@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/streaming_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
@@ -33,6 +34,63 @@ ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
 TEMP_CONFIG=""
+ROUTING_SOURCE="$REPO_ROOT/crates/actor/src/routing.rs"
+
+current_binary_mtime_epoch() {
+  (cd "$REPO_ROOT" && python3 - <<'PY'
+import os
+print(int(os.path.getmtime("target/debug/plexspaces")))
+PY
+)
+}
+
+assert_binary_newer_than_sources() {
+  (cd "$REPO_ROOT" && python3 - "$ROUTING_SOURCE" <<'PY'
+import os
+import sys
+
+binary = "target/debug/plexspaces"
+sources = sys.argv[1:]
+if not os.path.exists(binary):
+    print(f"missing binary: {binary}")
+    raise SystemExit(1)
+binary_mtime = os.path.getmtime(binary)
+newer = [path for path in sources if os.path.exists(path) and os.path.getmtime(path) > binary_mtime]
+if newer:
+    print("server binary is older than source changes:")
+    for path in newer:
+        print(path)
+    raise SystemExit(1)
+PY
+)
+}
+
+assert_node_binaries_current() {
+  for node in "${NODE_LIST[@]}"; do
+    local grpc_port=$(( ${node##*:} - 1 ))
+    local node_meta="$REPO_ROOT/plexspaces-node-${grpc_port}.meta"
+    if [ ! -f "$node_meta" ]; then
+      echo -e "${RED}Missing node metadata for ${node}${NC}"
+      echo "  Expected metadata file: $node_meta"
+      exit 1
+    fi
+
+    local current_mtime meta_mtime meta_binary
+    current_mtime="$(current_binary_mtime_epoch)"
+    meta_mtime="$(grep '^binary_mtime_epoch=' "$node_meta" | head -n1 | cut -d= -f2-)"
+    meta_binary="$(grep '^binary_path=' "$node_meta" | head -n1 | cut -d= -f2-)"
+
+    if [ "$meta_binary" != "$REPO_ROOT/target/debug/plexspaces" ] || [ "$meta_mtime" != "$current_mtime" ]; then
+      echo -e "${RED}Node ${node} is running an older PlexSpaces binary${NC}"
+      echo "  Expected binary: $REPO_ROOT/target/debug/plexspaces"
+      echo "  Recorded binary: ${meta_binary:-missing}"
+      echo "  Current mtime: $current_mtime"
+      echo "  Recorded mtime: ${meta_mtime:-missing}"
+      echo "  Rebuild with 'make build' and restart the server for port ${grpc_port}."
+      exit 1
+    fi
+  done
+}
 
 cleanup() {
   if [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]]; then
@@ -86,9 +144,69 @@ pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
 }
 
+list_registered_node_count() {
+  local host="$1" port="$2"
+  local raw
+  raw="$(curl -s --connect-timeout 5 --max-time 15 "http://${host}:${port}/api/v1/nodes?page_size=100" 2>/dev/null || true)"
+  RAW_RESPONSE="$raw" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ.get("RAW_RESPONSE", "").strip()
+if not raw:
+    print(0)
+    raise SystemExit(0)
+try:
+    payload = json.loads(raw)
+except Exception:
+    print(0)
+    raise SystemExit(0)
+nodes = payload.get("nodes", [])
+print(len(nodes) if isinstance(nodes, list) else 0)
+PY
+}
+
+wait_for_registry_membership() {
+  local expected="$1"
+  local attempts="${2:-30}"
+  local sleep_s="${3:-2}"
+  local ready=false
+
+  for attempt in $(seq 1 "$attempts"); do
+    ready=true
+    for node in "${NODE_LIST[@]}"; do
+      local host="${node%%:*}"
+      local port="${node##*:}"
+      local count
+      count="$(list_registered_node_count "$host" "$port")"
+      if [[ "$count" -lt "$expected" ]]; then
+        ready=false
+        echo -e "  ${YELLOW}Registry on ${host}:${port} sees ${count}/${expected} nodes (attempt ${attempt}/${attempts})...${NC}"
+        break
+      fi
+    done
+    if [[ "$ready" == "true" ]]; then
+      return 0
+    fi
+    sleep "$sleep_s"
+  done
+
+  echo -e "${RED}Node registry did not converge to ${expected} nodes before the run${NC}"
+  for node in "${NODE_LIST[@]}"; do
+    local host="${node%%:*}"
+    local port="${node##*:}"
+    echo "  Registered nodes from http://${host}:${port}/api/v1/nodes"
+    curl -s --connect-timeout 5 --max-time 30 "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
+  done
+  exit 1
+}
+
 echo "Step 0: Build WASM"
 "$SCRIPT_DIR/build.sh"
 echo ""
+
+assert_binary_newer_than_sources
+assert_node_binaries_current
 
 for node in "${NODE_LIST[@]}"; do
   host="${node%%:*}"
@@ -127,6 +245,18 @@ sleep 2
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
 
+echo "Step 1a: Wait for registry convergence"
+wait_for_registry_membership "${#NODE_LIST[@]}" "${STREAMING_PIPELINE_REGISTRY_ATTEMPTS:-3}" "${STREAMING_PIPELINE_REGISTRY_SLEEP_SECS:-2}"
+
+echo "Step 1b: ListConnectedNodes (GET /api/v1/nodes) per node"
+for node in "${NODE_LIST[@]}"; do
+  host="${node%%:*}"
+  port="${node##*:}"
+  echo "  Registered nodes from http://${host}:${port}/api/v1/nodes"
+  curl -s --connect-timeout 5 --max-time 30 "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
+done
+echo ""
+
 run_payload=$(cat <<EOF
 {"op":"run","worker_count":$WORKER_COUNT,"batch_count":$BATCH_COUNT,"events_per_batch":$EVENTS_PER_BATCH,"drop_rate":$DROP_RATE,"enrich_fields":$ENRICH_FIELDS}
 EOF
@@ -134,7 +264,7 @@ EOF
 
 echo "Step 2: Trigger leader on ${ENTRY_NODE}"
 run_attempt=1
-run_attempt_limit=10
+run_attempt_limit=3
 run_start=$(date +%s%N)
 while true; do
   run_response=$(curl -s --max-time 240 -X POST \
@@ -142,13 +272,25 @@ while true; do
     -H "Content-Type: application/json" \
     -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
 
-  if [[ "$run_response" != *"Placement produced no target nodes"* ]]; then
+  should_retry=false
+  if [[ "$run_response" == *"Placement produced no target nodes"* ]]; then
+    should_retry=true
+    retry_reason="seed nodes not reconciled"
+  elif [[ ${#NODE_LIST[@]} -gt 1 ]] && echo "$run_response" | grep -q '"status":"ok"'; then
+    # Multi-node run: check if enough nodes participated; retry if SWIM not fully reconciled yet
+    got_nodes=$(echo "$run_response" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('node_count',0))" 2>/dev/null || echo "0")
+    if [[ "$got_nodes" -lt "${#NODE_LIST[@]}" ]]; then
+      should_retry=true
+      retry_reason="only ${got_nodes}/${#NODE_LIST[@]} nodes participated (SWIM not fully reconciled)"
+    fi
+  fi
+  if [[ "$should_retry" == "false" ]]; then
     break
   fi
   if (( run_attempt >= run_attempt_limit )); then
     break
   fi
-  echo -e "  ${YELLOW}Seed nodes not reconciled yet, retrying leader run (${run_attempt}/${run_attempt_limit})...${NC}"
+  echo -e "  ${YELLOW}Retrying leader run (${run_attempt}/${run_attempt_limit}): ${retry_reason}...${NC}"
   run_attempt=$((run_attempt + 1))
   sleep 2
 done

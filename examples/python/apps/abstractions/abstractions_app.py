@@ -34,17 +34,7 @@ def application_id_from_actor_id(actor_id: str) -> str:
 
 
 def canonical_actor_target(target: str) -> str:
-    if "@" in target:
-        return target
-    if ":" not in target:
-        return target
-    actor_type, actor_name = target.split(":", 1)
-    self_id = host.self_id()
-    namespace = application_id_from_actor_id(self_id)
-    if not namespace or "@" not in self_id:
-        return target
-    node_id = self_id.rsplit("@", 1)[1]
-    return f"{actor_name}//{actor_type}::{namespace}@{node_id}"
+    return target
 
 
 @gen_server_actor(facets=["virtual_actor", "durability", "timer", "reminder"])

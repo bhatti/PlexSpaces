@@ -269,6 +269,17 @@ pub trait MessageSender: Send + Sync {
         Err("merge_application_metrics not implemented".to_string())
     }
 
+    /// Get unified application metrics for a local or remote node.
+    async fn get_application_metrics(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        node_id: &str,
+    ) -> Result<ApplicationMetrics, String> {
+        let _ = (ctx, application_id, node_id);
+        Err("get_application_metrics not implemented".to_string())
+    }
+
     /// Get application status for a local or remote node.
     async fn get_application_status(
         &self,
@@ -740,6 +751,20 @@ impl HostFunctions {
                 .await
         } else {
             Err("Application metrics service not configured".to_string())
+        }
+    }
+
+    /// Get unified application metrics for a local or remote node.
+    pub async fn get_application_metrics(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        node_id: &str,
+    ) -> Result<ApplicationMetrics, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.get_application_metrics(ctx, application_id, node_id).await
+        } else {
+            Err("Application service not configured".to_string())
         }
     }
 

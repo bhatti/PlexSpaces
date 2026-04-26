@@ -32,11 +32,33 @@ use plexspaces_core::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
     RequestContext, ServiceLocator,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use ulid::Ulid;
 
 fn test_actor_id(name: &str) -> ActorId {
-    ActorId::new(name, "GenServer", "default", "test-node").expect("valid test actor id")
+    ActorId::new(name, "gen_server", "default", "test-node").expect("valid test actor id")
+}
+
+fn make_spawn_spec(
+    actor_id: &ActorId,
+    actor_type: &str,
+) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
+    use plexspaces_proto::common::v1::ActorIdentity;
+    plexspaces_core::ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: actor_id.name().to_string(),
+            actor_type: actor_type.to_string(),
+        }),
+        role: String::new(),
+        namespace: actor_id.namespace().to_string(),
+        tenant_id: String::new(),
+        behavior_kind: String::new(),
+        args: HashMap::new(),
+        facets: vec![],
+        config: None,
+        labels: HashMap::new(),
+    }
 }
 
 /// Helper to create a test message
@@ -77,7 +99,7 @@ async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
         })
         .await;
     registry
-        .register("GenServer", |_args| {
+        .register("gen_server", |_args| {
             Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
@@ -99,18 +121,8 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let message_sender = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "GenServer",                      // actor_type from TestBehavior
-            vec![],                           // initial_state
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![],                           // facets
-        )
-        .await
-        .unwrap();
+    let spec = make_spawn_spec(&actor_id, "gen_server");
+    let message_sender = factory.spawn_actor(&ctx, &spec, vec![]).await.unwrap();
 
     // Verify actor is registered (via MessageSender, not mailbox)
     assert!(
@@ -136,24 +148,14 @@ async fn test_spawn_actor_registers_message_sender_only() {
     // Get ActorRegistry to verify registration
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
 
-    // Spawn actor
-    let actor_id = test_actor_id("test-actor");
+    // Spawn actor — actor_id type must match spec actor_type
+    let actor_id = ActorId::new("test-actor", "test", "default", "test-node").unwrap();
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
-    let message_sender = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-            vec![], // facets
-        )
-        .await
-        .unwrap();
+    let spec = make_spawn_spec(&actor_id, "test");
+    let message_sender = factory.spawn_actor(&ctx, &spec, vec![]).await.unwrap();
 
     // Verify actor is registered
     assert!(registry.is_actor_activated(&actor_id).await);
@@ -177,19 +179,9 @@ async fn test_multiple_actors_spawned_via_factory() {
     );
     for i in 0..5 {
         let actor_id =
-            ActorId::new(format!("actor-{i}"), "GenServer", "default", "test-node").unwrap();
-        factory
-            .spawn_actor(
-                &ctx,
-                &actor_id,
-                "GenServer",                      // actor_type from TestBehavior
-                vec![],                           // initial_state
-                None,                             // config
-                std::collections::HashMap::new(), // labels
-                vec![],                           // facets
-            )
-            .await
-            .unwrap();
+            ActorId::new(format!("actor-{i}"), "gen_server", "default", "test-node").unwrap();
+        let spec = make_spawn_spec(&actor_id, "gen_server");
+        factory.spawn_actor(&ctx, &spec, vec![]).await.unwrap();
 
         // Verify each is registered
         assert!(

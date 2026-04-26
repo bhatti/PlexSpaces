@@ -9,6 +9,7 @@ max_restarts = 5
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "calculator"
-type = "worker"
+name = "calculator"
+actor_type = "calculator_wasm"
+role = "worker"
 restart = "permanent"

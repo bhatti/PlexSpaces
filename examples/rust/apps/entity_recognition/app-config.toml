@@ -6,8 +6,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "entity_extractor"
-type = "worker"
+name = "entity_extractor"
+actor_type = "entity_recognition_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

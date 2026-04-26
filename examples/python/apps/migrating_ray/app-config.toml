@@ -13,8 +13,9 @@ max_restart_window_seconds = 60
 
 # Parameter server (centralized model weights)
 [[supervisor.children]]
-id = "parameter-server"
-type = "worker"
+name = "parameter-server"
+actor_type = "migrating_ray_wasm"
+role = "parameter-server"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 
@@ -26,13 +27,15 @@ hidden_dim = "64"
 
 # Data workers (gradient computation)
 [[supervisor.children]]
-id = "data-worker-0"
-type = "worker"
+name = "data-worker-0"
+actor_type = "migrating_ray_wasm"
+role = "data-worker-0"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 
 [[supervisor.children]]
-id = "data-worker-1"
-type = "worker"
+name = "data-worker-1"
+actor_type = "migrating_ray_wasm"
+role = "data-worker-1"
 restart = "permanent"
 shutdown_timeout_seconds = 5

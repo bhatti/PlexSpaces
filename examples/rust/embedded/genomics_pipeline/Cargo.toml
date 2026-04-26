@@ -10,6 +10,7 @@
 name = "genomics-pipeline"
 version = "0.1.0"
 edition = "2021"
+default-run = "genomics-pipeline"
 license = "LGPL-2.1-or-later"
 description = "DNA sequencing pipeline demonstrating durable workflows with PlexSpaces"
 

@@ -34,6 +34,7 @@ from .proto_wire import (
     encode_read_request,
     decode_read_response_first,
     decode_read_response_all,
+    decode_lock_response,
     encode_create_shard_group_request,
     encode_scatter_gather_request,
     encode_broadcast_shard_group_request,
@@ -96,6 +97,13 @@ def _from_payload_bytes(data) -> str:
     """
     if isinstance(data, (bytes, bytearray)):
         return data.decode("utf-8")
+    return str(data) if data else ""
+
+
+def _decode_lock_payload(data) -> str:
+    """Decode WIT lock payload bytes into the JSON string expected by SDK callers."""
+    if isinstance(data, (bytes, bytearray)):
+        return json.dumps(decode_lock_response(bytes(data)))
     return str(data) if data else ""
 
 
@@ -456,6 +464,19 @@ class _MockHost:
 
     def application_metrics_add(self, application_id: str, metrics_json: str) -> str:
         return metrics_json
+
+    def application_get_metrics(self, application_id: str, node_id: str) -> str:
+        return json.dumps({
+            "actor_counts": {},
+            "supervisor_count": 1,
+            "uptime_seconds": 0,
+            "message_count": 0,
+            "error_count": 0,
+            "counter_metrics": {},
+            "latency_totals_ms": {},
+            "latency_max_ms": {},
+            "latency_samples": {},
+        })
 
     def application_get_status(self, application_id: str, node_id: str) -> str:
         return json.dumps({
@@ -849,7 +870,7 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "lock_acquire"):
-            return _from_payload_bytes(h.lock_acquire(
+            return _decode_lock_payload(h.lock_acquire(
                 tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms
             ))
         return getattr(h, "lock-acquire", lambda *_: "ERROR: not implemented")(
@@ -892,7 +913,7 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "lock_renew"):
-            return _from_payload_bytes(h.lock_renew(
+            return _decode_lock_payload(h.lock_renew(
                 lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs
             ))
         return getattr(h, "lock-renew", lambda *_: "ERROR: not implemented")(
@@ -1294,6 +1315,24 @@ class Host:
             return decode_application_metrics_response(result_bytes)
         else:
             raw = fn(application_id, _to_payload_bytes(json.dumps(metrics)))
+            result = _from_payload_bytes(raw)
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise RuntimeError(result)
+            return json.loads(result)
+
+    def application_get_metrics(self, application_id: str, node_id: str) -> Dict[str, Any]:
+        """Get application metrics for a participating node."""
+        h = _get_host()
+        fn = getattr(h, "application_get_metrics", None) or getattr(
+            h, "application-get-metrics", None
+        )
+        if fn is None:
+            raise RuntimeError("application_get_metrics not available")
+        raw = fn(application_id, node_id)
+        if _host_is_wit:
+            result_bytes = bytes(raw) if raw else b""
+            return decode_application_metrics_response(result_bytes)
+        else:
             result = _from_payload_bytes(raw)
             if isinstance(result, str) and result.startswith("ERROR:"):
                 raise RuntimeError(result)

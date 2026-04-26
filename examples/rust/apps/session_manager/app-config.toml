@@ -6,8 +6,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "session"
-type = "worker"
+name = "session"
+actor_type = "session_manager_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

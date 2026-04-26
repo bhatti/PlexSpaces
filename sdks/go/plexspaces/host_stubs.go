@@ -442,6 +442,12 @@ func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
 	return metricsJSON
 }
 
+func hostApplicationGetMetrics(applicationID, nodeID string) string {
+	_ = applicationID
+	_ = nodeID
+	return `{"message_count":0,"error_count":0,"counter_metrics":{},"latency_totals_ms":{},"latency_max_ms":{},"latency_samples":{}}`
+}
+
 func hostApplicationGetStatus(applicationID, nodeID string) string {
 	return `{"node_id":"` + nodeID + `","application":{"application_id":"` + applicationID + `"}}`
 }

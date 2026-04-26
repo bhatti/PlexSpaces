@@ -86,36 +86,36 @@ async fn test_virtual_actor_type_registration_on_spawn() {
         .await
         .expect("VirtualActorManager should be available");
 
-    // Check if actor type is registered (GenServer for gen_server_actor)
+    // Check if actor type is registered (behavior class slug for gen_server_actor)
     assert!(
         virtual_actor_manager
-            .is_virtual_actor_type("GenServer")
+            .is_virtual_actor_type("gen_server")
             .await,
-        "GenServer type should be registered as virtual actor"
+        "gen_server type should be registered as virtual actor"
     );
 
     // Get type metadata
     let type_metadata = virtual_actor_manager
-        .get_virtual_actor_type("GenServer")
+        .get_virtual_actor_type("gen_server")
         .await;
     assert!(type_metadata.is_some(), "Type metadata should exist");
     let metadata = type_metadata.unwrap();
-    assert_eq!(metadata.actor_type, "GenServer");
-    assert_eq!(metadata.behavior_kind.as_deref(), Some("GenServer"));
-    assert_eq!(metadata.namespace, "test-namespace");
+    assert_eq!(metadata.actor_type(), "gen_server");
+    assert_eq!(metadata.behavior_kind(), Some("GenServer"));
+    assert_eq!(metadata.namespace(), "test-namespace");
     assert!(
-        metadata.facet_config.is_some(),
+        metadata.facet_config().is_some(),
         "facet_config should be set"
     );
     assert_eq!(
-        metadata.proto_facets.len(),
+        metadata.proto_facets().len(),
         1,
         "expected proto facet metadata"
     );
-    assert_eq!(metadata.proto_facets[0].r#type, "virtual_actor");
+    assert_eq!(metadata.proto_facets()[0].r#type, "virtual_actor");
 
     // Verify facet_config is in keyed format
-    let facet_config = metadata.facet_config.unwrap();
+    let facet_config = metadata.facet_config().unwrap();
     assert!(
         facet_config.is_object(),
         "facet_config should be a JSON object"
@@ -146,7 +146,7 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     // Type-level registration enables virtual actor behavior for any actor ID of this type
     // Individual instances may or may not be registered at instance level, but type-level
     // registration enables automatic activation for any actor ID matching the type pattern
-    // (e.g., {id}//GenServer::namespace@node)
+    // (e.g., {id}//gen_server::namespace@node)
 
     // Test that we can activate a new actor ID of the same type
     // (This tests that type-level registration enables activation)
@@ -155,14 +155,14 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     // Check if actor type is virtual (should be, because we registered it)
     assert!(
         virtual_actor_manager
-            .is_virtual_actor_type("GenServer")
+            .is_virtual_actor_type("gen_server")
             .await,
-        "GenServer type should still be registered"
+        "gen_server type should still be registered"
     );
 
     // Verify we can get type metadata for activation
     let type_metadata_for_activation = virtual_actor_manager
-        .get_virtual_actor_type("GenServer")
+        .get_virtual_actor_type("gen_server")
         .await;
     assert!(
         type_metadata_for_activation.is_some(),
@@ -173,7 +173,7 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     // Build actor_id3 in full format so the node can resolve type and namespace for get_or_activate.
     let actor_id3 = ActorId::new(
         actor_name3,
-        "GenServer",
+        "gen_server",
         "test-namespace",
         node.id().to_string(),
     )
@@ -232,7 +232,7 @@ async fn test_virtual_actor_type_registration_idempotent() {
     // Get initial metadata
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
     let metadata1 = virtual_actor_manager
-        .get_virtual_actor_type("GenServer")
+        .get_virtual_actor_type("gen_server")
         .await
         .unwrap();
 
@@ -252,11 +252,11 @@ async fn test_virtual_actor_type_registration_idempotent() {
 
     // Get metadata again - should still exist (idempotent registration)
     let metadata2 = virtual_actor_manager
-        .get_virtual_actor_type("GenServer")
+        .get_virtual_actor_type("gen_server")
         .await
         .unwrap();
 
     // Both should have same type and namespace
-    assert_eq!(metadata1.actor_type, metadata2.actor_type);
-    assert_eq!(metadata1.namespace, metadata2.namespace);
+    assert_eq!(metadata1.actor_type(), metadata2.actor_type());
+    assert_eq!(metadata1.namespace(), metadata2.namespace());
 }

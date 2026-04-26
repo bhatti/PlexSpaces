@@ -11,6 +11,7 @@ version = "0.1.0"
 edition = "2021"
 license = "LGPL-2.1-or-later"
 description = "AI workload example: Entity recognition with LLMs demonstrating resource-aware scheduling"
+default-run = "entity-recognition-app"
 
 [dependencies]
 # PlexSpaces crates
@@ -61,4 +62,3 @@ path = "src/bin/app.rs"
 
 [dev-dependencies]
 tokio-test = "0.4"
-

@@ -14,8 +14,9 @@ max_restart_window_seconds = 60
 
 # Session Store actor
 [[supervisor.children]]
-id = "session-store"
-type = "worker"
+name = "session-store"
+actor_type = "migrating_wasmcloud_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 

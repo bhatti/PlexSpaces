@@ -82,6 +82,7 @@ pub async fn spawn_actor_on_node(
         facets: vec![],
         namespace: String::new(),
         instances_count: 1,
+        role: String::new(),
     };
 
     let resp: SpawnActorResponse = client

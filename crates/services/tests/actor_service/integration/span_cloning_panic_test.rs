@@ -37,8 +37,9 @@ async fn test_ask_reply_does_not_panic_after_handler_span_closes() {
     let request = Request::new(AskReplyRequest {
         namespace: "test-namespace".to_string(),
         actor_type: "counter".to_string(),
+        actor_name: String::new(),
         http_method: "GET".to_string(),
-        payload: serde_json::json!({ "action": "get" }).to_string().into_bytes(),
+        payload: serde_json::json!({ "action": "get"}).to_string().into_bytes(),
         headers: HashMap::new(),
         query_params: HashMap::new(),
         path: "/api/v1/actors/test-namespace/counter".to_string(),
@@ -99,6 +100,7 @@ async fn test_concurrent_ask_reply_requests_do_not_panic() {
         let request = Request::new(AskReplyRequest {
             namespace: "test-namespace".to_string(),
             actor_type: "counter".to_string(),
+            actor_name: String::new(),
             http_method: "GET".to_string(),
             payload: serde_json::json!({ "action": "get", "id": i })
                 .to_string()

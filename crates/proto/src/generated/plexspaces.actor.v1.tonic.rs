@@ -258,6 +258,8 @@ pub mod actor_service_client {
                 );
             self.inner.streaming(req, path, codec).await
         }
+        /** Change actor state
+*/
         pub async fn set_actor_state(
             &mut self,
             request: impl tonic::IntoRequest<super::SetActorStateRequest>,
@@ -285,6 +287,8 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Migrate actor to different node
+*/
         pub async fn migrate_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::MigrateActorRequest>,
@@ -363,6 +367,33 @@ pub mod actor_service_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("plexspaces.actor.v1.ActorService", "MonitorActor"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn demonitor_actor(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DemonitorActorRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.actor.v1.ActorService/DemonitorActor",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("plexspaces.actor.v1.ActorService", "DemonitorActor"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -477,6 +508,33 @@ pub mod actor_service_client {
                         "plexspaces.actor.v1.ActorService",
                         "CheckActorExists",
                     ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_actor_states(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetActorStatesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetActorStatesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.actor.v1.ActorService/GetActorStates",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("plexspaces.actor.v1.ActorService", "GetActorStates"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -950,6 +1008,8 @@ pub mod actor_service_server {
             tonic::Response<Self::StreamMessagesStream>,
             tonic::Status,
         >;
+        /** Change actor state
+*/
         async fn set_actor_state(
             &self,
             request: tonic::Request<super::SetActorStateRequest>,
@@ -957,6 +1017,8 @@ pub mod actor_service_server {
             tonic::Response<super::SetActorStateResponse>,
             tonic::Status,
         >;
+        /** Migrate actor to different node
+*/
         async fn migrate_actor(
             &self,
             request: tonic::Request<super::MigrateActorRequest>,
@@ -976,6 +1038,13 @@ pub mod actor_service_server {
             request: tonic::Request<super::MonitorActorRequest>,
         ) -> std::result::Result<
             tonic::Response<super::MonitorActorResponse>,
+            tonic::Status,
+        >;
+        async fn demonitor_actor(
+            &self,
+            request: tonic::Request<super::DemonitorActorRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
         async fn link_actor(
@@ -1004,6 +1073,13 @@ pub mod actor_service_server {
             request: tonic::Request<super::CheckActorExistsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::CheckActorExistsResponse>,
+            tonic::Status,
+        >;
+        async fn get_actor_states(
+            &self,
+            request: tonic::Request<super::GetActorStatesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetActorStatesResponse>,
             tonic::Status,
         >;
         async fn ask_reply(
@@ -1649,6 +1725,52 @@ pub mod actor_service_server {
                     };
                     Box::pin(fut)
                 }
+                "/plexspaces.actor.v1.ActorService/DemonitorActor" => {
+                    #[allow(non_camel_case_types)]
+                    struct DemonitorActorSvc<T: ActorService>(pub Arc<T>);
+                    impl<
+                        T: ActorService,
+                    > tonic::server::UnaryService<super::DemonitorActorRequest>
+                    for DemonitorActorSvc<T> {
+                        type Response = super::super::super::common::v1::Empty;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DemonitorActorRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ActorService>::demonitor_actor(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = DemonitorActorSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/plexspaces.actor.v1.ActorService/LinkActor" => {
                     #[allow(non_camel_case_types)]
                     struct LinkActorSvc<T: ActorService>(pub Arc<T>);
@@ -1820,6 +1942,52 @@ pub mod actor_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = CheckActorExistsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.actor.v1.ActorService/GetActorStates" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetActorStatesSvc<T: ActorService>(pub Arc<T>);
+                    impl<
+                        T: ActorService,
+                    > tonic::server::UnaryService<super::GetActorStatesRequest>
+                    for GetActorStatesSvc<T> {
+                        type Response = super::GetActorStatesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetActorStatesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ActorService>::get_actor_states(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetActorStatesSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

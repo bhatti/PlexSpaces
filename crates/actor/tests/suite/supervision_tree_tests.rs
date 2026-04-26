@@ -46,7 +46,7 @@ use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 
 fn test_actor_id(name: &str) -> ActorId {
-    ActorId::new(name, "GenServer", "test", "localhost").expect("valid test actor id")
+    ActorId::new(name, "gen_server", "test", "localhost").expect("valid test actor id")
 }
 
 fn actor_id_from_legacy_test_id(id: &str) -> ActorId {
@@ -116,13 +116,8 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    ChildSpec::worker_sync(
-        id.clone(),
-        actor_id_from_legacy_test_id(&id).to_string(),
-        sync_factory,
-        actor_ref,
-    )
-    .with_restart(restart_strategy)
+    ChildSpec::worker_sync(actor_id_from_legacy_test_id(&id), sync_factory, actor_ref)
+        .with_restart(restart_strategy)
 }
 
 // ============================================================================

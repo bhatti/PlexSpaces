@@ -882,6 +882,15 @@ impl ActorContext {
         }
     }
 
+    /// Attach the actor's own reference to the context before runtime startup.
+    ///
+    /// The runtime must set this before `init()`, facet lifecycle hooks, or message
+    /// handling run so `ctx.actor_id()` and `ctx.self_ref()` are always available.
+    pub fn with_self_ref(mut self, self_ref: ActorRef) -> Self {
+        self.self_ref = Some(self_ref);
+        self
+    }
+
     /// Set trap_exit flag
     ///
     /// ## Erlang Equivalent

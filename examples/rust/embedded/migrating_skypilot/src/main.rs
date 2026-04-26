@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Comparison: SkyPilot (AI Workload Orchestration with Multi-Cloud Resource Scheduling)
+//
+// This is the package default run target, so `cargo run` starts the comparison
+// example without needing `--bin skypilot-comparison`.
 
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
@@ -243,7 +246,7 @@ impl GenServer for SkyPilotSchedulerActor {
         ctx.send_reply(
             correlation_id,
             &msg.sender_id,
-            msg.receiver_id.clone(),
+            msg.receiver_id.clone().into(),
             reply_msg,
         )
         .await
@@ -254,14 +257,19 @@ impl GenServer for SkyPilotSchedulerActor {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(env_filter)
         .init();
 
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("SkyPilot vs PlexSpaces Comparison");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("=== SkyPilot vs PlexSpaces Comparison ===");
     info!("Demonstrating Multi-Cloud AI Workload Orchestration with Cost Optimization");
 
-    let node = NodeBuilder::new("comparison-node-1").build().await;
+    let node = NodeBuilder::new("comparison-node-1").build_started().await;
 
     // SkyPilot schedules AI workloads across multiple clouds
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -372,6 +380,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Cost optimization: Finds cheapest available resources");
     info!("✅ Resource-aware: Matches task requirements to instances");
     info!("✅ AI workload orchestration: ML training, inference, preprocessing");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("Comparison complete");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     Ok(())
 }
@@ -382,7 +393,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_skypilot_scheduler() {
-        let node = NodeBuilder::new("test-node").build().await;
+        let node = NodeBuilder::new("test-node").build_started().await;
 
         let ctx = plexspaces_core::RequestContext::new_without_auth(
             "skypilot".to_string(),

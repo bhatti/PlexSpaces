@@ -35,11 +35,8 @@ impl From<&str> for TestActorIdentity {
 
 fn behavior_type_name(behavior_type: BehaviorType) -> String {
     match behavior_type {
-        BehaviorType::GenServer => "GenServer".to_string(),
-        BehaviorType::GenEvent => "GenEvent".to_string(),
-        BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-        BehaviorType::Workflow => "Workflow".to_string(),
         BehaviorType::Custom(name) => name,
+        other => other.actor_type_slug().into_owned(),
     }
 }
 
@@ -97,5 +94,10 @@ pub async fn actor_with_default_service_locator(
             normalized_test_actor_id(name, behavior_type, namespace.clone(), node_id)
         }
     };
-    Actor::new(actor_id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
+    // Set self_ref so ctx.actor_id() works during init()
+    let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+        .expect("test actor self_ref should be valid");
+    let context_inner = Arc::unwrap_or_clone(context).with_self_ref(self_ref);
+    Actor::new(actor_id, behavior, mailbox, tenant_id, namespace, None)
+        .set_context(Arc::new(context_inner))
 }

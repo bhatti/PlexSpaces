@@ -1209,6 +1209,14 @@ class SpawnActorRequest(betterproto.Message):
      Use case: data-parallel workloads, shard groups, worker pools.
     """
 
+    role: str = betterproto.string_field(9)
+    """
+    Role of the actor within its application (e.g. "worker", "leader").
+     Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+     Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+     If empty, falls back to actor_id.name() for dispatch.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class SpawnActorResponse(betterproto.Message):
@@ -1670,8 +1678,11 @@ class MonitorActorRequest(betterproto.Message):
     Request to monitor an actor (Erlang-style)
 
      ## Purpose
-     Establishes a monitoring link from supervisor to actor. When actor terminates,
-     the node hosting the actor will call NotifyActorDown on the supervisor_callback.
+     Establishes a monitor from `supervisor_id` to `actor_id` on the **node that hosts
+     `actor_id`**. When that actor terminates, that node runs termination handling and
+     delivers a `__DOWN__` **mailbox message** to `supervisor_id` (same Erlang semantics
+     as `{'DOWN', Ref, process, Pid, Reason}`), routing remotely via `ActorService` when
+     the supervisor lives on another node.
 
      ## Erlang Philosophy
      Equivalent to: Ref = erlang:monitor(process, Pid)
@@ -1679,9 +1690,11 @@ class MonitorActorRequest(betterproto.Message):
 
      ## Design Notes
      - actor_id: Canonical actor ID for the actor to monitor
-     - supervisor_id: The supervisor that wants notifications (for logging/debugging)
-     - supervisor_callback: gRPC address where to send NotifyActorDown
-       (e.g., "http://supervisor-node:8000")
+     - supervisor_id: Canonical actor ID of the process that receives `__DOWN__` in its mailbox
+     - supervisor_callback: **Reserved / wire compatibility.** The Rust server implementation
+       does not use this field today; DOWN is sent with `ActorRegistry::tell` to `supervisor_id`.
+       Clients should still populate it per validation (e.g. supervisor node's ActorService URL)
+       for forward compatibility with a possible push-style callback path.
     """
 
     actor_id: str = betterproto.string_field(1)
@@ -1706,6 +1719,22 @@ class MonitorActorResponse(betterproto.Message):
     """
 
     monitor_ref: str = betterproto.string_field(1)
+
+
+@dataclass(eq=False, repr=False)
+class DemonitorActorRequest(betterproto.Message):
+    """
+    Request to remove a monitor (Erlang demonitor/1 equivalent)
+
+     ## Purpose
+     Cancels a monitor previously established via MonitorActor on the node that hosts
+     the **monitored** actor (`actor_id`). The caller must supply the same `monitor_ref`
+     returned by MonitorActor.
+    """
+
+    actor_id: str = betterproto.string_field(1)
+    supervisor_id: str = betterproto.string_field(2)
+    monitor_ref: str = betterproto.string_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -1734,6 +1763,46 @@ class ActorDownNotification(betterproto.Message):
     actor_id: str = betterproto.string_field(1)
     supervisor_id: str = betterproto.string_field(2)
     reason: str = betterproto.string_field(3)
+    monitor_ref: str = betterproto.string_field(4)
+    """
+    Monitor reference ULID correlating with the original monitor() call.
+     Allows the monitoring actor to identify which monitor fired when monitoring multiple actors.
+    """
+
+    is_link_signal: bool = betterproto.bool_field(5)
+    """
+    When true, this notification is a Link EXIT signal (bidirectional death propagation).
+     The receiving node should kill the supervisor_id actor with a Linked exit reason.
+     When false (default), this is a Monitor DOWN notification delivered to the mailbox.
+    """
+
+
+@dataclass(eq=False, repr=False)
+class GetActorStatesRequest(betterproto.Message):
+    """
+    Request to batch-check actor states — used by stale-monitor GC task
+
+     ## Purpose
+     Efficiently checks the lifecycle state of multiple actors in a single RPC call.
+     Used by the background monitor GC task to detect stale monitor entries for actors
+     that no longer exist on their hosting node.
+    """
+
+    actor_ids: List[str] = betterproto.string_field(1)
+    """List of canonical actor IDs to check"""
+
+
+@dataclass(eq=False, repr=False)
+class GetActorStatesResponse(betterproto.Message):
+    """Response for batch actor state check — uses existing ActorState enum"""
+
+    states: Dict[str, "ActorState"] = betterproto.map_field(
+        1, betterproto.TYPE_STRING, betterproto.TYPE_ENUM
+    )
+    """
+    Map of canonical actor_id -> ActorState (uses existing ActorState enum)
+     ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
+    """
 
 
 @dataclass(eq=False, repr=False)
@@ -2256,6 +2325,88 @@ class ActorHealth(betterproto.Message):
     """For FAILED status: reason for failure"""
 
 
+@dataclass(eq=False, repr=False)
+class ActorSpawnSpec(betterproto.Message):
+    """
+    Complete specification for spawning or reactivating any actor.
+
+     ## Purpose
+     Single source of truth for all information needed to spawn an actor, whether
+     from TOML app-config, SDK annotations, gRPC, or virtual actor reactivation.
+     Replaces the fragmented triple of (init_config_template, initial_state, labels)
+     and the VirtualActorDefinitionRegistration intermediary.
+
+     ## Design
+     - node_id is NOT included: ActorFactory always resolves local_node_id at spawn time.
+     - tenant_id is overridden from JWT at request time if available.
+     - args map is the canonical user-supplied init payload: becomes "args" key in WASM init().
+     - facets carry the full facet declaration (type, config, priority) verbatim from ChildSpec.
+
+     ## Usage
+     - TOML ChildSpec → ActorSpawnSpec via actor_spawn_spec_from_child_spec()
+     - SDK annotations → ActorSpawnSpec built from behavior + declared facets
+     - VirtualActorMetadata stores ActorSpawnSpec as its spec field
+     - ActorBuilder.from_spec() accepts ActorSpawnSpec
+     - ActorFactory.spawn_actor() accepts ActorSpawnSpec
+    """
+
+    identity: "__common_v1__.ActorIdentity" = betterproto.message_field(1)
+    """
+    Instance name + behavior class (namespace and tenant added in fields below).
+    """
+
+    role: str = betterproto.string_field(2)
+    """
+    Role of the actor within its application (e.g. "worker", "leader").
+     Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+     Used by BehaviorRegistry to dispatch the correct spec when multiple children
+     share the same actor_type (behavior class).
+    """
+
+    namespace: str = betterproto.string_field(3)
+    """Namespace for actor isolation (required at spawn time)."""
+
+    tenant_id: str = betterproto.string_field(4)
+    """
+    Tenant ID for multi-tenancy isolation (empty if auth disabled).
+     Overridden from JWT claims at request time when auth is enabled.
+    """
+
+    behavior_kind: str = betterproto.string_field(5)
+    """
+    OTP-style behavior kind for logging and observability.
+     Examples: "GenServer", "GenEvent", "GenStateMachine", "Workflow".
+    """
+
+    args: Dict[str, str] = betterproto.map_field(
+        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """
+    User-supplied initialization arguments.
+     These become the "args" field in the WASM init() payload so TypeScript/Python/Go
+     actors can read them via host.config("initial_count"), etc.
+     Also used by Rust embedded actors as configuration.
+    """
+
+    facets: List["__common_v1__.Facet"] = betterproto.message_field(7)
+    """
+    Facet declarations attached to this actor.
+     Carries virtual_actor, durability, timer, etc. facets verbatim from ChildSpec.
+     ActorFactory instantiates these at spawn time via create_facets_from_config().
+    """
+
+    labels: Dict[str, str] = betterproto.map_field(
+        8, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """Observability labels propagated to metrics and traces."""
+
+    config: "ActorConfig" = betterproto.message_field(9)
+    """
+    Actor runtime configuration (mailbox, restart policy, etc.).
+     Optional — defaults apply when absent.
+    """
+
+
 class ActorServiceStub(betterproto.ServiceStub):
     async def spawn_actor(
         self,
@@ -2431,6 +2582,23 @@ class ActorServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
+    async def demonitor_actor(
+        self,
+        demonitor_actor_request: "DemonitorActorRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "__common_v1__.Empty":
+        return await self._unary_unary(
+            "/plexspaces.actor.v1.ActorService/DemonitorActor",
+            demonitor_actor_request,
+            __common_v1__.Empty,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
     async def link_actor(
         self,
         link_actor_request: "LinkActorRequest",
@@ -2494,6 +2662,23 @@ class ActorServiceStub(betterproto.ServiceStub):
             "/plexspaces.actor.v1.ActorService/CheckActorExists",
             check_actor_exists_request,
             CheckActorExistsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_actor_states(
+        self,
+        get_actor_states_request: "GetActorStatesRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetActorStatesResponse":
+        return await self._unary_unary(
+            "/plexspaces.actor.v1.ActorService/GetActorStates",
+            get_actor_states_request,
+            GetActorStatesResponse,
             timeout=timeout,
             deadline=deadline,
             metadata=metadata,
@@ -2828,6 +3013,11 @@ class ActorServiceBase(ServiceBase):
     ) -> "MonitorActorResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
+    async def demonitor_actor(
+        self, demonitor_actor_request: "DemonitorActorRequest"
+    ) -> "__common_v1__.Empty":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
     async def link_actor(
         self, link_actor_request: "LinkActorRequest"
     ) -> "LinkActorResponse":
@@ -2846,6 +3036,11 @@ class ActorServiceBase(ServiceBase):
     async def check_actor_exists(
         self, check_actor_exists_request: "CheckActorExistsRequest"
     ) -> "CheckActorExistsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_actor_states(
+        self, get_actor_states_request: "GetActorStatesRequest"
+    ) -> "GetActorStatesResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
     async def ask_reply(
@@ -2993,6 +3188,14 @@ class ActorServiceBase(ServiceBase):
         response = await self.monitor_actor(request)
         await stream.send_message(response)
 
+    async def __rpc_demonitor_actor(
+        self,
+        stream: "grpclib.server.Stream[DemonitorActorRequest, __common_v1__.Empty]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.demonitor_actor(request)
+        await stream.send_message(response)
+
     async def __rpc_link_actor(
         self, stream: "grpclib.server.Stream[LinkActorRequest, LinkActorResponse]"
     ) -> None:
@@ -3021,6 +3224,14 @@ class ActorServiceBase(ServiceBase):
     ) -> None:
         request = await stream.recv_message()
         response = await self.check_actor_exists(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_actor_states(
+        self,
+        stream: "grpclib.server.Stream[GetActorStatesRequest, GetActorStatesResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_actor_states(request)
         await stream.send_message(response)
 
     async def __rpc_ask_reply(
@@ -3195,6 +3406,12 @@ class ActorServiceBase(ServiceBase):
                 MonitorActorRequest,
                 MonitorActorResponse,
             ),
+            "/plexspaces.actor.v1.ActorService/DemonitorActor": grpclib.const.Handler(
+                self.__rpc_demonitor_actor,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                DemonitorActorRequest,
+                __common_v1__.Empty,
+            ),
             "/plexspaces.actor.v1.ActorService/LinkActor": grpclib.const.Handler(
                 self.__rpc_link_actor,
                 grpclib.const.Cardinality.UNARY_UNARY,
@@ -3218,6 +3435,12 @@ class ActorServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 CheckActorExistsRequest,
                 CheckActorExistsResponse,
+            ),
+            "/plexspaces.actor.v1.ActorService/GetActorStates": grpclib.const.Handler(
+                self.__rpc_get_actor_states,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetActorStatesRequest,
+                GetActorStatesResponse,
             ),
             "/plexspaces.actor.v1.ActorService/AskReply": grpclib.const.Handler(
                 self.__rpc_ask_reply,

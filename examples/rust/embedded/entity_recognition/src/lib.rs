@@ -52,9 +52,8 @@ pub mod processor;
 pub mod aggregator;
 pub mod application;
 
-pub use config::{EntityRecognitionConfig, AppConfig, BackendType, NodeConfig, ResourceConfig};
+pub use config::{EntityRecognitionConfig, BackendType, NodeConfig, ResourceConfig};
 pub use loader::{LoaderBehavior, LoaderRequest, LoaderResponse};
 pub use processor::{ProcessorBehavior, ProcessorRequest, ProcessorResponse, Entity};
 pub use aggregator::{AggregatorBehavior, AggregatorRequest, AggregatorResponse};
 pub use application::EntityRecognitionApplication;
-

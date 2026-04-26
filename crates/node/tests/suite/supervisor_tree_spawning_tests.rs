@@ -23,7 +23,7 @@
 //! 2. All supervisors are spawned as actors (Erlang-style)
 //! 3. Nested supervisor trees are handled correctly
 //! 4. All spawned actors are tracked in ActorRegistry
-//! 5. Actor types are correctly set from ChildSpec.id
+//! 5. Actor types match `ChildSpec.actor_identity.actor_type` (behavior class) in canonical `ActorId`s
 //! 6. The entire tree is spawned when an application is deployed
 
 use super::test_helpers::app_request_with_tenant;
@@ -31,9 +31,9 @@ use plexspaces_core::{service_names, ActorId, ApplicationManager, RequestContext
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    ChildType, DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
+    DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::application::ApplicationState;
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_proto::ActorLifecycleEvent;
@@ -68,6 +68,10 @@ fn get_shared_wasm_bytes() -> &'static Vec<u8> {
     SHARED_WASM_BYTES.get_or_init(|| {
         const MINIMAL_WASM_WAT: &str = r#"
             (module
+                (memory (export "memory") 1)
+                (func (export "init") (param i32 i32) (result i32)
+                    i32.const 0
+                )
                 (func (export "handle_message") (param i32 i32 i32 i32 i32 i32) (result i32)
                     i32.const 0
                 )
@@ -75,7 +79,6 @@ fn get_shared_wasm_bytes() -> &'static Vec<u8> {
                     i32.const 0
                     i32.const 0
                 )
-                (memory (export "memory") 1)
             )
         "#;
         wat::parse_str(MINIMAL_WASM_WAT).expect("Failed to parse WAT")
@@ -198,8 +201,12 @@ async fn wait_for_actors_activated(
     false
 }
 
-fn expected_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
-    ActorId::new(name, name, "default", node_id).expect("supervision test actor IDs must be valid")
+/// Build the expected actor ID for a supervisor-tree actor.
+/// actor_type = "test_wasm_actor" (all ChildSpecs in these tests use this type).
+/// namespace  = app_name (SpecApplication uses spec.name when spec.namespace is empty).
+fn expected_actor_id(name: &str, app_name: &str, node_id: &str) -> ActorId {
+    ActorId::new(name, "test_wasm_actor", app_name, node_id)
+        .expect("supervision test actor IDs must be valid")
 }
 
 /// Helper to wait for application state using polling (no events available for this)
@@ -279,34 +286,34 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "worker-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker-2".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "worker-3".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker-3".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }
@@ -321,24 +328,24 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "nested-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "nested-worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "nested-worker-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "nested-worker-2".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -350,24 +357,25 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "root-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "root-worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "child-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "child-supervisor".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(child_supervisor),
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }
@@ -418,18 +426,47 @@ async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     use std::sync::Arc;
 
-    let registry = BehaviorRegistry::new();
-    let registry_arc = Arc::new(registry);
+    let registry = Arc::new(BehaviorRegistry::new());
 
-    // Register in ServiceLocator (ActorFactory looks for BehaviorRegistry by type)
-    let service_locator = node.service_locator();
-    service_locator
-        .register_behavior_registry(registry_arc.clone())
+    // All ChildSpecs in supervisor tree tests use actor_type = "test_wasm_actor".
+    // Register it once so ActorFactory can create mock actors for any name.
+    for actor_type in ["test_wasm_actor"] {
+        let at = actor_type.to_string();
+        registry
+            .register_simple(at.clone(), move || {
+                let at2 = at.clone();
+                async move {
+                    Ok(Box::new(MockActor { actor_type: at2 }) as Box<dyn plexspaces_core::Actor>)
+                }
+            })
+            .await;
+    }
+
+    node.service_locator()
+        .register_behavior_registry(registry)
         .await;
 
-    tracing::debug!("Registered behavior factory in ServiceLocator (unknown actor_types will fail - register behaviors first)");
-
     Ok(())
+}
+
+/// Minimal no-op actor for supervisor tree spawn tests — verifies structure, not behavior.
+struct MockActor {
+    actor_type: String,
+}
+
+#[async_trait::async_trait]
+impl plexspaces_core::Actor for MockActor {
+    async fn handle_message(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+        _msg: plexspaces_core::Message,
+    ) -> Result<(), plexspaces_core::BehaviorError> {
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::GenServer
+    }
 }
 
 /// Deploy application using SpecApplication directly (mock/simulated setup for unit tests)
@@ -452,48 +489,36 @@ async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
 /// ## Returns
 /// Result indicating success or failure
 async fn deploy_application_mock(
-    node: &Node,
+    node: &Arc<Node>,
     app_name: &str,
     app_spec: ApplicationSpec,
 ) -> Result<(), String> {
-    use plexspaces_application::Application;
-    use plexspaces_application::SpecApplication;
+    use plexspaces_application::{Application, ApplicationNode, SpecApplication};
     use std::sync::Arc;
-
-    tracing::debug!(
-        application = %app_name,
-        "Deploying application using SpecApplication (mock/simulated unit test mode)"
-    );
 
     register_mock_behavior_factory(node)
         .await
         .map_err(|e| format!("Failed to register behavior factory: {}", e))?;
 
-    // Create SpecApplication (behavior factory is in ServiceLocator, not passed directly)
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
 
-    // Register application
-    node.application_manager()
+    let app_manager = node.application_manager();
+
+    // Node implements ApplicationNode — set context so initialize_supervisor_tree
+    // can resolve ActorFactory and other services via ServiceLocator.
+    let node_as_app_node: Arc<dyn ApplicationNode> = node.clone();
+    app_manager.set_node_context(node_as_app_node).await;
+
+    app_manager
         .register(&app_ctx(app_name), app)
         .await
         .map_err(|e| format!("Failed to register application: {}", e))?;
 
-    tracing::debug!(
-        application = %app_name,
-        "Application registered, starting..."
-    );
-
-    // Start application (spawns supervisor tree)
-    node.application_manager()
+    app_manager
         .start(app_name)
         .await
         .map_err(|e| format!("Failed to start application: {}", e))?;
-
-    tracing::debug!(
-        application = %app_name,
-        "Application started successfully"
-    );
 
     Ok(())
 }
@@ -626,9 +651,9 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         // Wait for actors to be activated using lifecycle events
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            expected_runtime_actor_id("worker-1", node_id),
-            expected_runtime_actor_id("worker-2", node_id),
-            expected_runtime_actor_id("worker-3", node_id),
+            expected_actor_id("worker-1", "test-app", node_id),
+            expected_actor_id("worker-2", "test-app", node_id),
+            expected_actor_id("worker-3", "test-app", node_id),
         ];
         let actors_activated =
             wait_for_actors_activated(&node, &expected_actors, Duration::from_secs(1)).await;
@@ -643,9 +668,9 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         // Verify all 3 workers are spawned
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            expected_runtime_actor_id("worker-1", node_id),
-            expected_runtime_actor_id("worker-2", node_id),
-            expected_runtime_actor_id("worker-3", node_id),
+            expected_actor_id("worker-1", "test-app", node_id),
+            expected_actor_id("worker-2", "test-app", node_id),
+            expected_actor_id("worker-3", "test-app", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -657,16 +682,15 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
             );
         }
 
-        // Verify actor types are set correctly
+        // Verify actor types are set correctly (actor_type = ChildSpec.actor_identity.actor_type)
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
+                Some(expected_actor.actor_type().to_string()),
                 "Actor {} should have type {}",
                 expected_actor,
-                expected_type
+                expected_actor.actor_type()
             );
         }
     })
@@ -758,10 +782,10 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         // - nested-worker-1 (worker under child supervisor)
         // - nested-worker-2 (worker under child supervisor)
         let expected_actors = vec![
-            expected_runtime_actor_id("root-worker-1", node_id),
-            expected_runtime_actor_id("child-supervisor", node_id), // Supervisor should be spawned as actor
-            expected_runtime_actor_id("nested-worker-1", node_id),
-            expected_runtime_actor_id("nested-worker-2", node_id),
+            expected_actor_id("root-worker-1", "nested-app", node_id),
+            expected_actor_id("child-supervisor", "nested-app", node_id),
+            expected_actor_id("nested-worker-1", "nested-app", node_id),
+            expected_actor_id("nested-worker-2", "nested-app", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -776,13 +800,12 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         // Verify actor types are set correctly
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
+                Some(expected_actor.actor_type().to_string()),
                 "Actor {} should have type {}",
                 expected_actor,
-                expected_type
+                expected_actor.actor_type()
             );
         }
 
@@ -806,14 +829,14 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
         max_restarts: 3,
         max_restart_window: None,
         children: vec![ChildSpec {
-            id: "deep-worker-1".to_string(),
-            r#type: ChildType::ChildTypeWorker.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "deep-worker-1".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
+
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![],
-            behavior_kind: None,
+            ..Default::default()
         }],
     };
 
@@ -824,24 +847,25 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "level2-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level2-supervisor".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(level3_supervisor),
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "level2-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level2-worker".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -853,24 +877,25 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "root-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "root-worker".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "level1-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level1-supervisor".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(level2_supervisor),
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }
@@ -885,24 +910,24 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "supervisor-a-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "supervisor-a-worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "supervisor-a-worker-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "supervisor-a-worker-2".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -913,14 +938,14 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
         max_restarts: 3,
         max_restart_window: None,
         children: vec![ChildSpec {
-            id: "supervisor-b-worker-1".to_string(),
-            r#type: ChildType::ChildTypeWorker.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "supervisor-b-worker-1".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
+
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![],
-            behavior_kind: None,
+            ..Default::default()
         }],
     };
 
@@ -931,34 +956,36 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "supervisor-a".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "supervisor-a".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(supervisor_a),
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "supervisor-b".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "supervisor-b".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(supervisor_b),
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "root-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "root-worker".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }
@@ -1017,11 +1044,11 @@ async fn test_deeply_nested_supervisor_tree() {
         //   - level2-supervisor (supervisor actor)
         //     - deep-worker-1 (worker)
         let expected_actors = vec![
-            expected_runtime_actor_id("root-worker", node_id),
-            expected_runtime_actor_id("level1-supervisor", node_id),
-            expected_runtime_actor_id("level2-worker", node_id),
-            expected_runtime_actor_id("level2-supervisor", node_id),
-            expected_runtime_actor_id("deep-worker-1", node_id),
+            expected_actor_id("root-worker", "test-app", node_id),
+            expected_actor_id("level1-supervisor", "test-app", node_id),
+            expected_actor_id("level2-worker", "test-app", node_id),
+            expected_actor_id("level2-supervisor", "test-app", node_id),
+            expected_actor_id("deep-worker-1", "test-app", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -1035,8 +1062,8 @@ async fn test_deeply_nested_supervisor_tree() {
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-            expected_runtime_actor_id("level1-supervisor", node_id),
-            expected_runtime_actor_id("level2-supervisor", node_id),
+            expected_actor_id("level1-supervisor", "test-app", node_id),
+            expected_actor_id("level2-supervisor", "test-app", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1047,13 +1074,12 @@ async fn test_deeply_nested_supervisor_tree() {
             );
 
             let actor_type = get_actor_type(&node, supervisor_actor).await;
-            let expected_type = supervisor_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
+                Some(supervisor_actor.actor_type().to_string()),
                 "Supervisor actor {} should have type {}",
                 supervisor_actor,
-                expected_type
+                supervisor_actor.actor_type()
             );
         }
     })
@@ -1238,14 +1264,14 @@ async fn test_complex_supervisor_hierarchy() {
         //   - level3-worker (worker)
         let expected_actors = vec![
             // Level 1
-            expected_runtime_actor_id("root-worker", node_id),
-            expected_runtime_actor_id("level1-supervisor", node_id),
+            expected_actor_id("root-worker", "complex-app", node_id),
+            expected_actor_id("level1-supervisor", "complex-app", node_id),
             // Level 2
-            expected_runtime_actor_id("level2-worker", node_id),
-            expected_runtime_actor_id("level2-supervisor", node_id),
+            expected_actor_id("level2-worker", "complex-app", node_id),
+            expected_actor_id("level2-supervisor", "complex-app", node_id),
             // Level 3
-            expected_runtime_actor_id("level3-supervisor", node_id),
-            expected_runtime_actor_id("level3-worker", node_id),
+            expected_actor_id("level3-supervisor", "complex-app", node_id),
+            expected_actor_id("level3-worker", "complex-app", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1260,9 +1286,9 @@ async fn test_complex_supervisor_hierarchy() {
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-            expected_runtime_actor_id("level1-supervisor", node_id),
-            expected_runtime_actor_id("level2-supervisor", node_id),
-            expected_runtime_actor_id("level3-supervisor", node_id),
+            expected_actor_id("level1-supervisor", "complex-app", node_id),
+            expected_actor_id("level2-supervisor", "complex-app", node_id),
+            expected_actor_id("level3-supervisor", "complex-app", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1273,17 +1299,16 @@ async fn test_complex_supervisor_hierarchy() {
             );
 
             let actor_type = get_actor_type(&node, supervisor_actor).await;
-            let expected_type = supervisor_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
+                Some(supervisor_actor.actor_type().to_string()),
                 "Supervisor actor {} should have type {}",
                 supervisor_actor,
-                expected_type
+                supervisor_actor.actor_type()
             );
         }
 
-        // Verify total count matches expected (10 actors total: 3 supervisors + 7 workers)
+        // Verify total count matches expected (6 actors: 3 supervisors + 3 workers)
         assert_eq!(
             actor_ids.len(),
             expected_actors.len(),
@@ -1294,20 +1319,19 @@ async fn test_complex_supervisor_hierarchy() {
 
         // Verify actor types for all workers
         let worker_actors = vec![
-            expected_runtime_actor_id("root-worker", node_id),
-            expected_runtime_actor_id("level2-worker", node_id),
-            expected_runtime_actor_id("level3-worker", node_id),
+            expected_actor_id("root-worker", "complex-app", node_id),
+            expected_actor_id("level2-worker", "complex-app", node_id),
+            expected_actor_id("level3-worker", "complex-app", node_id),
         ];
 
         for worker_actor in &worker_actors {
             let actor_type = get_actor_type(&node, worker_actor).await;
-            let expected_type = worker_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
+                Some(worker_actor.actor_type().to_string()),
                 "Worker actor {} should have type {}",
                 worker_actor,
-                expected_type
+                worker_actor.actor_type()
             );
         }
     })
@@ -1368,12 +1392,12 @@ async fn test_multiple_sibling_supervisors() {
         //   - supervisor-b-worker-1 (worker)
         // - root-worker (worker)
         let expected_actors = vec![
-            expected_runtime_actor_id("supervisor-a", node_id),
-            expected_runtime_actor_id("supervisor-a-worker-1", node_id),
-            expected_runtime_actor_id("supervisor-a-worker-2", node_id),
-            expected_runtime_actor_id("supervisor-b", node_id),
-            expected_runtime_actor_id("supervisor-b-worker-1", node_id),
-            expected_runtime_actor_id("root-worker", node_id),
+            expected_actor_id("supervisor-a", "actors_tracked_in_-app", node_id),
+            expected_actor_id("supervisor-a-worker-1", "actors_tracked_in_-app", node_id),
+            expected_actor_id("supervisor-a-worker-2", "actors_tracked_in_-app", node_id),
+            expected_actor_id("supervisor-b", "actors_tracked_in_-app", node_id),
+            expected_actor_id("supervisor-b-worker-1", "actors_tracked_in_-app", node_id),
+            expected_actor_id("root-worker", "actors_tracked_in_-app", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1388,8 +1412,8 @@ async fn test_multiple_sibling_supervisors() {
 
         // Verify both sibling supervisors are spawned as actors
         let supervisor_actors = vec![
-            expected_runtime_actor_id("supervisor-a", node_id),
-            expected_runtime_actor_id("supervisor-b", node_id),
+            expected_actor_id("supervisor-a", "actors_tracked_in_-app", node_id),
+            expected_actor_id("supervisor-b", "actors_tracked_in_-app", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1489,9 +1513,9 @@ async fn test_auto_generated_supervisor_tree() {
         // With simple supervisor tree, we expect 3 workers
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            expected_runtime_actor_id("worker-1", node_id),
-            expected_runtime_actor_id("worker-2", node_id),
-            expected_runtime_actor_id("worker-3", node_id),
+            expected_actor_id("worker-1", "auto-app", node_id),
+            expected_actor_id("worker-2", "auto-app", node_id),
+            expected_actor_id("worker-3", "auto-app", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -1642,9 +1666,8 @@ async fn test_actor_type_tracking_complex_tree() {
         let actor_ids = get_all_actor_ids(&node).await;
         let _node_id = node.id().as_str();
 
-        // Verify every actor has the correct type (matching its ChildSpec.id)
+        // Verify every actor has the correct type (matching ChildSpec.actor_identity.actor_type = "test_wasm_actor")
         for actor_id in &actor_ids {
-            let actor_name = actor_id.name();
             let actor_type = get_actor_type(&node, actor_id).await;
             assert!(
                 actor_type.is_some(),
@@ -1653,10 +1676,9 @@ async fn test_actor_type_tracking_complex_tree() {
             );
             assert_eq!(
                 actor_type,
-                Some(actor_name.to_string()),
-                "Actor {} should have type matching its name '{}'",
-                actor_id,
-                actor_name
+                Some("test_wasm_actor".to_string()),
+                "Actor {} should have type 'test_wasm_actor' (matching ChildSpec.actor_identity.actor_type)",
+                actor_id
             );
         }
     })
@@ -1678,24 +1700,24 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "worker_b".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker_b".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "worker_c".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker_c".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -1707,24 +1729,25 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "worker_a".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker_a".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "sub_sup".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "sub_sup".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(sub_sup),
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }
@@ -1818,10 +1841,10 @@ async fn test_erlang_style_supervision_structure() {
         // - worker_b (worker under sub_sup)
         // - worker_c (worker under sub_sup)
         let expected_actors = vec![
-            expected_runtime_actor_id("worker_a", node_id),
-            expected_runtime_actor_id("sub_sup", node_id), // Supervisor must be spawned as actor
-            expected_runtime_actor_id("worker_b", node_id),
-            expected_runtime_actor_id("worker_c", node_id),
+            expected_actor_id("worker_a", "my_app", node_id),
+            expected_actor_id("sub_sup", "my_app", node_id), // Supervisor must be spawned as actor
+            expected_actor_id("worker_b", "my_app", node_id),
+            expected_actor_id("worker_c", "my_app", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1835,22 +1858,21 @@ async fn test_erlang_style_supervision_structure() {
         }
 
         // Verify supervisors are spawned as actors (Erlang-style)
-        let supervisor_actor = expected_runtime_actor_id("sub_sup", node_id);
+        let supervisor_actor = expected_actor_id("sub_sup", "my_app", node_id);
         assert!(
             actor_ids.contains(&supervisor_actor),
             "Supervisor 'sub_sup' should be spawned as an actor (Erlang-style)"
         );
 
-        // Verify actor types match ChildSpec.id (for dashboard visibility)
+        // Verify actor types match ChildSpec.actor_identity.actor_type
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
-                Some(expected_type.to_string()),
-                "Actor {} should have type '{}' (matching ChildSpec.id)",
+                Some(expected_actor.actor_type().to_string()),
+                "Actor {} should have type '{}' (matching ChildSpec.actor_identity.actor_type)",
                 expected_actor,
-                expected_type
+                expected_actor.actor_type()
             );
         }
 
@@ -1914,14 +1936,14 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         max_restarts: 3,
         max_restart_window: None,
         children: vec![ChildSpec {
-            id: "level3-worker".to_string(),
-            r#type: ChildType::ChildTypeWorker.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "level3-worker".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
+
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![], // Phase 1: Unified Lifecycle - facets support
-            behavior_kind: None,
+            ..Default::default()
         }],
     };
 
@@ -1934,14 +1956,15 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         max_restarts: 3,
         max_restart_window: None,
         children: vec![ChildSpec {
-            id: "level3-supervisor".to_string(),
-            r#type: ChildType::ChildTypeSupervisor.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "level3-supervisor".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
+
+            role: "supervisor".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
             supervisor: Some(level3_supervisor), // level3_supervisor is the nested spec for level3-supervisor
-            facets: vec![],                      // Phase 1: Unified Lifecycle - facets support
-            behavior_kind: None,
+            ..Default::default()
         }],
     };
 
@@ -1951,24 +1974,25 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "level2-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level2-supervisor".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(level2_supervisor_nested_spec), // level2-supervisor has level3-supervisor as a nested child
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "level2-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level2-worker".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -1980,24 +2004,25 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         max_restart_window: None,
         children: vec![
             ChildSpec {
-                id: "root-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "root-worker".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "level1-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "level1-supervisor".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+
+                role: "supervisor".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
                 supervisor: Some(level2_supervisor_spec),
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     }

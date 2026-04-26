@@ -1,0 +1,65 @@
+name = "ts-ai-monitor-link-supervision"
+version = "1.0.0"
+namespace = "ts-ai-monitor-link-supervision"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "inference_worker_a"
+actor_type = "inference_worker"
+role = "inference_worker_a"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { worker_id = "worker-a" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+[[supervisor.children]]
+name = "inference_worker_b"
+actor_type = "inference_worker"
+role = "inference_worker_b"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { worker_id = "worker-b" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+[[supervisor.children]]
+name = "validator_agent"
+actor_type = "validator_agent"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "pipeline_supervisor"
+actor_type = "pipeline_supervisor"
+restart = "permanent"
+shutdown_timeout_seconds = 15
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "audit_log"
+actor_type = "audit_log"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "lazy" } }
+]

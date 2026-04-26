@@ -31,7 +31,7 @@ echo "✓ Redis is running"
 echo ""
 echo "Building example..."
 cd "$EXAMPLE_DIR"
-cargo build --release
+cargo build
 
 # Start nodes in background
 echo ""
@@ -39,7 +39,7 @@ echo "Starting nodes..."
 echo "Note: Press Ctrl+C to stop all nodes"
 
 # Node 1 (CPU)
-cargo run --release --bin entity-recognition-node -- \
+cargo run --bin entity-recognition-node -- \
     --node-id node-1 \
     --listen-addr 0.0.0.0:9000 \
     --backend redis \
@@ -49,7 +49,7 @@ cargo run --release --bin entity-recognition-node -- \
 NODE1_PID=$!
 
 # Node 2 (GPU)
-cargo run --release --bin entity-recognition-node -- \
+cargo run --bin entity-recognition-node -- \
     --node-id node-2 \
     --listen-addr 0.0.0.0:8000 \
     --backend redis \
@@ -59,7 +59,7 @@ cargo run --release --bin entity-recognition-node -- \
 NODE2_PID=$!
 
 # Node 3 (CPU)
-cargo run --release --bin entity-recognition-node -- \
+cargo run --bin entity-recognition-node -- \
     --node-id node-3 \
     --listen-addr 0.0.0.0:8001 \
     --backend redis \
@@ -86,7 +86,7 @@ trap cleanup EXIT INT TERM
 echo "✓ Nodes started (PIDs: $NODE1_PID, $NODE2_PID, $NODE3_PID)"
 echo ""
 echo "Nodes are running. You can now run the application:"
-echo "  cargo run --release --bin entity-recognition-app -- \\"
+echo "  cargo run -- \\"
 echo "      --node-addr http://localhost:9000 \\"
 echo "      --backend redis \\"
 echo "      --redis-url redis://localhost:6379 \\"
@@ -96,4 +96,3 @@ echo "Press Ctrl+C to stop all nodes"
 
 # Wait for user interrupt
 wait
-

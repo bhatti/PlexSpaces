@@ -9,7 +9,7 @@
 
 ## APIs used
 
-- **NodeBuilder** — Build node with `with_listen_addr`, `with_in_memory_backends`, `build().await`, then `start().await`.
+- **NodeBuilder** — Build node with `with_listen_addr`, `with_in_memory_backends`, and `build_started().await` so release config, unified migrations, service initialization, and runtime startup follow the same path as the server.
 - **RequestContext::new_without_auth(tenant_id, namespace)** — Explicit tenant/namespace (e.g. `"acme-corp"`, `"webhooks"`).
 - **ActorBuilder::new(behavior).with_name(...).with_namespace(...).spawn(&ctx, service_locator)** — Spawn actor; provide a unique actor name and the framework constructs the structured actor ID for type `BehaviorType::Custom("webhook_handler")`.
 - **GenServer** — Request/reply; `action=list` vs deliver; reply via `ctx.send_reply(...)`.
@@ -20,7 +20,7 @@ Examples use the **workspace shared target directory** (`<workspace>/target`). S
 
 ```bash
 cd examples/rust/embedded/webhook_handler
-cargo run --release
+cargo run
 ```
 
 Or run the test script:

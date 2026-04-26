@@ -9,15 +9,17 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "leader"
-type = "leader"
+name = "leader"
+actor_type = "heat_diffusion_wasm"
+role = "leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "leader" }
 
 [[supervisor.children]]
-id = "worker"
-type = "worker"
+name = "worker"
+actor_type = "heat_diffusion_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "worker" }

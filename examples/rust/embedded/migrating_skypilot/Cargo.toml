@@ -1,24 +1,28 @@
+[workspace]
+
 [package]
 name = "skypilot-comparison"
-version.workspace = true
-edition.workspace = true
-
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+default-run = "skypilot-comparison"
+description = "SkyPilot-style multi-cloud AI workload orchestration example with PlexSpaces"
 
 [dependencies]
-plexspaces-core.workspace = true
-plexspaces-actor.workspace = true
-plexspaces-behavior.workspace = true
-plexspaces-node.workspace = true
-plexspaces-mailbox.workspace = true
-plexspaces-sdk.workspace = true
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-ulid.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-async-trait.workspace = true
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-node = { path = "../../../../crates/node" }
+plexspaces-mailbox = { path = "../../../../crates/mailbox" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+tokio = { version = "1.44", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ulid = { version = "1.1", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+async-trait = "0.1"
 
 [[bin]]
-name = "skypilot_comparison"
+name = "skypilot-comparison"
 path = "src/main.rs"

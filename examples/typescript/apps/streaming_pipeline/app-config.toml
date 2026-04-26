@@ -9,15 +9,34 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "leader"
-type = "leader"
+name = "leader"
+actor_type = "streaming_pipeline_wasm"
+role = "leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
-args = { role = "leader", worker_count = "8", batch_count = "18", events_per_batch = "1200", drop_rate = "0.08", enrich_fields = "6" }
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } }
+]
+
+[supervisor.children.args]
+role = "leader"
+worker_count = "8"
+batch_count = "18"
+events_per_batch = "1200"
+drop_rate = "0.08"
+enrich_fields = "6"
 
 [[supervisor.children]]
-id = "worker"
-type = "worker"
+name = "worker"
+actor_type = "streaming_pipeline_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
-args = { role = "worker" }
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } }
+]
+
+[supervisor.children.args]
+role = "worker"

@@ -55,6 +55,7 @@ async fn test_spawn_actor_basic() {
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
     let request = Request::new(SpawnActorRequest {
         actor_type: "test_actor".to_string(),
+        role: "test_actor".to_string(),
         ..Default::default()
     });
 
@@ -91,6 +92,7 @@ async fn test_spawn_remote_actor_missing_target_node() {
     // Missing actor_type (should fail)
     let request = Request::new(SpawnActorRequest {
         actor_type: "".to_string(), // Empty actor_type should fail
+        role: String::new(),
         ..Default::default()
     });
 
@@ -115,6 +117,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
     let request = Request::new(SpawnActorRequest {
         actor_id: String::new(),
         actor_type: "".to_string(),
+        role: String::new(),
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
@@ -147,6 +150,7 @@ async fn test_spawn_remote_actor_wrong_node() {
     let request = Request::new(SpawnActorRequest {
         actor_id: String::new(),
         actor_type: "test_actor".to_string(),
+        role: "test_actor".to_string(),
         initial_state: vec![],
         config: None,
         labels: std::collections::HashMap::new(),
@@ -177,6 +181,7 @@ async fn test_spawn_multiple_remote_actors() {
     for i in 0..3 {
         let request = Request::new(SpawnActorRequest {
             actor_type: format!("test_actor_{}", i),
+            role: format!("test_actor_{}", i),
             ..Default::default()
         });
 

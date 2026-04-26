@@ -36,7 +36,7 @@ use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 
 fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
-    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+    plexspaces_core::ActorId::new(name, "gen_server", "namespace", "test-node")
         .expect("valid test actor id")
 }
 
@@ -78,6 +78,30 @@ impl plexspaces_core::Actor for TestActor {
     }
 }
 
+struct InitObservingActor {
+    observed_ids: Arc<tokio::sync::Mutex<Vec<plexspaces_core::ActorId>>>,
+}
+
+#[async_trait]
+impl plexspaces_core::Actor for InitObservingActor {
+    async fn init(&mut self, ctx: &ActorContext) -> Result<(), ActorError> {
+        self.observed_ids.lock().await.push(ctx.actor_id().clone());
+        Ok(())
+    }
+
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::GenServer
+    }
+}
+
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
@@ -101,8 +125,7 @@ async fn test_supervisor_start_child_with_facets() {
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
-        child_id.clone(),
-        actor_id.clone(),
+        test_actor_id(&child_id),
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
@@ -169,8 +192,7 @@ async fn test_supervisor_restart_preserves_facets() {
     let actor_id = test_actor_id(&child_id).to_string();
 
     let spec = ChildSpec::worker(
-        child_id.clone(),
-        actor_id.clone(),
+        test_actor_id(&child_id),
         Arc::new({
             let actor_id = actor_id.clone();
             move || {
@@ -269,5 +291,67 @@ async fn test_supervisor_restart_preserves_facets() {
     assert_eq!(
         retrieved_spec.facets[0].r#type, "test_facet",
         "Facet type should still match after restart"
+    );
+}
+
+#[tokio::test]
+async fn test_supervisor_restart_sets_self_ref_before_init() {
+    let (mut supervisor, mut event_rx) = create_test_supervisor().await;
+    let observed_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+
+    let child_name = "self-ref-worker";
+    let actor_id = test_actor_id(child_name);
+    let actor_id_string = actor_id.to_string();
+    let actor_id_for_factory = actor_id.clone();
+    let spec = ChildSpec::worker(
+        actor_id.clone(),
+        Arc::new({
+            let observed_ids = observed_ids.clone();
+            let actor_id_for_factory = actor_id_for_factory.clone();
+            move || {
+                let observed_ids = observed_ids.clone();
+                let actor_id_string = actor_id_string.clone();
+                let actor_id_for_factory = actor_id_for_factory.clone();
+                Box::pin(async move {
+                    let mailbox = Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id_string),
+                    )
+                    .await
+                    .unwrap();
+                    let actor = actor_with_default_service_locator(
+                        actor_id_string.clone(),
+                        Box::new(InitObservingActor {
+                            observed_ids: observed_ids.clone(),
+                        }),
+                        mailbox,
+                        "tenant".to_string(),
+                        "namespace".to_string(),
+                    )
+                    .await;
+                    let actor_ref = CoreActorRef::new(actor_id_for_factory.clone())
+                        .map_err(|e| ActorError::InvalidState(e.to_string()))?;
+                    Ok(StartedChild::Worker { actor, actor_ref })
+                })
+            }
+        }),
+    );
+
+    supervisor
+        .start_child(spec)
+        .await
+        .expect("start_child should succeed");
+    let _ = event_rx.recv().await;
+
+    supervisor
+        .restart_child(actor_id.as_str())
+        .await
+        .expect("restart_child should succeed");
+
+    let observed_ids = observed_ids.lock().await.clone();
+    assert_eq!(
+        observed_ids,
+        vec![actor_id.clone(), actor_id],
+        "both initial start and supervisor restart should inject self_ref before init()"
     );
 }

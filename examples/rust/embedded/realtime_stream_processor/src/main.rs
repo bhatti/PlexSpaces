@@ -51,7 +51,7 @@ use plexspaces_sdk::{
 use plexspaces_actor::supervisor::{Supervisor, SupervisorEvent, SupervisionStrategy};
 use plexspaces_actor::child_spec::{ChildSpec, RestartStrategy, StartFn, StartedChild};
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorError, ActorRef};
+use plexspaces_core::{ActorError, ActorId, ActorRef};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -420,29 +420,32 @@ fn generate_events(num_events: usize) -> Vec<ClickstreamEvent> {
 }
 
 /// Create a ChildSpec for a supervised stream processor
-/// 
+///
 /// ## Architecture
 /// Creates a factory function that supervisor can use to recreate the actor
 /// when it crashes. The factory spawns the actor using ActorFactoryImpl.
+///
+/// `child_actor_id` is the canonical [`ActorId`] for this worker — distinct from the
+/// supervisor's label string passed to [`Supervisor::new`].
 fn create_processor_spec(
-    processor_id: &str,
+    child_actor_id: ActorId,
     event_type: EventType,
     restart: RestartStrategy,
     ctx: RequestContext,
     service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
 ) -> ChildSpec {
-    let id = processor_id.to_string();
-    let name_for_factory = id.clone();
+    let child_actor_id_for_factory = child_actor_id.clone();
     let ctx_for_factory = ctx.clone();
     let service_locator_for_factory = service_locator.clone();
     let event_type_for_factory = event_type.clone();
-    
+
     let start_fn: StartFn = Arc::new(move || {
-        let actor_name = name_for_factory.clone();
+        let child_actor_id = child_actor_id_for_factory.clone();
+        let actor_name = child_actor_id.name().to_string();
         let ctx = ctx_for_factory.clone();
         let service_locator = service_locator_for_factory.clone();
         let event_type = event_type_for_factory.clone();
-        
+
         Box::pin(async move {
             // Factory function creates a NEW actor each time supervisor needs to restart.
             // This is called by supervisor when actor crashes and needs restart.
@@ -462,7 +465,7 @@ fn create_processor_spec(
             // ActorBuilder handles mailbox creation, context setup, and structured ID construction.
             let actor_instance = StreamProcessor::new(&actor_name, event_type);
             let mut actor = ActorBuilder::new(Box::new(actor_instance))
-                .with_name(actor_name)
+                .with_id(child_actor_id.clone())
                 .with_namespace(ctx.namespace().to_string())
                 .with_tenant_id(ctx.tenant_id().to_string())
                 .build()
@@ -489,9 +492,8 @@ fn create_processor_spec(
             Ok(StartedChild::Worker { actor, actor_ref })
         })
     });
-    
-    ChildSpec::worker(id.clone(), id, start_fn)
-        .with_restart(restart)
+
+    ChildSpec::worker(child_actor_id, start_fn).with_restart(restart)
 }
 
 // =============================================================================
@@ -534,15 +536,9 @@ async fn main() -> Result<()> {
     
     // Create node with clustering disabled for single-node example
     // SDK pattern: Use NodeBuilder for node creation
-    let node = Arc::new(NodeBuilder::new(node_id)
+    let node = NodeBuilder::new(node_id)
         .with_clustering_enabled(false)
-        .build().await);
-    
-    // Start node in background task
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
+        .build_started().await;
     
     // Wait for node to initialize services
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -580,14 +576,14 @@ async fn main() -> Result<()> {
     let event_types = vec![EventType::PageView, EventType::Click, EventType::Conversion];
     
     for i in 0..num_processors {
-        let processor_id = format!("processor-{}@{}", i, node_id);
+        let processor_name = format!("processor-{}", i);
         let event_type = event_types[i % event_types.len()].clone();
         
         // SDK helper: spawn_gen_server() wraps ActorFactoryImpl.spawn_gen_server()
         let processor = spawn_gen_server(
             &ctx,
             service_locator.clone(),
-            &processor_id,
+            &processor_name,
             StreamProcessor::new(&format!("processor-{}", i), event_type),
             vec![],
         ).await
@@ -610,7 +606,7 @@ async fn main() -> Result<()> {
     // Create supervisor for demonstrating failure/restart
     // In production, all processors would be supervised
     let (supervisor, mut event_rx) = Supervisor::new(
-        "processor-supervisor".to_string(),
+        "processor-pool-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
@@ -620,11 +616,17 @@ async fn main() -> Result<()> {
 
     // Register one processor with supervisor for failure demonstration
     // In production, all processors would be registered
-    let supervised_processor_id = format!("supervised-processor@{}", node_id);
+    let supervised_actor_id = ActorId::new(
+        "supervised-processor",
+        "stream_processor",
+        ctx.namespace(),
+        node_id,
+    )
+    .map_err(|e| anyhow::anyhow!("invalid supervised actor id: {}", e))?;
     let supervised_event_type = EventType::PageView;
-    
+
     let spec = create_processor_spec(
-        &supervised_processor_id,
+        supervised_actor_id.clone(),
         supervised_event_type,
         RestartStrategy::Permanent,
         ctx.clone(),
@@ -705,11 +707,13 @@ async fn main() -> Result<()> {
     
     // Trigger failure - supervisor will automatically restart it
     metrics_tracker.start_coordinate();
-    supervisor.handle_failure(
-        &supervised_processor_id,
-        "simulated stream processor crash: out of memory".to_string(),
-        None,
-    ).await?;
+    supervisor
+        .handle_failure(
+            &supervised_actor_id,
+            "simulated stream processor crash: out of memory".to_string(),
+            None,
+        )
+        .await?;
     
     // Collect restart events
     let timeout = tokio::time::sleep(Duration::from_millis(1000));

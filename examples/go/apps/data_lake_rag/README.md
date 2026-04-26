@@ -70,4 +70,4 @@ The actor service logs a warning with `list_cluster_filter`, `node_config_cluste
 
 - This is a synthetic RAG benchmark, not a real embedding/vector database integration.
 - The leader models ingest/chunking/query orchestration while workers simulate chunk embedding and retrieval scoring.
-- Workers write node-local `ApplicationMetrics`, and the leader combines per-node application status deltas into the final report.
+- Workers write node-local `ApplicationMetrics`, and the leader combines per-node application metrics deltas into the final report.

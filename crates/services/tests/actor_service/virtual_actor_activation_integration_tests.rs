@@ -20,15 +20,20 @@ use plexspaces_core::{
     RequestContext, ServiceLocator,
 };
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
-use plexspaces_node::NodeBuilder;
+use plexspaces_node::{Node, NodeBuilder, ReleaseSpec};
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, AskReplyRequest, SendMessageRequest,
 };
+use plexspaces_proto::node::v1::RuntimeConfig;
+use plexspaces_proto::storage::v1::SharedDbConfig;
 use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_services::process_group_service::ProcessGroupServiceImpl;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tempfile::TempDir;
 use tonic::Request;
 
 /// Test actor for virtual actor tests
@@ -44,6 +49,45 @@ fn canonical_actor_id(
     node_id: &str,
 ) -> ActorId {
     ActorId::new(name, actor_type, namespace, node_id).expect("valid test actor id")
+}
+
+fn writable_test_db_url(temp_dir: &TempDir) -> String {
+    let db_path: PathBuf = temp_dir.path().join("db").join("plexspaces.db");
+    std::fs::create_dir_all(
+        db_path
+            .parent()
+            .expect("sqlite test db path should always have a parent directory"),
+    )
+    .expect("failed to create writable sqlite test directory");
+    format!("sqlite://{}?mode=rwc", db_path.display())
+}
+
+async fn build_test_node(node_id: &str) -> (Node, TempDir) {
+    let temp_dir = TempDir::new().expect("failed to create temp dir for sqlite-backed test node");
+    let node = NodeBuilder::new(node_id)
+        .with_sqlite_journaling()
+        .with_release_spec(ReleaseSpec {
+            name: format!("virtual-actor-activation-{node_id}"),
+            version: "0.0.0-test".to_string(),
+            runtime: Some(RuntimeConfig {
+                db: Some(SharedDbConfig {
+                    connection_string: writable_test_db_url(&temp_dir),
+                    auto_migrate: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .build()
+        .await;
+    let process_group_service: Arc<dyn plexspaces_core::ProcessGroupService> = Arc::new(
+        ProcessGroupServiceImpl::new(node.service_locator(), node_id.to_string()),
+    );
+    node.service_locator()
+        .register_process_group_service(process_group_service)
+        .await;
+    (node, temp_dir)
 }
 
 impl CounterActor {
@@ -495,9 +539,26 @@ async fn increment_count(
     Ok(payload["count"].as_i64().unwrap_or_default() as i32)
 }
 
-async fn register_counter_behavior_with_initial_count(
+fn build_counter_actor(initial_count: i32) -> Box<dyn ActorTrait> {
+    Box::new(CounterActor::new_with_count(initial_count))
+}
+
+fn build_durable_counter_actor(initial_count: i32) -> Box<dyn ActorTrait> {
+    Box::new(DurableCounterActor::new_with_count(initial_count))
+}
+
+fn build_workflow_probe_actor(initial_count: i32) -> Box<dyn ActorTrait> {
+    Box::new(WorkflowProbeActor::new_with_count(initial_count))
+}
+
+fn build_durable_workflow_probe_actor(initial_count: i32) -> Box<dyn ActorTrait> {
+    Box::new(DurableWorkflowProbeActor::new_with_count(initial_count))
+}
+
+async fn register_behavior_with_initial_count(
     service_locator: &plexspaces_services::ServiceLocatorImpl,
     actor_type: &str,
+    build_actor: fn(i32) -> Box<dyn ActorTrait>,
 ) {
     let registry = BehaviorRegistry::new();
     let module_name = actor_type.to_string();
@@ -520,7 +581,7 @@ async fn register_counter_behavior_with_initial_count(
                     .get("initial_count")
                     .and_then(|value| value.as_i64())
                     .unwrap_or_default() as i32;
-                Ok(Box::new(CounterActor::new_with_count(initial_count)) as Box<dyn ActorTrait>)
+                Ok(build_actor(initial_count))
             })
         })
         .await;
@@ -529,38 +590,18 @@ async fn register_counter_behavior_with_initial_count(
         .await;
 }
 
+async fn register_counter_behavior_with_initial_count(
+    service_locator: &plexspaces_services::ServiceLocatorImpl,
+    actor_type: &str,
+) {
+    register_behavior_with_initial_count(service_locator, actor_type, build_counter_actor).await;
+}
+
 async fn register_durable_counter_behavior_with_initial_count(
     service_locator: &plexspaces_services::ServiceLocatorImpl,
     actor_type: &str,
 ) {
-    let registry = BehaviorRegistry::new();
-    let module_name = actor_type.to_string();
-    registry
-        .register(actor_type.to_string(), move |args| {
-            let args = args.to_vec();
-            let module_name = module_name.clone();
-            Box::pin(async move {
-                let config = if args.is_empty() {
-                    serde_json::json!({})
-                } else {
-                    serde_json::from_slice(&args).map_err(|e| {
-                        BehaviorFactoryError::InvalidArguments(
-                            module_name.clone(),
-                            format!("invalid JSON config: {}", e),
-                        )
-                    })?
-                };
-                let initial_count = config
-                    .get("initial_count")
-                    .and_then(|value| value.as_i64())
-                    .unwrap_or_default() as i32;
-                Ok(Box::new(DurableCounterActor::new_with_count(initial_count))
-                    as Box<dyn ActorTrait>)
-            })
-        })
-        .await;
-    service_locator
-        .register_behavior_registry(Arc::new(registry))
+    register_behavior_with_initial_count(service_locator, actor_type, build_durable_counter_actor)
         .await;
 }
 
@@ -568,34 +609,7 @@ async fn register_workflow_probe_behavior(
     service_locator: &plexspaces_services::ServiceLocatorImpl,
     actor_type: &str,
 ) {
-    let registry = BehaviorRegistry::new();
-    let module_name = actor_type.to_string();
-    registry
-        .register(actor_type.to_string(), move |args| {
-            let args = args.to_vec();
-            let module_name = module_name.clone();
-            Box::pin(async move {
-                let config = if args.is_empty() {
-                    serde_json::json!({})
-                } else {
-                    serde_json::from_slice(&args).map_err(|e| {
-                        BehaviorFactoryError::InvalidArguments(
-                            module_name.clone(),
-                            format!("invalid JSON config: {}", e),
-                        )
-                    })?
-                };
-                let initial_count = config
-                    .get("initial_count")
-                    .and_then(|value| value.as_i64())
-                    .unwrap_or_default() as i32;
-                Ok(Box::new(WorkflowProbeActor::new_with_count(initial_count))
-                    as Box<dyn ActorTrait>)
-            })
-        })
-        .await;
-    service_locator
-        .register_behavior_registry(Arc::new(registry))
+    register_behavior_with_initial_count(service_locator, actor_type, build_workflow_probe_actor)
         .await;
 }
 
@@ -603,37 +617,12 @@ async fn register_durable_workflow_probe_behavior(
     service_locator: &plexspaces_services::ServiceLocatorImpl,
     actor_type: &str,
 ) {
-    let registry = BehaviorRegistry::new();
-    let module_name = actor_type.to_string();
-    registry
-        .register(actor_type.to_string(), move |args| {
-            let args = args.to_vec();
-            let module_name = module_name.clone();
-            Box::pin(async move {
-                let config = if args.is_empty() {
-                    serde_json::json!({})
-                } else {
-                    serde_json::from_slice(&args).map_err(|e| {
-                        BehaviorFactoryError::InvalidArguments(
-                            module_name.clone(),
-                            format!("invalid JSON config: {}", e),
-                        )
-                    })?
-                };
-                let initial_count = config
-                    .get("initial_count")
-                    .and_then(|value| value.as_i64())
-                    .unwrap_or_default() as i32;
-                Ok(
-                    Box::new(DurableWorkflowProbeActor::new_with_count(initial_count))
-                        as Box<dyn ActorTrait>,
-                )
-            })
-        })
-        .await;
-    service_locator
-        .register_behavior_registry(Arc::new(registry))
-        .await;
+    register_behavior_with_initial_count(
+        service_locator,
+        actor_type,
+        build_durable_workflow_probe_actor,
+    )
+    .await;
 }
 
 async fn invoke_virtual_actor(
@@ -650,6 +639,7 @@ async fn invoke_virtual_actor(
         let mut request = Request::new(AskReplyRequest {
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
+            actor_name: String::new(),
             http_method: http_method.to_string(),
             payload,
             headers: HashMap::new(),
@@ -684,6 +674,7 @@ async fn invoke_virtual_actor(
         let mut request = Request::new(SendMessageRequest {
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
+            actor_name: String::new(),
             http_method: http_method.to_string(),
             payload,
             headers: HashMap::new(),
@@ -738,6 +729,22 @@ async fn wait_for_actor_registration(
     })
     .await
     .expect("actor should be registered before continuing");
+}
+
+async fn wait_for_actor_unregistration(
+    actor_registry: &Arc<plexspaces_core::ActorRegistry>,
+    actor_id: &ActorId,
+) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if actor_registry.lookup_actor(actor_id).await.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("actor should be unregistered before continuing");
 }
 
 async fn wait_for_virtual_registration(
@@ -820,7 +827,7 @@ async fn assert_has_concrete_timer_and_reminder_facets(
 /// Test: Virtual actor type registration and lazy activation
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_and_lazy_activation() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "counter";
@@ -885,7 +892,7 @@ async fn test_virtual_actor_type_registration_and_lazy_activation() {
 /// Test: Type-level metadata preserves eager strategy and full facet config
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_preserves_eager_metadata() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
 
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
@@ -917,23 +924,25 @@ async fn test_virtual_actor_type_registration_preserves_eager_metadata() {
         .get_virtual_actor_type(actor_type)
         .await
         .unwrap();
-    assert_eq!(metadata.namespace, namespace);
-    assert_eq!(metadata.tenant_id, "tenant-a");
+    assert_eq!(metadata.spec.namespace, namespace);
+    assert_eq!(metadata.spec.tenant_id, "tenant-a");
     assert_eq!(
-        metadata.activation_strategy,
+        metadata.activation_strategy(),
         ActivationStrategy::ActivationStrategyEager
     );
-    assert_eq!(metadata.facet_config, Some(facet_config));
+    // facet_config is derived from spec.facets; init_config_template args are in spec.args
+    assert!(metadata.facet_config().is_some());
+    // args should contain initial_count from init_config_template
     assert_eq!(
-        metadata.init_config_template,
-        Some(br#"{"initial_count":41}"#.to_vec())
+        metadata.spec.args.get("initial_count").map(|s| s.as_str()),
+        Some("41")
     );
 }
 
 /// Test: Virtual actor suspension and reactivation with instance-level metadata
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "counter";
@@ -1027,7 +1036,7 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
 /// Test: Virtual actor reactivation with type-level metadata fallback
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_type_level_fallback() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "counter";
@@ -1147,7 +1156,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
 /// Test: Error case - virtual actor activation fails when metadata is missing
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_activation_error_missing_metadata() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     register_counter_behavior_with_initial_count(&service_locator, "read-state-tracker").await;
@@ -1183,7 +1192,7 @@ async fn test_virtual_actor_activation_error_missing_metadata() {
 /// Test: Virtual actor with proper actor ID format
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_actor_id_format() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
         service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
@@ -1240,7 +1249,7 @@ async fn test_virtual_actor_actor_id_format() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_activation_with_http_format() {
     // Use unique actor_type to avoid interference when tests run in parallel
-    let node = NodeBuilder::new("test-node-http-fmt").build().await;
+    let (node, _db_dir) = build_test_node("test-node-http-fmt").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     register_counter_behavior_with_initial_count(&service_locator, "orbit-tracker").await;
@@ -1259,9 +1268,6 @@ async fn test_virtual_actor_activation_with_http_format() {
                 "virtual_actor": {
                     "idle_timeout": "5m",
                     "activation_strategy": "lazy"
-                },
-                "durability": {
-                    "enabled": true
                 }
             }),
             Some(tenant_id.to_string()),
@@ -1303,10 +1309,13 @@ async fn test_virtual_actor_activation_with_http_format() {
     );
     assert_eq!(
         actor_id.to_string(),
-        format!(
-            "{}//{}::{}@test-node-http-fmt",
-            instance_id, base_actor_type, namespace
+        canonical_actor_id(
+            &instance_id,
+            base_actor_type,
+            namespace,
+            "test-node-http-fmt",
         )
+        .to_string()
     );
 
     // Test activation via ActorService
@@ -1339,7 +1348,7 @@ async fn test_virtual_actor_activation_with_http_format() {
 /// but instance metadata is missing when reactivating
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_type_registered_only() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     register_counter_behavior_with_initial_count(&service_locator, "read-state-tracker").await;
@@ -1428,7 +1437,7 @@ async fn test_virtual_actor_reactivation_type_registered_only() {
 /// Test: type-level registration can rebuild a behavior from stored init config
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_template() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
 
@@ -1448,9 +1457,6 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
                 "virtual_actor": {
                     "idle_timeout": "5m",
                     "activation_strategy": "lazy"
-                },
-                "durability": {
-                    "enabled": true
                 }
             }),
             Some(tenant_id.to_string()),
@@ -1507,6 +1513,28 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         .stop_actor(&ctx, &actor_id)
         .await
         .unwrap();
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    wait_for_actor_unregistration(&actor_registry, &actor_id).await;
+    let stopped_metadata = virtual_actor_manager
+        .get_metadata(&actor_id)
+        .await
+        .expect("instance metadata should persist across stop");
+    // initial_state is now derived from spec.args via wasm_init_payload; verify args are preserved
+    assert_eq!(
+        stopped_metadata.spec.args.get("initial_count").map(|s| s.as_str()),
+        Some("7"),
+        "reactivation metadata should preserve the original init template args for non-durable actors"
+    );
+    let pending_messages = virtual_actor_manager
+        .registry()
+        .pending_activations()
+        .read()
+        .await;
+    assert!(
+        pending_messages.get(&actor_id).is_none(),
+        "reactivation should not inherit stale pending messages from the previous live instance"
+    );
+    drop(pending_messages);
 
     let response = invoke_virtual_actor(
         &actor_service,
@@ -1538,10 +1566,10 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
     );
 
     let instance_metadata = virtual_actor_manager.get_metadata(&actor_id).await.unwrap();
-    assert_eq!(instance_metadata.actor_type, actor_type);
-    assert_eq!(instance_metadata.namespace, namespace);
+    assert_eq!(instance_metadata.actor_type(), actor_type);
+    assert_eq!(instance_metadata.spec.namespace, namespace);
     assert_eq!(
-        instance_metadata.activation_strategy,
+        instance_metadata.activation_strategy(),
         ActivationStrategy::ActivationStrategyLazy
     );
 }
@@ -1549,7 +1577,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
 /// Test: Virtual actor activation preserves state after suspension/reactivation
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_state_preservation() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "counter";
@@ -1628,7 +1656,7 @@ async fn test_virtual_actor_state_preservation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "counter-with-facets";
@@ -1645,6 +1673,7 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,
         Some(&[
@@ -1772,7 +1801,7 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_restores_durable_state() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "durable-counter";
@@ -1787,6 +1816,7 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
     plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,
         Some(&[
@@ -1930,7 +1960,7 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let actor_type = "channel-with-group";
@@ -1945,6 +1975,7 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
     plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,
         Some(&[
@@ -2044,8 +2075,234 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_abstractions_example_runtime_send_primes_channel_definition_metadata() {
+    let (node, _db_dir) = build_test_node("test-node").await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let namespace = "test-ns";
+    let actor_type = "abstractions_wasm";
+
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+
+    for (instance_name, initial_count) in [("abstractions", 2u32), ("channel", 9u32)] {
+        plexspaces_core::register_virtual_actor_definition(
+            &sl_dyn,
+            plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: instance_name.to_string(),
+                    actor_type: actor_type.to_string(),
+                }),
+                role: instance_name.to_string(),
+                namespace: namespace.to_string(),
+                tenant_id: tenant_id.to_string(),
+                behavior_kind: "GenServer".to_string(),
+                args: std::collections::HashMap::from([(
+                    "initial_count".to_string(),
+                    initial_count.to_string(),
+                )]),
+                facets: vec![plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "5m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                }],
+                labels: std::collections::HashMap::new(),
+                config: None,
+            },
+        )
+        .await
+        .expect("named virtual actor definition must register");
+    }
+
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+    let target_actor_id = canonical_actor_id("alerts", actor_type, namespace, "test-node");
+
+    let send_result = actor_service
+        .send_message(
+            "channel:alerts",
+            Message {
+                id: ulid::Ulid::new().to_string(),
+                message_type: "cast".to_string(),
+                sender_id: canonical_actor_id("sender", "sender", namespace, "test-node")
+                    .to_string(),
+                receiver_id: "channel:alerts".to_string(),
+                payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+                ..Default::default()
+            },
+            Some(&ctx),
+        )
+        .await;
+
+    assert!(
+        send_result.is_ok(),
+        "runtime send to named virtual actor should succeed: {:?}",
+        send_result.err()
+    );
+
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    wait_for_actor_registration(&actor_registry, &target_actor_id).await;
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        "channel:alerts",
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("querying activated named virtual actor should succeed");
+
+    assert_eq!(
+        count_from_invoke_response(&response),
+        10,
+        "runtime send must preserve the channel declaration's init template from the abstractions example"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_template() {
+    let (node, _db_dir) = build_test_node("test-node").await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let namespace = "test-ns";
+    let actor_type = "abstractions_wasm";
+
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+
+    for (instance_name, initial_count) in [("abstractions", 2u32), ("ephemeral", 5u32)] {
+        plexspaces_core::register_virtual_actor_definition(
+            &sl_dyn,
+            plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: instance_name.to_string(),
+                    actor_type: actor_type.to_string(),
+                }),
+                role: instance_name.to_string(),
+                namespace: namespace.to_string(),
+                tenant_id: tenant_id.to_string(),
+                behavior_kind: "GenServer".to_string(),
+                args: std::collections::HashMap::from([(
+                    "initial_count".to_string(),
+                    initial_count.to_string(),
+                )]),
+                facets: vec![plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "5m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                }],
+                labels: std::collections::HashMap::new(),
+                config: None,
+            },
+        )
+        .await
+        .expect("named virtual actor definition must register");
+    }
+
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    let actor_id = canonical_actor_id("session-1", actor_type, namespace, "test-node");
+    let actor_name = "ephemeral:session-1";
+    let stop_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    let initial = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("ephemeral named actor should activate");
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+    assert_eq!(
+        count_from_invoke_response(&initial),
+        5,
+        "named ephemeral definition should seed first activation from its init template"
+    );
+
+    let increment_one = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("first increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_one), 6);
+
+    let increment_two = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("second increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_two), 7);
+
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
+        .await
+        .unwrap();
+    wait_for_actor_unregistration(&actor_registry, &actor_id).await;
+
+    let reactivated = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("ephemeral named actor should reactivate");
+    assert_eq!(
+        count_from_invoke_response(&reactivated),
+        5,
+        "named non-durable actors that share a behavior class must reactivate from their declaration template"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let namespace = "test-workflows";
@@ -2127,7 +2384,7 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let namespace = "test-workflows";
@@ -2139,6 +2396,7 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
     plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,
         Some(&[
@@ -2254,7 +2512,7 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
 /// remove a type registration.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_not_evicted_on_vacation() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let namespace = "test-ns-vac";
@@ -2333,8 +2591,7 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
     );
     let meta = meta.unwrap();
     let fc = meta
-        .facet_config
-        .as_ref()
+        .facet_config()
         .expect("facet_config must be present");
     assert!(
         fc.get("virtual_actor").is_some(),
@@ -2387,7 +2644,7 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
 /// all declared facets (virtual_actor, timer, reminder) are recreated on the new instance.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
     let namespace = "test-ns-respawn";
@@ -2406,6 +2663,7 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
     plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,
         Some(&[
@@ -2534,7 +2792,7 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
 /// VirtualActorMetadata.facet_config for correct resurrection.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
-    let node = NodeBuilder::new("test-node").build().await;
+    let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
     let actor_type = "wasm-sim-actor";
     let namespace = "test-ns-wasm";
@@ -2576,6 +2834,7 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
     let result = plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
+        String::new(), // instance_name — empty when name == type (standalone virtual actors)
         namespace.to_string(),
         None,                // No trait-object facets (WASM path)
         Some(&proto_facets), // Proto facets from app-config.toml
@@ -2593,8 +2852,7 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
         .expect("actor type must be registered");
 
     let fc = meta
-        .facet_config
-        .as_ref()
+        .facet_config()
         .expect("facet_config must be present after registration");
 
     // virtual_actor facet config
@@ -2638,7 +2896,7 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
 
     // Verify activation_strategy is parsed correctly from metadata
     assert_eq!(
-        meta.activation_strategy,
+        meta.activation_strategy(),
         ActivationStrategy::ActivationStrategyLazy,
         "activation_strategy in VirtualActorMetadata must be Lazy"
     );

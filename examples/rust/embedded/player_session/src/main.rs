@@ -439,14 +439,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
     let node = NodeBuilder::new("game-server")
         .with_clustering_enabled(false)
-        .build().await;
-    let node = Arc::new(node);
-    
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .build_started().await;
     
     println!("  ✓ Node 'game-server' created");
     println!();
@@ -480,7 +473,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let virtual_player: ActorRef = spawn(
         &ctx,
         node.service_locator(),
-        "player-virtual@game-server",
+        "player-virtual",
         "players",
         VirtualPlayerSession::new("player-virtual"),
     ).await?;
@@ -521,7 +514,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let actor_factory = node.service_locator().get_actor_factory().await
         .ok_or("Actor factory not available")?;
-    actor_factory.stop_actor(&ctx, &"player-virtual@game-server".to_string()).await?;
+    actor_factory.stop_actor(&ctx, &virtual_player.id().to_string()).await?;
     println!("  ✓ Actor terminated");
     println!("  ⚠️  State is LOST (no durability facet)");
     println!();
@@ -534,7 +527,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let virtual_player2: ActorRef = spawn(
         &ctx,
         node.service_locator(),
-        "player-virtual@game-server",
+        "player-virtual",
         "players",
         VirtualPlayerSession::new("player-virtual"),
     ).await?;
@@ -557,7 +550,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("  ✅ VERIFIED: State was LOST (as expected for non-durable actor)");
     }
     
-    actor_factory.stop_actor(&ctx, &"player-virtual@game-server".to_string()).await?;
+    actor_factory.stop_actor(&ctx, &virtual_player2.id().to_string()).await?;
     println!();
 
     // =========================================================================
@@ -590,7 +583,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let durable_player: ActorRef = spawn_with_storage(
         &ctx,
         node.service_locator(),
-        "player-durable@game-server",
+        "player-durable",
         "players",
         DurablePlayerSession::new("player-durable"),
         storage.clone(),
@@ -630,7 +623,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Terminate actor
     println!("Step B.5: Terminate actor (state is PERSISTED)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    actor_factory.stop_actor(&ctx, &"player-durable@game-server".to_string()).await?;
+    actor_factory.stop_actor(&ctx, &durable_player.id().to_string()).await?;
     println!("  ✓ Actor terminated");
     println!("  ✅ State is PERSISTED (durability facet journals all changes)");
     println!();

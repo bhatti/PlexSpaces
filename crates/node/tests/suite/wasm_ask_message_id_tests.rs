@@ -22,9 +22,9 @@ use super::test_helpers::app_request_with_tenant;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    ChildType, DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
+    DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::{Message, Metadata};
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_services::application_service::ApplicationServiceImpl;
@@ -81,17 +81,18 @@ async fn test_wasm_ask_single_message_id_flow() {
 
     // ── 2. Deploy calculator as single-actor application ───────────
     let child_spec = ChildSpec {
-        id: "calculator".to_string(),
-        r#type: ChildType::ChildTypeWorker.into(),
-        args: HashMap::new(),
+        actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+            name: "calculator".to_string(),
+            actor_type: "test_wasm_actor".to_string(),
+        }),
+
+        role: "worker".to_string(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
         shutdown_timeout: Some(ProstDuration {
             seconds: 5,
             nanos: 0,
         }),
-        supervisor: None,
-        facets: vec![],
-        behavior_kind: None,
+        ..Default::default()
     };
     let supervisor_spec = SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),

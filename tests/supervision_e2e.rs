@@ -62,7 +62,7 @@ use plexspaces_actor::{
 use plexspaces_core::ActorRef as CoreActorRef;
 
 fn test_actor_id(name: &str) -> ActorId {
-    ActorId::new(name, "GenServer", "test", "local").expect("invalid test actor id")
+    ActorId::new(name, "gen_server", "test", "local").expect("invalid test actor id")
 }
 
 fn test_actor_id_string(name: &str) -> String {
@@ -83,7 +83,7 @@ fn create_child_spec(
     let actor_id = test_actor_id(&id);
     let actor_ref = CoreActorRef::new(actor_id.clone()).expect("Failed to create actor ref");
 
-    ChildSpec::worker_sync(id.clone(), actor_id.to_string(), factory, actor_ref)
+    ChildSpec::worker_sync(actor_id, factory, actor_ref)
         .with_restart(restart)
         .with_shutdown(match shutdown_timeout_ms {
             Some(ms) => ShutdownSpec::Timeout(std::time::Duration::from_millis(ms)),

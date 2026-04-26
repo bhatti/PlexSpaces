@@ -28,9 +28,10 @@ use plexspaces_core::ApplicationManager;
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ChildSpec, ChildType,
+    application_service_server::ApplicationService, ApplicationSpec, ChildSpec,
     DeployApplicationRequest, RestartPolicy, SupervisionStrategy, SupervisorSpec,
 };
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
     GetNodeDashboardRequest, GetSummaryRequest,
@@ -222,30 +223,30 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
         }),
         children: vec![
             ChildSpec {
-                id: "worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(ActorIdentity {
+                    name: "worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(ProstDuration {
                     seconds: 5,
                     nanos: 0,
                 }),
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
             ChildSpec {
-                id: "worker-2".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
+                actor_identity: Some(ActorIdentity {
+                    name: "worker-2".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(ProstDuration {
                     seconds: 5,
                     nanos: 0,
                 }),
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             },
         ],
     };
@@ -375,8 +376,12 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
 
         // Verify specific actor types
         for child in &supervisor.children {
-            if child.r#type() == ChildType::ChildTypeWorker {
-                let actor_type = &child.id;
+            if child.role != "supervisor" {
+                let actor_type = child
+                    .actor_identity
+                    .as_ref()
+                    .map(|i| i.actor_type.as_str())
+                    .unwrap_or("");
                 let count = summary.actors_by_type.get(actor_type).copied().unwrap_or(0);
                 assert!(
                     count >= 1,

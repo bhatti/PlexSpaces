@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Durable Workflows with Journaling");
 
     // Create a node
-    let node = NodeBuilder::new("comparison-node-1").build().await;
+    let node = NodeBuilder::new("comparison-node-1").build_started().await;
 
     // Create order
     let order = Order {
@@ -305,7 +305,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         50,
     ));
 
-    let actor_id = format!("order-workflow-{}@comparison-node-1", order.id);
+    let actor_name = format!("order-workflow-{}", order.id);
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "workflows".to_string(),
         "orders".to_string(),
@@ -313,7 +313,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workflow_actor = plexspaces_sdk::spawn_with_facets(
         &ctx,
         node.service_locator(),
-        actor_id.clone(),
+        actor_name,
         "orders",
         OrderWorkflow::new(order.clone()),
         vec![durability_facet],
@@ -393,7 +393,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_order_workflow() {
-        let node = NodeBuilder::new("test-node").build().await;
+        let node = NodeBuilder::new("test-node").build_started().await;
 
         let order = Order {
             id: "TEST-001".to_string(),

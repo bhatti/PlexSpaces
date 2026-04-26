@@ -940,6 +940,12 @@ pub struct SpawnActorRequest {
     /// Use case: data-parallel workloads, shard groups, worker pools.
     #[prost(uint32, tag="8")]
     pub instances_count: u32,
+    /// Role of the actor within its application (e.g. "worker", "leader").
+    /// Maps 1:1 to ChildSpec.role (TOML `type` field in \[[supervisor.children]\]).
+    /// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+    /// If empty, falls back to actor_id.name() for dispatch.
+    #[prost(string, tag="9")]
+    pub role: ::prost::alloc::string::String,
 }
 /// Response from SpawnActor
 ///
@@ -1410,8 +1416,11 @@ pub struct ActorMigrating {
 /// Request to monitor an actor (Erlang-style)
 ///
 /// ## Purpose
-/// Establishes a monitoring link from supervisor to actor. When actor terminates,
-/// the node hosting the actor will call NotifyActorDown on the supervisor_callback.
+/// Establishes a monitor from `supervisor_id` to `actor_id` on the **node that hosts
+/// `actor_id`**. When that actor terminates, that node runs termination handling and
+/// delivers a `__DOWN__` **mailbox message** to `supervisor_id` (same Erlang semantics
+/// as `{'DOWN', Ref, process, Pid, Reason}`), routing remotely via `ActorService` when
+/// the supervisor lives on another node.
 ///
 /// ## Erlang Philosophy
 /// Equivalent to: Ref = erlang:monitor(process, Pid)
@@ -1419,9 +1428,11 @@ pub struct ActorMigrating {
 ///
 /// ## Design Notes
 /// - actor_id: Canonical actor ID for the actor to monitor
-/// - supervisor_id: The supervisor that wants notifications (for logging/debugging)
-/// - supervisor_callback: gRPC address where to send NotifyActorDown
-///    (e.g., "<http://supervisor-node:8000">)
+/// - supervisor_id: Canonical actor ID of the process that receives `__DOWN__` in its mailbox
+/// - supervisor_callback: **Reserved / wire compatibility.** The Rust server implementation
+///    does not use this field today; DOWN is sent with `ActorRegistry::tell` to `supervisor_id`.
+///    Clients should still populate it per validation (e.g. supervisor node's ActorService URL)
+///    for forward compatibility with a possible push-style callback path.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitorActorRequest {
@@ -1447,6 +1458,22 @@ pub struct MonitorActorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitorActorResponse {
     #[prost(string, tag="1")]
+    pub monitor_ref: ::prost::alloc::string::String,
+}
+/// Request to remove a monitor (Erlang demonitor/1 equivalent)
+///
+/// ## Purpose
+/// Cancels a monitor previously established via MonitorActor on the node that hosts
+/// the **monitored** actor (`actor_id`). The caller must supply the same `monitor_ref`
+/// returned by MonitorActor.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DemonitorActorRequest {
+    #[prost(string, tag="1")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub supervisor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub monitor_ref: ::prost::alloc::string::String,
 }
 /// Notification that a monitored actor has terminated
@@ -1476,6 +1503,39 @@ pub struct ActorDownNotification {
     pub supervisor_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub reason: ::prost::alloc::string::String,
+    /// Monitor reference ULID correlating with the original monitor() call.
+    /// Allows the monitoring actor to identify which monitor fired when monitoring multiple actors.
+    #[prost(string, tag="4")]
+    pub monitor_ref: ::prost::alloc::string::String,
+    /// When true, this notification is a Link EXIT signal (bidirectional death propagation).
+    /// The receiving node should kill the supervisor_id actor with a Linked exit reason.
+    /// When false (default), this is a Monitor DOWN notification delivered to the mailbox.
+    #[prost(bool, tag="5")]
+    pub is_link_signal: bool,
+}
+// ==================== Batch Actor State Check (for stale-monitor GC) ====================
+
+/// Request to batch-check actor states — used by stale-monitor GC task
+///
+/// ## Purpose
+/// Efficiently checks the lifecycle state of multiple actors in a single RPC call.
+/// Used by the background monitor GC task to detect stale monitor entries for actors
+/// that no longer exist on their hosting node.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetActorStatesRequest {
+    /// List of canonical actor IDs to check
+    #[prost(string, repeated, tag="1")]
+    pub actor_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// Response for batch actor state check — uses existing ActorState enum
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetActorStatesResponse {
+    /// Map of canonical actor_id -> ActorState (uses existing ActorState enum)
+    /// ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
+    #[prost(map="string, enumeration(ActorState)", tag="1")]
+    pub states: ::std::collections::HashMap<::prost::alloc::string::String, i32>,
 }
 /// / Actor link for two-way death propagation
 /// /
@@ -1951,6 +2011,68 @@ pub struct ActorHealth {
     /// For FAILED status: reason for failure
     #[prost(string, optional, tag="3")]
     pub failure_reason: ::core::option::Option<::prost::alloc::string::String>,
+}
+/// Complete specification for spawning or reactivating any actor.
+///
+/// ## Purpose
+/// Single source of truth for all information needed to spawn an actor, whether
+/// from TOML app-config, SDK annotations, gRPC, or virtual actor reactivation.
+/// Replaces the fragmented triple of (init_config_template, initial_state, labels)
+/// and the VirtualActorDefinitionRegistration intermediary.
+///
+/// ## Design
+/// - node_id is NOT included: ActorFactory always resolves local_node_id at spawn time.
+/// - tenant_id is overridden from JWT at request time if available.
+/// - args map is the canonical user-supplied init payload: becomes "args" key in WASM init().
+/// - facets carry the full facet declaration (type, config, priority) verbatim from ChildSpec.
+///
+/// ## Usage
+/// - TOML ChildSpec → ActorSpawnSpec via actor_spawn_spec_from_child_spec()
+/// - SDK annotations → ActorSpawnSpec built from behavior + declared facets
+/// - VirtualActorMetadata stores ActorSpawnSpec as its spec field
+/// - ActorBuilder.from_spec() accepts ActorSpawnSpec
+/// - ActorFactory.spawn_actor() accepts ActorSpawnSpec
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActorSpawnSpec {
+    /// Instance name + behavior class (namespace and tenant added in fields below).
+    #[prost(message, optional, tag="1")]
+    pub identity: ::core::option::Option<super::super::common::v1::ActorIdentity>,
+    /// Role of the actor within its application (e.g. "worker", "leader").
+    /// Maps 1:1 to ChildSpec.role (TOML `type` field in \[[supervisor.children]\]).
+    /// Used by BehaviorRegistry to dispatch the correct spec when multiple children
+    /// share the same actor_type (behavior class).
+    #[prost(string, tag="2")]
+    pub role: ::prost::alloc::string::String,
+    /// Namespace for actor isolation (required at spawn time).
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Tenant ID for multi-tenancy isolation (empty if auth disabled).
+    /// Overridden from JWT claims at request time when auth is enabled.
+    #[prost(string, tag="4")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// OTP-style behavior kind for logging and observability.
+    /// Examples: "GenServer", "GenEvent", "GenStateMachine", "Workflow".
+    #[prost(string, tag="5")]
+    pub behavior_kind: ::prost::alloc::string::String,
+    /// User-supplied initialization arguments.
+    /// These become the "args" field in the WASM init() payload so TypeScript/Python/Go
+    /// actors can read them via host.config("initial_count"), etc.
+    /// Also used by Rust embedded actors as configuration.
+    #[prost(map="string, string", tag="6")]
+    pub args: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Facet declarations attached to this actor.
+    /// Carries virtual_actor, durability, timer, etc. facets verbatim from ChildSpec.
+    /// ActorFactory instantiates these at spawn time via create_facets_from_config().
+    #[prost(message, repeated, tag="7")]
+    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
+    /// Observability labels propagated to metrics and traces.
+    #[prost(map="string, string", tag="8")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Actor runtime configuration (mailbox, restart policy, etc.).
+    /// Optional — defaults apply when absent.
+    #[prost(message, optional, tag="9")]
+    pub config: ::core::option::Option<ActorConfig>,
 }
 /// Actor lifecycle states.
 ///
@@ -2864,6 +2986,470 @@ impl ActorHealthStatus {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 include!("plexspaces.actor.v1.tonic.rs");

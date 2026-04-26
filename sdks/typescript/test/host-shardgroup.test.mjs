@@ -17,6 +17,14 @@ function applicationGetStatus(rawCall, applicationId, nodeId) {
   return JSON.parse(result);
 }
 
+function applicationGetMetrics(rawCall, applicationId, nodeId) {
+  const result = rawCall(applicationId, nodeId);
+  if (result.startsWith('ERROR:')) {
+    throw new Error(result);
+  }
+  return JSON.parse(result);
+}
+
 describe('Host shard-group wrappers', () => {
   it('createShardGroup parses host JSON response', () => {
     const response = createShardGroup(
@@ -42,5 +50,18 @@ describe('Host shard-group wrappers', () => {
     );
     assert.equal(response.node_id, 'node-a');
     assert.equal(response.application.application_id, 'app-a');
+  });
+
+  it('applicationGetMetrics parses host JSON response', () => {
+    const response = applicationGetMetrics(
+      () => JSON.stringify({
+        message_count: 9,
+        counter_metrics: { worker_messages: 7 },
+      }),
+      'app-a',
+      'node-a',
+    );
+    assert.equal(response.message_count, 9);
+    assert.equal(response.counter_metrics.worker_messages, 7);
   });
 });

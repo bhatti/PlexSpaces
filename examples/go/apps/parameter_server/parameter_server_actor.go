@@ -134,17 +134,21 @@ func (l *LeaderActor) train(payloadJSON string) string {
 		}
 	}
 
-	startStatuses := map[string]map[string]any{}
+	startMetrics := map[string]map[string]any{}
 	nodeAddresses := map[string]string{}
 	for _, nodeID := range participantNodeIDs {
 		status, err := host.ApplicationGetStatus(l.ApplicationID(), nodeID)
 		if err != nil {
 			return marshal(map[string]any{"error": fmt.Sprintf("failed to capture application status for %s: %v", nodeID, err)})
 		}
-		startStatuses[nodeID] = status
 		if address, ok := status["node_address"].(string); ok && address != "" {
 			nodeAddresses[nodeID] = address
 		}
+		metrics, err := host.ApplicationGetMetrics(l.ApplicationID(), nodeID)
+		if err != nil {
+			return marshal(map[string]any{"error": fmt.Sprintf("failed to capture application metrics for %s: %v", nodeID, err)})
+		}
+		startMetrics[nodeID] = metrics
 	}
 
 	results := make([]map[string]any, 0, iterations)
@@ -303,10 +307,14 @@ func (l *LeaderActor) train(payloadJSON string) string {
 		if err != nil {
 			return marshal(map[string]any{"error": fmt.Sprintf("failed to collect final application status for %s: %v", nodeID, err)})
 		}
+		metrics, err := host.ApplicationGetMetrics(l.ApplicationID(), nodeID)
+		if err != nil {
+			return marshal(map[string]any{"error": fmt.Sprintf("failed to collect final application metrics for %s: %v", nodeID, err)})
+		}
 		if address, ok := status["node_address"].(string); ok && address != "" {
 			nodeAddresses[nodeID] = address
 		}
-		applyStatusDelta(nodeMetrics, roleMetrics, startStatuses[nodeID], status)
+		applyMetricsDelta(nodeMetrics, roleMetrics, nodeID, startMetrics[nodeID], metrics)
 	}
 
 	for nodeID, counts := range computeActorCounts(leaderNodeID, shardActorIDs) {
@@ -605,20 +613,20 @@ func ensureRoleMetric(metrics map[string]map[string]int, role string) map[string
 	return entry
 }
 
-func applyStatusDelta(
+func applyMetricsDelta(
 	nodeMetrics map[string]map[string]int,
 	roleMetrics map[string]map[string]int,
-	startStatus map[string]any,
-	endStatus map[string]any,
+	nodeID string,
+	startMetrics map[string]any,
+	endMetrics map[string]any,
 ) {
-	counterDelta := saturatingMapDelta(statusMetricsMap(endStatus, "counter_metrics"), statusMetricsMap(startStatus, "counter_metrics"))
-	latencyTotalsDelta := saturatingMapDelta(statusMetricsMap(endStatus, "latency_totals_ms"), statusMetricsMap(startStatus, "latency_totals_ms"))
-	latencyMaxEnd := statusMetricsMap(endStatus, "latency_max_ms")
-	latencyMaxStart := statusMetricsMap(startStatus, "latency_max_ms")
-	latencySamplesDelta := saturatingMapDelta(statusMetricsMap(endStatus, "latency_samples"), statusMetricsMap(startStatus, "latency_samples"))
-	messageDelta := maxInt(anyToInt(statusMetricsValue(endStatus, "message_count"), 0)-anyToInt(statusMetricsValue(startStatus, "message_count"), 0), 0)
-	errorDelta := maxInt(anyToInt(statusMetricsValue(endStatus, "error_count"), 0)-anyToInt(statusMetricsValue(startStatus, "error_count"), 0), 0)
-	nodeID := stringValue(endStatus["node_id"])
+	counterDelta := saturatingMapDelta(metricsMap(endMetrics, "counter_metrics"), metricsMap(startMetrics, "counter_metrics"))
+	latencyTotalsDelta := saturatingMapDelta(metricsMap(endMetrics, "latency_totals_ms"), metricsMap(startMetrics, "latency_totals_ms"))
+	latencyMaxEnd := metricsMap(endMetrics, "latency_max_ms")
+	latencyMaxStart := metricsMap(startMetrics, "latency_max_ms")
+	latencySamplesDelta := saturatingMapDelta(metricsMap(endMetrics, "latency_samples"), metricsMap(startMetrics, "latency_samples"))
+	messageDelta := maxInt(anyToInt(endMetrics["message_count"], 0)-anyToInt(startMetrics["message_count"], 0), 0)
+	errorDelta := maxInt(anyToInt(endMetrics["error_count"], 0)-anyToInt(startMetrics["error_count"], 0), 0)
 	node := ensureNodeMetric(nodeMetrics, nodeID)
 	node["messages"] += messageDelta
 	node["leader_messages"] += counterDelta["leader_messages"]
@@ -652,14 +660,8 @@ func applyStatusDelta(
 	worker["errors"] += errorDelta
 }
 
-func statusMetricsValue(status map[string]any, field string) any {
-	application, _ := status["application"].(map[string]any)
-	metrics, _ := application["metrics"].(map[string]any)
-	return metrics[field]
-}
-
-func statusMetricsMap(status map[string]any, field string) map[string]int {
-	value, _ := statusMetricsValue(status, field).(map[string]any)
+func metricsMap(metrics map[string]any, field string) map[string]int {
+	value, _ := metrics[field].(map[string]any)
 	result := map[string]int{}
 	for key, raw := range value {
 		result[key] = anyToInt(raw, 0)

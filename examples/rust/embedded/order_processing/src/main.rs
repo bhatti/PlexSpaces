@@ -233,15 +233,7 @@ async fn main() -> Result<()> {
     
     let node = NodeBuilder::new("order-node")
         .with_clustering_enabled(false)
-        .build().await;
-    let node = Arc::new(node);
-    
-    // Start node in background
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .build_started().await;
     
     info!("  ✓ Node 'order-node' created and started");
     println!();
@@ -260,7 +252,7 @@ async fn main() -> Result<()> {
     let actor_ref: ActorRef = spawn(
         &ctx,
         node.service_locator(),
-        "order-processor@order-node",
+        "order-processor",
         "orders",
         OrderProcessor::new(),
     ).await.map_err(|e| anyhow::anyhow!("Failed to spawn actor: {}", e))?;

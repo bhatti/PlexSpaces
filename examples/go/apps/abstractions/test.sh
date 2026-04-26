@@ -297,8 +297,13 @@ if ! echo "$EPHEMERAL_UPDATED_PAYLOAD" | grep -q '"count": 7\|"count":7'; then
   echo "$EPHEMERAL_UPDATED_PAYLOAD"
   exit 1
 fi
-STOP_EPHEMERAL_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$EPHEMERAL_INTERNAL_ID")"
-assert_actor_ok "stop_ephemeral" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_EPHEMERAL_PAYLOAD" 15)"
+# Stop via DELETE API so the Rust node handles stop directly (no WASM controller indirection).
+# DELETE /api/v1/actors/{namespace}/{actor_type:id} resolves canonical ID, calls actor_factory.stop_actor,
+# then prime_instance_from_definition refreshes the spec so reactivation uses initial_count=5.
+STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+  "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
+  -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+assert_actor_ok "stop_ephemeral" "$STOP_RESULT"
 sleep 1
 EPHEMERAL_REACTIVATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
 assert_actor_ok "ephemeral reactivated status" "$EPHEMERAL_REACTIVATED"

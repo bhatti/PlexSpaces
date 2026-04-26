@@ -157,7 +157,7 @@ mod tests {
                     &ctx,
                     actor_id,
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,

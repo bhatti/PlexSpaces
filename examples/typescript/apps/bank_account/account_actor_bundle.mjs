@@ -437,8 +437,8 @@ function encodeTupleField(v, allowWildcardStar) {
     if (allowWildcardStar && v === "*") {
       return appendVarint(new Uint8Array([56]), 1);
     }
-    const enc = new TextEncoder();
-    const bytes = new Uint8Array(enc.encode(v));
+    const enc2 = new TextEncoder();
+    const bytes = new Uint8Array(enc2.encode(v));
     let inner = new Uint8Array([26]);
     inner = appendVarint(inner, bytes.length);
     inner = concatBytes(inner, bytes);
@@ -615,10 +615,10 @@ function bytesToBase64Sync(bytes) {
 }
 function encodeHttpFetchRequestWire(headers, body) {
   let buf = new Uint8Array(0);
-  const enc = new TextEncoder();
+  const enc2 = new TextEncoder();
   for (const [k, v] of Object.entries(headers)) {
-    const kb = new Uint8Array(enc.encode(k));
-    const vb = new Uint8Array(enc.encode(v));
+    const kb = new Uint8Array(enc2.encode(k));
+    const vb = new Uint8Array(enc2.encode(v));
     let entry = appendLengthDelimited(new Uint8Array(0), 1, kb);
     entry = appendLengthDelimited(entry, 2, vb);
     buf = appendLengthDelimited(buf, 1, entry);
@@ -683,6 +683,579 @@ function decodeHttpFetchResponseWire(data) {
   return out;
 }
 
+// ../../../../sdks/typescript/dist/wire/shard-group-proto-wire.js
+var enc = new TextDecoder("utf-8", { fatal: false });
+var encW = new TextEncoder();
+function appendString(buf, fieldNum, s) {
+  if (!s)
+    return buf;
+  return appendLengthDelimited(buf, fieldNum, new Uint8Array(encW.encode(s)));
+}
+function appendUint32(buf, fieldNum, v) {
+  if (v === 0)
+    return buf;
+  const tag = fieldNum << 3 | 0;
+  let b = appendVarint(buf, tag);
+  b = appendVarint(b, v >>> 0);
+  return b;
+}
+function appendBytes(buf, fieldNum, data) {
+  if (data.length === 0)
+    return buf;
+  return appendLengthDelimited(buf, fieldNum, data);
+}
+function readString(data, pos) {
+  const { slice, nextPos } = readLengthDelimited(data, pos);
+  return { value: enc.decode(slice), nextPos };
+}
+function readUint32(data, pos) {
+  const { value, n } = readVarint(data, pos);
+  return { value: Number(value) & 4294967295, nextPos: pos + n };
+}
+function partitionStrategyEnum(s) {
+  switch ((s ?? "").toLowerCase()) {
+    case "hash":
+      return 1;
+    case "range":
+      return 2;
+    case "consistent_hash":
+      return 3;
+    case "custom":
+      return 99;
+    default:
+      return 0;
+  }
+}
+function rebalancePolicyEnum(s) {
+  switch ((s ?? "").toLowerCase()) {
+    case "none":
+      return 1;
+    case "on_scale":
+      return 2;
+    case "load_based":
+      return 3;
+    default:
+      return 0;
+  }
+}
+function nodePlacementStrategyEnum(s) {
+  switch ((s ?? "").toLowerCase()) {
+    case "same_node":
+      return 1;
+    case "from_registry":
+      return 2;
+    case "node_ids":
+      return 3;
+    default:
+      return 0;
+  }
+}
+function aggregationStrategyEnum(s) {
+  switch ((s ?? "").toLowerCase()) {
+    case "concat":
+      return 1;
+    case "merge":
+      return 2;
+    case "first":
+      return 3;
+    case "majority":
+      return 4;
+    default:
+      return 0;
+  }
+}
+function encodeNodePlacement(placement) {
+  let buf = new Uint8Array(0);
+  const strategy = nodePlacementStrategyEnum(placement.strategy);
+  if (strategy !== 0) {
+    buf = appendUint32(buf, 1, strategy);
+  }
+  const cluster = placement.cluster ?? "";
+  buf = appendString(buf, 2, cluster);
+  const nodeIds = placement.node_ids;
+  if (Array.isArray(nodeIds)) {
+    for (const n of nodeIds) {
+      buf = appendString(buf, 3, n);
+    }
+  }
+  return buf;
+}
+function encodeDataParallelConfig(cfg) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, cfg.group_id ?? "");
+  const shardCount = Number(cfg.shard_count ?? 0) >>> 0;
+  if (shardCount > 0)
+    buf = appendUint32(buf, 2, shardCount);
+  const ps = partitionStrategyEnum(cfg.partition_strategy);
+  if (ps !== 0)
+    buf = appendUint32(buf, 4, ps);
+  const rp = rebalancePolicyEnum(cfg.rebalance_policy);
+  if (rp !== 0)
+    buf = appendUint32(buf, 5, rp);
+  const placement = cfg.placement;
+  if (placement && typeof placement === "object") {
+    const placementBytes = encodeNodePlacement(placement);
+    if (placementBytes.length > 0) {
+      buf = appendLengthDelimited(buf, 6, placementBytes);
+    }
+  }
+  return buf;
+}
+function ulid() {
+  const t = Date.now();
+  const chars = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  let id = "";
+  let ts = t;
+  for (let i = 9; i >= 0; i--) {
+    id = chars[ts % 32] + id;
+    ts = Math.floor(ts / 32);
+  }
+  for (let i = 0; i < 16; i++)
+    id += chars[Math.floor(Math.random() * 32)];
+  return id;
+}
+function encodeMessage(query) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, ulid());
+  buf = appendString(buf, 5, "call");
+  const payloadBytes = new Uint8Array(encW.encode(JSON.stringify(query)));
+  buf = appendBytes(buf, 6, payloadBytes);
+  return buf;
+}
+function encodeCreateShardGroupRequest(req) {
+  let buf = new Uint8Array(0);
+  const cfgFields = {
+    group_id: req.group_id,
+    shard_count: req.shard_count,
+    partition_strategy: req.partition_strategy,
+    rebalance_policy: req.rebalance_policy,
+    placement: req.placement
+  };
+  const cfgBytes = encodeDataParallelConfig(cfgFields);
+  buf = appendLengthDelimited(buf, 1, cfgBytes);
+  buf = appendString(buf, 2, req.actor_type ?? "");
+  const initialState = req.initial_state;
+  if (initialState !== void 0 && initialState !== null) {
+    const stateBytes = new Uint8Array(encW.encode(JSON.stringify(initialState)));
+    if (stateBytes.length > 0) {
+      buf = appendBytes(buf, 4, stateBytes);
+    }
+  }
+  return buf;
+}
+function encodeDurationMs(ms) {
+  const seconds = Math.floor(ms / 1e3);
+  const nanos = ms % 1e3 * 1e6;
+  let buf = new Uint8Array(0);
+  if (seconds > 0) {
+    buf = appendVarint(buf, 1 << 3 | 0);
+    buf = appendVarint(buf, seconds);
+  }
+  if (nanos > 0) {
+    buf = appendVarint(buf, 2 << 3 | 0);
+    buf = appendVarint(buf, nanos);
+  }
+  return buf;
+}
+function encodeScatterGatherRequest(req) {
+  let buf = new Uint8Array(0);
+  buf = appendString(buf, 1, req.group_id ?? "");
+  const query = req.query;
+  if (query && typeof query === "object") {
+    const msgBytes = encodeMessage(query);
+    buf = appendLengthDelimited(buf, 2, msgBytes);
+  }
+  const timeoutMs = Number(req.timeout_ms ?? 3e4);
+  if (timeoutMs > 0) {
+    const durBytes = encodeDurationMs(timeoutMs);
+    if (durBytes.length > 0)
+      buf = appendLengthDelimited(buf, 3, durBytes);
+  }
+  const agg = aggregationStrategyEnum(req.aggregation);
+  if (agg !== 0)
+    buf = appendUint32(buf, 4, agg);
+  const minResponses = Number(req.min_responses ?? 0) >>> 0;
+  if (minResponses > 0)
+    buf = appendUint32(buf, 5, minResponses);
+  return buf;
+}
+function decodeShardGroup(data) {
+  const result = {
+    config: {},
+    actor_type: "",
+    shard_actor_ids: [],
+    state: 0
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result.config = decodeDataParallelConfig(slice);
+    } else if (fn === 2 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.actor_type = value;
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result.shard_actor_ids.push(enc.decode(slice));
+    } else if (fn === 4 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.state = value;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+function decodeDataParallelConfig(data) {
+  const result = {
+    group_id: "",
+    shard_count: 0,
+    partition_strategy: 0,
+    rebalance_policy: 0
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.group_id = value;
+    } else if (fn === 2 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.shard_count = value;
+    } else if (fn === 4 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.partition_strategy = value;
+    } else if (fn === 5 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.rebalance_policy = value;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+function decodeCreateShardGroupResponse(data) {
+  let pos = 0;
+  let group = { shard_actor_ids: [] };
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      group = decodeShardGroup(slice);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { group };
+}
+function decodeMessagePayload(data) {
+  let pos = 0;
+  let payloadBytes = null;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 6 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      payloadBytes = slice;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  if (!payloadBytes || payloadBytes.length === 0)
+    return {};
+  const text = enc.decode(payloadBytes);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+function decodeShardQueryResponse(data) {
+  const result = {
+    shard_id: 0,
+    shard_actor_id: "",
+    payload: {},
+    success: false,
+    error: ""
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.shard_id = value;
+    } else if (fn === 2 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.shard_actor_id = value;
+    } else if (fn === 3 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result.payload = decodeMessagePayload(slice);
+    } else if (fn === 5 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      result.success = value !== 0;
+    } else if (fn === 6 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.error = value;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+function decodeScatterGatherResponse(data) {
+  const shardResponses = [];
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      shardResponses.push(decodeShardQueryResponse(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { shard_responses: shardResponses };
+}
+function decodeUint64MapEntry(data) {
+  let pos = 0;
+  let key = "";
+  let value = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      key = enc.decode(slice);
+    } else if (fn === 2 && wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      value = Number(v);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return { key, value };
+}
+function decodeUint64Map(entries) {
+  const result = {};
+  for (const entry of entries) {
+    const { key, value } = decodeUint64MapEntry(entry);
+    if (key)
+      result[key] = value;
+  }
+  return result;
+}
+function decodeApplicationMetrics(data) {
+  const actorCountEntries = [];
+  const counterMetricEntries = [];
+  const latencyTotalsEntries = [];
+  const latencyMaxEntries = [];
+  const latencySamplesEntries = [];
+  let pos = 0;
+  let messageCount = 0;
+  let errorCount = 0;
+  let uptimeSeconds = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      actorCountEntries.push(slice);
+    } else if (fn === 3 && wt === 0) {
+      const { value, nextPos } = readUint32(data, pos);
+      pos = nextPos;
+      uptimeSeconds = value;
+    } else if (fn === 4 && wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      messageCount = Number(v);
+    } else if (fn === 5 && wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      errorCount = Number(v);
+    } else if (fn === 6 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      counterMetricEntries.push(slice);
+    } else if (fn === 7 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      latencyTotalsEntries.push(slice);
+    } else if (fn === 8 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      latencyMaxEntries.push(slice);
+    } else if (fn === 9 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      latencySamplesEntries.push(slice);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return {
+    actor_counts: decodeUint64Map(actorCountEntries),
+    uptime_seconds: uptimeSeconds,
+    message_count: messageCount,
+    error_count: errorCount,
+    counter_metrics: decodeUint64Map(counterMetricEntries),
+    latency_totals_ms: decodeUint64Map(latencyTotalsEntries),
+    latency_max_ms: decodeUint64Map(latencyMaxEntries),
+    latency_samples: decodeUint64Map(latencySamplesEntries)
+  };
+}
+function decodeApplicationInfo(data) {
+  const result = {
+    application_id: "",
+    name: "",
+    metrics: null
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.application_id = value;
+    } else if (fn === 2 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.name = value;
+    } else if (fn === 8 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result.metrics = decodeApplicationMetrics(slice);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+function decodeGetApplicationStatusResponse(data) {
+  const result = {
+    application: null,
+    node_id: "",
+    node_address: "",
+    error: null
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      result.application = decodeApplicationInfo(slice);
+    } else if (fn === 3 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.error = value;
+    } else if (fn === 4 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.node_id = value;
+    } else if (fn === 5 && wt === 2) {
+      const { value, nextPos } = readString(data, pos);
+      pos = nextPos;
+      result.node_address = value;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return result;
+}
+function appendUint64(buf, fieldNum, v) {
+  if (v === 0)
+    return buf;
+  const tag = fieldNum << 3 | 0;
+  let b = appendVarint(buf, tag);
+  b = appendVarint(b, v);
+  return b;
+}
+function encodeUint64MapEntry(key, value) {
+  let entry = new Uint8Array(0);
+  entry = appendString(entry, 1, key);
+  entry = appendUint64(entry, 2, value);
+  return entry;
+}
+function encodeApplicationMetrics(metrics) {
+  let buf = new Uint8Array(0);
+  const counterMetrics = metrics.counter_metrics;
+  if (counterMetrics && typeof counterMetrics === "object") {
+    for (const [key, value] of Object.entries(counterMetrics)) {
+      const entry = encodeUint64MapEntry(key, Number(value));
+      buf = appendLengthDelimited(buf, 6, entry);
+    }
+  }
+  const latencyTotals = metrics.latency_totals_ms;
+  if (latencyTotals && typeof latencyTotals === "object") {
+    for (const [key, value] of Object.entries(latencyTotals)) {
+      const entry = encodeUint64MapEntry(key, Number(value));
+      buf = appendLengthDelimited(buf, 7, entry);
+    }
+  }
+  const latencyMax = metrics.latency_max_ms;
+  if (latencyMax && typeof latencyMax === "object") {
+    for (const [key, value] of Object.entries(latencyMax)) {
+      const entry = encodeUint64MapEntry(key, Number(value));
+      buf = appendLengthDelimited(buf, 8, entry);
+    }
+  }
+  const latencySamples = metrics.latency_samples;
+  if (latencySamples && typeof latencySamples === "object") {
+    for (const [key, value] of Object.entries(latencySamples)) {
+      const entry = encodeUint64MapEntry(key, Number(value));
+      buf = appendLengthDelimited(buf, 9, entry);
+    }
+  }
+  return buf;
+}
+
 // ../../../../sdks/typescript/dist/host.js
 import {
   send as hostSend,
@@ -741,6 +1314,13 @@ function safeCall(fn, ...args) {
 function hostPayloadToBytes(result) {
   if (result instanceof Uint8Array)
     return result;
+  if (ArrayBuffer.isView(result)) {
+    const v = result;
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  if (result instanceof ArrayBuffer) {
+    return new Uint8Array(result);
+  }
   if (typeof result === "string") {
     const out = new Uint8Array(result.length);
     for (let i = 0; i < result.length; i++)
@@ -998,16 +1578,42 @@ var Host = class {
   // Key-Value Store
   // ========================================================================
   kvGet(key) {
-    return safeCall(hostKvGet, key);
+    if (typeof hostKvGet !== "function")
+      return "";
+    try {
+      return decodeWitPayloadUtf8(hostKvGet(key));
+    } catch (e) {
+      return `ERROR:${e}`;
+    }
   }
   kvPut(key, value) {
-    return safeCall(hostKvPut, key, value);
+    if (typeof hostKvPut !== "function")
+      return "";
+    try {
+      hostKvPut(key, encodeWitPayloadUtf8(value));
+      return "";
+    } catch (e) {
+      return `ERROR:${e}`;
+    }
   }
   kvDelete(key) {
-    return safeCall(hostKvDelete, key);
+    if (typeof hostKvDelete !== "function")
+      return "";
+    try {
+      hostKvDelete(key);
+      return "";
+    } catch (e) {
+      return `ERROR:${e}`;
+    }
   }
   kvList(prefix) {
-    return safeCall(hostKvList, prefix);
+    if (typeof hostKvList !== "function")
+      return "[]";
+    try {
+      return JSON.stringify(hostKvList(prefix));
+    } catch (e) {
+      return `ERROR:${e}`;
+    }
   }
   // ========================================================================
   // TupleSpace (protobuf WriteRequest / ReadRequest / ReadResponse wire bytes)
@@ -1095,11 +1701,17 @@ var Host = class {
     }
   }
   createShardGroup(request) {
-    const result = safeCall(hostCreateShardGroup, JSON.stringify(request));
+    const reqBytes = encodeCreateShardGroupRequest(request);
+    const result = safeCall(hostCreateShardGroup, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_actor_ids: [] };
+    const decoded = decodeCreateShardGroupResponse(bytes);
+    const group = decoded.group ?? {};
+    return { ...group, ...decoded };
   }
   bulkUpdateShardGroup(request) {
     const result = safeCall(hostBulkUpdateShardGroup, JSON.stringify(request));
@@ -1116,11 +1728,15 @@ var Host = class {
     return JSON.parse(result);
   }
   scatterGather(request) {
-    const result = safeCall(hostScatterGather, JSON.stringify(request));
+    const reqBytes = encodeScatterGatherRequest(request);
+    const result = safeCall(hostScatterGather, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { shard_responses: [] };
+    return decodeScatterGatherResponse(bytes);
   }
   broadcastShardGroup(request) {
     const result = safeCall(hostBroadcastShardGroup, JSON.stringify(request));
@@ -1158,18 +1774,29 @@ var Host = class {
     return JSON.parse(result);
   }
   applicationMetricsAdd(applicationId, metrics) {
-    const result = safeCall(hostApplicationMetricsAdd, applicationId, JSON.stringify(metrics));
+    const metricsBytes = encodeApplicationMetrics(metrics);
+    const result = safeCall(hostApplicationMetricsAdd, applicationId, metricsBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return {};
+    try {
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      return {};
+    }
   }
   applicationGetStatus(applicationId, nodeId) {
     const result = safeCall(hostApplicationGetStatus, applicationId, nodeId);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return { node_id: nodeId, node_address: "", application: null };
+    return decodeGetApplicationStatusResponse(bytes);
   }
   /**
    * Execute an outbound HTTP request via a named service link.
@@ -1208,58 +1835,151 @@ var Host = class {
 };
 var host = new Host();
 
+// ../../../../sdks/typescript/dist/router.js
+function normalizeActorRole(actorId) {
+  if (!actorId) {
+    return "";
+  }
+  const canonicalSep = actorId.indexOf("//");
+  if (canonicalSep >= 0 && canonicalSep + 2 < actorId.length) {
+    const rest = actorId.substring(canonicalSep + 2);
+    const behaviorSep = rest.indexOf("::");
+    if (behaviorSep >= 0) {
+      return rest.substring(0, behaviorSep);
+    }
+    const nodeSep2 = rest.indexOf("@");
+    return nodeSep2 >= 0 ? rest.substring(0, nodeSep2) : rest;
+  }
+  const childSep = actorId.indexOf(":");
+  if (childSep >= 0) {
+    return actorId.substring(0, childSep);
+  }
+  const nodeSep = actorId.indexOf("@");
+  if (nodeSep >= 0) {
+    return actorId.substring(0, nodeSep);
+  }
+  return actorId;
+}
+var ActorRouter = class {
+  /**
+   * Create an ActorRouter with prefix-to-factory mappings.
+   *
+   * @param routes - Map of actor_id prefix to factory function.
+   *   Prefix matching: "rate-limiter" matches "rate-limiter-0", "rate-limiter-1", etc.
+   *
+   * Example:
+   *   new ActorRouter({
+   *     "parameter-server": () => new ParameterServerActor(),
+   *     "data-worker": () => new DataWorkerActor(),
+   *   })
+   */
+  constructor(routes) {
+    this.active = null;
+    this.factories = routes;
+  }
+  /** WIT `init(config: payload) -> result<_, actor-error>` */
+  init(configJson) {
+    try {
+      const text = decodeWitPayloadUtf8(configJson);
+      const config = text.trim() ? JSON.parse(text) : {};
+      const actorId = config.actor_id || "";
+      const actorType = config.actor_type || normalizeActorRole(actorId);
+      const declarationName = config.declaration_name || "";
+      const findFactory = (key) => {
+        let bestPrefix = "";
+        let bestFactory2 = null;
+        for (const prefix of Object.keys(this.factories)) {
+          if (key === prefix || key.startsWith(prefix)) {
+            if (prefix.length > bestPrefix.length) {
+              bestPrefix = prefix;
+              bestFactory2 = this.factories[prefix];
+            }
+          }
+        }
+        return [bestPrefix, bestFactory2];
+      };
+      let [, bestFactory] = declarationName ? findFactory(declarationName) : ["", null];
+      if (!bestFactory) {
+        [, bestFactory] = findFactory(actorType);
+      }
+      if (!bestFactory) {
+        throw new Error("ERROR: no actor registered for declaration_name='" + declarationName + "' actor_type='" + actorType + "'");
+      }
+      this.active = bestFactory();
+      this.active.init(text);
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("ERROR:")) {
+        throw e;
+      }
+      throw new Error("ERROR: router init failed");
+    }
+  }
+  /** WIT `handle(...) -> result<payload, actor-error>` */
+  handle(fromActor, msgType, payloadJson) {
+    if (!this.active) {
+      return encodeWitPayloadUtf8('{"error":"no active actor (init not called)"}');
+    }
+    return this.active.handle(fromActor, msgType, payloadJson);
+  }
+  /** WIT `get-state() -> result<payload, actor-error>` */
+  getState() {
+    if (!this.active) {
+      return encodeWitPayloadUtf8("{}");
+    }
+    return this.active.getState();
+  }
+  /** WIT `set-state(state: payload) -> result<_, actor-error>` */
+  setState(stateJson) {
+    if (!this.active) {
+      throw new Error("ERROR: no active actor");
+    }
+    this.active.setState(stateJson);
+  }
+};
+
 // account_actor.ts
 var BankAccountActor = class extends PlexSpacesActor {
   getDefaultState() {
-    return { account_id: "", balance: 0, transactions: [] };
+    return { actor_id: "", balance: 0, transactions: [] };
   }
   onInit(config) {
-    this.state.account_id = String(config.account_id ?? "");
+    if (typeof config.actor_id === "string" && config.actor_id) {
+      this.state.actor_id = config.actor_id;
+    }
     this.state.balance = 0;
     this.state.transactions = [];
   }
   onBalance() {
-    return { account: this.state.account_id, balance: this.state.balance };
+    return { success: true, account: this.state.actor_id, balance: this.state.balance };
   }
-  /** Alias for balance (same as Python handler("balance", "get")). */
+  /** Alias for balance. */
   onGet() {
     return this.onBalance();
   }
   onDeposit(payload) {
     const amount = Number(payload.amount ?? 0);
-    if (amount <= 0) return { error: "invalid_amount" };
+    if (amount <= 0) return { success: false, error: "invalid_amount" };
     this.state.balance += amount;
-    this.state.transactions.push({
-      type: "deposit",
-      amount,
-      balance_after: this.state.balance
-    });
-    return { status: "ok", balance: this.state.balance };
+    this.state.transactions.push({ type: "deposit", amount, balance_after: this.state.balance });
+    return { success: true, balance: this.state.balance };
   }
   onWithdraw(payload) {
     const amount = Number(payload.amount ?? 0);
-    if (amount <= 0) return { error: "invalid_amount" };
+    if (amount <= 0) return { success: false, error: "invalid_amount" };
     if (amount > this.state.balance) {
-      return { error: "insufficient_funds", balance: this.state.balance };
+      return { success: false, error: "insufficient_funds", balance: this.state.balance };
     }
     this.state.balance -= amount;
-    this.state.transactions.push({
-      type: "withdraw",
-      amount,
-      balance_after: this.state.balance
-    });
-    return { status: "ok", balance: this.state.balance };
+    this.state.transactions.push({ type: "withdraw", amount, balance_after: this.state.balance });
+    return { success: true, balance: this.state.balance };
   }
   onTx_count() {
-    return { count: this.state.transactions.length };
+    return { success: true, count: this.state.transactions.length };
   }
   onHistory(payload) {
-    const count = Math.min(
-      Number(payload.count ?? 5),
-      this.state.transactions.length
-    );
+    const count = Math.min(Number(payload.count ?? 5), this.state.transactions.length);
     const recent = count > 0 ? this.state.transactions.slice(-count) : [];
-    return { transactions: recent };
+    return { success: true, transactions: recent };
   }
   onReplay() {
     let rebuilt = 0;
@@ -1268,24 +1988,22 @@ var BankAccountActor = class extends PlexSpacesActor {
       else if (tx.type === "withdraw") rebuilt -= tx.amount;
     }
     return {
+      success: true,
       replayed: this.state.transactions.length,
       rebuilt_balance: rebuilt,
       current_balance: this.state.balance
     };
   }
-  onSet_account(payload) {
-    this.state.account_id = String(payload.account_id ?? "");
-    return { status: "ok" };
-  }
 };
-var instance = new BankAccountActor();
+var router = new ActorRouter({
+  bank_account_wasm: () => new BankAccountActor()
+});
 var actor2 = {
-  init: (configJson) => instance.init(configJson),
-  handle: (from, msgType, payloadJson) => instance.handle(from, msgType, payloadJson),
-  getState: () => instance.getState(),
-  setState: (stateJson) => instance.setState(stateJson)
+  init: (configJson) => router.init(configJson),
+  handle: (from, msgType, payloadJson) => router.handle(from, msgType, payloadJson),
+  getState: () => router.getState(),
+  setState: (stateJson) => router.setState(stateJson)
 };
 export {
-  BankAccountActor,
   actor2 as actor
 };

@@ -43,7 +43,7 @@ use std::time::Duration as StdDuration;
 use tokio::time::{sleep, timeout as tokio_timeout, Duration};
 
 fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
-    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+    plexspaces_core::ActorId::new(name, "gen_server", "namespace", "test-node")
         .expect("valid test actor id")
 }
 
@@ -76,13 +76,8 @@ fn create_child_spec_from_factory(
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    let mut spec = ChildSpec::worker_sync(
-        id.clone(),
-        actor_id_from_legacy(&id).to_string(),
-        factory,
-        actor_ref,
-    )
-    .with_restart(restart_strategy);
+    let mut spec = ChildSpec::worker_sync(actor_id_from_legacy(&id), factory, actor_ref)
+        .with_restart(restart_strategy);
 
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {

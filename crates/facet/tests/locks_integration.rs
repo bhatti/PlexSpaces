@@ -68,7 +68,7 @@ async fn get_shared_node() -> Arc<Node> {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
-        .register_simple("GenServer", || {
+        .register_simple("gen_server", || {
             Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
@@ -230,14 +230,18 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 50,
             );
             let actor_name = format!("lock-tbl-ar-{}", ulid::Ulid::new());
-            let actor_id =
-                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
-                    .expect("test actor id should be valid");
+            let actor_id = ActorId::new(
+                &actor_name,
+                "gen_server",
+                "test-namespace",
+                node_id.as_str(),
+            )
+            .expect("test actor id should be valid");
 
             node.spawn(
                 &ctx,
                 &actor_id,
-                "GenServer",
+                "gen_server",
                 vec![],
                 None,
                 HashMap::new(),
@@ -320,7 +324,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             let actor_name1 = format!("lock-tbl-1-{}", ulid::Ulid::new());
             let actor_id1 = ActorId::new(
                 &actor_name1,
-                "GenServer",
+                "gen_server",
                 "test-namespace",
                 node_id.as_str(),
             )
@@ -334,7 +338,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .spawn(
                     &ctx1,
                     &actor_id1,
-                    "GenServer",
+                    "gen_server",
                     vec![],
                     None,
                     HashMap::new(),
@@ -385,7 +389,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             let actor_name2 = format!("lock-tbl-2-{}", ulid::Ulid::new());
             let actor_id2 = ActorId::new(
                 &actor_name2,
-                "GenServer",
+                "gen_server",
                 "test-namespace",
                 node_id.as_str(),
             )
@@ -399,7 +403,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .spawn(
                     &ctx2,
                     &actor_id2,
-                    "GenServer",
+                    "gen_server",
                     vec![],
                     None,
                     HashMap::new(),
@@ -452,14 +456,18 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 50,
             );
             let actor_name = format!("lock-tbl-get-{}", ulid::Ulid::new());
-            let actor_id =
-                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
-                    .expect("test actor id should be valid");
+            let actor_id = ActorId::new(
+                &actor_name,
+                "gen_server",
+                "test-namespace",
+                node_id.as_str(),
+            )
+            .expect("test actor id should be valid");
 
             node.spawn(
                 &ctx,
                 &actor_id,
-                "GenServer",
+                "gen_server",
                 vec![],
                 None,
                 HashMap::new(),
@@ -539,15 +547,19 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
 
             let lock_key = format!("tbl-{run_id}-proto");
             let actor_name = format!("lock-tbl-proto-{}", ulid::Ulid::new());
-            let actor_id =
-                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
-                    .expect("test actor id should be valid");
+            let actor_id = ActorId::new(
+                &actor_name,
+                "gen_server",
+                "test-namespace",
+                node_id.as_str(),
+            )
+            .expect("test actor id should be valid");
             let actor_id_str = actor_id.to_string();
 
             node.spawn(
                 &ctx,
                 &actor_id,
-                "GenServer",
+                "gen_server",
                 vec![],
                 None,
                 HashMap::new(),

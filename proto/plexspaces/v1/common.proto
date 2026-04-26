@@ -277,6 +277,33 @@ message ActorId {
   ];
 }
 
+// Declaration-time actor identity (instance name + behavior class).
+//
+// Namespace and node_id are supplied at deploy/spawn time to build a full
+// `ActorId`. Client configuration, TOML, and supervision declarations should
+// use this message instead of overloading a single string field.
+message ActorIdentity {
+  // Unique instance name within the actor type, namespace, and node scope.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    }
+  ];
+
+  // Behavior class / registered type (WASM dispatch, VirtualActorManager index).
+  string actor_type = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-z][a-z0-9_-]*$"
+    }
+  ];
+}
+
 // Standard error details
 message ErrorDetail {
   string code = 1 [(buf.validate.field).string = {

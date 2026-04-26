@@ -65,6 +65,7 @@ interface host {
     scatter-gather: func(request: payload) -> result<payload, actor-error>;
     spawn-actors: func(request: payload) -> result<payload, actor-error>;
     application-metrics-add: func(application-id: string, metrics: payload) -> result<payload, actor-error>;
+    application-get-metrics: func(application-id: string, node-id: string) -> result<payload, actor-error>;
     application-get-status: func(application-id: string, node-id: string) -> result<payload, actor-error>;
 
     ts-write: func(tuple-data: payload) -> result<_, actor-error>;

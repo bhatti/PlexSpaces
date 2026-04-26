@@ -21,9 +21,13 @@
 //! Provides low-level client for sending messages to actors on remote nodes.
 //! This is the foundation for the future high-level SDK.
 
+use plexspaces_core::{apply_request_context_to_grpc_metadata, RequestContext};
 use plexspaces_proto::{
     common::v1::Message as ProtoMessage,
-    v1::actor::{SendMessageRequest, SpawnActorRequest, SpawnActorResponse},
+    v1::actor::{
+        DemonitorActorRequest, LinkActorRequest, MonitorActorRequest, SendMessageRequest,
+        SpawnActorRequest, SpawnActorResponse, UnlinkActorRequest,
+    },
     ActorServiceClient,
 };
 use tonic::{transport::Channel, Request};
@@ -211,6 +215,7 @@ impl RemoteActorClient {
             facets: vec![],           // No facets for basic spawn
             namespace: String::new(), // Use default namespace (from JWT in production)
             instances_count: 1,
+            role: String::new(),
         });
 
         let response = self
@@ -224,6 +229,92 @@ impl RemoteActorClient {
             .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
         Ok(actor_ref)
+    }
+
+    /// Register a one-way monitor: `supervisor_id` receives `__DOWN__` when `actor_id` terminates.
+    ///
+    /// Returns the `monitor_ref` ULID that can be passed to `demonitor`.
+    pub async fn monitor_actor(
+        &mut self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        supervisor_id: &str,
+        supervisor_callback: &str,
+    ) -> Result<String, String> {
+        let mut req = Request::new(MonitorActorRequest {
+            actor_id: actor_id.to_string(),
+            supervisor_id: supervisor_id.to_string(),
+            supervisor_callback: supervisor_callback.to_string(),
+        });
+        apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        let resp = self
+            .client
+            .monitor_actor(req)
+            .await
+            .map_err(|e| format!("monitor_actor failed: {}", e.message()))?;
+
+        Ok(resp.into_inner().monitor_ref)
+    }
+
+    /// Cancel a monitor on the remote node that hosts `actor_id`.
+    pub async fn demonitor_actor(
+        &mut self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        supervisor_id: &str,
+        monitor_ref: &str,
+    ) -> Result<(), String> {
+        let mut req = Request::new(DemonitorActorRequest {
+            actor_id: actor_id.to_string(),
+            supervisor_id: supervisor_id.to_string(),
+            monitor_ref: monitor_ref.to_string(),
+        });
+        apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        self.client
+            .demonitor_actor(req)
+            .await
+            .map_err(|e| format!("demonitor_actor failed: {}", e.message()))?;
+        Ok(())
+    }
+
+    /// Create a bidirectional link between two actors on the remote node.
+    pub async fn link_actor(
+        &mut self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String> {
+        let mut req = Request::new(LinkActorRequest {
+            actor_id: actor_id.to_string(),
+            linked_actor_id: linked_actor_id.to_string(),
+        });
+        apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        self.client
+            .link_actor(req)
+            .await
+            .map_err(|e| format!("link_actor failed: {}", e.message()))?;
+
+        Ok(())
+    }
+
+    /// Remove a bidirectional link between two actors on the remote node.
+    pub async fn unlink_actor(
+        &mut self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), String> {
+        let mut req = Request::new(UnlinkActorRequest {
+            actor_id: actor_id.to_string(),
+            linked_actor_id: linked_actor_id.to_string(),
+        });
+        apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        self.client
+            .unlink_actor(req)
+            .await
+            .map_err(|e| format!("unlink_actor failed: {}", e.message()))?;
+
+        Ok(())
     }
 }
 

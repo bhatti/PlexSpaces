@@ -50,7 +50,8 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 id = "task-queue"
-type = "worker"
+actor_type = "task_queue_worker"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 facets = [

@@ -20,8 +20,9 @@ max_restart_window_seconds = 60
 
 # ChatRoom actor (Durable Object: one per room)
 [[supervisor.children]]
-id = "chat-room"
-type = "worker"
+name = "chat-room"
+actor_type = "migrating_cloudflare_workers_wasm"
+role = "chat-room"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 
@@ -30,8 +31,9 @@ max_history = "100"
 
 # RateLimiter actor (Durable Object: per-user rate limiting)
 [[supervisor.children]]
-id = "rate-limiter"
-type = "worker"
+name = "rate-limiter"
+actor_type = "migrating_cloudflare_workers_wasm"
+role = "rate-limiter"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 

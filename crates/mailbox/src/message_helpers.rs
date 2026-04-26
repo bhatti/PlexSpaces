@@ -168,13 +168,20 @@ pub fn exit_message(from: String, reason_str: &str) -> Message {
     headers.insert("type".to_string(), "__EXIT__".to_string());
     headers.insert("exit_from".to_string(), from.clone());
     headers.insert("exit_reason".to_string(), reason_str.to_string());
+    // JSON payload so WASM/SDK handlers (Python, Go, TypeScript, Rust WASM) can parse
+    // exit_from and exit_reason by name — headers are authoritative for native Rust actors.
+    let payload = format!(
+        r#"{{"exit_from":{},"exit_reason":{}}}"#,
+        serde_json::to_string(&from).unwrap_or_default(),
+        serde_json::to_string(&reason_str).unwrap_or_default(),
+    );
     Message {
         id: Ulid::new().to_string(),
         sender_id: from,
         receiver_id: String::new(),
         channel: String::new(),
         message_type: "__EXIT__".to_string(),
-        payload: b"__EXIT__".to_vec(),
+        payload: payload.into_bytes(),
         timestamp: Some(Timestamp {
             seconds: now.timestamp(),
             nanos: now.timestamp_subsec_nanos() as i32,

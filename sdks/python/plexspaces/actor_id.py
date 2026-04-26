@@ -73,6 +73,22 @@ class ActorID:
     def __str__(self) -> str:
         return self.to_str()
 
+    def sibling(self, name: str, actor_type: str = "") -> "ActorID":
+        """Return a canonical ID for a same-application sibling actor.
+
+        For supervisor-spawned actors where name == type (the common case)::
+
+            peer = self_id.sibling("inference_worker_a", "inference_worker")
+            # -> "inference_worker_a//inference_worker::namespace@node"
+
+        If actor_type is omitted, name is used as the type::
+
+            peer = self_id.sibling("pipeline_supervisor")
+            # -> "pipeline_supervisor//pipeline_supervisor::namespace@node"
+        """
+        t = actor_type if actor_type else name
+        return ActorID(name=name, actor_type=t, namespace=self.namespace, node_id=self.node_id)
+
     def with_type_and_name(self, actor_type: str, name: str) -> "ActorID":
         """Return a copy with an explicit actor_type and name.
 

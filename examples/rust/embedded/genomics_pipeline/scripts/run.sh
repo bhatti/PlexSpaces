@@ -16,16 +16,15 @@ echo ""
 
 # Build the example
 echo "Building genomics-pipeline..."
-cargo build --release
+cargo build
 
 echo ""
 echo "Running genomics-pipeline example..."
 echo ""
 
-# Run with sample arguments if provided, otherwise run without
+# Run with sample arguments if provided, otherwise use bundled sample data.
 if [ $# -ge 2 ]; then
-    cargo run --release --bin genomics-pipeline -- --sample-id "$1" --fastq "$2"
+    cargo run -- --sample-id "$1" --fastq "$2"
 else
-    cargo run --release --bin genomics-pipeline
+    cargo run -- --sample-id SAMPLE001 --fastq test_data/sample001.fastq
 fi
-

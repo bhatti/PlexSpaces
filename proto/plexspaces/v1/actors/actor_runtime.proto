@@ -1749,6 +1749,15 @@ message SpawnActorRequest {
     }
   ];
 
+  // Role of the actor within its application (e.g. "worker", "leader").
+  // Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
+  // Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+  // If empty, falls back to actor_id.name() for dispatch.
+  string role = 9 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
   // RESERVED for future WASM support (Week 11-12)
   // When WASM support is added, these fields will be used:
   // - bytes wasm_module = 10;        // WASM bytecode for dynamic deployment
@@ -2327,8 +2336,11 @@ message ActorMigrating {
 // Request to monitor an actor (Erlang-style)
 //
 // ## Purpose
-// Establishes a monitoring link from supervisor to actor. When actor terminates,
-// the node hosting the actor will call NotifyActorDown on the supervisor_callback.
+// Establishes a monitor from `supervisor_id` to `actor_id` on the **node that hosts
+// `actor_id`**. When that actor terminates, that node runs termination handling and
+// delivers a `__DOWN__` **mailbox message** to `supervisor_id` (same Erlang semantics
+// as `{'DOWN', Ref, process, Pid, Reason}`), routing remotely via `ActorService` when
+// the supervisor lives on another node.
 //
 // ## Erlang Philosophy
 // Equivalent to: Ref = erlang:monitor(process, Pid)
@@ -2336,9 +2348,11 @@ message ActorMigrating {
 //
 // ## Design Notes
 // - actor_id: Canonical actor ID for the actor to monitor
-// - supervisor_id: The supervisor that wants notifications (for logging/debugging)
-// - supervisor_callback: gRPC address where to send NotifyActorDown
-//   (e.g., "http://supervisor-node:8000")
+// - supervisor_id: Canonical actor ID of the process that receives `__DOWN__` in its mailbox
+// - supervisor_callback: **Reserved / wire compatibility.** The Rust server implementation
+//   does not use this field today; DOWN is sent with `ActorRegistry::tell` to `supervisor_id`.
+//   Clients should still populate it per validation (e.g. supervisor node's ActorService URL)
+//   for forward compatibility with a possible push-style callback path.
 message MonitorActorRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
@@ -2404,6 +2418,48 @@ message MonitorActorResponse {
   ];
 }
 
+// Request to remove a monitor (Erlang demonitor/1 equivalent)
+//
+// ## Purpose
+// Cancels a monitor previously established via MonitorActor on the node that hosts
+// the **monitored** actor (`actor_id`). The caller must supply the same `monitor_ref`
+// returned by MonitorActor.
+message DemonitorActorRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Demonitor Actor Request"
+      description: "Remove a monitor on the node hosting the monitored actor"
+      required: [
+        "actor_id",
+        "supervisor_id",
+        "monitor_ref"
+      ]
+    }
+  };
+
+  string actor_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  string supervisor_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  string monitor_ref = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+}
+
 // Notification that a monitored actor has terminated
 //
 // ## Purpose
@@ -2456,6 +2512,52 @@ message ActorDownNotification {
       max_len: 256
     }
   ];
+
+  // Monitor reference ULID correlating with the original monitor() call.
+  // Allows the monitoring actor to identify which monitor fired when monitoring multiple actors.
+  string monitor_ref = 4 [(buf.validate.field).string.max_len = 255];
+
+  // When true, this notification is a Link EXIT signal (bidirectional death propagation).
+  // The receiving node should kill the supervisor_id actor with a Linked exit reason.
+  // When false (default), this is a Monitor DOWN notification delivered to the mailbox.
+  bool is_link_signal = 5;
+}
+
+// ==================== Batch Actor State Check (for stale-monitor GC) ====================
+
+// Request to batch-check actor states — used by stale-monitor GC task
+//
+// ## Purpose
+// Efficiently checks the lifecycle state of multiple actors in a single RPC call.
+// Used by the background monitor GC task to detect stale monitor entries for actors
+// that no longer exist on their hosting node.
+message GetActorStatesRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Actor States Request"
+      description: "Batch check of actor states for stale monitor cleanup"
+      required: ["actor_ids"]
+    }
+  };
+
+  // List of canonical actor IDs to check
+  repeated string actor_ids = 1 [
+    (google.api.field_behavior) = REQUIRED
+  ];
+}
+
+// Response for batch actor state check — uses existing ActorState enum
+message GetActorStatesResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Actor States Response"
+      description: "Map of actor_id to current ActorState"
+    }
+  };
+
+  // Map of canonical actor_id -> ActorState (uses existing ActorState enum)
+  // ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
+  map<string, ActorState> states = 1;
 }
 
 // ==================== Link Semantics (Erlang Pattern) ====================
@@ -2803,9 +2905,9 @@ service ActorService {
   // Monitor an actor (Erlang-style location transparent monitoring)
   //
   // ## Purpose
-  // Establishes a monitoring link from supervisor to actor. When the actor
-  // terminates (normally or abnormally), the remote node will notify the
-  // supervisor via NotifyActorDown.
+  // Establishes a monitor on the node hosting `actor_id`. When that actor terminates,
+  // the hosting node delivers `__DOWN__` to `supervisor_id`'s mailbox (via `tell` /
+  // `SendMessage` when the supervisor is remote).
   //
   // ## Erlang Philosophy
   // In Erlang, monitor(process, Pid) works the same for local and remote processes.
@@ -2813,14 +2915,27 @@ service ActorService {
   // in the same node or a different node.
   //
   // ## Design Notes
-  // - supervisor_id: The actor that wants to be notified (usually a supervisor)
-  // - supervisor_callback: gRPC address where to send NotifyActorDown
-  // - actor_id can be local or remote and always uses canonical ActorId format
-  // - Returns monitor_ref for potential demonitor() in future
+  // - supervisor_id: Canonical actor that receives `__DOWN__` (mailbox message)
+  // - supervisor_callback: Reserved for forward compatibility; see `MonitorActorRequest`
+  // - actor_id uses canonical ActorId format
+  // - Returns monitor_ref for `DemonitorActor` / local demonitor
   rpc MonitorActor(MonitorActorRequest) returns (MonitorActorResponse) {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Monitor Actor"
       description: "Establish monitoring link to actor (Erlang-style)"
+      tags: "Supervision"
+    };
+  }
+
+  // Remove a monitor (Erlang demonitor/1 equivalent, location-transparent)
+  //
+  // ## Purpose
+  // Deletes the monitor entry on the node hosting `actor_id`. Used when the supervisor
+  // calls demonitor on a **remote** monitored actor; local demonitor uses the registry directly.
+  rpc DemonitorActor(DemonitorActorRequest) returns (plexspaces.common.v1.Empty) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Demonitor Actor"
+      description: "Cancel a monitor on the node hosting the monitored actor"
       tags: "Supervision"
     };
   }
@@ -2872,9 +2987,10 @@ service ActorService {
   // Internal: Notify supervisor of actor termination
   //
   // ## Purpose
-  // Called by the remote node hosting the actor when it terminates. The remote
-  // node sends this notification to the supervisor_callback address that was
-  // provided in MonitorActor.
+  // Optional push-style path: deliver termination info to a supervisor node without
+  // going through `ActorRegistry::tell`. The primary monitor path today is mailbox
+  // `__DOWN__` via `tell` / `SendMessage` to `supervisor_id` when the monitored actor's
+  // node runs `handle_actor_termination`.
   //
   // ## Erlang Philosophy
   // Equivalent to receiving {'DOWN', Ref, process, Pid, Reason} message in Erlang.
@@ -2908,6 +3024,29 @@ service ActorService {
       summary: "Check Actor Exists"
       description: "Check if virtual actor exists without activating"
       tags: "Virtual Actors"
+    };
+  }
+
+  // Batch-check actor states — used by stale-monitor GC and health checks
+  //
+  // ## Purpose
+  // Returns the current lifecycle state (active/inactive/not_found) for a list of canonical
+  // actor IDs. Used by the background monitor GC task to detect stale entries for actors
+  // that no longer exist on their hosting node.
+  //
+  // ## Design
+  // - Single RPC call replaces N separate CheckActorExists calls
+  // - Groups actors by node for efficient batch processing
+  // - Returns NOT_FOUND for actors that have been deregistered
+  rpc GetActorStates(GetActorStatesRequest) returns (GetActorStatesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/actors/states"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Actor States"
+      description: "Batch check actor states for monitoring and GC"
+      tags: "Actors"
     };
   }
 
@@ -3673,4 +3812,66 @@ message ActorHealth {
   optional google.protobuf.Duration stuck_since = 2;
   // For FAILED status: reason for failure
   optional string failure_reason = 3;
+}
+
+// Complete specification for spawning or reactivating any actor.
+//
+// ## Purpose
+// Single source of truth for all information needed to spawn an actor, whether
+// from TOML app-config, SDK annotations, gRPC, or virtual actor reactivation.
+// Replaces the fragmented triple of (init_config_template, initial_state, labels)
+// and the VirtualActorDefinitionRegistration intermediary.
+//
+// ## Design
+// - node_id is NOT included: ActorFactory always resolves local_node_id at spawn time.
+// - tenant_id is overridden from JWT at request time if available.
+// - args map is the canonical user-supplied init payload: becomes "args" key in WASM init().
+// - facets carry the full facet declaration (type, config, priority) verbatim from ChildSpec.
+//
+// ## Usage
+// - TOML ChildSpec → ActorSpawnSpec via actor_spawn_spec_from_child_spec()
+// - SDK annotations → ActorSpawnSpec built from behavior + declared facets
+// - VirtualActorMetadata stores ActorSpawnSpec as its spec field
+// - ActorBuilder.from_spec() accepts ActorSpawnSpec
+// - ActorFactory.spawn_actor() accepts ActorSpawnSpec
+message ActorSpawnSpec {
+  // Instance name + behavior class (namespace and tenant added in fields below).
+  plexspaces.common.v1.ActorIdentity identity = 1 [
+    (google.api.field_behavior) = REQUIRED
+  ];
+
+  // Role of the actor within its application (e.g. "worker", "leader").
+  // Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
+  // Used by BehaviorRegistry to dispatch the correct spec when multiple children
+  // share the same actor_type (behavior class).
+  string role = 2;
+
+  // Namespace for actor isolation (required at spawn time).
+  string namespace = 3;
+
+  // Tenant ID for multi-tenancy isolation (empty if auth disabled).
+  // Overridden from JWT claims at request time when auth is enabled.
+  string tenant_id = 4;
+
+  // OTP-style behavior kind for logging and observability.
+  // Examples: "GenServer", "GenEvent", "GenStateMachine", "Workflow".
+  string behavior_kind = 5;
+
+  // User-supplied initialization arguments.
+  // These become the "args" field in the WASM init() payload so TypeScript/Python/Go
+  // actors can read them via host.config("initial_count"), etc.
+  // Also used by Rust embedded actors as configuration.
+  map<string, string> args = 6;
+
+  // Facet declarations attached to this actor.
+  // Carries virtual_actor, durability, timer, etc. facets verbatim from ChildSpec.
+  // ActorFactory instantiates these at spawn time via create_facets_from_config().
+  repeated plexspaces.common.v1.Facet facets = 7;
+
+  // Observability labels propagated to metrics and traces.
+  map<string, string> labels = 8;
+
+  // Actor runtime configuration (mailbox, restart policy, etc.).
+  // Optional — defaults apply when absent.
+  ActorConfig config = 9;
 }

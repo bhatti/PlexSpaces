@@ -18,8 +18,9 @@ max_restart_window_seconds = 60
 
 # ReadStateTracker actor (Virtual Actor: one per user, auto-activated)
 [[supervisor.children]]
-id = "read-state-tracker"
-type = "worker"
+name = "read-state-tracker"
+actor_type = "migrating_orbit_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 facets = [

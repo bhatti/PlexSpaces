@@ -317,18 +317,9 @@ async fn main() -> Result<()> {
     
     // Create node with clustering disabled for single-node example
     // SDK pattern: Use NodeBuilder for node creation
-    let node = Arc::new(NodeBuilder::new(node_id)
+    let node = NodeBuilder::new(node_id)
         .with_clustering_enabled(false)
-        .build().await);
-    
-    // Start node in background task
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    
-    // Wait for node to initialize services
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .build_started().await;
     
     let node_time = node_start.elapsed();
     metrics_tracker.end_coordinate();
@@ -358,14 +349,14 @@ async fn main() -> Result<()> {
     let service_locator = node.service_locator();
     
     for i in 0..shard_count {
-        let actor_id = format!("analytics-shard-{}@{}", i, node_id);
+        let actor_name = format!("analytics-shard-{}", i);
         
         // SDK helper: spawn_gen_server() wraps ActorFactoryImpl.spawn_gen_server()
         // Core functionality stays in crates/actor, SDK provides convenience wrapper
         let shard = spawn_gen_server(
             &ctx,
             service_locator.clone(),
-            &actor_id,
+            &actor_name,
             AnalyticsShard::new(i),
             vec![], // No facets needed for this example
         ).await

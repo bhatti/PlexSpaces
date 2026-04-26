@@ -81,11 +81,11 @@ fn wasm_config_for_child_spec(
 /// ## Design
 /// - Wraps a WasmInstance (which holds the WASM module and state)
 /// - Forwards handle_message calls to WASM instance
-/// - actor_type: for dashboard/index (e.g. child_spec.id "SensorStream")
+/// - actor_type: for dashboard/index (behavior class from `ChildSpec.actor_identity`)
 /// - behavior_kind: for logging spans (e.g. GenEvent so logs show behavior=GenEvent not behavior=SensorStream)
 struct WasmActorBehavior {
     instance: Arc<WasmInstance>,
-    actor_type: String, // Actor type for dashboard grouping (e.g., application name or child spec id)
+    actor_type: String, // Behavior class for dashboard grouping (`actor_identity.actor_type`)
     behavior_kind: plexspaces_core::BehaviorType, // OTP-style kind for logging (GenServer, GenEvent, etc.)
 }
 
@@ -493,6 +493,7 @@ impl WasmApplication {
         while let Some(current_spec) = queue.pop_front() {
             // Initialize all children in the current supervisor
             for child in &current_spec.children {
+                let identity = plexspaces_application::child_spec_util::require_child_identity(child)?;
                 match child.r#type() {
                     plexspaces_proto::application::v1::ChildType::ChildTypeWorker => {
                         // Get tenant_id/namespace from stored values (set during registration)
@@ -555,14 +556,14 @@ impl WasmApplication {
                         } else {
                             return Err(ApplicationError::Other(format!(
                                 "Child supervisor '{}' missing supervisor specification",
-                                child.id
+                                identity.name
                             )));
                         }
                     }
                     _ => {
                         return Err(ApplicationError::Other(format!(
                             "Invalid child type for '{}'",
-                            child.id
+                            identity.name
                         )));
                     }
                 }
@@ -588,6 +589,8 @@ impl WasmApplication {
         namespace: String,
     ) -> Result<String, ApplicationError> {
         use plexspaces_core::Actor;
+
+        let identity = plexspaces_application::child_spec_util::require_child_identity(child_spec)?;
 
         // For WASM actors, we need to:
         // 1. Resolve WASM module by hash
@@ -713,24 +716,45 @@ impl WasmApplication {
         // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
         // See PROJECT_TRACKER.md.
         // Actor identity is structured in memory and serialized canonically for the WASM host.
-        let actor_id = plexspaces_core::ActorId::new(
-            &child_spec.id,
-            &child_spec.id,
-            namespace,
+        let actor_id_typed = plexspaces_core::ActorId::new(
+            &identity.name,
+            &identity.actor_type,
+            namespace.as_str(),
             node.id().as_str(),
         )
         .map_err(|e| {
             ApplicationError::ActorSpawnFailed(
-                child_spec.id.clone(),
+                identity.name.clone(),
                 format!("Invalid WASM actor identity: {}", e),
             )
-        })?
-        .to_string();
+        })?;
+        let actor_id = actor_id_typed.to_string();
+
+        // Build ActorSpawnSpec from ChildSpec so wasm_init_payload derives the same payload
+        // as the reactivation path — single source of truth for WASM init() arguments.
+        let spawn_spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+            identity: child_spec.actor_identity.clone().map(|ident| {
+                plexspaces_proto::common::v1::ActorIdentity {
+                    name: ident.name,
+                    actor_type: ident.actor_type,
+                }
+            }),
+            role: child_spec.role.clone(),
+            namespace: namespace.clone(),
+            tenant_id: tenant_id.clone(),
+            behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
+            args: child_spec.args.clone(),
+            facets: child_spec.facets.clone(),
+            labels: std::collections::HashMap::new(),
+            config: None,
+        };
+        let init_payload = plexspaces_core::wasm_init_payload(&spawn_spec, &actor_id_typed);
+
         let wasm_instance = runtime
             .instantiate(
                 module,
                 actor_id.clone(),
-                &[], // No initial state
+                &init_payload,
                 wasm_config_for_child_spec(child_spec),
                 Some(channel_service),
                 Some(Arc::new(message_sender.clone()) as Arc<dyn std::any::Any + Send + Sync>),
@@ -748,8 +772,8 @@ impl WasmApplication {
                 ApplicationError::Other(format!("Failed to instantiate WASM module: {}", e))
             })?;
 
-        // Use child_spec.id as actor_type for better dashboard visibility
-        let actor_type = child_spec.id.clone();
+        // Behavior class for dashboard grouping (distinct from instance name).
+        let actor_type = identity.actor_type.clone();
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
 
         // Create behavior that wraps WASM instance with actor_type and behavior_kind for logging
@@ -908,21 +932,19 @@ impl WasmApplication {
             // Stop actor with timeout (default: 5 seconds per actor)
             let timeout_duration = Duration::from_secs(5);
 
-            // Use ActorFactory directly from ServiceLocator
-            let _service_locator = node.service_locator().ok_or_else(|| {
+            let service_locator = node.service_locator().ok_or_else(|| {
                 ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ServiceLocator not available from node".to_string(),
                 )
             })?;
 
-            // Get ActorFactory from ApplicationNode (avoids circular dependency)
             use plexspaces_actor::ActorFactory;
             let actor_factory: Arc<dyn ActorFactory> =
-                node.actor_factory().await.ok_or_else(|| {
+                service_locator.get_actor_factory().await.ok_or_else(|| {
                     ApplicationError::ActorStopFailed(
                         actor_id.to_string(),
-                        "ActorFactory not found in ServiceLocator".to_string(),
+                        "ActorFactory not available from ServiceLocator".to_string(),
                     )
                 })?;
 
@@ -1251,9 +1273,12 @@ impl Application for WasmApplication {
         if !live_actor_ids.is_empty() {
             use plexspaces_actor::ActorFactory;
 
-            let actor_factory: Arc<dyn ActorFactory> = node.actor_factory().await.ok_or_else(|| {
-                ApplicationError::Other("ActorFactory not found in ServiceLocator".to_string())
-            })?;
+            let actor_factory: Arc<dyn ActorFactory> =
+                service_locator.get_actor_factory().await.ok_or_else(|| {
+                    ApplicationError::Other(
+                        "ActorFactory not available from ServiceLocator".to_string(),
+                    )
+                })?;
 
             for actor_id in &live_actor_ids {
                 match actor_factory.stop_actor(&ctx, actor_id).await {
@@ -1623,16 +1648,17 @@ mod tests {
                 nanos: 0,
             }),
             children: vec![ChildSpec {
-                id: "worker-1".to_string(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker-1".to_string(),
+                    actor_type: "test_wasm_actor".to_string(),
+                }),
                 r#type: ChildType::ChildTypeWorker.into(),
-                args: std::collections::HashMap::new(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(Duration {
                     seconds: 5,
                     nanos: 0,
                 }),
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                ..Default::default()
             }],
         };
 
@@ -1735,7 +1761,10 @@ mod tests {
     #[test]
     fn test_wasm_config_for_child_spec_enables_checkpoint_mode_for_durable_actor() {
         let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "durable-worker".to_string(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "durable-worker".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
             facets: vec![plexspaces_proto::common::v1::Facet {
                 r#type: "durability".to_string(),
                 priority: 90,
@@ -1756,7 +1785,10 @@ mod tests {
     #[test]
     fn test_wasm_config_for_child_spec_leaves_non_durable_actor_restart_fresh() {
         let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "ephemeral-worker".to_string(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "ephemeral-worker".to_string(),
+                actor_type: "test_wasm_actor".to_string(),
+            }),
             facets: vec![plexspaces_proto::common::v1::Facet {
                 r#type: "virtual_actor".to_string(),
                 priority: 100,

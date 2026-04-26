@@ -7,8 +7,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "webhook"
-type = "worker"
+name = "webhook"
+actor_type = "migrating_aws_durable_lambda_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

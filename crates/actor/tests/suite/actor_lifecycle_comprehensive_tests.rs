@@ -42,7 +42,7 @@ use ulid::Ulid;
 fn linked_actor_id(name: &str) -> ActorId {
     ActorId::new(
         name.to_string(),
-        "GenServer".to_string(),
+        "gen_server".to_string(),
         "default".to_string(),
         "test-node".to_string(),
     )

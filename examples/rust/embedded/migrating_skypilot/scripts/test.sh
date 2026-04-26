@@ -9,7 +9,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "SkyPilot Comparison - Test Script"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-cargo build --release 2>&1 | grep -E "(Compiling|Finished|error)" || true
+cargo build 2>&1 | grep -E "(Compiling|Finished|error)" || true
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Build failed"
     exit 1
@@ -23,7 +23,7 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
 fi
 echo "✅ Unit tests passed"
 
-timeout 60 cargo run --release 2>&1 | tee /tmp/skypilot_output.log
+timeout 60 cargo run 2>&1 | tee /tmp/skypilot_output.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Example execution failed"
     exit 1

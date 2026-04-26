@@ -69,11 +69,12 @@ sleep 2
 
 send_weather() {
   local payload="$1"
-  curl -s --max-time 30 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/weather:default/ask?timeout=30" \
+  curl -s --max-time 30 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/weather:weather_actor_wasm/ask?timeout=30" \
     -H "Content-Type: application/json" \
     -d "$payload" 2>/dev/null || echo '{"status":"error","error":"timeout"}'
 }
 
+send_weather '{"op":"clear_cache"}' >/dev/null  # purge any stale KV from previous runs
 LONDON_API=$(send_weather '{"op":"get_weather","city":"London"}')
 LONDON_CACHE=$(send_weather '{"op":"get_weather","city":"London"}')
 STATS_BEFORE=$(send_weather '{"op":"cache_stats"}')

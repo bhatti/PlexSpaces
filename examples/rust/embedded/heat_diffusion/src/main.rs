@@ -311,7 +311,7 @@ async fn main() -> Result<()> {
 
     // Setup: Node and TupleSpace
     let node = NodeBuilder::new("heat-node".to_string())
-        .build()
+        .build_started()
         .await;
     let service_locator = node.service_locator();
 

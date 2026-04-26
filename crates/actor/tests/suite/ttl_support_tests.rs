@@ -119,7 +119,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     mailbox_config.capacity = 1000; // Large capacity to prevent "Mailbox is full" errors
     let actor_id = ActorId::new(
         "test".to_string(),
-        "GenServer".to_string(),
+        "gen_server".to_string(),
         "test".to_string(),
         "node1".to_string(),
     )
@@ -150,7 +150,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,

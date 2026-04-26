@@ -13,28 +13,16 @@
 ///    modules => \[Module\]}
 /// ```
 ///
-/// ## Design: Unified Child Reference
-/// In PlexSpaces, both actors and supervisors are identified by ID.
-/// - For actors: `actor_or_supervisor_id` is the actor ID
-/// - For supervisors: `actor_or_supervisor_id` is the supervisor ID
-/// - The `child_type` field distinguishes them
-///
-/// This follows Erlang's approach where supervisors are just special processes.
+/// Identity uses `ActorIdentity` (name + actor_type). The canonical `ActorId`
+/// string is derived at runtime when namespace and node_id are known.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChildSpec {
-    /// Unique identifier for this child within the supervisor
-    /// This is the child's local name, like "worker1" or "db_supervisor"
-    #[prost(string, tag="1")]
-    pub child_id: ::prost::alloc::string::String,
-    /// ID of the actor or supervisor to supervise
-    /// - For actors: actor ID (e.g., "worker1@localhost")
-    /// - For supervisors: supervisor ID (e.g., "db-supervisor")
-    /// The supervisor monitors this process regardless of its type
-    #[prost(string, tag="2")]
-    pub actor_or_supervisor_id: ::prost::alloc::string::String,
+    /// Instance name + behavior class for this supervised process.
+    #[prost(message, optional, tag="1")]
+    pub actor_identity: ::core::option::Option<super::super::common::v1::ActorIdentity>,
     /// How to handle child failures
-    #[prost(enumeration="RestartStrategy", tag="3")]
+    #[prost(enumeration="RestartStrategy", tag="2")]
     pub restart_strategy: i32,
     /// Shutdown timeout for graceful termination
     /// - None/0 = brutal_kill (immediate)
@@ -42,23 +30,23 @@ pub struct ChildSpec {
     /// - For supervisors: typically set high or infinity to allow children to shutdown
     ///
     /// Max 5 minutes
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="3")]
     pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
     /// Child type: actor (worker) or supervisor
-    #[prost(enumeration="ChildType", tag="5")]
+    #[prost(enumeration="ChildType", tag="4")]
     pub child_type: i32,
     /// Metadata for child configuration
     /// Can include:
     /// - "start_module": Module name for recreation
     /// - "start_function": Function to call
     /// - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="5")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Facet configuration (for automatic attachment during actor creation)
     /// Facets are attached in priority order (high priority first) before actor.init() is called
     /// All facets are automatically restored during supervisor restart
     /// Phase 1: Unified Lifecycle - Multiple facets support
-    #[prost(message, repeated, tag="7")]
+    #[prost(message, repeated, tag="6")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
 }
 /// Supervisor configuration

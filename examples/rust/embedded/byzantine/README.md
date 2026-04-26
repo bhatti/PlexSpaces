@@ -8,7 +8,7 @@
 |---------|-------|
 | **Application** | `ByzantineApplication` implements `Application` trait |
 | **ConfigBootstrap** | Load config from `release.toml` |
-| **BehaviorRegistry** | Register `ByzantineGeneral` behavior |
+| **BehaviorRegistry** | Register `byzantine_general` behavior |
 | **SDK Spawn Helper** | Spawn general actors from registered behavior types |
 | **ActorContext** | Message passing between generals |
 | **ActorRef::ask()** | Request-reply pattern for results |
@@ -96,7 +96,7 @@ impl Application for ByzantineApplication {
         service_locator.register_service(Arc::new(behavior_registry)).await;
         
         // Spawn actors via SDK helper using registered behavior type
-        spawn_with_behavior_type(&ctx, service_locator.clone(), actor_id, "consensus", "ByzantineGeneral", initial_state, vec![]).await?;
+        spawn_with_behavior_type(&ctx, service_locator.clone(), actor_id, "consensus", "byzantine_general", initial_state, vec![]).await?;
         
         // Run algorithm
         algorithm.run(&ctx).await?;
@@ -131,7 +131,7 @@ pub async fn register_byzantine_behaviors(
     _journal: Arc<dyn Journal>,
     _tuplespace: Arc<TupleSpace>,
 ) {
-    registry.register("ByzantineGeneral", move |initial_state: &[u8]| {
+    registry.register("byzantine_general", move |initial_state: &[u8]| {
         let state: Value = serde_json::from_slice(initial_state)?;
         let general = General::new(id, source_id, num_rounds);
         Ok(Box::new(general) as Box<dyn Actor>)

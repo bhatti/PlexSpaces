@@ -9,8 +9,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "inference_worker"
-type = "inference_worker"
+name = "inference_worker"
+actor_type = "parallel_ai_inference_wasm"
+role = "inference_worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -22,8 +23,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "benchmark"
-type = "benchmark"
+name = "benchmark"
+actor_type = "parallel_ai_inference_wasm"
+role = "benchmark"
 restart = "permanent"
 shutdown_timeout_seconds = 30
 behavior_kind = "GenServer"
@@ -34,8 +36,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "orchestrator"
-type = "orchestrator"
+name = "orchestrator"
+actor_type = "parallel_ai_inference_wasm"
+role = "orchestrator"
 restart = "permanent"
 shutdown_timeout_seconds = 60
 behavior_kind = "Workflow"
@@ -47,8 +50,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "metrics_event"
-type = "metrics_event"
+name = "metrics_event"
+actor_type = "parallel_ai_inference_wasm"
+role = "metrics_event"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
@@ -58,8 +62,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "circuit_breaker"
-type = "circuit_breaker"
+name = "circuit_breaker"
+actor_type = "parallel_ai_inference_wasm"
+role = "circuit_breaker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"

@@ -13,6 +13,7 @@ WASM_FILE="$SCRIPT_DIR/weather_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8092}"
 APP_ID="weather-python-test"
+RUN_ID="$(date +%s)"
 
 if [[ "${1:-}" == "--contract-only" ]]; then
   HTTP_PORT=""
@@ -71,18 +72,19 @@ sleep 2
 
 send_weather() {
   local payload="$1"
-  curl -s --max-time 30 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/weather:default/ask?timeout=30" \
+  curl -s --max-time 30 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/weather:weather-$RUN_ID/ask?timeout=30" \
     -H "Content-Type: application/json" \
     -d "$payload" 2>/dev/null || echo '{"status":"error","error":"timeout"}'
 }
 
+send_weather '{"op":"clear_cache"}' >/dev/null
 LONDON_API=$(send_weather '{"op":"get_weather","city":"London"}')
 LONDON_CACHE=$(send_weather '{"op":"get_weather","city":"London"}')
 STATS_BEFORE=$(send_weather '{"op":"cache_stats"}')
 CLEAR_RESP=$(send_weather '{"op":"clear_cache"}')
 PARIS_API=$(send_weather '{"op":"get_weather","city":"Paris"}')
 STATS_AFTER=$(send_weather '{"op":"cache_stats"}')
-APP_LIST_JSON=$(fetch_applications_list_json "http://localhost:$HTTP_PORT")
+APP_METRICS=$(send_weather '{"op":"app_metrics"}')
 
 echo "Step 3: Output and metrics"
 if ! \
@@ -92,7 +94,7 @@ if ! \
   STATS_BEFORE="$STATS_BEFORE" \
   STATS_AFTER="$STATS_AFTER" \
   CLEAR_RESP="$CLEAR_RESP" \
-  APP_LIST_JSON="$APP_LIST_JSON" \
+  APP_METRICS="$APP_METRICS" \
   APP_ID="$APP_ID" \
   python3 - <<'PY'
 import json
@@ -110,28 +112,13 @@ def payload(raw):
     return body if isinstance(body, dict) else {}
 
 
-def app_metrics(raw, app_id):
-    try:
-        data = json.loads((raw or "").strip() or '{"applications":[]}')
-    except json.JSONDecodeError:
-        return {}
-    apps = data.get("applications", data.get("items", [])) if isinstance(data, dict) else data
-    for app in apps if isinstance(apps, list) else []:
-        if not isinstance(app, dict):
-            continue
-        candidate = str(app.get("application_id") or app.get("name") or app.get("id") or "")
-        if candidate == app_id or app_id in candidate:
-            nested = app.get("application") if isinstance(app.get("application"), dict) else app
-            return nested.get("metrics", app.get("metrics", {})) if isinstance(nested, dict) else {}
-    return {}
-
-
 london_api = payload(os.environ["LONDON_API"])
 london_cache = payload(os.environ["LONDON_CACHE"])
 paris_api = payload(os.environ["PARIS_API"])
 stats_before = payload(os.environ["STATS_BEFORE"])
 stats_after = payload(os.environ["STATS_AFTER"])
 clear_resp = payload(os.environ["CLEAR_RESP"])
+metrics = payload(os.environ["APP_METRICS"])
 
 print("  Weather responses")
 print(f"  London API:   {json.dumps(london_api, sort_keys=True)}")
@@ -143,9 +130,8 @@ print(f"  before_clear: {json.dumps(stats_before, sort_keys=True)}")
 print(f"  after_clear:  {json.dumps(stats_after, sort_keys=True)}")
 print()
 print("  Application metrics")
-metrics = app_metrics(os.environ.get("APP_LIST_JSON", ""), os.environ.get("APP_ID", ""))
 if not metrics:
-    print("  (no metrics object on application record)")
+    print("  (no metrics object returned by actor)")
 else:
     print(f"  message_count={metrics.get('message_count')} error_count={metrics.get('error_count')}")
     for metric_map in ("counter_metrics", "latency_totals_ms", "latency_max_ms", "latency_samples"):
@@ -166,6 +152,9 @@ if int(stats_before.get("hits", 0) or 0) < 1 or int(stats_before.get("misses", 0
     sys.exit(1)
 if int(stats_after.get("hits", 0) or 0) != 0 or int(stats_after.get("misses", 0) or 0) < 1:
     print("expected cache_stats after clear to reset hits and record one miss", file=sys.stderr)
+    sys.exit(1)
+if int(metrics.get("message_count", 0) or 0) < 1:
+    print("expected unified application metrics message_count >= 1", file=sys.stderr)
     sys.exit(1)
 PY
 then

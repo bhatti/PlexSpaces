@@ -30,8 +30,8 @@ flowchart LR
   workers --> scatter
   scatter --> converge["Leader checks convergence"]
   converge -->|repeat| scatter
-  converge -->|done| status["Get application status from each node"]
-  status --> output["Aggregate metrics + result"]
+  converge -->|done| metrics["Get application metrics from each node"]
+  metrics --> output["Aggregate metrics + result"]
 ```
 
 ## Metrics flow
@@ -40,8 +40,8 @@ flowchart LR
 flowchart TD
   worker["Worker compute + coordination metrics"] --> local["Node-local ApplicationMetrics"]
   leader["Leader orchestration metrics"] --> local
-  local --> status["application-get-status per node"]
-  status --> aggregate["Leader aggregates per-node + per-role totals"]
+  local --> metrics["application-get-metrics per node"]
+  metrics --> aggregate["Leader aggregates per-node + per-role totals"]
   aggregate --> output["Benchmark output in test.sh"]
 ```
 
@@ -84,7 +84,8 @@ The test script:
 
 Each node keeps local application metrics for the deployed app instance. The worker and leader update
 node-local `ApplicationMetrics` through the actor-world WIT host, and the leader aggregates those
-per-node snapshots via `application-get-status` after the scatter/gather run completes.
+per-node snapshots via `application-get-metrics` after the scatter/gather run completes. The leader
+only uses `application-get-status` for node-address labeling in the final report.
 
 That means the final benchmark output reflects:
 

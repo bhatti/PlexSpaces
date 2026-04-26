@@ -99,7 +99,7 @@ The `app-config.toml` attaches RegistryFacet to the actor:
 ```toml
 [[supervisor.children]]
 id = "registry"
-type = "worker"
+role = "worker"
 facets = [
   { type = "registry", priority = 50, config = {} }
 ]

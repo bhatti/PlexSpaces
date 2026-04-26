@@ -41,7 +41,6 @@
 
 use crate::{ActorId, MessageSender, RequestContext};
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Trait for spawning and activating actors
@@ -78,13 +77,11 @@ pub trait ActorFactory: Send + Sync {
     /// in ActorRegistry automatically.
     ///
     /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
-    /// * `actor_id` - Actor ID (format: "actor_name@node_id")
-    /// * `actor_type` - Type of actor to spawn (used by BehaviorFactory if available)
-    /// * `initial_state` - Initial state bytes (passed to BehaviorFactory if available)
-    /// * `config` - Optional actor configuration
-    /// * `labels` - Optional labels for the actor
-    /// * `facets` - Optional facets to attach to the actor
+    /// * `ctx` - RequestContext for tenant isolation (first parameter; overrides spec.tenant_id
+    ///           when auth is enabled so JWT-resolved tenant_id from gRPC boundary always wins)
+    /// * `spec` - ActorSpawnSpec carrying identity, namespace, args, config, labels, proto facets
+    /// * `facets` - Already-instantiated runtime facets to attach before the actor starts
+    ///             (proto facets in spec are for persistence/registration metadata only)
     ///
     /// ## Returns
     /// `Arc<dyn MessageSender>` for the spawned actor. `ActorRef` implements `MessageSender`,
@@ -96,11 +93,7 @@ pub trait ActorFactory: Send + Sync {
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
-        actor_id: &ActorId,
-        actor_type: &str,
-        initial_state: Vec<u8>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        labels: HashMap<String, String>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
 

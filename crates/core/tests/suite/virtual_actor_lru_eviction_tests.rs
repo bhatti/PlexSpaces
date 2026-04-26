@@ -168,6 +168,38 @@ fn test_actor_id(name: &str) -> ActorId {
     ActorId::new(name, "gen_server", "default", "test-node").unwrap()
 }
 
+fn test_spawn_spec(actor_type: &str, namespace: &str, tenant: &str, strategy: ActivationStrategy) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
+    use plexspaces_proto::actor::v1::ActorSpawnSpec;
+    use plexspaces_proto::common::v1::ActorIdentity;
+    use plexspaces_proto::common::v1::Facet;
+    let activation_str = match strategy {
+        ActivationStrategy::ActivationStrategyEager => "eager",
+        _ => "lazy",
+    };
+    ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: String::new(),
+            actor_type: actor_type.to_string(),
+        }),
+        role: String::new(),
+        namespace: namespace.to_string(),
+        tenant_id: tenant.to_string(),
+        behavior_kind: String::new(),
+        args: std::collections::HashMap::new(),
+        facets: vec![Facet {
+            r#type: "virtual_actor".to_string(),
+            config: std::collections::HashMap::from([
+                ("activation_strategy".to_string(), activation_str.to_string()),
+            ]),
+            priority: 0,
+            state: std::collections::HashMap::new(),
+            metadata: None,
+        }],
+        labels: std::collections::HashMap::new(),
+        config: None,
+    }
+}
+
 #[tokio::test]
 async fn test_lru_eviction_basic() {
     // Create ActorRegistry and VirtualActorManager
@@ -177,7 +209,7 @@ async fn test_lru_eviction_basic() {
     // Set max_pool_per_actor_type to 3 for testing
     manager.set_max_pool_per_actor_type(3).await;
 
-    let actor_type = "TestActor".to_string();
+    let actor_type = "test_actor".to_string();
 
     // Register 4 actors (exceeds limit of 3)
     let actor_ids: Vec<ActorId> = (0..4)
@@ -192,13 +224,7 @@ async fn test_lru_eviction_basic() {
             .register(
                 actor_id.clone(),
                 facet,
-                actor_type.clone(),
-                None,
-                "tenant".to_string(),
-                "namespace".to_string(),
-                vec![],
-                std::collections::HashMap::new(),
-                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", plexspaces_common::ActivationStrategy::ActivationStrategyLazy),
             )
             .await
             .unwrap();
@@ -232,16 +258,10 @@ async fn test_lru_eviction_basic() {
     let facet_5 = create_mock_facet(actor_id_5.clone());
     manager
         .register(
-            actor_id_5.clone(),
-            facet_5,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id_5.clone(),
+                facet_5,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
 
@@ -287,7 +307,7 @@ async fn test_lru_eviction_ordering() {
     // Set max_pool_per_actor_type to 2
     manager.set_max_pool_per_actor_type(2).await;
 
-    let actor_type = "TestActor".to_string();
+    let actor_type = "test_actor".to_string();
     let service_locator = test_service_locator();
 
     // Register 2 actors
@@ -297,16 +317,10 @@ async fn test_lru_eviction_ordering() {
     let facet_1 = create_mock_facet(actor_id_1.clone());
     manager
         .register(
-            actor_id_1.clone(),
-            facet_1,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id_1.clone(),
+                facet_1,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -326,16 +340,10 @@ async fn test_lru_eviction_ordering() {
     let facet_2 = create_mock_facet(actor_id_2.clone());
     manager
         .register(
-            actor_id_2.clone(),
-            facet_2,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id_2.clone(),
+                facet_2,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -358,16 +366,10 @@ async fn test_lru_eviction_ordering() {
     let facet_3 = create_mock_facet(actor_id_3.clone());
     manager
         .register(
-            actor_id_3.clone(),
-            facet_3,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id_3.clone(),
+                facet_3,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -413,13 +415,7 @@ async fn test_lru_eviction_multiple_types() {
             .register(
                 actor_id.clone(),
                 facet,
-                actor_type_1.clone(),
-                None,
-                "tenant".to_string(),
-                "namespace".to_string(),
-                vec![],
-                std::collections::HashMap::new(),
-                ActivationStrategy::ActivationStrategyLazy,
+                test_spawn_spec(&actor_type_1.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
             )
             .await
             .unwrap();
@@ -443,13 +439,7 @@ async fn test_lru_eviction_multiple_types() {
             .register(
                 actor_id.clone(),
                 facet,
-                actor_type_2.clone(),
-                None,
-                "tenant".to_string(),
-                "namespace".to_string(),
-                vec![],
-                std::collections::HashMap::new(),
-                ActivationStrategy::ActivationStrategyLazy,
+                test_spawn_spec(&actor_type_2.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
             )
             .await
             .unwrap();
@@ -489,7 +479,7 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     manager.set_max_pool_per_actor_type(2).await;
 
-    let actor_type = "TestActor".to_string();
+    let actor_type = "test_actor".to_string();
     let service_locator = test_service_locator();
 
     for (actor_id, strategy) in [
@@ -510,13 +500,7 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
             .register(
                 actor_id.clone(),
                 create_mock_facet(actor_id.clone()),
-                actor_type.clone(),
-                None,
-                "tenant".to_string(),
-                "namespace".to_string(),
-                vec![],
-                std::collections::HashMap::new(),
-                strategy,
+                test_spawn_spec(&actor_type, "namespace", "tenant", strategy),
             )
             .await
             .unwrap();
@@ -539,13 +523,7 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
         .register(
             actor_id_4.clone(),
             create_mock_facet(actor_id_4.clone()),
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
+            test_spawn_spec(&actor_type, "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
         )
         .await
         .unwrap();
@@ -565,22 +543,16 @@ async fn test_update_last_access() {
     let actor_registry = create_test_actor_registry().await;
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
 
-    let actor_type = "TestActor".to_string();
+    let actor_type = "test_actor".to_string();
     let actor_id = test_actor_id("actor-1");
 
     let facet = create_mock_facet(actor_id.clone());
     manager
         .register(
-            actor_id.clone(),
-            facet,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id.clone(),
+                facet,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
 
@@ -622,22 +594,16 @@ async fn test_remove_from_active_tracking() {
     let actor_registry = create_test_actor_registry().await;
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
 
-    let actor_type = "TestActor".to_string();
+    let actor_type = "test_actor".to_string();
     let actor_id = test_actor_id("actor-1");
 
     let facet = create_mock_facet(actor_id.clone());
     manager
         .register(
-            actor_id.clone(),
-            facet,
-            actor_type.clone(),
-            None,
-            "tenant".to_string(),
-            "namespace".to_string(),
-            vec![],
-            std::collections::HashMap::new(),
-            ActivationStrategy::ActivationStrategyLazy,
-        )
+                actor_id.clone(),
+                facet,
+                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            )
         .await
         .unwrap();
 

@@ -62,7 +62,8 @@ impl ActorTrait for AlignmentWorker {
                 .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
             let response = new_message("reply", response_value);
             let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
-            ctx.send_reply(correlation_id, &msg.sender_id, msg.receiver_id.clone(), response).await
+            ctx.send_reply(correlation_id, &msg.sender_id, ctx.actor_id().clone(), response)
+                .await
                 .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
         }
 

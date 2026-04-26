@@ -77,6 +77,27 @@ fn resolve_application_id() -> String {
     actor_application_id(&host::self_id())
 }
 
+fn current_node_id() -> String {
+    host::self_id()
+        .rsplit_once('@')
+        .map(|(_, node_id)| node_id.to_string())
+        .unwrap_or_default()
+}
+
+fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "actor_counts": metrics.actor_counts,
+        "supervisor_count": metrics.supervisor_count,
+        "uptime_seconds": metrics.uptime_seconds,
+        "message_count": metrics.message_count,
+        "error_count": metrics.error_count,
+        "counter_metrics": metrics.counter_metrics,
+        "latency_totals_ms": metrics.latency_totals_ms,
+        "latency_max_ms": metrics.latency_max_ms,
+        "latency_samples": metrics.latency_samples,
+    })
+}
+
 fn merge_application_metrics_for(
     application_id: &str,
     metrics: serde_json::Value,
@@ -326,6 +347,21 @@ fn handle_get_status() -> String {
     })
 }
 
+fn handle_get_metrics() -> String {
+    let application_id = resolve_application_id();
+    let node_id = current_node_id();
+    match host::application_get_metrics(&application_id, &node_id) {
+        Ok(bytes) => match ApplicationMetrics::decode(bytes.as_slice()) {
+            Ok(metrics) => application_metrics_to_json(&metrics).to_string(),
+            Err(err) => serde_json::json!({
+                "error": format!("invalid ApplicationMetrics protobuf: {}", err)
+            })
+            .to_string(),
+        },
+        Err(err) => serde_json::json!({ "error": err }).to_string(),
+    }
+}
+
 /// Batch process for throughput demo: `{ "documents": [ { "doc_id", "content" }, ... ] }` (max 50).
 fn handle_batch(payload: &serde_json::Value) -> String {
     let application_id = resolve_application_id();
@@ -435,6 +471,22 @@ impl EntityRecognitionActor {
         ))
     }
 
+    #[handler("get_metrics")]
+    fn get_metrics_op(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_get_metrics())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid metrics response" })),
+        ))
+    }
+
+    #[handler("metrics")]
+    fn metrics_alias(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_get_metrics())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid metrics response" })),
+        ))
+    }
+
     #[handler("batch")]
     fn batch_op(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
         let payload = parse_payload(payload)?;
@@ -496,7 +548,7 @@ mod tests {
         assert_eq!(
             parse_op(
                 "call",
-                r#"{"op":"process_document","doc_id":"d","content":"x"}"#
+                br#"{"op":"process_document","doc_id":"d","content":"x"}"#
             )
             .expect("op"),
             "process_document"

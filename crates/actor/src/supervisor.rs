@@ -288,14 +288,17 @@ impl Supervisor {
     /// Create a new supervisor with required ServiceLocator
     ///
     /// ## Arguments
-    /// * `id` - Unique supervisor identifier
+    /// * `supervisor_label` - Opaque handle for this supervisor (logging / metrics / local tables).
+    ///   This is **not** an [`ActorId`] and must **not** be reused as a supervised child's
+    ///   instance `name` or as `ActorIdentity.name` in application specs — workers and nested
+    ///   supervisors each have their own canonical [`ActorId`] via [`crate::ChildSpec::actor_id`].
     /// * `strategy` - Supervision strategy (OneForOne, OneForAll, RestForOne)
     /// * `service_locator` - ServiceLocator for service access (required for ActorRef creation)
     ///
     /// ## Returns
     /// Tuple of (Supervisor, event receiver channel)
     pub fn new(
-        id: String,
+        supervisor_label: String,
         strategy: SupervisionStrategy,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> (Self, mpsc::Receiver<SupervisorEvent>) {
@@ -303,7 +306,7 @@ impl Supervisor {
         let (_shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
         let supervisor = Supervisor {
-            id,
+            id: supervisor_label,
             strategy: Arc::new(RwLock::new(strategy)),
             children: Arc::new(RwLock::new(IndexMap::new())),
             child_supervisors: Arc::new(RwLock::new(IndexMap::new())),
@@ -364,15 +367,11 @@ impl Supervisor {
     ///
     /// ## Example
     /// ```rust,ignore
-    /// let spec = ChildSpec::worker_sync(
-    ///     "worker1".to_string(),
-    ///     "worker1@node1".to_string(),
-    ///     Arc::new(|| Ok(actor)),
-    ///     actor_ref,
-    /// );
+    /// let child_actor_id = ActorId::new("worker1", "worker", "ns", "node1").unwrap();
+    /// let spec = ChildSpec::worker_sync(child_actor_id, Arc::new(|| Ok(actor)), actor_ref);
     /// supervisor.add_child(spec).await?;
     /// ```
-    #[instrument(skip(self, spec), fields(supervisor_id = %self.id, child_id = %spec.child_id))]
+    #[instrument(skip(self, spec), fields(supervisor_id = %self.id, child_id = %spec.actor_id))]
     pub async fn add_child(
         &self,
         spec: crate::ChildSpec,
@@ -395,7 +394,7 @@ impl Supervisor {
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 supervisor_id = %self.id,
-                child_id = %spec.child_id,
+                child_id = %spec.actor_id,
                 restart_strategy = ?spec.restart_strategy,
                 child_type = ?spec.child_type,
                 facet_count = spec.facets.len(),
@@ -404,13 +403,13 @@ impl Supervisor {
             );
         }
 
-        let child_id = ActorId::from(spec.actor_or_supervisor_id.clone());
+        let child_id = spec.actor_id.clone();
 
         // Create the actor via async factory
         let started_child = (spec.start_fn)().await.map_err(|e| {
             error!(
                 supervisor_id = %self.id,
-                child_id = %spec.child_id,
+                child_id = %child_id,
                 error = %e,
                 "Failed to create actor via factory"
             );
@@ -442,25 +441,27 @@ impl Supervisor {
         // started actor can be registered in ActorRegistry afterward. Actor::new() always
         // starts with a TestServiceLocatorStub; we replace it here with the real one.
         let existing_ctx = actor.context().clone();
-        let new_ctx = Arc::new(ActorContext::new(
-            existing_ctx.node_id.clone(),
-            existing_ctx.tenant_id.clone(),
-            existing_ctx.namespace.clone(),
-            service_locator.clone(),
-            existing_ctx.config.clone(),
-        ));
-        let mut actor = actor.set_context(new_ctx);
-
         // Create ActorRef from the actor crate (has tell() method) for return value.
-        // Extract namespace from actor_id (format: "name:namespace@node") for proper isolation.
-        let child_namespace = extract_namespace_from_actor_id(&child_id.to_string());
         let actor_ref = ActorActorRef::local(
             child_id.clone(),
-            String::new(),
-            child_namespace,
+            existing_ctx.tenant_id.clone(),
+            existing_ctx.namespace.clone(),
             mailbox,
-            service_locator,
+            service_locator.clone(),
         );
+        let self_ref = plexspaces_core::ActorRef::new(child_id.clone())
+            .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
+        let new_ctx = Arc::new(
+            ActorContext::new(
+                existing_ctx.node_id.clone(),
+                existing_ctx.tenant_id.clone(),
+                existing_ctx.namespace.clone(),
+                service_locator.clone(),
+                existing_ctx.config.clone(),
+            )
+            .with_self_ref(self_ref),
+        );
+        let mut actor = actor.set_context(new_ctx);
 
         // Create core ActorRef for internal storage
         let core_actor_ref = ActorRef::new(child_id.clone())
@@ -1427,7 +1428,7 @@ impl Supervisor {
     }
 
     /// Perform the actual restart
-    #[instrument(skip(self, child, stats), fields(supervisor_id = %self.id, child_id = %child.spec.actor_or_supervisor_id))]
+    #[instrument(skip(self, child, stats), fields(supervisor_id = %self.id, child_id = %child.spec.actor_id))]
     async fn perform_restart(
         &self,
         child: &mut SupervisedActor,
@@ -1435,10 +1436,11 @@ impl Supervisor {
     ) -> Result<(), SupervisorError> {
         use crate::child_spec::StartedChild;
 
-        let child_id = &child.spec.actor_or_supervisor_id;
+        let child_actor_id = child.spec.actor_id.clone();
+        let child_id = child_actor_id.to_string();
         debug!(
             supervisor_id = %self.id,
-            child_id = %child_id,
+            child_id = %child_actor_id,
             "Performing child restart"
         );
         stats.total_restarts += 1;
@@ -1541,13 +1543,18 @@ impl Supervisor {
         // restarted actor can be registered in ActorRegistry afterward.
         if let Some(service_locator) = &self.service_locator {
             let existing_ctx = new_actor.context().clone();
-            let new_ctx = Arc::new(ActorContext::new(
-                existing_ctx.node_id.clone(),
-                existing_ctx.tenant_id.clone(),
-                existing_ctx.namespace.clone(),
-                service_locator.clone(),
-                existing_ctx.config.clone(),
-            ));
+            let self_ref = plexspaces_core::ActorRef::new(new_actor.id().clone())
+                .map_err(|e| SupervisorError::RestartFailed(e.to_string()))?;
+            let new_ctx = Arc::new(
+                ActorContext::new(
+                    existing_ctx.node_id.clone(),
+                    existing_ctx.tenant_id.clone(),
+                    existing_ctx.namespace.clone(),
+                    service_locator.clone(),
+                    existing_ctx.config.clone(),
+                )
+                .with_self_ref(self_ref),
+            );
             new_actor = new_actor.set_context(new_ctx);
         }
 
@@ -1622,10 +1629,14 @@ impl Supervisor {
     /// All errors are logged but don't prevent other children from stopping.
     #[instrument(skip(self), fields(supervisor_id = %self.id))]
     pub async fn shutdown(&mut self) -> Result<(), SupervisorError> {
-        info!(
-            supervisor_id = %self.id,
-            "Starting supervisor shutdown (Erlang/OTP-style cascading shutdown)"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let child_count = self.children.read().await.len();
+            tracing::trace!(
+                supervisor_id = %self.id,
+                child_count,
+                "Starting supervisor shutdown"
+            );
+        }
 
         // Phase 1: Shutdown child supervisors first (they shutdown their children recursively)
         // Reverse order to shutdown in opposite order of start (Erlang/OTP convention)
@@ -1885,10 +1896,12 @@ impl Supervisor {
             children.clear();
         }
 
-        info!(
-            supervisor_id = %self.id,
-            "Supervisor shutdown completed"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                supervisor_id = %self.id,
+                "Supervisor shutdown completed"
+            );
+        }
 
         Ok(())
     }
@@ -2173,10 +2186,11 @@ impl Supervisor {
     ///
     /// ## Example
     /// ```rust,ignore
-    /// let spec = ChildSpec::worker("worker1", "worker1@node1", start_fn);
+    /// let child_actor_id = ActorId::new("worker1", "worker", "ns", "node1").unwrap();
+    /// let spec = ChildSpec::worker(child_actor_id, start_fn);
     /// let child_id = supervisor.start_child(spec).await?;
     /// ```
-    #[instrument(skip(self, spec), fields(supervisor_id = %self.id, child_id = %spec.child_id))]
+    #[instrument(skip(self, spec), fields(supervisor_id = %self.id, child_id = %spec.actor_id))]
     pub async fn start_child(
         &mut self,
         spec: crate::child_spec::ChildSpec,
@@ -2185,7 +2199,7 @@ impl Supervisor {
 
         debug!(
             supervisor_id = %self.id,
-            child_id = %spec.child_id,
+            child_id = %spec.actor_id,
             child_type = ?spec.child_type,
             "Starting child dynamically"
         );
@@ -2224,13 +2238,13 @@ impl Supervisor {
                                 if let Err(e) = actor.attach_facet(facet).await {
                                     warn!(
                                         supervisor_id = %self.id,
-                                        child_id = %spec.child_id,
+                                        child_id = %spec.actor_id,
                                         error = %e,
                                         "Failed to attach facet from ChildSpec (continuing with other facets)"
                                     );
                                     metrics::counter!("plexspaces_supervisor_facet_attach_errors_total",
                                         "supervisor_id" => self.id.clone(),
-                                        "child_id" => spec.child_id.clone()
+                                        "child_id" => spec.actor_id.to_string()
                                     ).increment(1);
                                 } else {
                                     attached_count += 1;
@@ -2240,17 +2254,17 @@ impl Supervisor {
                             let facet_attach_duration = facet_attach_start.elapsed();
                             metrics::histogram!("plexspaces_supervisor_facet_attach_duration_seconds",
                                 "supervisor_id" => self.id.clone(),
-                                "child_id" => spec.child_id.clone()
+                                "child_id" => spec.actor_id.to_string()
                             ).record(facet_attach_duration.as_secs_f64());
                             metrics::counter!("plexspaces_supervisor_facets_attached_total",
                                 "supervisor_id" => self.id.clone(),
-                                "child_id" => spec.child_id.clone()
+                                "child_id" => spec.actor_id.to_string()
                             )
                             .increment(attached_count);
 
                             debug!(
                                 supervisor_id = %self.id,
-                                child_id = %spec.child_id,
+                                child_id = %spec.actor_id,
                                 facet_count = spec.facets.len(),
                                 attached_count = attached_count,
                                 duration_ms = facet_attach_duration.as_millis(),
@@ -2259,7 +2273,7 @@ impl Supervisor {
                         } else {
                             debug!(
                                 supervisor_id = %self.id,
-                                child_id = %spec.child_id,
+                                child_id = %spec.actor_id,
                                 facet_count = spec.facets.len(),
                                 "FacetRegistry not available - facets not attached (graceful degradation)"
                             );
@@ -2277,15 +2291,8 @@ impl Supervisor {
                 // Store ChildSpec directly (proto-first design with facets support)
                 let supervised = SupervisedActor {
                     actor: Arc::new(RwLock::new(actor)),
-                    actor_ref: ActorRef::new(
-                        ActorId::from_canonical(&spec.actor_or_supervisor_id).map_err(|e| {
-                            SupervisorError::ActorCreationFailed(format!(
-                                "invalid child actor id '{}': {}",
-                                spec.actor_or_supervisor_id, e
-                            ))
-                        })?,
-                    )
-                    .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
+                    actor_ref: ActorRef::new(spec.actor_id.clone())
+                        .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
                     handle: Some(handle),
                     restart_count: 0,
                     last_restart: None,
@@ -2295,20 +2302,14 @@ impl Supervisor {
 
                 // Add to children
                 let mut children = self.children.write().await;
-                children.insert(spec.actor_or_supervisor_id.clone().into(), supervised);
+                children.insert(spec.actor_id.clone(), supervised);
                 drop(children);
 
                 // Phase 3: Register parent-child relationship
                 if let Some(service_locator) = &self.service_locator {
                     if let Some(registry) = service_locator.actor_registry().await {
                         let supervisor_id = ActorId::from(self.id.clone());
-                        let child_id = ActorId::from_canonical(&spec.actor_or_supervisor_id)
-                            .map_err(|e| {
-                                SupervisorError::ActorCreationFailed(format!(
-                                    "invalid child actor id '{}': {}",
-                                    spec.actor_or_supervisor_id, e
-                                ))
-                            })?;
+                        let child_id = spec.actor_id.clone();
                         registry
                             .register_parent_child(&supervisor_id, &child_id)
                             .await;
@@ -2318,12 +2319,10 @@ impl Supervisor {
                 // Send event
                 let _ = self
                     .event_tx
-                    .send(SupervisorEvent::ChildStarted(
-                        spec.actor_or_supervisor_id.clone().into(),
-                    ))
+                    .send(SupervisorEvent::ChildStarted(spec.actor_id.clone()))
                     .await;
 
-                Ok(spec.actor_or_supervisor_id.into())
+                Ok(spec.actor_id.clone())
             }
             StartedChild::Supervisor { supervisor: _ } => {
                 // For supervisor children, we need to add them via add_supervisor_child
@@ -2523,9 +2522,12 @@ impl Supervisor {
         if child_supervisors.contains_key(child_id) {
             // For supervisor children, we don't have full ChildSpec stored
             // Return a minimal spec
+            let actor_id = ActorId::from_canonical(child_id).unwrap_or_else(|_| {
+                ActorId::new(child_id, "supervisor", "default", "localhost")
+                    .expect("placeholder supervisor child id")
+            });
             return Some(crate::child_spec::ChildSpec {
-                child_id: child_id.to_string(),
-                actor_or_supervisor_id: child_id.to_string(),
+                actor_id,
                 restart_strategy: crate::child_spec::RestartStrategy::Permanent,
                 shutdown_timeout: None,
                 child_type: crate::child_spec::ChildType::Supervisor,
@@ -2638,16 +2640,16 @@ impl Supervisor {
 
         // Validate children config (but don't add them yet)
         for (idx, child_spec_proto) in config.children.iter().enumerate() {
-            if child_spec_proto.child_id.is_empty() {
+            let Some(id) = child_spec_proto.actor_identity.as_ref() else {
                 return Err(SupervisorError::ActorCreationFailed(format!(
-                    "Child at index {} has empty child_id",
+                    "Child at index {} is missing actor_identity",
                     idx
                 )));
-            }
-            if child_spec_proto.actor_or_supervisor_id.is_empty() {
+            };
+            if id.name.is_empty() || id.actor_type.is_empty() {
                 return Err(SupervisorError::ActorCreationFailed(format!(
-                    "Child {} has empty actor_or_supervisor_id",
-                    child_spec_proto.child_id
+                    "Child at index {} has empty name or actor_type in actor_identity",
+                    idx
                 )));
             }
             // Validate child type
@@ -2656,13 +2658,13 @@ impl Supervisor {
                     .map_err(|_| {
                         SupervisorError::ActorCreationFailed(format!(
                             "Child {} has invalid child_type: {}",
-                            child_spec_proto.child_id, child_spec_proto.child_type
+                            id.name, child_spec_proto.child_type
                         ))
                     })?;
             if child_type == plexspaces_proto::supervision::v1::ChildType::ChildTypeUnspecified {
                 return Err(SupervisorError::ActorCreationFailed(format!(
                     "Child {} has unspecified child_type",
-                    child_spec_proto.child_id
+                    id.name
                 )));
             }
         }
@@ -2786,14 +2788,18 @@ pub enum SupervisorError {
 ///
 /// ## Example
 /// ```rust,ignore
-/// let (supervisor, event_rx) = SupervisorBuilder::new("my-supervisor".to_string())
+/// let (supervisor, event_rx) = SupervisorBuilder::new("my-supervisor-label".to_string())
 ///     .with_strategy(SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 60 })
-///     .add_child(ChildSpec::worker_sync(...))
+///     .add_child(ChildSpec::worker_sync(
+///         child_actor_id,
+///         Arc::new(|| Ok(actor)),
+///         actor_ref,
+///     ))
 ///     .build(service_locator)
 ///     .await?;
 /// ```
 pub struct SupervisorBuilder {
-    /// Supervisor ID
+    /// Opaque supervisor label (same semantics as [`Supervisor::new`] first argument).
     id: String,
     /// Supervision strategy
     strategy: SupervisionStrategy,
@@ -2804,7 +2810,9 @@ pub struct SupervisorBuilder {
 }
 
 impl SupervisorBuilder {
-    /// Create a new supervisor builder
+    /// Create a new supervisor builder.
+    ///
+    /// `id` is the same **opaque supervisor label** as [`Supervisor::new`]'s first argument (logging / metrics), not a child [`ActorId`].
     pub fn new(id: String) -> Self {
         SupervisorBuilder {
             id,
@@ -2827,9 +2835,9 @@ impl SupervisorBuilder {
     ///
     /// ## Example
     /// ```rust,ignore
+    /// let child_actor_id = ActorId::new("worker1", "worker", "ns", "node1").unwrap();
     /// builder.add_child(ChildSpec::worker_sync(
-    ///     "worker1".to_string(),
-    ///     "worker1@node1".to_string(),
+    ///     child_actor_id,
     ///     Arc::new(|| Ok(actor)),
     ///     actor_ref,
     /// ))
@@ -2892,8 +2900,7 @@ mod tests {
     ) -> crate::ChildSpec {
         use crate::child_spec::{ChildSpec, ChildType as CSChildType, StartedChild};
 
-        let child_id = id.clone();
-        let actor_id_string = test_actor_id_string(&id);
+        let child_actor_id = test_actor_id(&id);
         let id_for_factory = id.clone();
         let start_fn: crate::child_spec::StartFn = Arc::new(move || {
             let child_name = id_for_factory.clone();
@@ -2916,16 +2923,11 @@ mod tests {
             })
         });
 
-        ChildSpec {
-            child_id,
-            actor_or_supervisor_id: actor_id_string,
-            restart_strategy: restart,
-            shutdown_timeout: Some(Duration::from_secs(5)),
-            child_type: CSChildType::Actor,
-            metadata: std::collections::HashMap::new(),
-            facets: Vec::new(),
-            start_fn,
-        }
+        let mut spec = ChildSpec::worker(child_actor_id, start_fn);
+        spec.restart_strategy = restart;
+        spec.shutdown_timeout = Some(Duration::from_secs(5));
+        spec.child_type = CSChildType::Actor;
+        spec
     }
 
     /// Helper function to create a test supervisor with ServiceLocator
@@ -2942,7 +2944,6 @@ mod tests {
     fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpec {
         use crate::child_spec::{ChildSpec, RestartStrategy as CSRestartStrategy};
 
-        let actor_id_string = test_actor_id_string(&id);
         let id_for_factory = id.clone();
         let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
             Arc::new(move || {
@@ -2981,7 +2982,7 @@ mod tests {
             RestartPolicy::ExponentialBackoff { .. } => CSRestartStrategy::Permanent,
         };
 
-        ChildSpec::worker_sync(id, actor_id_string, sync_factory, actor_ref)
+        ChildSpec::worker_sync(test_actor_id(&id), sync_factory, actor_ref)
             .with_restart(restart_strategy)
     }
 

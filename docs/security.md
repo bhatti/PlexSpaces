@@ -677,6 +677,7 @@ Full integration of the gRPC InterceptorChain into the node server (so every gRP
 - **Tenant-id**: Callers do **not** choose tenant by setting metadata themselves when JWT auth is enabled. The JWT proves identity; middleware writes `x-tenant-id` (and related identity headers) from validated claims. Treat any pre-middleware client value as untrusted; production paths rely on `AuthInterceptor` clearing and repopulating metadata.
 - **Namespace**: `x-namespace` may be supplied for request scoping (or taken from proto fields / labels where documented). Services build `RequestContext` via `request_context_from_grpc_request` so tenant and namespace follow the same validation rules as HTTP.
 - **Services**: gRPC handlers should use `request_context_from_grpc_request` (or equivalent) for every RPC that touches tenant-scoped state. Avoid ad hoc `RequestContext::new_without_auth("", "")` on code paths that perform routing or registry access.
+- **WASM host routing**: When a WASM actor sends or asks, the host must derive `RequestContext` from the registered sender actor/runtime metadata instead of manufacturing an empty tenant. That preserves the tenant established by JWT/mTLS and the namespace already bound to the actor identity.
 
 ### RequestContext and Auth
 

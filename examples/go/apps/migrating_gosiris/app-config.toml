@@ -13,8 +13,9 @@ max_restart_window_seconds = 60
 
 # Aggregator actor - collects and analyzes sensor data
 [[supervisor.children]]
-id = "aggregator"
-type = "worker"
+name = "aggregator"
+actor_type = "migrating_gosiris_wasm"
+role = "aggregator"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 
@@ -25,8 +26,9 @@ alert_thresh_humid = "20.0"
 
 # Sensor 1 - Data center zone A (cool)
 [[supervisor.children]]
-id = "sensor-dc-zone-a"
-type = "worker"
+name = "sensor-dc-zone-a"
+actor_type = "migrating_gosiris_wasm"
+role = "sensor-dc-zone-a"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 
@@ -38,8 +40,9 @@ base_humidity = "35.0"
 
 # Sensor 2 - Data center zone B (warm)
 [[supervisor.children]]
-id = "sensor-dc-zone-b"
-type = "worker"
+name = "sensor-dc-zone-b"
+actor_type = "migrating_gosiris_wasm"
+role = "sensor-dc-zone-b"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 
@@ -51,8 +54,9 @@ base_humidity = "42.0"
 
 # Sensor 3 - Server room (hot)
 [[supervisor.children]]
-id = "sensor-server-room"
-type = "worker"
+name = "sensor-server-room"
+actor_type = "migrating_gosiris_wasm"
+role = "sensor-server-room"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 
@@ -64,8 +68,9 @@ base_humidity = "30.0"
 
 # Sensor 4 - Outdoor (variable)
 [[supervisor.children]]
-id = "sensor-outdoor"
-type = "worker"
+name = "sensor-outdoor"
+actor_type = "migrating_gosiris_wasm"
+role = "sensor-outdoor"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 

@@ -614,9 +614,12 @@ const router = new ActorRouter({
 });
 
 export const actor = {
-  init: (configJson: string) => router.init(configJson),
-  handle: (from: string, msgType: string, payloadJson: string) =>
-    router.handle(from, msgType, payloadJson),
+  init: (configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.init(configJson),
+  handle: (
+    from: string,
+    msgType: string,
+    payloadJson: string | Uint8Array | ArrayBuffer | ArrayBufferView
+  ) => router.handle(from, msgType, payloadJson),
   getState: () => router.getState(),
-  setState: (stateJson: string) => router.setState(stateJson),
+  setState: (stateJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.setState(stateJson),
 };

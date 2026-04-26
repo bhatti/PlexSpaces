@@ -19,75 +19,65 @@ func TestNormalizeWorkerPayloadUnwrapsNestedPayload(t *testing.T) {
 	}
 }
 
-func TestApplyStatusDeltaAccumulatesCollectiveAndElementMetrics(t *testing.T) {
+func TestApplyMetricsDeltaAccumulatesCollectiveAndElementMetrics(t *testing.T) {
 	start := map[string]any{
-		"node_id": "test-node-8091",
-		"application": map[string]any{
-			"metrics": map[string]any{
-				"message_count": 0,
-				"error_count":   0,
-				"counter_metrics": map[string]any{
-					"leader_messages":              0,
-					"worker_messages":              0,
-					"leader_collective_operations": 0,
-					"worker_collective_operations": 0,
-					"worker_element_operations":    0,
-				},
-				"latency_totals_ms": map[string]any{
-					"leader":              0,
-					"leader.compute":      0,
-					"leader.coordination": 0,
-					"worker":              0,
-					"worker.compute":      0,
-					"worker.coordination": 0,
-				},
-				"latency_max_ms": map[string]any{
-					"leader": 0,
-					"worker": 0,
-				},
-				"latency_samples": map[string]any{
-					"leader": 0,
-					"worker": 0,
-				},
-			},
+		"message_count": 0,
+		"error_count":   0,
+		"counter_metrics": map[string]any{
+			"leader_messages":              0,
+			"worker_messages":              0,
+			"leader_collective_operations": 0,
+			"worker_collective_operations": 0,
+			"worker_element_operations":    0,
+		},
+		"latency_totals_ms": map[string]any{
+			"leader":              0,
+			"leader.compute":      0,
+			"leader.coordination": 0,
+			"worker":              0,
+			"worker.compute":      0,
+			"worker.coordination": 0,
+		},
+		"latency_max_ms": map[string]any{
+			"leader": 0,
+			"worker": 0,
+		},
+		"latency_samples": map[string]any{
+			"leader": 0,
+			"worker": 0,
 		},
 	}
 	end := map[string]any{
-		"node_id": "test-node-8091",
-		"application": map[string]any{
-			"metrics": map[string]any{
-				"message_count": 5,
-				"error_count":   0,
-				"counter_metrics": map[string]any{
-					"leader_messages":              2,
-					"worker_messages":              3,
-					"leader_collective_operations": 2,
-					"worker_collective_operations": 3,
-					"worker_element_operations":    99,
-				},
-				"latency_totals_ms": map[string]any{
-					"leader":              20,
-					"leader.compute":      7,
-					"leader.coordination": 13,
-					"worker":              40,
-					"worker.compute":      35,
-					"worker.coordination": 5,
-				},
-				"latency_max_ms": map[string]any{
-					"leader": 20,
-					"worker": 40,
-				},
-				"latency_samples": map[string]any{
-					"leader": 1,
-					"worker": 3,
-				},
-			},
+		"message_count": 5,
+		"error_count":   0,
+		"counter_metrics": map[string]any{
+			"leader_messages":              2,
+			"worker_messages":              3,
+			"leader_collective_operations": 2,
+			"worker_collective_operations": 3,
+			"worker_element_operations":    99,
+		},
+		"latency_totals_ms": map[string]any{
+			"leader":              20,
+			"leader.compute":      7,
+			"leader.coordination": 13,
+			"worker":              40,
+			"worker.compute":      35,
+			"worker.coordination": 5,
+		},
+		"latency_max_ms": map[string]any{
+			"leader": 20,
+			"worker": 40,
+		},
+		"latency_samples": map[string]any{
+			"leader": 1,
+			"worker": 3,
 		},
 	}
 
 	nodeMetrics := map[string]map[string]int{}
 	roleMetrics := map[string]map[string]int{}
-	applyStatusDelta(nodeMetrics, roleMetrics, start, end)
+	applyMetricsDelta(nodeMetrics, roleMetrics, "test-node-8091", start, end)
 
 	node := nodeMetrics["test-node-8091"]
 	if node["collective_operations"] != 5 {
@@ -101,6 +91,38 @@ func TestApplyStatusDeltaAccumulatesCollectiveAndElementMetrics(t *testing.T) {
 	}
 	if roleMetrics["worker"]["collective_operations"] != 3 {
 		t.Fatalf("worker collective_operations = %d, want 3", roleMetrics["worker"]["collective_operations"])
+	}
+}
+
+func TestAccumulateShardStatsAcceptsReduceStyleShardEnvelope(t *testing.T) {
+	nodeMetrics := map[string]bool{}
+	var totalLatency uint64
+	var totalResponses uint64
+	var maxLatency uint64
+	totalErrors := 0
+
+	err := accumulateShardStats([]any{
+		map[string]any{
+			"shard_actor_id": "01B//worker::mpi-collectives-go@test-node-8093",
+			"payload":        42.5,
+			"latency_ms":     3.0,
+			"success":        true,
+		},
+	}, "test-node-8091", nodeMetrics, &totalLatency, &totalResponses, &maxLatency, &totalErrors)
+	if err != nil {
+		t.Fatalf("accumulateShardStats error: %v", err)
+	}
+	if totalErrors != 0 {
+		t.Fatalf("totalErrors = %d, want 0", totalErrors)
+	}
+	if totalResponses != 1 {
+		t.Fatalf("totalResponses = %d, want 1", totalResponses)
+	}
+	if totalLatency != 3 || maxLatency != 3 {
+		t.Fatalf("latency totals = %d/%d, want 3/3", totalLatency, maxLatency)
+	}
+	if !nodeMetrics["test-node-8093"] {
+		t.Fatalf("expected remote node to be marked from shard_actor_id fallback")
 	}
 }
 

@@ -7,8 +7,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "job-scheduler"
-type = "worker"
+name = "job-scheduler"
+actor_type = "migrating_kueue_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

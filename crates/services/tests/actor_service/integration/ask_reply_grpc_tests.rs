@@ -24,6 +24,7 @@ async fn test_ask_reply_get_counter_real_grpc() {
     let request = Request::new(AskReplyRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
+        actor_name: String::new(),
         http_method: "GET".to_string(),
         payload: serde_json::json!({ "action": "get" })
             .to_string()
@@ -73,6 +74,7 @@ async fn test_send_message_post_counter_real_grpc() {
     let request = Request::new(SendMessageRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: serde_json::json!({ "action": "increment" })
             .to_string()
@@ -120,6 +122,7 @@ async fn test_ask_reply_post_counter_real_grpc() {
     let request = Request::new(AskReplyRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: serde_json::json!({ "action": "get" })
             .to_string()

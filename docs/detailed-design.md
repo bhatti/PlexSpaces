@@ -633,22 +633,23 @@ Orleans-style activation/deactivation with automatic instance creation:
 
 1. **Type Registration**: During application deployment (`wasm_application.rs`):
    ```rust
-   // Extract all facet configs from ChildSpec
-   let mut all_facet_configs = serde_json::Map::new();
-   for facet_proto in &child_spec.facets {
-       if let Some(config) = extract_facet_config(&child_spec.facets, &facet_proto.r#type) {
-           all_facet_configs.insert(facet_proto.r#type.clone(), config);
-       }
-   }
+   // Build ActorSpawnSpec from ChildSpec — single source of truth for spawn + reactivation
+   let spawn_spec = ActorSpawnSpec {
+       identity: Some(ActorIdentity {
+           name: child_spec.actor_identity.name.clone(),
+           actor_type: actor_type.clone(),
+       }),
+       namespace: namespace.to_string(),
+       tenant_id: tenant_id.to_string(),
+       behavior_kind: child_spec.behavior_kind.clone(),
+       args: child_spec.args.clone(),
+       facets: child_spec.facets.clone(),
+       config: None,
+       labels: std::collections::HashMap::new(),
+   };
    
-   // Register virtual actor type with all facet configs
-   virtual_actor_manager.register_virtual_actor_type(
-       actor_type,
-       config,
-       namespace,
-       serde_json::Value::Object(all_facet_configs), // All facets
-       None, // tenant_id for type-level registration
-   ).await?;
+   // Register virtual actor definition — stores ActorSpawnSpec verbatim
+   virtual_actor_manager.register_virtual_actor_definition(spawn_spec).await?;
    ```
 
 2. **Auto-Activation**: When message arrives for non-existent virtual actor:
@@ -657,9 +658,9 @@ Orleans-style activation/deactivation with automatic instance creation:
    - Performs internal activation inside `ActorServiceImpl::ask_reply()` or `ActorServiceImpl::send_message()` which:
      - Reuses suspended instance metadata when a virtual actor id is already known
      - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)` for type-driven activation
-     - Retrieves type metadata from `VirtualActorManager`
-     - Creates all facets from `facet_config`: `create_facets_from_config(facet_config, facet_registry)`
-     - Spawns actor with facets attached when no suspended instance exists
+     - Retrieves `ActorSpawnSpec` from `VirtualActorManager` (stored at registration time)
+     - Calls `ActorFactory::spawn_actor(ctx, &spec, facets)` — derives WASM init bytes via `wasm_init_payload(&spec, &actor_id)` from `spec.args` (no stale `initial_state` bytes)
+     - Creates runtime facet objects from `spec.facets` via `create_facets_from_config`
    - Retries lookup to discover newly created actor
 
 3. **Facet Support**: Supports all facet types:
@@ -709,6 +710,7 @@ These defaults are applied when creating `VirtualActorFacet` instances if not ex
 - Provides trait-based API for lifecycle operations (`get_activation_strategy()`, `should_activate()`, `should_deactivate()`, etc.)
 - Supports both instance-level and type-level registration
 - Applies defaults from `RuntimeConfig.default_virtual_actor_config` when creating facets
+- Each registered actor type/definition stores a single `ActorSpawnSpec` (proto message) as the unified descriptor for spawn and reactivation — eliminates the old `init_config_template`/`initial_state` duality
 
 **Example (SDK)**:
 ```rust
@@ -1894,7 +1896,7 @@ Leader-worker patterns use **existing building blocks** only; no dedicated sessi
 
 Data flow: CreateShardGroup `config.placement` → `shard_config.resource_requirements.placement` → scheduler (when used) → ScatterGather/MapShardGroup use `shard_actor_ids`.
 
-**Multi-node spawn**: When `placement.node_ids` lists multiple nodes (or `from_registry` returns multiple), `create_shard_group_internal` spawns each shard on the corresponding node: local shards via `ActorFactory.spawn_actor`, remote shards via `get_actor_service_client(node_id)` and gRPC `SpawnActor`. Integration test: `test_create_shard_group_multi_node_scatter_gather` (in-process two nodes, node2 on a local gRPC server, node1’s ObjectRegistry updated so node2 is discoverable) validates that CreateShardGroup with `node_ids: [node1, node2]` yields two shard actor IDs (one per node).
+**Multi-node spawn**: When `placement.node_ids` lists multiple nodes (or `from_registry` returns multiple), `create_shard_group_internal` spawns each shard on the corresponding node: local shards via `ActorFactory::spawn_actor(ctx, &spec, facets)` (3-param, spec carries identity/namespace/config/labels), remote shards via `get_actor_service_client(node_id)` and gRPC `SpawnActor`. Integration test: `test_create_shard_group_multi_node_scatter_gather` (in-process two nodes, node2 on a local gRPC server, node1’s ObjectRegistry updated so node2 is discoverable) validates that CreateShardGroup with `node_ids: [node1, node2]` yields two shard actor IDs (one per node).
 
 ## Collective / Parallel Shard-Group APIs
 

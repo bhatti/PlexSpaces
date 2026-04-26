@@ -231,20 +231,17 @@ where
                             })
                             .or_else(|| {
                                 if auth_disabled {
-                                    query_params.get("tenant_id").cloned()
+                                    Some(String::new())
                                 } else {
                                     None
                                 }
                             })
                             .ok_or_else(|| {
-                                let error_body = if auth_disabled {
-                                    "tenant_id is required when auth is disabled. Provide tenant_id as a query parameter."
-                                } else {
-                                    "tenant_id is required from a valid Authorization bearer token."
-                                };
                                 return Ok(Response::builder()
-                                    .status(StatusCode::BAD_REQUEST)
-                                    .body(hyper::body::Incoming::from(error_body))
+                                    .status(StatusCode::UNAUTHORIZED)
+                                    .body(hyper::body::Incoming::from(
+                                        "tenant_id is required from a valid Authorization bearer token."
+                                    ))
                                     .unwrap());
                             })?;
                         let namespace = path_parts[0].to_string();
@@ -254,18 +251,6 @@ where
                         let query_params: std::collections::HashMap<String, String> = query_params;
                         
                         let is_ask = path_parts.get(2).copied() == Some("ask") || method == &hyper::Method::GET;
-                        if method == &hyper::Method::DELETE {
-                            let err_json = serde_json::json!({
-                                "code": 405,
-                                "message": "DELETE is not supported for actor ask/tell endpoints"
-                            });
-                            let resp = Response::builder()
-                                .status(HyperStatusCode::METHOD_NOT_ALLOWED)
-                                .header("content-type", "application/json")
-                                .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
-                                .unwrap();
-                            return Ok(resp);
-                        }
 
                         // Extract optional timeout from ?timeout=<seconds> query param (default: 5s)
                         let timeout_duration = query_params.get("timeout")
@@ -329,6 +314,7 @@ where
                             let mut grpc_req = TonicRequest::new(AskReplyRequest {
                                 namespace,
                                 actor_type,
+                                actor_name: String::new(),
                                 http_method: method.as_str().to_string(),
                                 payload,
                                 headers: request_headers,
@@ -410,6 +396,7 @@ where
                             let mut grpc_req = TonicRequest::new(SendMessageRequest {
                                 namespace,
                                 actor_type,
+                                actor_name: String::new(),
                                 http_method: method.as_str().to_string(),
                                 payload,
                                 headers: request_headers,

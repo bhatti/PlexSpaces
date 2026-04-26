@@ -25,7 +25,7 @@ fn create_test_message(payload: Vec<u8>) -> Message {
 fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
     ActorId::new(
         name.to_string(),
-        "GenServer".to_string(),
+        "gen_server".to_string(),
         namespace.to_string(),
         node_id.to_string(),
     )

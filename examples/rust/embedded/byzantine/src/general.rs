@@ -11,6 +11,8 @@ use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message}
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+const BYZANTINE_GENERAL_BEHAVIOR: &str = "byzantine_general";
+
 // =============================================================================
 // Message Types
 // =============================================================================
@@ -165,7 +167,7 @@ impl Actor for General {
                     // Get current actor ID from self_ref or use receiver_id from message
                     let current_actor_id = ctx.self_ref()
                         .map(|r| r.id().clone())
-                        .unwrap_or_else(|| msg.receiver_id.clone());
+                        .unwrap_or_else(|| msg.receiver_id.clone().into());
                     
                     // Extract correlation_id - Message has String, not Option<String>
                     let correlation_id_opt = if msg.correlation_id.is_empty() {
@@ -189,6 +191,6 @@ impl Actor for General {
     }
 
     fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::Custom("ByzantineGeneral".to_string())
+        BehaviorType::Custom(BYZANTINE_GENERAL_BEHAVIOR.to_string())
     }
 }

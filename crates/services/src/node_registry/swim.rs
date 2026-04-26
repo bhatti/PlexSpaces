@@ -928,6 +928,17 @@ impl SwimProtocol {
         }
     }
 
+    /// Remove a member without publishing a SWIM transition.
+    ///
+    /// This is reserved for local cleanup of synthetic placeholders, such as seed aliases with
+    /// temporary `_unknown_*` IDs, which are not real cluster members and should not emit dead-node
+    /// signals or metrics when reconciled to a concrete node identity.
+    #[instrument(skip(self), fields(node_id = %node_id))]
+    pub async fn remove_member_silently(&self, node_id: &str) {
+        let mut members = self.members.write().await;
+        members.remove(node_id);
+    }
+
     /// Process an incoming alive message (node proving it's alive)
     #[instrument(skip(self))]
     pub async fn process_alive(&self, node_id: &str, incarnation: u64, address: &str) {
@@ -1853,6 +1864,22 @@ mod tests {
 
         let retrieved = protocol.get_member("node-1").await.unwrap();
         assert_eq!(retrieved.state, NodeState::Dead);
+    }
+
+    #[tokio::test]
+    async fn test_protocol_remove_member_silently() {
+        let protocol = SwimProtocol::new(
+            "local-node".to_string(),
+            "localhost:8000".to_string(),
+            SwimConfig::default(),
+        );
+
+        let member = SwimMember::new("_unknown_seed".to_string(), "localhost:8001".to_string());
+        protocol.upsert_member(member).await;
+
+        protocol.remove_member_silently("_unknown_seed").await;
+
+        assert!(protocol.get_member("_unknown_seed").await.is_none());
     }
 
     #[tokio::test]

@@ -5,8 +5,8 @@
 
 //! Loader actor: Reads documents (CPU-intensive).
 
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
-use plexspaces_mailbox::Message;
+use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_sdk::{new_message, Message};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -56,10 +56,18 @@ impl ActorTrait for LoaderBehavior {
                     content,
                 };
                 
-                // Send reply via context
-                if let Ok(reply_data) = serde_json::to_vec(&response) {
-                    let reply = Message::new(reply_data);
-                    let _ = if let Some(sender_id) = &msg.sender { ctx.send_reply(msg.correlation_id.as_deref(), sender_id, msg.receiver.clone(), reply).await } else { Ok(()) }; // Ignore reply errors for now
+                if !msg.sender_id.is_empty() {
+                    let reply_value = serde_json::to_value(&response)
+                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to serialize reply: {}", e)))?;
+                    let reply = new_message("reply", reply_value);
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    ctx.send_reply(correlation_id, &msg.sender_id, msg.receiver_id.clone().into(), reply)
+                        .await
+                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
                 }
                 
                 Ok(())
@@ -79,4 +87,3 @@ pub enum LoaderRequest {
 pub enum LoaderResponse {
     DocumentLoaded { document_id: String, content: String },
 }
-

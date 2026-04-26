@@ -14,6 +14,16 @@ import {
   encodeWriteRequest,
 } from './wire/tuplespace-proto-wire.js';
 import { decodeHttpFetchResponseWire, encodeHttpFetchRequestWire } from './wire/http-fetch-proto-wire.js';
+import {
+  decodeApplicationMetrics,
+  decodeCreateShardGroupResponse,
+  decodeGetApplicationStatusResponse,
+  decodeScatterGatherResponse,
+  encodeApplicationMetrics,
+  encodeCreateShardGroupRequest,
+  encodeScatterGatherRequest,
+} from './wire/shard-group-proto-wire.js';
+import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from './wit-payload.js';
 
 // Virtual imports provided by jco componentize at runtime.
 // These map 1:1 to the WIT host interface functions.
@@ -63,6 +73,7 @@ import {
   barrierShardGroup as hostBarrierShardGroup,
   spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
+  applicationGetMetrics as hostApplicationGetMetrics,
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch,
   // @ts-expect-error Virtual import
@@ -81,6 +92,15 @@ function safeCall<T>(fn: ((...args: any[]) => T) | undefined, ...args: any[]): T
 /** Host list&lt;u8&gt; / payload: accept Uint8Array; some bindings surface Latin-1 string bytes. */
 function hostPayloadToBytes(result: unknown): Uint8Array {
   if (result instanceof Uint8Array) return result;
+  // Cross-realm ArrayBufferView check: jco componentize-js returns list<u8> as a Uint8Array
+  // from a different JS realm inside the WASM component, so instanceof fails. Use isView() instead.
+  if (ArrayBuffer.isView(result)) {
+    const v = result as ArrayBufferView;
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  if (result instanceof ArrayBuffer) {
+    return new Uint8Array(result);
+  }
   if (typeof result === 'string') {
     const out = new Uint8Array(result.length);
     for (let i = 0; i < result.length; i++) out[i] = result.charCodeAt(i) & 0xff;
@@ -373,10 +393,22 @@ export class Host {
   // Key-Value Store
   // ========================================================================
 
-  kvGet(key: string): string { return safeCall(hostKvGet, key) as string; }
-  kvPut(key: string, value: string): string { return safeCall(hostKvPut, key, value) as string; }
-  kvDelete(key: string): string { return safeCall(hostKvDelete, key) as string; }
-  kvList(prefix: string): string { return safeCall(hostKvList, prefix) as string; }
+  kvGet(key: string): string {
+    if (typeof hostKvGet !== 'function') return '';
+    try { return decodeWitPayloadUtf8(hostKvGet(key)); } catch (e) { return `ERROR:${e}`; }
+  }
+  kvPut(key: string, value: string): string {
+    if (typeof hostKvPut !== 'function') return '';
+    try { hostKvPut(key, encodeWitPayloadUtf8(value)); return ''; } catch (e) { return `ERROR:${e}`; }
+  }
+  kvDelete(key: string): string {
+    if (typeof hostKvDelete !== 'function') return '';
+    try { hostKvDelete(key); return ''; } catch (e) { return `ERROR:${e}`; }
+  }
+  kvList(prefix: string): string {
+    if (typeof hostKvList !== 'function') return '[]';
+    try { return JSON.stringify(hostKvList(prefix)); } catch (e) { return `ERROR:${e}`; }
+  }
 
   // ========================================================================
   // TupleSpace (protobuf WriteRequest / ReadRequest / ReadResponse wire bytes)
@@ -469,11 +501,17 @@ export class Host {
   }
 
   createShardGroup(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostCreateShardGroup, JSON.stringify(request)) as string;
+    const reqBytes = encodeCreateShardGroupRequest(request);
+    const result = safeCall(hostCreateShardGroup, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_actor_ids: [] };
+    const decoded = decodeCreateShardGroupResponse(bytes);
+    // Flatten: expose group fields at top level for actor convenience
+    const group = decoded.group as Record<string, unknown> ?? {};
+    return { ...group, ...decoded };
   }
 
   bulkUpdateShardGroup(request: Record<string, unknown>): Record<string, unknown> {
@@ -493,11 +531,14 @@ export class Host {
   }
 
   scatterGather(request: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostScatterGather, JSON.stringify(request)) as string;
+    const reqBytes = encodeScatterGatherRequest(request);
+    const result = safeCall(hostScatterGather, reqBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { shard_responses: [] };
+    return decodeScatterGatherResponse(bytes);
   }
 
   broadcastShardGroup(request: Record<string, unknown>): Record<string, unknown> {
@@ -541,19 +582,34 @@ export class Host {
   }
 
   applicationMetricsAdd(applicationId: string, metrics: Record<string, unknown>): Record<string, unknown> {
-    const result = safeCall(hostApplicationMetricsAdd, applicationId, JSON.stringify(metrics)) as string;
+    const metricsBytes = encodeApplicationMetrics(metrics);
+    const result = safeCall(hostApplicationMetricsAdd, applicationId, metricsBytes) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return {};
+    try { return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>; } catch { return {}; }
+  }
+
+  applicationGetMetrics(applicationId: string, nodeId: string): Record<string, unknown> {
+    const result = safeCall(hostApplicationGetMetrics, applicationId, nodeId) as unknown;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return {};
+    return decodeApplicationMetrics(bytes);
   }
 
   applicationGetStatus(applicationId: string, nodeId: string): Record<string, unknown> {
-    const result = safeCall(hostApplicationGetStatus, applicationId, nodeId) as string;
+    const result = safeCall(hostApplicationGetStatus, applicationId, nodeId) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as Record<string, unknown>;
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) return { node_id: nodeId, node_address: '', application: null };
+    return decodeGetApplicationStatusResponse(bytes);
   }
 
   /**

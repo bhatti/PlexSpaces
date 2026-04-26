@@ -1213,11 +1213,13 @@ impl NodeServiceImpl {
             if Self::looks_like_address(entry) {
                 let address_key = canonical_node_address_key(entry);
                 if local_address_keys.iter().any(|key| key == &address_key) {
-                    info!(
-                        entry = %entry,
-                        local_node_id = %self.local_node_id,
-                        "Seed node address resolves to local node, skipping self registration"
-                    );
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
+                            entry = %entry,
+                            local_node_id = %self.local_node_id,
+                            "Seed node address resolves to local node, skipping self registration"
+                        );
+                    }
                     continue;
                 }
             }

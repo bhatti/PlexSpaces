@@ -53,6 +53,8 @@ pub use controller::ApplicationController;
 // Re-export for backward compatibility
 pub use plexspaces_actor::ProtoSupervisorBuilder as SupervisorBuilder;
 
+pub mod child_spec_util;
+
 // Application implementations
 pub mod application_impl;
 pub mod application_manager_ext;

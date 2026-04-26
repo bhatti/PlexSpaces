@@ -118,6 +118,80 @@
 #![warn(clippy::all)]
 
 use async_trait::async_trait;
+
+fn parse_spawn_init_state(
+    initial_state: &[u8],
+) -> (
+    Option<String>,
+    std::collections::HashMap<String, String>,
+) {
+    let init_payload = serde_json::from_slice::<serde_json::Value>(initial_state).ok();
+    let requested_role = init_payload.as_ref().and_then(|value| {
+        value
+            .get("role")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                value
+                    .get("declaration_name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                value
+                    .get("config")
+                    .and_then(|cfg| cfg.get("role"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+    });
+    let args = init_payload
+        .as_ref()
+        .and_then(|value| {
+            value
+                .get("args")
+                .and_then(|args| args.as_object())
+                .map(|args| {
+                    args.iter()
+                        .map(|(k, v)| {
+                            let s = match v {
+                                serde_json::Value::String(s) => s.clone(),
+                                _ => v.to_string(),
+                            };
+                            (k.clone(), s)
+                        })
+                        .collect()
+                })
+                .or_else(|| {
+                    value.as_object().map(|obj| {
+                        obj.iter()
+                            .filter(|(k, _)| {
+                                !matches!(
+                                    k.as_str(),
+                                    "actor_id"
+                                        | "actor_type"
+                                        | "declaration_name"
+                                        | "behavior_kind"
+                                        | "args"
+                                        | "config"
+                                ) && !k.starts_with("__")
+                            })
+                            .filter_map(|(k, v)| match v {
+                                serde_json::Value::String(s) => Some((k.clone(), s.clone())),
+                                serde_json::Value::Number(n) => Some((k.clone(), n.to_string())),
+                                serde_json::Value::Bool(b) => Some((k.clone(), b.to_string())),
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                })
+        })
+        .unwrap_or_default();
+    (requested_role, args)
+}
 use futures::future::join_all;
 use serde::Deserialize;
 use std::pin::Pin;
@@ -149,6 +223,7 @@ use plexspaces_proto::actor::v1::{
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
     ActorDownNotification,
+    ActorState,
     AllReduceShardGroupRequest,
     AllReduceShardGroupResponse,
     AskReplyRequest,
@@ -166,8 +241,11 @@ use plexspaces_proto::actor::v1::{
     CreateShardGroupResponse,
     DeleteActorRequest,
     DeleteShardGroupRequest,
+    DemonitorActorRequest,
     GetActorRequest,
     GetActorResponse,
+    GetActorStatesRequest,
+    GetActorStatesResponse,
     GetShardGroupRequest,
     GetShardGroupResponse,
     LinkActorRequest,
@@ -259,6 +337,10 @@ impl ActorServiceImpl {
         }
     }
 
+    pub fn service_locator(&self) -> Arc<ServiceLocatorImpl> {
+        self.service_locator.clone()
+    }
+
     fn build_canonical_actor_id(
         &self,
         name: &str,
@@ -322,60 +404,123 @@ impl ActorServiceImpl {
         }
 
         let requested_namespace = ctx.namespace().to_string();
-        let (instance_id, simple_actor_type) = if let Some((actor_type_part, instance_id_part)) =
-            requested_actor_type.split_once(':')
-        {
-            (instance_id_part.to_string(), actor_type_part.to_string())
-        } else {
-            (
-                ulid::Ulid::new().to_string(),
-                requested_actor_type.to_string(),
-            )
+
+        // HTTP clients address actors in two formats:
+        //   "instance_name"            → address is the instance name (no actor_type hint)
+        //   "actor_type:instance_name" → explicit type and name; empty name means anonymous
+        //
+        // Parse into (actor_type_hint, instance_name_opt):
+        //   - actor_type_hint  = the type segment (or the whole string when no colon)
+        //   - instance_name_opt = explicit instance name, or None when not specified
+        let (actor_type_hint, instance_name_opt) =
+            if let Some((type_part, name_part)) = requested_actor_type.split_once(':') {
+                // "type:name" format — name may be empty (anonymous instance request)
+                (
+                    type_part.to_string(),
+                    if name_part.is_empty() {
+                        None
+                    } else {
+                        Some(name_part.to_string())
+                    },
+                )
+            } else {
+                // bare address — treat as instance name; type resolved via reverse index below
+                (requested_actor_type.to_string(), None)
+            };
+
+        // Resolve the actor_type (from reverse index if needed) before building any ActorId.
+        // VirtualActorManager is keyed by actor_type; the reverse index maps instance_name → actor_type.
+        // resolve_actor_type_for_name returns actor_type_hint unchanged when no mapping exists
+        // (standalone actors where name == actor_type) or when actor_type_hint IS the actor_type.
+        let actor_type = virtual_actor_manager
+            .resolve_actor_type_for_name(&requested_namespace, &actor_type_hint)
+            .await;
+
+        // Determine the instance name:
+        //   - Explicit name from "type:name" format → use as-is
+        //   - No explicit name but bare address matches a known instance → use the bare address
+        //   - No explicit name and "type:" format (anonymous request) → generate ULID
+        let actor_name = match instance_name_opt {
+            Some(name) => name,
+            None => {
+                // bare address: if it differs from the resolved actor_type, it IS the instance name
+                // (e.g. "inference_worker_a" resolved to actor_type "inference_worker")
+                if actor_type_hint != actor_type {
+                    actor_type_hint.clone()
+                } else {
+                    // actor_type_hint == actor_type: client addressed by type alone.
+                    // Check if there is already an active instance keyed by this name.
+                    // If yes, return it. If no, generate a ULID for a new anonymous instance.
+                    let tentative_id = self.build_canonical_actor_id(
+                        &actor_type_hint,
+                        &actor_type,
+                        &requested_namespace,
+                        &self.local_node_id,
+                    )?;
+                    if virtual_actor_manager
+                        .get_metadata(&tentative_id)
+                        .await
+                        .is_some()
+                    {
+                        return Ok(tentative_id.to_string());
+                    }
+                    // No existing singleton — generate ULID for a new anonymous instance
+                    ulid::Ulid::new().to_string()
+                }
+            }
         };
 
-        let requested_actor_id = self.build_canonical_actor_id(
-            &instance_id,
-            &simple_actor_type,
-            &requested_namespace,
-            &self.local_node_id,
-        )?;
-
-        if virtual_actor_manager
-            .get_metadata(&requested_actor_id)
-            .await
-            .is_some()
-        {
-            return Ok(requested_actor_id.to_string());
-        }
-
-        let type_metadata = virtual_actor_manager
-            .get_virtual_actor_type(&simple_actor_type)
-            .await
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                    requested_actor_type,
-                    ctx.tenant_id(),
-                    ctx.namespace()
-                ))
-            })?;
+        let definition_metadata = virtual_actor_manager
+            .get_virtual_actor_definition(&requested_namespace, &actor_type_hint)
+            .await;
+        let type_metadata = if let Some(metadata) = definition_metadata.clone() {
+            metadata
+        } else {
+            virtual_actor_manager
+                .get_virtual_actor_type(&actor_type)
+                .await
+                .ok_or_else(|| {
+                    Status::not_found(format!(
+                        "No actors found for type '{}' in tenant '{}', namespace '{}'",
+                        requested_actor_type,
+                        ctx.tenant_id(),
+                        ctx.namespace()
+                    ))
+                })?
+        };
 
         let target_actor_id = self.build_canonical_actor_id(
-            &instance_id,
-            &simple_actor_type,
-            &type_metadata.namespace,
+            &actor_name, // ActorId.name  — instance name
+            &actor_type, // ActorId.actor_type — behavior class
+            type_metadata.namespace(),
             &self.local_node_id,
         )?;
+
+        if let Some(metadata) = definition_metadata {
+            virtual_actor_manager
+                .prime_instance_from_definition(&target_actor_id, &metadata)
+                .await;
+        }
 
         Ok(target_actor_id.to_string())
     }
 
-    async fn canonical_actor_id_from_client_target(
+    pub async fn canonical_actor_id_from_client_target(
         &self,
         ctx: &RequestContext,
         requested_actor_type: &str,
     ) -> Option<String> {
         if requested_actor_type.contains("//") {
+            // Canonical actor ID passed directly — prime instance from named definition
+            // so reactivation after explicit stop re-derives init from declaration args.
+            if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(requested_actor_type) {
+                if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                    let name = actor_id.name();
+                    if let Some(def) = manager.get_virtual_actor_definition(actor_id.namespace(), name).await {
+                        manager.prime_instance_from_definition(&actor_id, &def).await;
+                    }
+                }
+            }
             return Some(requested_actor_type.to_string());
         }
 
@@ -387,26 +532,94 @@ impl ActorServiceImpl {
             return resolved;
         }
 
-        let (actor_type, base_actor_id) = requested_actor_type.split_once(':')?;
-        if actor_type.is_empty() || base_actor_id.is_empty() {
+        let (left, right) = requested_actor_type.split_once(':')?;
+        if left.is_empty() || right.is_empty() {
             return None;
         }
 
-        let namespace = if let Some(virtual_actor_manager) =
-            self.service_locator.virtual_actor_manager().await
-        {
-            virtual_actor_manager
-                .get_virtual_actor_type(actor_type)
-                .await
-                .map(|metadata| metadata.namespace)
-                .unwrap_or_else(|| ctx.namespace().to_string())
+        let virtual_actor_manager = self.service_locator.virtual_actor_manager().await;
+        let namespace = ctx.namespace().to_string();
+
+        // Step 1: O(1) — try left=instance_name, right=actor_type direct canonical lookup.
+        // Build the canonical ID and check if the actor is already live in the registry.
+        if let Ok(candidate_id) = self.build_canonical_actor_id(left, right, &namespace, &self.local_node_id) {
+            if let Some(registry) = self.service_locator.actor_registry().await {
+                if registry.lookup_actor_in_scope(ctx.tenant_id(), &namespace, &candidate_id).await.is_some() {
+                    return Some(candidate_id.to_string());
+                }
+            }
+        }
+
+        // Step 2: O(n) — discover live actors of type `right`, find one whose name matches `left`.
+        // Handles cases where actor_type is the right side and multiple instances exist.
+        if let Some(registry) = self.service_locator.actor_registry().await {
+            let actor_ids = registry.discover_actors_by_type(ctx, right).await;
+            if let Some(live_id) = actor_ids.iter().find(|id| {
+                id.name() == left && id.namespace() == namespace
+            }) {
+                return Some(live_id.to_string());
+            }
+        }
+
+        // Step 3: virtual actor definition name lookup.
+        // Interpret left=definition_name (maps to actor_type via name_to_actor_type),
+        // right=instance_id (the instance name used in the canonical actor ID).
+        let definition_metadata = if let Some(manager) = &virtual_actor_manager {
+            manager.get_virtual_actor_definition(&namespace, left).await
         } else {
-            ctx.namespace().to_string()
+            None
         };
 
-        self.build_canonical_actor_id(base_actor_id, actor_type, &namespace, &self.local_node_id)
-            .ok()
-            .map(|actor_id| actor_id.to_string())
+        if let Some(ref def_meta) = definition_metadata {
+            let def_ns = def_meta.namespace().to_string();
+            let resolved_actor_type = if let Some(manager) = &virtual_actor_manager {
+                manager.resolve_actor_type_for_name(&def_ns, left).await
+            } else {
+                left.to_string()
+            };
+            let actor_id = self
+                .build_canonical_actor_id(right, &resolved_actor_type, &def_ns, &self.local_node_id)
+                .ok()?;
+            if let Some(manager) = virtual_actor_manager {
+                manager.prime_instance_from_definition(&actor_id, def_meta).await;
+            }
+            return Some(actor_id.to_string());
+        }
+
+        // Step 4: name:actor_type with no live actor and no definition — build canonical directly
+        // and prime from type-level spec if available.
+        let actor_id = self
+            .build_canonical_actor_id(left, right, &namespace, &self.local_node_id)
+            .ok()?;
+
+        if let Some(manager) = &virtual_actor_manager {
+            if let Some(type_meta) = manager.get_virtual_actor_type(right).await {
+                manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+            }
+        }
+
+        Some(actor_id.to_string())
+    }
+
+    async fn canonical_actor_id_for_runtime_target(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &str,
+    ) -> Result<String, String> {
+        if actor_id.contains("//") {
+            return Ok(actor_id.to_string());
+        }
+
+        self.canonical_actor_id_from_client_target(ctx, actor_id)
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "Failed to resolve actor target '{}' in tenant '{}', namespace '{}'",
+                    actor_id,
+                    ctx.tenant_id(),
+                    ctx.namespace()
+                )
+            })
     }
 
     fn duration_from_proto(duration: Option<prost_types::Duration>) -> Option<Duration> {
@@ -632,6 +845,33 @@ impl ActorServiceImpl {
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
+        let requested_actor_type = actor_type.to_string();
+        let (requested_role, mut init_args) = parse_spawn_init_state(&initial_state);
+        let resolved_actor_type = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+            manager
+                .resolve_actor_type_for_name(ctx.namespace(), &requested_actor_type)
+                .await
+        } else {
+            requested_actor_type.clone()
+        };
+        let role = if let Some(role) = requested_role {
+            role
+        } else if resolved_actor_type != requested_actor_type {
+            requested_actor_type.clone()
+        } else {
+            String::new()
+        };
+        if init_args.is_empty() && !role.is_empty() {
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                if let Some(definition) = manager
+                    .get_virtual_actor_definition(ctx.namespace(), &role)
+                    .await
+                {
+                    init_args = definition.spec.args;
+                }
+            }
+        }
+
         // Public/client-facing spawn takes a base actor id.
         // The framework owns canonical actor-id construction so callers do not have to
         // assemble `{id}//{actor_type}::{namespace}@{node_id}` themselves.
@@ -645,7 +885,7 @@ impl ActorServiceImpl {
             }
             self.build_canonical_actor_id(
                 parsed.name(),
-                actor_type,
+                &resolved_actor_type,
                 if parsed.namespace().is_empty() {
                     ctx.namespace()
                 } else {
@@ -657,7 +897,7 @@ impl ActorServiceImpl {
         } else {
             self.build_canonical_actor_id(
                 actor_id,
-                actor_type,
+                &resolved_actor_type,
                 ctx.namespace(),
                 &self.local_node_id,
             )
@@ -672,21 +912,26 @@ impl ActorServiceImpl {
                 local_actor_id
             ))?;
 
-        // Use ActorFactory to spawn actor
-        // ActorFactory returns MessageSender, but we need ActorRefImpl
-        // The actor is already registered in ActorRegistry, so we can create ActorRefImpl
-        // that uses MessageSender internally
-        actor_factory
-            .spawn_actor(
-                &ctx,
-                &local_actor_id,
-                actor_type,
-                initial_state,
+        // Use ActorFactory to spawn actor via ActorSpawnSpec
+        let spawn_spec = {
+            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_proto::common::v1::ActorIdentity;
+            ActorSpawnSpec {
+                identity: Some(ActorIdentity {
+                    name: local_actor_id.name().to_string(),
+                    actor_type: resolved_actor_type.clone(),
+                }),
+                role,
+                namespace: ctx.namespace().to_string(),
+                tenant_id: ctx.tenant_id().to_string(),
+                behavior_kind: String::new(),
+                args: init_args,
+                facets: vec![],
                 config,
                 labels,
-                vec![], // facets (empty - facets should be attached via config or separate API)
-            )
-            .await?;
+            }
+        };
+        actor_factory.spawn_actor(ctx, &spawn_spec, vec![]).await?;
 
         // Actor is now spawned and registered - try to create ActorRefImpl::local() if mailbox available
         let registry = self.get_actor_registry().await;
@@ -716,6 +961,7 @@ impl ActorServiceImpl {
         &self,
         actor_id: &str,
         message: Message,
+        routing_ctx: Option<&RequestContext>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -803,10 +1049,15 @@ impl ActorServiceImpl {
         // `actor_id` MUST be a full canonical ID. gRPC handlers resolve type names to canonical
         // IDs at the transport boundary; WASM actors must supply canonical IDs from PGs or config.
         // Derive namespace from sender's canonical ID so route_message can build a valid
-        // temporary-sender ActorId when needed.
-        let ctx = ActorId::from_canonical(&message.sender_id)
-            .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
-            .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
+        // temporary-sender ActorId when needed — unless an explicit routing context was supplied
+        // (e.g. `__DOWN__` replaying the monitor-establishing scope).
+        let ctx = routing_ctx.cloned().unwrap_or_else(|| {
+            ActorId::from_canonical(&message.sender_id)
+                .map(|id| {
+                    RequestContext::new_without_auth(String::new(), id.namespace().to_string())
+                })
+                .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()))
+        });
 
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -814,8 +1065,12 @@ impl ActorServiceImpl {
                 message.id, actor_id
             );
         }
+        let routed_actor_id = self
+            .canonical_actor_id_for_runtime_target(&ctx, actor_id)
+            .await
+            .map_err(|e| format!("Failed to resolve actor target: {}", e))?;
         let (msg_id, _) = self
-            .route_message(ctx, actor_id, message, false, None)
+            .route_message(ctx, &routed_actor_id, message, false, None)
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -848,8 +1103,12 @@ impl ActorServiceImpl {
             );
         }
 
+        let routed_actor_id = self
+            .canonical_actor_id_for_runtime_target(&ctx, actor_id)
+            .await
+            .map_err(|e| format!("Failed to resolve actor target: {}", e))?;
         let target_actor_id = self
-            .parse_canonical_actor_id(actor_id)
+            .parse_canonical_actor_id(&routed_actor_id)
             .map_err(|e| e.to_string())?;
         let node_id = target_actor_id.node_id().to_string();
 
@@ -886,11 +1145,11 @@ impl ActorServiceImpl {
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(
                     "🟪 [ACTOR_SERVICE::send_message_and_wait] REMOTE: message_id={}, actor_id={}, calling route_message",
-                    message.id, actor_id
+                    message.id, routed_actor_id
                 );
             }
             let (_, response) = self
-                .route_message(ctx, actor_id, message, true, timeout)
+                .route_message(ctx, &routed_actor_id, message, true, timeout)
                 .await
                 .map_err(|e| format!("Failed to send message and wait: {}", e))?;
 
@@ -1052,11 +1311,11 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
 
     async fn send(
         &self,
-        _ctx: &RequestContext,
+        ctx: &RequestContext,
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.send_message(actor_id, message).await
+        self.send_message(actor_id, message, Some(ctx)).await
     }
 
     async fn send_and_wait(
@@ -1066,7 +1325,8 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
         message: Message,
         timeout: Option<std::time::Duration>,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-        self.send_message_and_wait(actor_id, message, timeout, ctx.clone()).await
+        self.send_message_and_wait(actor_id, message, timeout, ctx.clone())
+            .await
     }
 
     async fn create_shard_group(
@@ -1258,7 +1518,6 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
         }
         Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { results })
     }
-
 }
 
 /// Implement Service trait for ActorServiceImpl (for ServiceLocator registration)
@@ -1492,9 +1751,25 @@ impl ActorServiceTrait for ActorServiceImpl {
         // Clone values before using them (needed for both spawn_actor and proto_actor)
         let actor_type = req.actor_type.clone();
         let initial_state = req.initial_state.clone();
+        let (requested_role_from_init, mut init_args) = parse_spawn_init_state(&initial_state);
         let config = req.config.clone();
         let labels = req.labels.clone();
         let facets = req.facets.clone();
+        let effective_role = if req.role.is_empty() {
+            requested_role_from_init.unwrap_or_default()
+        } else {
+            req.role.clone()
+        };
+        if init_args.is_empty() && !effective_role.is_empty() {
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                if let Some(definition) = manager
+                    .get_virtual_actor_definition(effective_namespace, &effective_role)
+                    .await
+                {
+                    init_args = definition.spec.args;
+                }
+            }
+        }
 
         // Log facets for observability
         let facet_count = facets.len();
@@ -1542,17 +1817,27 @@ impl ActorServiceTrait for ActorServiceImpl {
             self.service_locator.get_actor_factory().await;
 
         let spawned_actor_ref = if let Some(factory) = actor_factory_opt {
-            // Spawn actor using ActorFactory with facets
+            // Spawn actor using ActorFactory via ActorSpawnSpec
+            let spawn_spec = {
+                use plexspaces_core::ActorSpawnSpec;
+                use plexspaces_proto::common::v1::ActorIdentity;
+                ActorSpawnSpec {
+                    identity: Some(ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: actor_type.clone(),
+                    }),
+                    role: effective_role,
+                    namespace: effective_ctx.namespace().to_string(),
+                    tenant_id: effective_ctx.tenant_id().to_string(),
+                    behavior_kind: String::new(),
+                    args: init_args,
+                    facets: facets.clone(),
+                    config: config.clone(),
+                    labels: labels.clone(),
+                }
+            };
             let spawned_actor_ref = factory
-                .spawn_actor(
-                    &effective_ctx,
-                    &actor_id,
-                    &actor_type,
-                    initial_state.clone(),
-                    config.clone(),
-                    labels.clone(),
-                    facet_boxes, // Pass converted facets
-                )
+                .spawn_actor(&effective_ctx, &spawn_spec, facet_boxes)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
 
@@ -1614,9 +1899,53 @@ impl ActorServiceTrait for ActorServiceImpl {
 
     async fn delete_actor(
         &self,
-        _request: Request<DeleteActorRequest>,
+        request: Request<DeleteActorRequest>,
     ) -> Result<Response<Empty>, Status> {
-        Err(Status::unimplemented("delete_actor not yet implemented"))
+        self.check_accepting_requests().await?;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() {
+            ctx.namespace().to_string()
+        } else {
+            req.namespace.clone()
+        };
+        let routing_ctx =
+            RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace);
+
+        if req.actor_id.is_empty() {
+            return Err(Status::invalid_argument("actor_id is required"));
+        }
+
+        // Resolve name:type shorthand or canonical ID to a fully-qualified canonical ID.
+        let canonical_id = self
+            .canonical_actor_id_from_client_target(&routing_ctx, &req.actor_id)
+            .await
+            .unwrap_or_else(|| req.actor_id.clone());
+
+        let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid actor_id '{}': {}", req.actor_id, e)))?;
+
+        let factory = self
+            .service_locator
+            .get_actor_factory()
+            .await
+            .ok_or_else(|| Status::internal("ActorFactory not available"))?;
+
+        factory
+            .stop_actor(&routing_ctx, &actor_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to stop actor: {}", e)))?;
+
+        Ok(Response::new(Empty {}))
     }
 
     // ========================================================================
@@ -1654,32 +1983,206 @@ impl ActorServiceTrait for ActorServiceImpl {
 
     async fn monitor_actor(
         &self,
-        _request: Request<MonitorActorRequest>,
+        request: Request<MonitorActorRequest>,
     ) -> Result<Response<MonitorActorResponse>, Status> {
-        Err(Status::unimplemented("monitor_actor not yet implemented"))
+        self.check_accepting_requests().await?;
+        let metadata = request.metadata().clone();
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let routing_ctx = crate::request_context_from_grpc_request(
+            &metadata,
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
+        let req = request.into_inner();
+
+        let target_id = self.parse_canonical_actor_id(&req.actor_id)?;
+        let supervisor_id = self
+            .parse_canonical_actor_id(&req.supervisor_id)
+            .map_err(|_| Status::invalid_argument("Invalid supervisor_id"))?;
+
+        let monitor_ref = ulid::Ulid::new().to_string();
+        let registry = self.get_actor_registry().await;
+
+        registry
+            .monitor(
+                &target_id,
+                &supervisor_id,
+                monitor_ref.clone(),
+                &routing_ctx,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("monitor failed: {}", e)))?;
+
+        Ok(Response::new(MonitorActorResponse { monitor_ref }))
+    }
+
+    async fn demonitor_actor(
+        &self,
+        request: Request<DemonitorActorRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        self.check_accepting_requests().await?;
+        let metadata = request.metadata().clone();
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let _ctx = crate::request_context_from_grpc_request(
+            &metadata,
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+
+        let target_id = self.parse_canonical_actor_id(&req.actor_id)?;
+        let supervisor_id = self
+            .parse_canonical_actor_id(&req.supervisor_id)
+            .map_err(|_| Status::invalid_argument("Invalid supervisor_id"))?;
+
+        let registry = self.get_actor_registry().await;
+        let monitors = registry.actor_monitor().get_monitors(&target_id).await;
+        if let Some(link) = monitors.iter().find(|l| l.monitor_ref == req.monitor_ref) {
+            if link.monitoring_actor_id != supervisor_id {
+                return Err(Status::permission_denied(
+                    "monitor_ref is not owned by supervisor_id",
+                ));
+            }
+        }
+
+        registry
+            .demonitor(&target_id, &supervisor_id, &req.monitor_ref)
+            .await
+            .map_err(|e| Status::internal(format!("demonitor failed: {}", e)))?;
+
+        Ok(Response::new(Empty {}))
     }
 
     async fn notify_actor_down(
         &self,
-        _request: Request<ActorDownNotification>,
+        request: Request<ActorDownNotification>,
     ) -> Result<Response<Empty>, Status> {
-        Err(Status::unimplemented(
-            "notify_actor_down not yet implemented",
-        ))
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+
+        let supervisor_id = self
+            .parse_canonical_actor_id(&req.supervisor_id)
+            .map_err(|_| Status::invalid_argument("Invalid supervisor_id"))?;
+        let terminated_id = self
+            .parse_canonical_actor_id(&req.actor_id)
+            .map_err(|_| Status::invalid_argument("Invalid actor_id"))?;
+
+        let registry = self.get_actor_registry().await;
+
+        if req.is_link_signal && req.reason != "normal" && req.reason != "shutdown" {
+            // Link EXIT signal: kill the linked actor on this node.
+            let linked_reason = plexspaces_core::ExitReason::Linked {
+                actor_id: terminated_id,
+                reason: Box::new(plexspaces_core::ExitReason::Error(req.reason)),
+            };
+            registry
+                .handle_actor_termination(&supervisor_id, linked_reason)
+                .await;
+        } else {
+            // Monitor DOWN: deliver __DOWN__ message to the supervisor's mailbox.
+            let down_msg = plexspaces_core::actor_monitor::create_down_message(
+                &terminated_id,
+                &req.monitor_ref,
+                &req.reason,
+            );
+            registry
+                .tell(&supervisor_id, down_msg)
+                .await
+                .map_err(|e| Status::internal(format!("tell failed: {}", e)))?;
+        }
+
+        Ok(Response::new(Empty {}))
     }
 
     async fn link_actor(
         &self,
-        _request: Request<LinkActorRequest>,
+        request: Request<LinkActorRequest>,
     ) -> Result<Response<LinkActorResponse>, Status> {
-        Err(Status::unimplemented("link_actor not yet implemented"))
+        self.check_accepting_requests().await?;
+        let metadata = request.metadata().clone();
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let _ctx = crate::request_context_from_grpc_request(
+            &metadata,
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+
+        let a = self.parse_canonical_actor_id(&req.actor_id)?;
+        let b = self.parse_canonical_actor_id(&req.linked_actor_id)?;
+
+        self.get_actor_registry()
+            .await
+            .link(&a, &b)
+            .await
+            .map_err(|e| Status::internal(format!("link failed: {}", e)))?;
+
+        Ok(Response::new(LinkActorResponse { success: true }))
     }
 
     async fn unlink_actor(
         &self,
-        _request: Request<UnlinkActorRequest>,
+        request: Request<UnlinkActorRequest>,
     ) -> Result<Response<UnlinkActorResponse>, Status> {
-        Err(Status::unimplemented("unlink_actor not yet implemented"))
+        self.check_accepting_requests().await?;
+        let metadata = request.metadata().clone();
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let _ctx = crate::request_context_from_grpc_request(
+            &metadata,
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+
+        let a = self.parse_canonical_actor_id(&req.actor_id)?;
+        let b = self.parse_canonical_actor_id(&req.linked_actor_id)?;
+
+        self.get_actor_registry()
+            .await
+            .unlink(&a, &b)
+            .await
+            .map_err(|e| Status::internal(format!("unlink failed: {}", e)))?;
+
+        Ok(Response::new(UnlinkActorResponse { success: true }))
+    }
+
+    async fn get_actor_states(
+        &self,
+        request: Request<GetActorStatesRequest>,
+    ) -> Result<Response<GetActorStatesResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let req = request.into_inner();
+        let registry = self.get_actor_registry().await;
+
+        let mut states = HashMap::new();
+        for actor_id_str in &req.actor_ids {
+            let actor_id = self.parse_canonical_actor_id(actor_id_str)?;
+            // Use the actor's local_state_handle (via ActorRegistry::get_actor_state) for
+            // authoritative state, falling back to registration status.
+            let state = if let Some(proto_state) = registry.get_actor_state(&actor_id).await {
+                proto_state as i32
+            } else if registry.is_actor_registered(&actor_id).await {
+                ActorState::ActorStateInactive as i32
+            } else {
+                ActorState::ActorStateTerminated as i32
+            };
+            states.insert(actor_id_str.clone(), state);
+        }
+
+        Ok(Response::new(GetActorStatesResponse { states }))
     }
 
     async fn check_actor_exists(
@@ -2365,11 +2868,28 @@ impl ActorServiceImpl {
             .await
             .ok_or_else(|| "Actor factory not available".to_string())?;
 
+        // Resolve the declaration name (e.g. "worker") to the actual WASM behavior class
+        // (e.g. "streaming_pipeline_wasm") via the VirtualActorManager name index.
+        // When actor_type is already the behavior class the lookup returns it unchanged.
+        let declaration_name = req.actor_type.clone();
+        let resolved_actor_type = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+            manager.resolve_actor_type_for_name(ctx.namespace(), &req.actor_type).await
+        } else {
+            req.actor_type.clone()
+        };
+        let definition_spec = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+            manager
+                .get_virtual_actor_definition(ctx.namespace(), &declaration_name)
+                .await
+                .map(|metadata| metadata.spec)
+        } else {
+            None
+        };
+
         let mut shard_actor_ids = Vec::with_capacity(shard_count as usize);
 
         for shard_id in 0..shard_count {
             let actor_id_base = format!("{}-{}", group_id, ulid::Ulid::new());
-            let initial_state = req.initial_state.clone();
 
             let mut shard_config = req.shard_config.clone().unwrap_or_default();
             shard_config.actor_groups.push(config.group_id.clone());
@@ -2386,21 +2906,38 @@ impl ActorServiceImpl {
                 let full_id = self
                     .build_canonical_actor_id(
                         &actor_id_base,
-                        &req.actor_type,
+                        &resolved_actor_type,
                         ctx.namespace(),
                         target_node,
                     )
                     .map_err(|e| e.to_string())?;
+
+                let shard_spawn_spec = {
+                    use plexspaces_core::ActorSpawnSpec;
+                    use plexspaces_proto::common::v1::ActorIdentity;
+                    ActorSpawnSpec {
+                        identity: Some(ActorIdentity {
+                            name: full_id.name().to_string(),
+                            actor_type: resolved_actor_type.clone(),
+                        }),
+                        role: declaration_name.clone(),
+                        namespace: ctx.namespace().to_string(),
+                        tenant_id: ctx.tenant_id().to_string(),
+                        behavior_kind: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.behavior_kind.clone())
+                            .unwrap_or_default(),
+                        args: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.args.clone())
+                            .unwrap_or_default(),
+                        facets: vec![],
+                        config: Some(shard_config),
+                        labels: std::collections::HashMap::new(),
+                    }
+                };
                 match actor_factory
-                    .spawn_actor(
-                        &ctx,
-                        &full_id,
-                        &req.actor_type,
-                        initial_state,
-                        Some(shard_config),
-                        std::collections::HashMap::new(),
-                        vec![],
-                    )
+                    .spawn_actor(&ctx, &shard_spawn_spec, vec![])
                     .await
                 {
                     Ok(_sender) => {
@@ -2421,6 +2958,40 @@ impl ActorServiceImpl {
                 // Remote node: resolve channel and call SpawnActor on the target node via gRPC.
                 // On failure we stop only locally-spawned shards; remote shards are left running
                 // (caller may retry or orchestration can terminate them via TerminateActor).
+                let remote_actor_id = self
+                    .build_canonical_actor_id(
+                        &actor_id_base,
+                        &resolved_actor_type,
+                        ctx.namespace(),
+                        target_node,
+                    )
+                    .map_err(|e| e.to_string())?;
+                let remote_spawn_spec = {
+                    use plexspaces_core::ActorSpawnSpec;
+                    use plexspaces_proto::common::v1::ActorIdentity;
+                    ActorSpawnSpec {
+                        identity: Some(ActorIdentity {
+                            name: remote_actor_id.name().to_string(),
+                            actor_type: resolved_actor_type.clone(),
+                        }),
+                        role: declaration_name.clone(),
+                        namespace: ctx.namespace().to_string(),
+                        tenant_id: ctx.tenant_id().to_string(),
+                        behavior_kind: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.behavior_kind.clone())
+                            .unwrap_or_default(),
+                        args: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.args.clone())
+                            .unwrap_or_default(),
+                        facets: vec![],
+                        config: Some(shard_config.clone()),
+                        labels: std::collections::HashMap::new(),
+                    }
+                };
+                let remote_initial_state =
+                    plexspaces_core::wasm_init_payload(&remote_spawn_spec, &remote_actor_id);
                 let channel = self
                     .service_locator
                     .get_actor_service_client(target_node)
@@ -2428,14 +2999,15 @@ impl ActorServiceImpl {
                     .map_err(|e| format!("Failed to get client for node {}: {}", target_node, e))?;
                 let mut client = plexspaces_proto::ActorServiceClient::new(channel);
                 let spawn_req = SpawnActorRequest {
-                    actor_type: req.actor_type.clone(),
+                    actor_type: resolved_actor_type.clone(),
                     actor_id: actor_id_base.clone(),
-                    initial_state,
+                    initial_state: remote_initial_state,
                     config: Some(shard_config),
                     labels: std::collections::HashMap::new(),
                     facets: vec![],
                     namespace: ctx.namespace().to_string(),
                     instances_count: 1,
+                    role: declaration_name.clone(),
                 };
                 let spawn_response = client
                     .spawn_actor(tonic::Request::new(spawn_req))
@@ -3789,6 +4361,13 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.monitor_actor(request).await
     }
 
+    async fn demonitor_actor(
+        &self,
+        request: Request<DemonitorActorRequest>,
+    ) -> Result<Response<Empty>, Status> {
+        self.0.demonitor_actor(request).await
+    }
+
     async fn notify_actor_down(
         &self,
         request: Request<ActorDownNotification>,
@@ -3815,6 +4394,13 @@ impl ActorServiceTrait for ActorServiceWrapper {
         request: Request<CheckActorExistsRequest>,
     ) -> Result<Response<CheckActorExistsResponse>, Status> {
         self.0.check_actor_exists(request).await
+    }
+
+    async fn get_actor_states(
+        &self,
+        request: Request<GetActorStatesRequest>,
+    ) -> Result<Response<GetActorStatesResponse>, Status> {
+        self.0.get_actor_states(request).await
     }
 
     async fn ask_reply(
@@ -4472,7 +5058,7 @@ mod tests {
         // ARRANGE
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-        let actor_id = test_actor_id("test", "TestActor", "default", "node1");
+        let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
         let mailbox = Arc::new(
             Mailbox::new(mailbox_config_default(), actor_id.to_string())
@@ -4487,7 +5073,7 @@ mod tests {
             actor_id.clone(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
-            "TestActor",
+            "test_actor",
             "default",
         )
         .await;
@@ -4563,6 +5149,150 @@ mod tests {
         assert_eq!(resolved, Some(actor_id.to_string()));
     }
 
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_name_colon_type_hits_live_actor() {
+        // name:actor_type where actor_type is the right side — O(1) lookup path.
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        let mailbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                "weather//weather_actor_wasm::app-ns@node1".to_string(),
+            )
+            .await
+            .expect("Failed to create mailbox"),
+        );
+        let actor_id = test_actor_id("weather", "weather_actor_wasm", "app-ns", "node1");
+        let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
+
+        register_test_actor(
+            actor_registry,
+            actor_id.clone(),
+            mailbox,
+            service.service_locator.clone(),
+            "weather_actor_wasm",
+            "app-ns",
+        )
+        .await;
+
+        // weather:weather_actor_wasm → direct O(1) hit: weather//weather_actor_wasm::app-ns@node1
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, "weather:weather_actor_wasm")
+            .await;
+
+        assert_eq!(resolved, Some(actor_id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_name_colon_type_no_live_actor_builds_canonical() {
+        // name:actor_type where no live actor exists — falls through to Step 4 direct build.
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
+
+        // No live actor registered. Should build: weather//weather_actor_wasm::app-ns@node1
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, "weather:weather_actor_wasm")
+            .await;
+
+        assert_eq!(
+            resolved,
+            Some("weather//weather_actor_wasm::app-ns@node1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_virtual_definition_name_lookup() {
+        // definition_name:instance_id — left is a virtual actor definition name.
+        // This uses the Step 3 path (definition metadata lookup).
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        // Register virtual actor definition: name="weather", actor_type="weather_actor_wasm"
+        if let Some(manager) = service.service_locator.virtual_actor_manager().await {
+            let spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "weather".to_string(),
+                    actor_type: "weather_actor_wasm".to_string(),
+                }),
+                role: String::new(),
+                namespace: "app-ns".to_string(),
+                tenant_id: String::new(),
+                behavior_kind: "GenServer".to_string(),
+                args: Default::default(),
+                facets: vec![],
+                labels: Default::default(),
+                config: None,
+            };
+            manager.register_virtual_actor_definition(spec).await.unwrap();
+        }
+
+        let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
+
+        // weather:session-1 → definition name "weather" maps to "weather_actor_wasm",
+        // instance name = "session-1" → session-1//weather_actor_wasm::app-ns@node1
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, "weather:session-1")
+            .await;
+
+        assert_eq!(
+            resolved,
+            Some("session-1//weather_actor_wasm::app-ns@node1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_bare_definition_name_lookup() {
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        if let Some(manager) = service.service_locator.virtual_actor_manager().await {
+            let spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "audit-log-test".to_string(),
+                    actor_type: "audit_log_test_wasm".to_string(),
+                }),
+                role: "worker".to_string(),
+                namespace: "audit-log-test".to_string(),
+                tenant_id: String::new(),
+                behavior_kind: "GenEvent".to_string(),
+                args: Default::default(),
+                facets: vec![],
+                labels: Default::default(),
+                config: None,
+            };
+            manager.register_virtual_actor_definition(spec).await.unwrap();
+        }
+
+        let ctx = RequestContext::new_without_auth(String::new(), "audit-log-test".to_string());
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, "audit-log-test")
+            .await;
+
+        assert_eq!(
+            resolved,
+            Some("audit-log-test//audit_log_test_wasm::audit-log-test@node1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_canonical_id_passthrough() {
+        // Canonical actor ID passthrough — already contains //.
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
+
+        let canonical = "weather//weather_actor_wasm::app-ns@node1";
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, canonical)
+            .await;
+
+        assert_eq!(resolved, Some(canonical.to_string()));
+    }
+
     #[test]
     fn test_set_message_receiver_id_uses_canonical_actor_id() {
         let mut message = create_test_message(b"test".to_vec());
@@ -4603,7 +5333,7 @@ mod tests {
         // ARRANGE: Create actor and register it locally
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-        let actor_id = test_actor_id("test", "TestActor", "default", "node1");
+        let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
         let mailbox = Arc::new(
             Mailbox::new(mailbox_config_default(), actor_id.to_string())
@@ -4616,7 +5346,7 @@ mod tests {
             actor_id.clone(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
-            "TestActor",
+            "test_actor",
             "default",
         )
         .await;
@@ -4706,7 +5436,7 @@ mod tests {
         // ARRANGE: Create actor and register it
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-        let actor_id = test_actor_id("test", "TestActor", "default", "node1");
+        let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
         let mailbox = Arc::new(
             Mailbox::new(mailbox_config_default(), actor_id.to_string())
@@ -4719,7 +5449,7 @@ mod tests {
             actor_id.clone(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
-            "TestActor",
+            "test_actor",
             "default",
         )
         .await;
@@ -4756,7 +5486,7 @@ mod tests {
         // ARRANGE
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-        let actor_id = test_actor_id("test", "TestActor", "default", "node1");
+        let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
         let mailbox = Arc::new(
             Mailbox::new(mailbox_config_default(), actor_id.to_string())
@@ -4769,7 +5499,7 @@ mod tests {
             actor_id.clone(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
-            "TestActor",
+            "test_actor",
             "default",
         )
         .await;
@@ -4814,7 +5544,7 @@ mod tests {
         // ARRANGE
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-        let actor_id = test_actor_id("test", "TestActor", "default", "node1");
+        let actor_id = test_actor_id("test", "test_actor", "default", "node1");
 
         let mailbox = Arc::new(
             Mailbox::new(mailbox_config_default(), actor_id.to_string())
@@ -4827,7 +5557,7 @@ mod tests {
             actor_id.clone(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
-            "TestActor",
+            "test_actor",
             "default",
         )
         .await;

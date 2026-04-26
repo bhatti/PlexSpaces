@@ -8,8 +8,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "weather"
-type = "worker"
+name = "weather"
+actor_type = "weather_actor_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

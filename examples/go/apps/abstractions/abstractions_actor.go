@@ -9,7 +9,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -231,20 +230,7 @@ func (a *abstractionsActor) status() string {
 }
 
 func canonicalActorTarget(target string) string {
-	if strings.Contains(target, "@") {
-		return target
-	}
-	parts := strings.SplitN(target, ":", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return target
-	}
-	selfID := host.SelfID()
-	namespace := appApplicationIDFromActorID(selfID)
-	nodeParts := strings.SplitN(selfID, "@", 2)
-	if namespace == "" || len(nodeParts) != 2 || nodeParts[1] == "" {
-		return target
-	}
-	return fmt.Sprintf("%s//%s::%s@%s", parts[1], parts[0], namespace, nodeParts[1])
+	return target
 }
 
 func appApplicationIDFromActorID(actorID string) string {

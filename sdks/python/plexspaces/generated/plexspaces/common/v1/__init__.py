@@ -109,6 +109,27 @@ class ActorId(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
+class ActorIdentity(betterproto.Message):
+    """
+    Declaration-time actor identity (instance name + behavior class).
+
+     Namespace and node_id are supplied at deploy/spawn time to build a full
+     `ActorId`. Client configuration, TOML, and supervision declarations should
+     use this message instead of overloading a single string field.
+    """
+
+    name: str = betterproto.string_field(1)
+    """
+    Unique instance name within the actor type, namespace, and node scope.
+    """
+
+    actor_type: str = betterproto.string_field(2)
+    """
+    Behavior class / registered type (WASM dispatch, VirtualActorManager index).
+    """
+
+
+@dataclass(eq=False, repr=False)
 class ErrorDetail(betterproto.Message):
     """Standard error details"""
 

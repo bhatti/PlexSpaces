@@ -55,6 +55,21 @@ pub struct ActorId {
     #[prost(string, tag="4")]
     pub node_id: ::prost::alloc::string::String,
 }
+/// Declaration-time actor identity (instance name + behavior class).
+///
+/// Namespace and node_id are supplied at deploy/spawn time to build a full
+/// `ActorId`. Client configuration, TOML, and supervision declarations should
+/// use this message instead of overloading a single string field.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActorIdentity {
+    /// Unique instance name within the actor type, namespace, and node scope.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// Behavior class / registered type (WASM dispatch, VirtualActorManager index).
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+}
 /// Standard error details
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

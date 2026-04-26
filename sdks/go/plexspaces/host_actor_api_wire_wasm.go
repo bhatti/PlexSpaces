@@ -359,6 +359,11 @@ func buildQueryPayload(m map[string]any) (msgType string, payload []byte) {
 			mt = op
 		}
 	}
+	if mt != "" {
+		if _, exists := q["message_type"]; !exists {
+			q["message_type"] = mt
+		}
+	}
 	var err error
 	payload, err = json.Marshal(q)
 	if err != nil {
@@ -392,6 +397,11 @@ func buildMapFunctionPayload(m map[string]any) (msgType string, payload []byte, 
 	}
 	if mt == "" {
 		mt = strVal(body["op"])
+	}
+	if mt != "" {
+		if _, exists := body["message_type"]; !exists {
+			body["message_type"] = mt
+		}
 	}
 	var err error
 	payload, err = json.Marshal(body)

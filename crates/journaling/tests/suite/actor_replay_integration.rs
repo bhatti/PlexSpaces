@@ -37,7 +37,7 @@ mod actor_integration_tests {
     /// `ActorStruct::new` uses a stub service locator without an actor registry.
     /// `start` / facet attach register the actor and require a real `ServiceLocator` (same pattern as `plexspaces_actor` unit tests).
     fn test_actor_id(name: &str, namespace: &str) -> ActorId {
-        ActorId::new(name, "Counter", namespace, "test-node").expect("valid actor id")
+        ActorId::new(name, "counter", namespace, "test-node").expect("valid actor id")
     }
 
     async fn actor_with_service_locator(
@@ -98,7 +98,7 @@ mod actor_integration_tests {
         }
 
         fn behavior_type(&self) -> BehaviorType {
-            BehaviorType::Custom("Counter".to_string())
+            BehaviorType::Custom("counter".to_string())
         }
     }
 
@@ -489,7 +489,7 @@ mod actor_integration_tests {
         }
 
         fn behavior_type(&self) -> BehaviorType {
-            BehaviorType::Custom("CounterWrapper".to_string())
+            BehaviorType::Custom("counter_wrapper".to_string())
         }
     }
 

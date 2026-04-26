@@ -1483,6 +1483,7 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
             facets: vec![],
             namespace: "heat-diffusion-rust".to_string(),
             instances_count: 1,
+            role: String::new(),
         }))
         .await
         .expect("remote spawn should succeed")

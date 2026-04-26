@@ -15,8 +15,9 @@ max_restart_window_seconds = 60
 # Service registry actor
 # Facets are defined as an array of inline tables inside each child (matching proto ChildSpec.facets)
 [[supervisor.children]]
-id = "registry"
-type = "worker"
+name = "registry"
+actor_type = "registry_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 

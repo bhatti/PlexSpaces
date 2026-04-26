@@ -333,12 +333,21 @@ async fn create_test_registry_with_actors(
         let message_sender = actor_factory
             .spawn_actor(
                 &ctx,
-                &actor_id,
-                actor_type,                       // Use the provided actor_type
-                vec![],                           // initial_state
-                None,                             // config
-                std::collections::HashMap::new(), // labels
-                vec![],                           // facets
+                &plexspaces_core::ActorSpawnSpec {
+                    identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: actor_type.to_string(),
+                    }),
+                    role: String::new(),
+                    namespace: ctx.namespace().to_string(),
+                    tenant_id: ctx.tenant_id().to_string(),
+                    behavior_kind: String::new(),
+                    args: std::collections::HashMap::new(),
+                    facets: vec![],
+                    config: None,
+                    labels: std::collections::HashMap::new(),
+                },
+                vec![],
             )
             .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))
@@ -441,6 +450,7 @@ fn build_ask_request(
     AskReplyRequest {
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
+        actor_name: String::new(),
         http_method: method.to_string(),
         payload,
         headers: HashMap::new(),
@@ -460,6 +470,7 @@ fn build_send_request(actor_type: &str, payload: Vec<u8>) -> SendMessageRequest 
     SendMessageRequest {
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload,
         headers: HashMap::new(),

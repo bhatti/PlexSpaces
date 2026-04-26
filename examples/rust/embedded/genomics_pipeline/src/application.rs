@@ -37,7 +37,7 @@ use plexspaces_actor::supervisor::{
     SupervisionStrategy,
 };
 use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
-use plexspaces_core::ActorRef as CoreActorRef;
+use plexspaces_core::{ActorId, ActorRef as CoreActorRef};
 use plexspaces_mailbox::{Mailbox, mailbox_config_default, OrderingStrategy, BackpressureStrategy};
 
 /// Genomics Pipeline Application
@@ -61,19 +61,23 @@ pub struct GenomicsPipelineApplication {
     supervisors: Arc<RwLock<Vec<Arc<RwLock<Supervisor>>>>>,
 }
 
+/// Stable supervisor label (opaque string) — not an [`ActorId`], must not match any child instance name.
+fn supervisor_label(pool: &str, node_id: &str) -> String {
+    let safe = node_id.replace([':', '/', '.'], "-");
+    format!("{pool}-supervisor-{safe}")
+}
+
 /// Helper to create a ChildSpec from a sync factory
 fn create_child_spec(
-    id: String,
+    child_actor_id: ActorId,
     factory: Arc<dyn Fn() -> Result<plexspaces_actor::Actor, plexspaces_core::ActorError> + Send + Sync>,
     restart: RestartStrategy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
-    let actor_ref = CoreActorRef::new(id.clone())
-        .expect("Failed to create actor ref");
-    
+    let actor_ref = CoreActorRef::new(child_actor_id.clone()).expect("Failed to create actor ref");
+
     ChildSpec::worker_sync(
-        id.clone(),
-        id.clone(),
+        child_actor_id,
         factory,
         actor_ref,
     )
@@ -144,30 +148,35 @@ impl Application for GenomicsPipelineApplication {
         // Create supervisor for QC pool
         info!("Creating QC supervisor");
         let (qc_supervisor, _) = Supervisor::new(
-            format!("qc-supervisor@{}", node_id),
+            supervisor_label("qc", &node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
             service_locator.clone(),
         );
 
         for i in 0..self.config.worker_pools.qc {
-            let actor_id = format!("qc-{}@{}", i, node_id);
-            let actor_id_for_factory = actor_id.clone();
+            let child_actor_id = ActorId::new(format!("qc-{i}"), "qc_worker", "genomics", &node_id)
+                .map_err(|e| {
+                    ApplicationError::ActorSpawnFailed(format!("qc-{i}"), e.to_string())
+                })?;
+            let child_actor_id_for_factory = child_actor_id.clone();
             let node_id_for_factory = node_id.clone();
             let spec = create_child_spec(
-                actor_id.clone(),
+                child_actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
-                        )
-                    }).expect("Failed to create mailbox");
+                        tokio::runtime::Handle::current().block_on(Mailbox::new(
+                            config,
+                            format!("mailbox-{}", child_actor_id_for_factory.name()),
+                        ))
+                    })
+                    .expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
-                        actor_id_for_factory.clone(),
-                        Box::new(QCWorker::new(actor_id_for_factory.clone())),
+                        child_actor_id_for_factory.clone(),
+                        Box::new(QCWorker::new(child_actor_id_for_factory.name().to_string())),
                         mailbox,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
@@ -177,39 +186,48 @@ impl Application for GenomicsPipelineApplication {
                 RestartStrategy::Permanent,
                 Some(5000),
             );
-            qc_supervisor.add_child(spec).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{:?}", e)))?;
-            info!("Added QC actor: {}", actor_id);
+            qc_supervisor.add_child(spec).await.map_err(|e| {
+                ApplicationError::ActorSpawnFailed(child_actor_id.to_string(), format!("{:?}", e))
+            })?;
+            info!("Added QC actor: {}", child_actor_id);
         }
         supervisors.push(Arc::new(RwLock::new(qc_supervisor)));
 
         // Create supervisor for alignment pool
         info!("Creating alignment supervisor");
         let (alignment_supervisor, _) = Supervisor::new(
-            format!("alignment-supervisor@{}", node_id),
+            supervisor_label("alignment", &node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
             service_locator.clone(),
         );
 
         for i in 0..self.config.worker_pools.alignment {
-            let actor_id = format!("alignment-{}@{}", i, node_id);
-            let actor_id_for_factory = actor_id.clone();
+            let child_actor_id =
+                ActorId::new(format!("alignment-{i}"), "alignment_worker", "genomics", &node_id)
+                    .map_err(|e| {
+                        ApplicationError::ActorSpawnFailed(format!("alignment-{i}"), e.to_string())
+                    })?;
+            let child_actor_id_for_factory = child_actor_id.clone();
             let node_id_for_factory = node_id.clone();
             let spec = create_child_spec(
-                actor_id.clone(),
+                child_actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
-                        )
-                    }).expect("Failed to create mailbox");
+                        tokio::runtime::Handle::current().block_on(Mailbox::new(
+                            config,
+                            format!("mailbox-{}", child_actor_id_for_factory.name()),
+                        ))
+                    })
+                    .expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
-                        actor_id_for_factory.clone(),
-                        Box::new(AlignmentWorker::new(actor_id_for_factory.clone())),
+                        child_actor_id_for_factory.clone(),
+                        Box::new(AlignmentWorker::new(
+                            child_actor_id_for_factory.name().to_string(),
+                        )),
                         mailbox,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
@@ -219,41 +237,51 @@ impl Application for GenomicsPipelineApplication {
                 RestartStrategy::Permanent,
                 Some(5000),
             );
-            alignment_supervisor.add_child(spec).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{:?}", e)))?;
-            info!("Added alignment actor: {}", actor_id);
+            alignment_supervisor.add_child(spec).await.map_err(|e| {
+                ApplicationError::ActorSpawnFailed(child_actor_id.to_string(), format!("{:?}", e))
+            })?;
+            info!("Added alignment actor: {}", child_actor_id);
         }
         supervisors.push(Arc::new(RwLock::new(alignment_supervisor)));
 
         // Create supervisor for variant calling pool
         info!("Creating variant calling supervisor");
         let (variant_supervisor, _) = Supervisor::new(
-            format!("variant-supervisor@{}", node_id),
+            supervisor_label("variant", &node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
             service_locator.clone(),
         );
 
         for i in 0..self.config.worker_pools.chromosome {
-            let actor_id = format!("variant-{}@{}", i, node_id);
+            let child_actor_id =
+                ActorId::new(format!("variant-{i}"), "chromosome_worker", "genomics", &node_id)
+                    .map_err(|e| {
+                        ApplicationError::ActorSpawnFailed(format!("variant-{i}"), e.to_string())
+                    })?;
             let chromosome = format!("chr{}", i + 1);
-            let actor_id_for_factory = actor_id.clone();
+            let child_actor_id_for_factory = child_actor_id.clone();
             let chromosome_for_factory = chromosome.clone();
             let node_id_for_factory = node_id.clone();
             let spec = create_child_spec(
-                actor_id.clone(),
+                child_actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
-                        )
-                    }).expect("Failed to create mailbox");
+                        tokio::runtime::Handle::current().block_on(Mailbox::new(
+                            config,
+                            format!("mailbox-{}", child_actor_id_for_factory.name()),
+                        ))
+                    })
+                    .expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
-                        actor_id_for_factory.clone(),
-                        Box::new(ChromosomeWorker::new(actor_id_for_factory.clone(), chromosome_for_factory.clone())),
+                        child_actor_id_for_factory.clone(),
+                        Box::new(ChromosomeWorker::new(
+                            child_actor_id_for_factory.name().to_string(),
+                            chromosome_for_factory.clone(),
+                        )),
                         mailbox,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
@@ -263,39 +291,51 @@ impl Application for GenomicsPipelineApplication {
                 RestartStrategy::Permanent,
                 Some(5000),
             );
-            variant_supervisor.add_child(spec).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{:?}", e)))?;
-            info!("Added variant calling actor: {} for {}", actor_id, chromosome);
+            variant_supervisor.add_child(spec).await.map_err(|e| {
+                ApplicationError::ActorSpawnFailed(child_actor_id.to_string(), format!("{:?}", e))
+            })?;
+            info!(
+                "Added variant calling actor: {} for {}",
+                child_actor_id, chromosome
+            );
         }
         supervisors.push(Arc::new(RwLock::new(variant_supervisor)));
 
         // Create supervisor for annotation pool
         info!("Creating annotation supervisor");
         let (annotation_supervisor, _) = Supervisor::new(
-            format!("annotation-supervisor@{}", node_id),
+            supervisor_label("annotation", &node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
             service_locator.clone(),
         );
 
         for i in 0..self.config.worker_pools.annotation {
-            let actor_id = format!("annotation-{}@{}", i, node_id);
-            let actor_id_for_factory = actor_id.clone();
+            let child_actor_id =
+                ActorId::new(format!("annotation-{i}"), "annotation_worker", "genomics", &node_id)
+                    .map_err(|e| {
+                        ApplicationError::ActorSpawnFailed(format!("annotation-{i}"), e.to_string())
+                    })?;
+            let child_actor_id_for_factory = child_actor_id.clone();
             let node_id_for_factory = node_id.clone();
             let spec = create_child_spec(
-                actor_id.clone(),
+                child_actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
-                        )
-                    }).expect("Failed to create mailbox");
+                        tokio::runtime::Handle::current().block_on(Mailbox::new(
+                            config,
+                            format!("mailbox-{}", child_actor_id_for_factory.name()),
+                        ))
+                    })
+                    .expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
-                        actor_id_for_factory.clone(),
-                        Box::new(AnnotationWorker::new(actor_id_for_factory.clone())),
+                        child_actor_id_for_factory.clone(),
+                        Box::new(AnnotationWorker::new(
+                            child_actor_id_for_factory.name().to_string(),
+                        )),
                         mailbox,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
@@ -305,39 +345,47 @@ impl Application for GenomicsPipelineApplication {
                 RestartStrategy::Permanent,
                 Some(5000),
             );
-            annotation_supervisor.add_child(spec).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{:?}", e)))?;
-            info!("Added annotation actor: {}", actor_id);
+            annotation_supervisor.add_child(spec).await.map_err(|e| {
+                ApplicationError::ActorSpawnFailed(child_actor_id.to_string(), format!("{:?}", e))
+            })?;
+            info!("Added annotation actor: {}", child_actor_id);
         }
         supervisors.push(Arc::new(RwLock::new(annotation_supervisor)));
 
         // Create supervisor for report pool
         info!("Creating report supervisor");
         let (report_supervisor, _) = Supervisor::new(
-            format!("report-supervisor@{}", node_id),
+            supervisor_label("report", &node_id),
             SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 5 },
             service_locator.clone(),
         );
 
         for i in 0..self.config.worker_pools.report {
-            let actor_id = format!("report-{}@{}", i, node_id);
-            let actor_id_for_factory = actor_id.clone();
+            let child_actor_id =
+                ActorId::new(format!("report-{i}"), "report_worker", "genomics", &node_id).map_err(
+                    |e| ApplicationError::ActorSpawnFailed(format!("report-{i}"), e.to_string()),
+                )?;
+            let child_actor_id_for_factory = child_actor_id.clone();
             let node_id_for_factory = node_id.clone();
             let spec = create_child_spec(
-                actor_id.clone(),
+                child_actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            Mailbox::new(config, format!("mailbox-{}", actor_id_for_factory.clone()))
-                        )
-                    }).expect("Failed to create mailbox");
+                        tokio::runtime::Handle::current().block_on(Mailbox::new(
+                            config,
+                            format!("mailbox-{}", child_actor_id_for_factory.name()),
+                        ))
+                    })
+                    .expect("Failed to create mailbox");
                     Ok(plexspaces_actor::Actor::new(
-                        actor_id_for_factory.clone(),
-                        Box::new(ReportWorker::new(actor_id_for_factory.clone())),
+                        child_actor_id_for_factory.clone(),
+                        Box::new(ReportWorker::new(
+                            child_actor_id_for_factory.name().to_string(),
+                        )),
                         mailbox,
                         "default".to_string(), // tenant_id
                         "genomics".to_string(), // namespace
@@ -347,9 +395,10 @@ impl Application for GenomicsPipelineApplication {
                 RestartStrategy::Permanent,
                 Some(5000),
             );
-            report_supervisor.add_child(spec).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{:?}", e)))?;
-            info!("Added report actor: {}", actor_id);
+            report_supervisor.add_child(spec).await.map_err(|e| {
+                ApplicationError::ActorSpawnFailed(child_actor_id.to_string(), format!("{:?}", e))
+            })?;
+            info!("Added report actor: {}", child_actor_id);
         }
         supervisors.push(Arc::new(RwLock::new(report_supervisor)));
 

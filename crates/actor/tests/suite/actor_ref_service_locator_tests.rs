@@ -26,7 +26,7 @@ fn create_test_message(payload: Vec<u8>) -> Message {
 fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
     ActorId::new(
         name.to_string(),
-        "GenServer".to_string(),
+        "gen_server".to_string(),
         namespace.to_string(),
         node_id.to_string(),
     )
@@ -392,7 +392,7 @@ async fn test_actor_ref_local_unchanged() {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,

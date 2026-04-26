@@ -1326,6 +1326,22 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
+    async fn application_get_metrics(
+        &mut self,
+        application_id: String,
+        node_id: String,
+    ) -> Result<Vec<u8>, String> {
+        let ctx = self.pg_context();
+        match self
+            .host_functions
+            .get_application_metrics(&ctx, &application_id, &node_id)
+            .await
+        {
+            Ok(metrics) => Ok(Self::encode_proto(&metrics)),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
     async fn application_get_status(
         &mut self,
         application_id: String,
@@ -1719,6 +1735,20 @@ mod tests {
             Ok(metrics)
         }
 
+        async fn get_application_metrics(
+            &self,
+            _ctx: &RequestContext,
+            _application_id: &str,
+            _node_id: &str,
+        ) -> Result<ApplicationMetrics, String> {
+            Ok(ApplicationMetrics {
+                actor_counts: HashMap::from([("worker".to_string(), 2)]),
+                message_count: 5,
+                counter_metrics: HashMap::from([("tuple_operations".to_string(), 11)]),
+                ..Default::default()
+            })
+        }
+
         async fn get_application_status(
             &self,
             _ctx: &RequestContext,
@@ -1917,6 +1947,24 @@ mod tests {
             .metrics
             .expect("metrics expected");
         assert_eq!(metrics.counter_metrics.get("tuple_operations"), Some(&7));
+    }
+
+    #[tokio::test]
+    async fn application_get_metrics_serializes_metrics() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = decode_proto_response::<ApplicationMetrics>(
+            host.application_get_metrics(
+                "heat-diffusion-rust".to_string(),
+                "test-node-8092".to_string(),
+            )
+            .await,
+        );
+        assert_eq!(response.actor_counts.get("worker"), Some(&2));
+        assert_eq!(response.counter_metrics.get("tuple_operations"), Some(&11));
     }
 
     #[tokio::test]

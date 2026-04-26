@@ -19,8 +19,9 @@ max_restart_window_seconds = 60
 
 # Game Room Actor (Virtual Actor: one per room, auto-activated)
 [[supervisor.children]]
-id = "game-room"
-type = "worker"
+name = "game-room"
+actor_type = "migrating_rivet_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 facets = [

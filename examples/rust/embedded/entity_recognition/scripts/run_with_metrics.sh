@@ -10,9 +10,9 @@ echo "║          Entity Recognition Example                            ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Build in release mode
+# Build the default application binary in debug mode.
 echo "Building entity recognition example..."
-cargo build --release --bin entity-recognition-app
+cargo build
 
 echo ""
 echo "Running entity recognition application..."
@@ -21,7 +21,7 @@ echo ""
 
 # Run the example with sample documents and capture output
 # Use timeout to prevent stalling
-timeout 30 cargo run --release --bin entity-recognition-app -- \
+timeout 30 cargo run -- \
     doc1.txt doc2.txt doc3.txt 2>&1 | tee /tmp/entity_recognition_output.txt || {
     if [ $? -eq 124 ]; then
         echo ""
@@ -41,4 +41,3 @@ if grep -q "Performance Metrics:" /tmp/entity_recognition_output.txt; then
     grep -A 5 "Performance Metrics:" /tmp/entity_recognition_output.txt | sed 's/^/  /'
     echo ""
 fi
-

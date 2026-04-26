@@ -37,6 +37,11 @@ pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegist
 // registry module removed - replaced by object-registry
 pub mod actor_context;
 pub use actor_context::LinkProvider;
+pub mod actor_monitor;
+pub use actor_monitor::{
+    create_down_message, create_exit_message, exit_reason_to_string, start_monitor_gc_task,
+    ActorMonitor, LocalOnlyActorService, MonitorLink,
+};
 pub mod actor_registry;
 pub mod service_trait;
 pub mod service_wrappers;
@@ -59,7 +64,9 @@ pub use plexspaces_locks::{LockError, LockManager, LockResult};
 pub use plexspaces_proto::locks::prv::{
     AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
 };
-pub use service_locator::request_context_from_grpc_request;
+pub use service_locator::{
+    apply_request_context_to_grpc_metadata, request_context_from_grpc_request,
+};
 pub mod application_node_trait;
 pub use application_node_trait::ApplicationNode;
 pub mod grpc_connection_manager;
@@ -91,10 +98,9 @@ pub use monitoring::NodeConnectionInfo;
 pub use process_metrics::{ProcessResourceSampler, ProcessResourceSnapshot};
 pub use prometheus_text::{
     actor_metrics_from_exposition_for_namespace, local_prometheus_recorder_chart_summary,
-    max_histogram_bucket_upper_bound_for_labels,
-    overlay_node_operational_counters_from_exposition, sum_counter_all_label_sets,
-    sum_counter_for_labels, sum_sample_values_all_series, sum_sample_values_for_labels,
-    LocalPrometheusRecorderChartSummary,
+    max_histogram_bucket_upper_bound_for_labels, overlay_node_operational_counters_from_exposition,
+    sum_counter_all_label_sets, sum_counter_for_labels, sum_sample_values_all_series,
+    sum_sample_values_for_labels, LocalPrometheusRecorderChartSummary,
 };
 pub mod journal_storage;
 pub use journal_storage::{JournalError, JournalResult, JournalStorage};
@@ -121,7 +127,10 @@ pub use actor_factory::ActorFactory;
 pub mod constants;
 pub use constants::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};
 pub mod actor_id;
-pub use actor_id::{ActorId, ActorIdError};
+pub use actor_id::{
+    wasm_root_supervisor_actor_type_from_application_name,
+    wasm_worker_actor_type_from_application_name, ActorId, ActorIdError,
+};
 pub mod facet_helpers;
 pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 pub mod facet_factories;
@@ -141,14 +150,17 @@ pub use exit_reason::{ExitAction, ExitReason};
 // ObjectRegistration is re-exported from proto via actor_context module
 pub use actor_context::ObjectRegistration;
 // Re-export ActorRegistry and related types
-pub use actor_registry::{ActorRegistry, ActorRegistryError, MonitorLink, TemporarySenderEntry};
+pub use actor_registry::{ActorRegistry, ActorRegistryError, TemporarySenderEntry};
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
-pub use virtual_actor_manager::{VirtualActorError, VirtualActorManager, VirtualActorMetadata};
+pub use virtual_actor_manager::{
+    wasm_init_payload, VirtualActorError, VirtualActorManager, VirtualActorMetadata,
+};
+// Re-export ActorSpawnSpec from proto for convenience
+pub use plexspaces_proto::actor::v1::ActorSpawnSpec;
 // Re-export virtual actor registration helper
 pub use virtual_actor_registration::{
-    materialize_init_config_template, proto_facets_for_registration,
+    proto_facets_for_registration,
     register_virtual_actor_definition, register_virtual_actor_type_consistent,
-    VirtualActorDefinitionRegistration,
 };
 // FacetManager re-exported from plexspaces-facet crate for convenience
 pub use plexspaces_facet::FacetManager;
@@ -474,6 +486,23 @@ pub enum BehaviorType {
     Workflow,
     /// Custom behavior type
     Custom(String),
+}
+
+impl BehaviorType {
+    /// Canonical `actor_type` segment for [`ActorId`] and [`BehaviorRegistry`](crate::behavior_factory::BehaviorRegistry) keys.
+    ///
+    /// Matches `plexspaces.common.v1.ActorIdentity.actor_type` / buf pattern `^[a-z][a-z0-9_-]*$`.
+    /// OTP-style display names belong in [`Actor::behavior_kind`](Actor::behavior_kind), not here.
+    pub fn actor_type_slug(&self) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
+        match self {
+            BehaviorType::GenServer => Cow::Borrowed("gen_server"),
+            BehaviorType::GenEvent => Cow::Borrowed("gen_event"),
+            BehaviorType::GenStateMachine => Cow::Borrowed("gen_state_machine"),
+            BehaviorType::Workflow => Cow::Borrowed("workflow"),
+            BehaviorType::Custom(s) => Cow::Borrowed(s.as_str()),
+        }
+    }
 }
 
 /// Behavior errors

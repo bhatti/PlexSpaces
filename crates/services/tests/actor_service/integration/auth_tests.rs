@@ -158,6 +158,7 @@ async fn test_jwt_grpc_auth() {
         facets: vec![],
         namespace: "default".to_string(),
         instances_count: 1,
+        role: String::new(),
     });
 
     // Add JWT token to request metadata

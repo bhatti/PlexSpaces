@@ -35,10 +35,15 @@ import (
 type ActorFactory func() Actor
 
 // initConfig is the JSON structure passed by the framework to Init().
-// The actor_id field identifies which actor type to create.
+// declaration_name is the primary dispatch key and is sourced from ActorSpawnSpec.role /
+// ChildSpec.role. actor_type is the shared behavior class/module name and is only a fallback.
+// actor_id is used as a final fallback when neither field is present.
 type initConfig struct {
-	ActorID string          `json:"actor_id"`
-	Args    json.RawMessage `json:"args"`
+	ActorID         string          `json:"actor_id"`
+	ActorType       string          `json:"actor_type"`
+	DeclarationName string          `json:"declaration_name"`
+	Role            string          `json:"role"`
+	Args            json.RawMessage `json:"args"`
 }
 
 // ActorRouter routes messages to multiple actor types within a single
@@ -98,13 +103,25 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	name := normalizeRoleActorID(config.ActorID)
+	// declaration_name sourced from ActorSpawnSpec.role / ChildSpec.role is the authoritative
+	// dispatch key for multi-actor WASM modules. Fall back to actor_type, then to the canonical
+	// actor_id-derived role for older/simpler configs.
+	dispatchKey := config.DeclarationName
+	if dispatchKey == "" {
+		dispatchKey = config.Role
+	}
+	if dispatchKey == "" {
+		dispatchKey = config.ActorType
+	}
+	if dispatchKey == "" {
+		dispatchKey = normalizeRoleActorID(config.ActorID)
+	}
 
 	// Find matching factory by prefix (longest match wins)
 	var bestPrefix string
 	var bestFactory ActorFactory
 	for prefix, factory := range r.factories {
-		if name == prefix || strings.HasPrefix(name, prefix) {
+		if dispatchKey == prefix || strings.HasPrefix(dispatchKey, prefix) {
 			if len(prefix) > len(bestPrefix) {
 				bestPrefix = prefix
 				bestFactory = factory
@@ -113,7 +130,7 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 
 	if bestFactory == nil {
-		return "ERROR: no actor registered for prefix: " + name
+		return "ERROR: no actor registered for prefix: " + dispatchKey
 	}
 
 	// Create and initialize the actor

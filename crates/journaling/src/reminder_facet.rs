@@ -743,7 +743,7 @@ fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemT
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_core::{ActorRef, ActorService, ServiceLocator};
+    use plexspaces_core::{ActorId, ActorRef, ActorService, ServiceLocator};
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;
@@ -780,6 +780,13 @@ mod tests {
         service_locator
     }
 
+    /// Canonical [`ActorId`] string shared by reminder tests (`on_attach` + registration).
+    fn reminder_tests_actor_id() -> String {
+        ActorId::new("actor-1", "reminder_actor", "default", "test-node")
+            .expect("valid canonical actor id for reminder tests")
+            .to_string()
+    }
+
     /// Creates a test facet with SQLite :memory: backend.
     /// Uses in-memory SQLite for fast, isolated test execution.
     async fn create_test_facet() -> ReminderFacet {
@@ -801,7 +808,7 @@ mod tests {
         let first_fire_time = now + Duration::from_secs(first_fire_secs);
 
         ReminderRegistration {
-            actor_id: "test-actor".to_string(),
+            actor_id: reminder_tests_actor_id(),
             reminder_name: reminder_name.to_string(),
             interval: Some(prost_types::Duration {
                 seconds: interval_secs as i64,
@@ -833,12 +840,12 @@ mod tests {
     async fn test_reminder_facet_attach() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
         let actor_id = facet.actor_id.read().await.clone();
-        assert_eq!(actor_id, Some("actor-1".to_string()));
+        assert_eq!(actor_id, Some(reminder_tests_actor_id()));
     }
 
     #[tokio::test]
@@ -856,7 +863,7 @@ mod tests {
     async fn test_register_reminder_after_attach() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -877,7 +884,7 @@ mod tests {
     async fn test_register_duplicate_reminder_fails() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -898,7 +905,7 @@ mod tests {
     async fn test_unregister_reminder() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -915,7 +922,7 @@ mod tests {
     async fn test_unregister_nonexistent_reminder_fails() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -931,26 +938,35 @@ mod tests {
     async fn test_reminder_with_max_occurrences() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 3);
         facet.register_reminder(registration).await.unwrap();
 
-        // Wait for reminders to fire (background task will fire them)
-        tokio::time::sleep(Duration::from_secs(4)).await;
-
-        // Reminder should be auto-deleted after 3 fires
-        let reminders = facet.list_reminders().await;
-        assert_eq!(reminders.len(), 0);
+        // Poll until max_occurrences removes the reminder (background task + 1s interval × 3).
+        let poll = Duration::from_millis(50);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if facet.list_reminders().await.is_empty() {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "expected reminder removed after max_occurrences; still {:?}",
+                    facet.list_reminders().await
+                );
+            }
+            tokio::time::sleep(poll).await;
+        }
     }
 
     #[tokio::test]
     async fn test_multiple_reminders() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -970,7 +986,7 @@ mod tests {
     async fn test_reminder_zero_interval_fails() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 
@@ -992,7 +1008,7 @@ mod tests {
     async fn test_reminder_detach_stops_background_task() {
         let mut facet = create_test_facet().await;
         facet
-            .on_attach("actor-1", serde_json::json!({}))
+            .on_attach(&reminder_tests_actor_id(), serde_json::json!({}))
             .await
             .unwrap();
 

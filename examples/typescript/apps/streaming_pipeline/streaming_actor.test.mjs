@@ -17,6 +17,11 @@ function actorRoleId(actorId) {
   return nodeSep >= 0 ? actorId.substring(0, nodeSep) : actorId;
 }
 
+function actorNodeId(actorId) {
+  const parts = actorId.split("@");
+  return parts.length > 1 ? parts[parts.length - 1] : "local";
+}
+
 function normalizeWorkerPayload(payload) {
   let current = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   while (current && !("status" in current)) {
@@ -43,6 +48,25 @@ function mergeTopStreams(values, topK) {
     .map(([stream, count]) => ({ stream, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, topK);
+}
+
+function computeActorCounts(leaderNodeId, shardActorIds) {
+  const nodes = {
+    [leaderNodeId]: {
+      actors: 1,
+      leader_actors: 1,
+      worker_actors: 0,
+    },
+  };
+  for (const actorId of shardActorIds) {
+    const nodeId = actorNodeId(actorId);
+    if (!nodes[nodeId]) {
+      nodes[nodeId] = { actors: 0, leader_actors: 0, worker_actors: 0 };
+    }
+    nodes[nodeId].actors += 1;
+    nodes[nodeId].worker_actors += 1;
+  }
+  return nodes;
 }
 
 describe("streaming pipeline helpers", () => {
@@ -77,5 +101,17 @@ describe("streaming pipeline helpers", () => {
       { stream: "auth", count: 17 },
       { stream: "api", count: 8 },
     ]);
+  });
+
+  it("counts leader and worker actors per node from shard ids", () => {
+    const counts = computeActorCounts("test-node-8091", [
+      "run-1//streaming_pipeline_wasm::streaming-pipeline-ts@test-node-8091",
+      "run-2//streaming_pipeline_wasm::streaming-pipeline-ts@test-node-8093",
+      "run-3//streaming_pipeline_wasm::streaming-pipeline-ts@test-node-8093",
+    ]);
+    assert.deepEqual(counts, {
+      "test-node-8091": { actors: 2, leader_actors: 1, worker_actors: 1 },
+      "test-node-8093": { actors: 2, leader_actors: 0, worker_actors: 2 },
+    });
   });
 });

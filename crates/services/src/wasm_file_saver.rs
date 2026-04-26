@@ -37,9 +37,7 @@
 //!     application-spec.toml  # ApplicationSpec config
 //! ```
 
-use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildType, RestartPolicy, SupervisionStrategy,
-};
+use plexspaces_proto::application::v1::{ApplicationSpec, RestartPolicy, SupervisionStrategy};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -219,13 +217,13 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
         if !supervisor.children.is_empty() {
             for child in &supervisor.children {
                 toml_lines.push(String::from("\n[[supervisor.children]]"));
-                toml_lines.push(format!("id = \"{}\"", child.id));
+                if let Some(ref aid) = child.actor_identity {
+                    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+                    toml_lines.push(format!("name = \"{}\"", esc(&aid.name)));
+                    toml_lines.push(format!("actor_type = \"{}\"", esc(&aid.actor_type)));
+                }
 
-                let child_type_str = match ChildType::try_from(child.r#type) {
-                    Ok(ChildType::ChildTypeSupervisor) => "supervisor",
-                    _ => "worker",
-                };
-                toml_lines.push(format!("type = \"{}\"", child_type_str));
+                toml_lines.push(format!("role = \"{}\"", child.role));
 
                 let restart_str = match RestartPolicy::try_from(child.restart) {
                     Ok(RestartPolicy::RestartPolicyTransient) => "transient",
@@ -293,8 +291,9 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
 mod tests {
     use super::*;
     use plexspaces_proto::application::v1::{
-        ApplicationSpec, ChildSpec, ChildType, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+        ApplicationSpec, ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
     };
+    use plexspaces_proto::common::v1::ActorIdentity;
     use tempfile::TempDir;
 
     fn create_test_spec() -> ApplicationSpec {
@@ -404,8 +403,11 @@ mod tests {
                 }),
                 children: vec![
                     ChildSpec {
-                        id: "leader".to_string(),
-                        r#type: ChildType::ChildTypeWorker as i32,
+                        actor_identity: Some(ActorIdentity {
+                            name: "leader".to_string(),
+                            actor_type: "leader".to_string(),
+                        }),
+                        role: "leader".to_string(),
                         restart: RestartPolicy::RestartPolicyPermanent as i32,
                         shutdown_timeout: Some(prost_types::Duration {
                             seconds: 10,
@@ -418,8 +420,11 @@ mod tests {
                         ..Default::default()
                     },
                     ChildSpec {
-                        id: "worker".to_string(),
-                        r#type: ChildType::ChildTypeWorker as i32,
+                        actor_identity: Some(ActorIdentity {
+                            name: "worker".to_string(),
+                            actor_type: "worker".to_string(),
+                        }),
+                        role: "worker".to_string(),
                         restart: RestartPolicy::RestartPolicyPermanent as i32,
                         shutdown_timeout: Some(prost_types::Duration {
                             seconds: 10,
@@ -438,6 +443,8 @@ mod tests {
 
         let toml = serialize_application_spec_to_toml(&spec).unwrap();
         assert!(toml.contains("seed_nodes = [\"localhost:8091\", \"localhost:8093\"]"));
+        assert!(toml.contains("role = \"leader\""));
+        assert!(toml.contains("role = \"worker\""));
         assert!(toml.contains("args = { role = \"leader\" }"));
         assert!(toml.contains("args = { role = \"worker\" }"));
 

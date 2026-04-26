@@ -83,7 +83,9 @@ pub struct LocalPrometheusRecorderChartSummary {
 }
 
 /// Derives dashboard chart inputs from exposition (same text as `GetDashboardMetrics` / `/metrics`).
-pub fn local_prometheus_recorder_chart_summary(exposition: &str) -> LocalPrometheusRecorderChartSummary {
+pub fn local_prometheus_recorder_chart_summary(
+    exposition: &str,
+) -> LocalPrometheusRecorderChartSummary {
     let mut out = LocalPrometheusRecorderChartSummary::default();
     let routing_base = "plexspaces_message_routing_duration_seconds";
     let actor_base = "plexspaces_actor_message_processing_duration_seconds";
@@ -103,7 +105,8 @@ pub fn local_prometheus_recorder_chart_summary(exposition: &str) -> LocalPrometh
     if let Some(le) = max_histogram_finite_bucket_le_globally(exposition, actor_base) {
         out.actor_message_processing_latency_max_ms = le * 1000.0;
     }
-    let sup = sum_sample_values_all_series(exposition, "plexspaces_application_tracked_supervisors");
+    let sup =
+        sum_sample_values_all_series(exposition, "plexspaces_application_tracked_supervisors");
     out.application_supervisors_total = sup.round().clamp(0.0, u32::MAX as f64) as u32;
     out
 }

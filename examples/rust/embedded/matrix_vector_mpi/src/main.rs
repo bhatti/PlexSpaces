@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
 
     // Create node using NodeBuilder
     let node = NodeBuilder::new("mpi-node")
-        .build().await;
+        .build_started().await;
 
     // Create TupleSpace for coordination (dataflow pattern)
     let space = Arc::new(TupleSpace::with_tenant_namespace("internal", "system"));
@@ -99,14 +99,13 @@ async fn main() -> Result<()> {
     
     for worker_id in 0..num_workers {
         let worker_actor = WorkerActor::new(space.clone(), worker_id);
-        let worker_id_str = format!("worker-{}", worker_id);
-        let actor_id = format!("{}@{}", worker_id_str, node.id().as_str());
+        let actor_name = format!("worker-{}", worker_id);
         
         // Use SDK spawn helper (no facets needed for this actor)
         let actor_ref = spawn(
             &ctx,
             service_locator.clone(),
-            actor_id,
+            actor_name,
             "matrix-vector-mpi", // namespace
             worker_actor,
         ).await

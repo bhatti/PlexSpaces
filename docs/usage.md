@@ -20,29 +20,30 @@ use plexspaces_node::NodeBuilder;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a node with configuration
-    let node = NodeBuilder::new()
-        .with_node_id("node1".to_string())
-        .with_listen_address("0.0.0.0:8000".to_string())
-        .build()
-        .await?;
-    
-    // Start the node
-    node.start().await?;
-    
+    // For embedded/server-like startup, use build_started() so release config,
+    // unified migrations, service initialization, and the runtime all start together.
+    let node = NodeBuilder::new("node1")
+        .with_listen_addr("0.0.0.0:8000")
+        .build_started()
+        .await;
+
+    // Node is now running in the background and ready to use.
+    println!("Node started: {}", node.id());
+
     Ok(())
 }
 ```
 
+Use `build()` when you only need initialized services in-process. Use `build_started()` when an embedded app or example should follow the same startup path as the server, including release-config loading, unified migrations, service initialization, and the running node runtime.
+
 ### Creating and Using Actors (SDK)
 
 ```rust
+use plexspaces_node::NodeBuilder;
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
-    NodeBuilder, RequestContext, ActorId,
-    spawn_with_facets, call_message, json,
+    RequestContext, spawn_with_facets, call_message, json,
 };
-use std::sync::Arc;
 use std::time::Duration;
 
 // Define actor with SDK annotations
@@ -80,13 +81,11 @@ impl Counter {
 }
 
 // Usage
-let node = Arc::new(NodeBuilder::new("node1").build().await);
+let node = NodeBuilder::new("node1")
+    .with_clustering_enabled(false)
+    .build_started()
+    .await;
 let service_locator = node.service_locator();
-
-// Start node in background
-let node_clone = node.clone();
-tokio::spawn(async move { node_clone.start().await });
-tokio::time::sleep(Duration::from_millis(500)).await;
 
 // Create request context (tenant isolation required - NEVER use internal())
 let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into());

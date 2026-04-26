@@ -1,6 +1,6 @@
 # Entity recognition (Rust WASM)
 
-Simplified **document → entities** pipeline on one GenServer actor: token-level heuristics (EMAIL, URL, TOKEN) plus **`host::application_metrics_add`**. Same SDK+WIT layout as `calculator` / `nbody`.
+Simplified **document → entities** pipeline on one GenServer actor: token-level heuristics (EMAIL, URL, TOKEN) plus **`host::application_metrics_add`** for writes and **`host::application_get_metrics`** for reads. Same SDK+WIT layout as `calculator` / `nbody`.
 
 For a **full native** multi-actor demo (FSM + GenServer + GenEvent, Tokio), see **[`examples/rust/embedded/entity_recognition`](../../embedded/entity_recognition/)**.
 
@@ -22,6 +22,7 @@ For a **full native** multi-actor demo (FSM + GenServer + GenEvent, Tokio), see 
 | `reset` | — |
 | `get_stats` | — |
 | `get_status` / `status` | Rollups + `use_case` |
+| `get_metrics` / `metrics` | Raw application metrics snapshot from WIT |
 
 ## Build & test
 
@@ -40,6 +41,7 @@ flowchart LR
   A --> P[process_document / batch]
   P --> M[host::application_metrics_add]
   A --> S[get_status]
+  A --> G[host::application_get_metrics]
 ```
 
 ## References

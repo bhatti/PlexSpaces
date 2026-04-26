@@ -110,6 +110,34 @@ impl ActorBuilder {
         }
     }
 
+    /// Create an actor builder pre-populated from an [`ActorSpawnSpec`].
+    ///
+    /// ## Purpose
+    /// Primary entry point when the caller already has an `ActorSpawnSpec` (e.g. from
+    /// `VirtualActorMetadata.spec` during reactivation). The returned builder is configured
+    /// with identity, namespace, tenant_id, config, and labels from the spec; the caller can
+    /// further override via the existing `with_*` setters.
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let builder = ActorBuilder::from_spec(Box::new(MyBehavior), spec);
+    /// let actor = builder.build().await?;
+    /// ```
+    pub fn from_spec(behavior: Box<dyn Actor>, spec: &plexspaces_proto::actor::v1::ActorSpawnSpec) -> Self {
+        let mut builder = Self::new(behavior);
+        if let Some(ref identity) = spec.identity {
+            if !identity.name.is_empty() {
+                builder.actor_name = Some(identity.name.clone());
+            }
+        }
+        builder.namespace = spec.namespace.clone();
+        builder.tenant_id = spec.tenant_id.clone();
+        if let Some(config) = spec.config.clone() {
+            builder.config = Some(config);
+        }
+        builder
+    }
+
     /// Set the actor name used by runtime-owned ActorId construction.
     ///
     /// ## Arguments
@@ -174,6 +202,25 @@ impl ActorBuilder {
     /// ```
     pub fn with_tenant_id(mut self, tenant_id: impl Into<String>) -> Self {
         self.tenant_id = tenant_id.into();
+        self
+    }
+
+    /// Set the node ID for this actor.
+    ///
+    /// Use this to give the actor a fully-qualified identity at build time.
+    /// If omitted, `spawn_built_actor_impl` normalizes the node_id to the
+    /// actual local node at spawn time.
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let actor = ActorBuilder::new(MyBehavior::new())
+    ///     .with_name("counter")
+    ///     .with_node_id("node-1")
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn with_node_id(mut self, node_id: impl Into<String>) -> Self {
+        self.node_id = Some(node_id.into());
         self
     }
 
@@ -626,7 +673,12 @@ impl ActorBuilder {
                 .actor_name
                 .clone()
                 .unwrap_or_else(|| format!("actor_{timestamp}"));
-            let node_id = self.node_id.clone().unwrap_or_else(|| "local".to_string());
+            // If node_id is not set, use a placeholder — spawn_built_actor_impl will
+            // normalize to the real node_id at spawn time. No "local" magic strings.
+            let node_id = self
+                .node_id
+                .clone()
+                .unwrap_or_else(|| "unassigned".to_string());
             let namespace = if self.namespace.is_empty() {
                 "default".to_string()
             } else {
@@ -657,14 +709,13 @@ impl ActorBuilder {
             .await
             .expect("Failed to create mailbox");
 
-        // Use node_id from builder or default to "local"
         let node_id = self.node_id.clone();
 
         // Create actor with config if provided
         let mut actor = if let Some(config) = self.config {
             // Create actor with config in context
             use plexspaces_core::ActorContext;
-            let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
+            let node_id_str = node_id.clone().unwrap_or_else(|| "unassigned".to_string());
             // Create ServiceLocator for context
             // Note: This is a sync function, so we can't use create_default_service_locator
             // For ActorBuilder, we create a minimal ServiceLocator stub that will be replaced
@@ -772,6 +823,16 @@ impl ActorBuilder {
         let actor_id = actor.id().clone();
         let mailbox = actor.mailbox().clone();
 
+        let actor_ref = ActorRef::local(
+            actor_id.clone(),
+            tenant_id_for_ref.clone(),
+            namespace_for_ref.clone(),
+            mailbox.clone(),
+            service_locator.clone(),
+        );
+        let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+            .map_err(|e| format!("Failed to construct actor self_ref: {}", e))?;
+
         // Create ActorContext with proper node ID
         let actor_context = plexspaces_core::ActorContext::new(
             local_node_id.to_string(),
@@ -779,7 +840,8 @@ impl ActorBuilder {
             ctx.namespace().to_string(),
             service_locator.clone(),
             actor.context().config.clone(),
-        );
+        )
+        .with_self_ref(self_ref);
         actor = actor.set_context(std::sync::Arc::new(actor_context));
 
         // Update metrics
@@ -811,13 +873,7 @@ impl ActorBuilder {
         actor.register_started(&registry).await;
 
         // Return ActorRef
-        Ok(ActorRef::local(
-            actor_id,
-            tenant_id_for_ref,
-            namespace_for_ref,
-            mailbox,
-            service_locator,
-        ))
+        Ok(actor_ref)
     }
 }
 

@@ -89,7 +89,7 @@ impl SpecApplication {
     ///
     /// ## Purpose
     /// Allows applications to dynamically spawn actors using behavior factory
-    /// (actor_type is derived from child.id).
+    /// (behavior class and instance name come from `ChildSpec.actor_identity`).
     ///
     /// ## Arguments
     /// * `spec` - Application specification
@@ -140,7 +140,7 @@ impl SpecApplication {
     ///
     /// ## Purpose
     /// Spawns all actors defined in the supervisor tree specification.
-    /// Actor type is derived from child.id for both native Rust and WASM applications.
+    /// Actor identity uses `ChildSpec.actor_identity` (name + actor_type).
     ///
     /// ## Design Notes
     /// - Native Rust applications need a behavior factory/registry to create behaviors
@@ -175,89 +175,87 @@ impl SpecApplication {
         // For native Rust applications, we can't dynamically load modules,
         // so we validate the spec and log that full spawning requires a behavior factory
         for child in &supervisor_spec.children {
+            let identity = plexspaces_application::child_spec_util::require_child_identity(child)?;
             debug!(
-                child_id = %child.id,
+                child_name = %identity.name,
+                actor_type = %identity.actor_type,
                 child_type = ?child.r#type(),
                 "Processing child spec"
             );
 
-            // Validate child spec
-            if child.id.is_empty() {
-                return Err(ApplicationError::ConfigError(format!(
-                    "Child spec has empty ID in application '{}'",
-                    self.spec.name
-                )));
-            }
-
-            // Note: start_module removed - actor_type is derived from child.id
-
             // Log deployment progress: processing child
             debug!(
                 application = %self.spec.name,
-                child_id = %child.id,
+                child_name = %identity.name,
+                actor_type = %identity.actor_type,
                 child_type = ?child.r#type(),
                 progress = format!("{}/{}", actor_ids.len() + 1, supervisor_spec.children.len()),
                 "Processing child spec"
             );
 
-            // Use child.id as actor_type (start_module removed - was confusing)
-            let actor_type = child.id.clone();
+            let actor_type = identity.actor_type.clone();
+            // Namespace: use spec.namespace if set; fall back to app name (matches ApplicationManager.register convention).
+            let effective_namespace = if self.spec.namespace.is_empty() {
+                self.spec.name.clone()
+            } else {
+                self.spec.namespace.clone()
+            };
             let actor_id = plexspaces_core::ActorId::new(
-                &child.id,
+                identity.name.as_str(),
                 &actor_type,
-                &self.spec.namespace,
+                &effective_namespace,
                 node.id().as_str(),
             )
             .map_err(|e| {
-                ApplicationError::StartupFailed(format!(
-                    "Invalid actor identity for child '{}': {}",
-                    child.id, e
+                ApplicationError::ConfigError(format!(
+                    "Invalid child actor ID for '{}' in application '{}': {}",
+                    identity.name, self.spec.name, e
                 ))
             })?;
-            
+
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
-            // Tenant/namespace: use explicit namespace from ApplicationSpec.
-            use plexspaces_core::{RequestContext, ActorFactory};
-            // Tenant comes from auth, not config
-            // Namespace: must be set explicitly in ApplicationSpec during deployment
+            // Tenant/namespace: use effective_namespace derived above.
+            use plexspaces_core::{ActorFactory, RequestContext};
             let tenant_id = String::new();
-            let namespace = self.spec.namespace.clone();
+            let namespace = effective_namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
-            
+
             // Get ActorFactory from ServiceLocator
-            let actor_factory: Arc<dyn ActorFactory> = service_locator.get_actor_factory().await
+            let actor_factory: Arc<dyn ActorFactory> = service_locator
+                .get_actor_factory()
+                .await
                 .ok_or_else(|| {
                     ApplicationError::StartupFailed(
-                        "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called.".to_string()
+                        "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called."
+                            .to_string(),
                     )
                 })?;
-            
+
             // Phase 1: Unified Lifecycle - Convert proto facets to facet instances
             // Use FacetRegistry to create facets from proto configurations
             let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
                 // Get FacetRegistry from ServiceLocator
-                use plexspaces_core::service_names;
                 if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                     let facet_registry = facet_registry_wrapper.inner_clone();
                     // Use facet_helpers to create facets from proto
                     use plexspaces_actor::create_facets_from_proto;
                     let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
-                    
+
                     debug!(
                         application = %self.spec.name,
-                        child_id = %child.id,
+                        child_name = %identity.name,
                         facet_count = child.facets.len(),
                         created_count = facets.len(),
                         "Created facets from ChildSpec for actor"
                     );
-                    
+
                     facets
                 } else {
                     // FacetRegistry not available - log and skip facets (graceful degradation)
                     debug!(
                         application = %self.spec.name,
-                        child_id = %child.id,
+                        child_name = %identity.name,
                         facet_count = child.facets.len(),
                         "FacetRegistry not available - skipping facet attachment (graceful degradation)"
                     );
@@ -266,55 +264,58 @@ impl SpecApplication {
             } else {
                 Vec::new()
             };
-            
+
             // Spawn actor with facets using ActorFactory
             // Check if this child is a supervisor - if so, recursively spawn its children
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
             let child_type = ProtoChildType::try_from(child.r#type())
                 .unwrap_or(ProtoChildType::ChildTypeUnspecified);
-            
+
             if child_type == ProtoChildType::ChildTypeSupervisor {
                 // Spawn the supervisor actor first
-                match actor_factory.spawn_actor(
-                    &ctx,
-                    &actor_id,
-                    &actor_type, // Use child.id as actor_type
-                    vec![], // initial_state
-                    None, // config
-                    child.args.clone(), // labels (using args as labels for now)
-                    facets, // facets from ChildSpec
-                ).await {
+                match actor_factory
+                    .spawn_actor(
+                        &ctx,
+                        &actor_id,
+                        &actor_type,
+                        vec![],             // initial_state
+                        None,               // config
+                        child.args.clone(), // labels (using args as labels for now)
+                        facets,             // facets from ChildSpec
+                    )
+                    .await
+                {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,
-                            child_id = %child.id,
+                            child_name = %identity.name,
                             actor_type = %actor_type,
                             actor_id = %actor_id,
                             facet_count = child.facets.len(),
                             "Spawned supervisor actor"
                         );
-                        actor_ids.push(actor_id);
+                        actor_ids.push(actor_id.to_string());
                     }
                     Err(e) => {
                         error!(
                             application = %self.spec.name,
-                            child_id = %child.id,
+                            child_name = %identity.name,
                             actor_type = %actor_type,
                             error = %e,
                             "Failed to spawn supervisor actor"
                         );
                         return Err(ApplicationError::StartupFailed(format!(
                             "Failed to spawn supervisor actor '{}': {}",
-                            child.id, e
+                            identity.name, e
                         )));
                     }
                 }
-                
+
                 // Recursively spawn children of nested supervisor
                 if let Some(ref nested_supervisor_spec) = child.supervisor {
                     debug!(
                         application = %self.spec.name,
-                        supervisor_id = %child.id,
+                        supervisor_id = %identity.name,
                         nested_children_count = nested_supervisor_spec.children.len(),
                         "Recursively spawning nested supervisor children"
                     );
@@ -322,43 +323,47 @@ impl SpecApplication {
                     let nested_actor_ids = Box::pin(self.initialize_supervisor_tree(
                         node.clone(),
                         service_locator.clone(),
-                        nested_supervisor_spec
-                    )).await?;
+                        nested_supervisor_spec,
+                    ))
+                    .await?;
                     actor_ids.extend(nested_actor_ids);
                 }
             } else {
                 // Regular worker - spawn normally
-                match actor_factory.spawn_actor(
-                    &ctx,
-                    &actor_id,
-                    &actor_type, // Use child.id as actor_type
-                    vec![], // initial_state
-                    None, // config
-                    child.args.clone(), // labels (using args as labels for now)
-                    facets, // facets from ChildSpec
-                ).await {
+                match actor_factory
+                    .spawn_actor(
+                        &ctx,
+                        &actor_id,
+                        &actor_type,
+                        vec![],             // initial_state
+                        None,               // config
+                        child.args.clone(), // labels (using args as labels for now)
+                        facets,             // facets from ChildSpec
+                    )
+                    .await
+                {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,
-                            child_id = %child.id,
+                            child_name = %identity.name,
                             actor_type = %actor_type,
                             actor_id = %actor_id,
                             facet_count = child.facets.len(),
                             "Spawned actor with facets"
                         );
-                        actor_ids.push(actor_id);
+                        actor_ids.push(actor_id.to_string());
                     }
                     Err(e) => {
                         error!(
                             application = %self.spec.name,
-                            child_id = %child.id,
+                            child_name = %identity.name,
                             actor_type = %actor_type,
                             error = %e,
                             "Failed to spawn actor"
                         );
                         return Err(ApplicationError::StartupFailed(format!(
                             "Failed to spawn actor '{}': {}",
-                            child.id, e
+                            identity.name, e
                         )));
                     }
                 }
@@ -634,12 +639,16 @@ impl Application for SpecApplication {
                         "ActorFactory not found in ServiceLocator".to_string()
                     ))?;
                 
-                // Create RequestContext for shutdown using application's namespace
-                // Tenant comes from auth (empty for internal operations)
-                // Application owns its actors, so it can stop them
+                // Create RequestContext for shutdown using application's namespace.
+                // Fall back to app name if namespace was not set in ApplicationSpec.
+                let shutdown_namespace = if self.spec.namespace.is_empty() {
+                    self.spec.name.clone()
+                } else {
+                    self.spec.namespace.clone()
+                };
                 let ctx = RequestContext::new_without_auth(
                     String::new(), // tenant_id - empty for internal operations
-                    self.spec.namespace.clone(), // namespace from application spec
+                    shutdown_namespace,
                 );
                 
                 for actor_id in actor_ids.iter().rev() {
@@ -747,14 +756,13 @@ impl SpecApplication {
         
         // Validate each child spec
         for (idx, child) in supervisor_spec.children.iter().enumerate() {
-            // Validate child ID
-            if child.id.is_empty() {
-                return Err(ApplicationError::ConfigError(format!(
-                    "Child at index {} has empty ID in application '{}'",
-                    idx, app_name
-                )));
-            }
-            
+            let identity = plexspaces_application::child_spec_util::require_child_identity(child)
+                .map_err(|e| {
+                    ApplicationError::ConfigError(format!(
+                        "{e} (child index {idx}, application '{app_name}')"
+                    ))
+                })?;
+
             // Validate child type
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
             let child_type = ProtoChildType::try_from(child.r#type())
@@ -762,12 +770,10 @@ impl SpecApplication {
             if child_type == ProtoChildType::ChildTypeUnspecified {
                 return Err(ApplicationError::ConfigError(format!(
                     "Child '{}' at index {} has unspecified type in application '{}'",
-                    child.id, idx, app_name
+                    identity.name, idx, app_name
                 )));
             }
-            
-            // Note: start_module removed - actor_type is derived from child.id
-            
+
             // Validate restart policy
             use plexspaces_proto::application::v1::RestartPolicy as ProtoRestartPolicy;
             let restart_val = child.restart();
@@ -776,22 +782,26 @@ impl SpecApplication {
             if restart == ProtoRestartPolicy::RestartPolicyUnspecified {
                 return Err(ApplicationError::ConfigError(format!(
                     "Child '{}' at index {} has unspecified restart policy in application '{}'",
-                    child.id, idx, app_name
+                    identity.name, idx, app_name
                 )));
             }
-            
+
             // Validate nested supervisor spec if child is a supervisor
             if child_type == ProtoChildType::ChildTypeSupervisor {
                 if child.supervisor.is_none() {
                     return Err(ApplicationError::ConfigError(format!(
                         "Child supervisor '{}' at index {} missing supervisor specification in application '{}'",
-                        child.id, idx, app_name
+                        identity.name, idx, app_name
                     )));
                 }
                 // Recursively validate nested supervisor
                 if let Some(ref nested_spec) = child.supervisor {
                     // Recursive validation
-                    Self::validate_supervisor_spec_static(app_name, nested_spec, has_behavior_factory)?;
+                    Self::validate_supervisor_spec_static(
+                        app_name,
+                        nested_spec,
+                        has_behavior_factory,
+                    )?;
                 }
             }
         }
@@ -884,28 +894,30 @@ mod tests {
                 }),
                 children: vec![
                     ChildSpec {
-                        id: "worker1".to_string(),
+                        actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                            name: "worker1".to_string(),
+                            actor_type: "worker1".to_string(),
+                        }),
                         r#type: ChildType::ChildTypeWorker as i32,
-                        args: Default::default(),
                         restart: RestartPolicy::RestartPolicyPermanent as i32,
                         shutdown_timeout: Some(ProtoDuration {
                             seconds: 10,
                             nanos: 0,
                         }),
-                        supervisor: None,
-                        facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                        ..Default::default()
                     },
                     ChildSpec {
-                        id: "worker2".to_string(),
+                        actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                            name: "worker2".to_string(),
+                            actor_type: "worker2".to_string(),
+                        }),
                         r#type: ChildType::ChildTypeWorker as i32,
-                        args: Default::default(),
                         restart: RestartPolicy::RestartPolicyTransient as i32,
                         shutdown_timeout: Some(ProtoDuration {
                             seconds: 5,
                             nanos: 0,
                         }),
-                        supervisor: None,
-                        facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                        ..Default::default()
                     },
                 ],
             }),
@@ -1041,12 +1053,14 @@ mod tests {
         assert_eq!(health, HealthStatus::HealthStatusUnhealthy);
     }
 
-    /// Test: Supervisor tree validation with empty child ID fails
+    /// Test: Supervisor tree validation fails when actor_identity name is empty
     #[tokio::test]
     async fn test_supervisor_tree_empty_child_id_fails() {
         let mut spec = create_test_spec_with_supervisor();
         if let Some(ref mut supervisor) = spec.supervisor {
-            supervisor.children[0].id = String::new();
+            if let Some(ref mut id) = supervisor.children[0].actor_identity {
+                id.name.clear();
+            }
         }
 
         let mut app = SpecApplication::new(spec);
@@ -1054,11 +1068,10 @@ mod tests {
 
         let result = app.start(node).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("empty ID"));
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("actor_identity") || msg.contains("non-empty"),
+            "unexpected error: {msg}"
+        );
     }
-
-    // Note: start_module validation removed - actor_type is derived from child.id
 }

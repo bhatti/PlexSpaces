@@ -33,8 +33,8 @@ flowchart LR
   leader --> annotation["ScatterGather: Annotation"]
   annotation --> workers
   workers --> annotation
-  leader --> status["Get application status from each node"]
-  status --> report["Aggregate report + metrics"]
+  leader --> metrics["Get application metrics from each node"]
+  metrics --> report["Aggregate report + metrics"]
 ```
 
 ## Metrics flow
@@ -43,8 +43,8 @@ flowchart LR
 flowchart TD
   worker["Worker stage result"] --> local["Node-local ApplicationMetrics"]
   leader["Leader orchestration metrics"] --> local
-  local --> status["application-get-status per node"]
-  status --> aggregate["Leader aggregates per-node + per-role totals"]
+  local --> metrics["application-get-metrics per node"]
+  metrics --> aggregate["Leader aggregates per-node + per-role totals"]
   aggregate --> output["Benchmark output in test.sh"]
 ```
 
@@ -54,7 +54,7 @@ flowchart TD
 - Rust SDK WASM annotations: `#[gen_server_actor(wasm)]`, `#[plexspaces_handlers(wasm)]`, `#[handler(...)]`
 - ShardGroup create / scatter-gather
 - ApplicationSpec deploy with `seed_nodes`
-- Application metrics aggregation through `application-get-status`
+- Application metrics aggregation through `application-get-metrics`
 
 ## Build
 
@@ -86,7 +86,8 @@ The test script:
 
 Each node keeps local application metrics for the deployed app instance. The worker and leader update
 node-local `ApplicationMetrics` through the actor-world WIT host, and the leader aggregates those
-per-node snapshots via `application-get-status` after the scatter/gather run completes.
+per-node snapshots via `application-get-metrics` after the scatter/gather run completes. The leader
+only uses `application-get-status` for node-address labeling in the final report.
 
 That means the final benchmark output reflects:
 

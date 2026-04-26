@@ -14,19 +14,20 @@ max_restarts = 5
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "account-alice"
-type = "worker"
+name = "account-alice"
+actor_type = "bank_account_wasm"
+role = "account-alice"
 restart = "permanent"
 shutdown_timeout_seconds = 5
-
 [[supervisor.children]]
-id = "account-bob"
-type = "worker"
+name = "account-bob"
+actor_type = "bank_account_wasm"
+role = "account-bob"
 restart = "permanent"
 shutdown_timeout_seconds = 5
-
 [[supervisor.children]]
-id = "account-charlie"
-type = "worker"
+name = "account-charlie"
+actor_type = "bank_account_wasm"
+role = "account-charlie"
 restart = "permanent"
 shutdown_timeout_seconds = 5

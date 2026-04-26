@@ -310,24 +310,50 @@ plexspaces-cli release start --config node4.toml  # Annotation + Reports
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build PlexSpaces workspace
-cd /Users/bhatti/workspace/PlexSpaces
-cargo build --release
+cd /Users/shahzadbhatti/workspace/myspaces
+make build
 ```
 
 ### Quick Start (Standalone Runner)
 
 ```bash
-cd examples/genomics-pipeline
+cd examples/rust/embedded/genomics_pipeline
 
-# Run standalone example (development/testing)
+# Run standalone example (development/testing) with bundled sample data
 ./scripts/run.sh
 
 # Or with sample data
 ./scripts/run.sh SAMPLE001 /data/sample001.fastq
 
-# Or directly with cargo
-cargo run --release --bin genomics-pipeline
-cargo run --release --bin genomics-pipeline -- --sample-id SAMPLE001 --fastq /data/sample001.fastq
+# Or directly with cargo (debug by default)
+cargo run -- --sample-id SAMPLE001 --fastq test_data/sample001.fastq
+cargo run -- --sample-id SAMPLE001 --fastq /data/sample001.fastq
+```
+
+`cargo run` starts the standalone pipeline orchestrator by default. The node binary remains available explicitly with:
+
+```bash
+cargo run --bin genomics-node -- --config config/node1.toml
+```
+
+Bundled sample inputs:
+- [sample001.fastq](/Users/shahzadbhatti/workspace/myspaces/examples/rust/embedded/genomics_pipeline/test_data/sample001.fastq)
+- [sample002.fastq](/Users/shahzadbhatti/workspace/myspaces/examples/rust/embedded/genomics_pipeline/test_data/sample002.fastq)
+
+### How To Verify
+
+The current standalone runner verifies the embedded node startup, coordinator spawn, sample submission path, and metrics reporting. A successful run should include:
+- `✅ Node created: genomics-pipeline-node`
+- `✅ Coordinator spawned:`
+- `✅ Sample submitted: SAMPLE001`
+- the final `📊 Performance Metrics` block
+- the final `Example Complete` banner
+
+Quick verification command:
+
+```bash
+cd /Users/shahzadbhatti/workspace/myspaces/examples/rust/embedded/genomics_pipeline
+./scripts/run.sh
 ```
 
 ### Multi-Node Mode (Production)

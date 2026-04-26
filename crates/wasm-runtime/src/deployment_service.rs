@@ -48,6 +48,15 @@ use crate::WasmConfig;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
+#[derive(Debug, Clone)]
+pub struct ApplicationDeployLogContext {
+    pub tenant_id: String,
+    pub namespace: String,
+    pub version: String,
+    pub has_wasm_module: bool,
+    pub has_config: bool,
+}
+
 /// WASM Deployment Service
 ///
 /// Handles dynamic deployment of WASM modules across the cluster:
@@ -118,6 +127,41 @@ impl WasmDeploymentService {
         version: &str,
         module_bytes: &[u8],
     ) -> WasmResult<String> {
+        self.deploy_module_with_context(name, version, module_bytes, None)
+            .await
+    }
+
+    pub async fn deploy_module_for_application(
+        &self,
+        name: &str,
+        version: &str,
+        module_bytes: &[u8],
+        tenant_id: &str,
+        namespace: &str,
+        has_config: bool,
+    ) -> WasmResult<String> {
+        self.deploy_module_with_context(
+            name,
+            version,
+            module_bytes,
+            Some(ApplicationDeployLogContext {
+                tenant_id: tenant_id.to_string(),
+                namespace: namespace.to_string(),
+                version: version.to_string(),
+                has_wasm_module: true,
+                has_config,
+            }),
+        )
+        .await
+    }
+
+    async fn deploy_module_with_context(
+        &self,
+        name: &str,
+        version: &str,
+        module_bytes: &[u8],
+        log_context: Option<ApplicationDeployLogContext>,
+    ) -> WasmResult<String> {
         // Compute module hash for content-addressable caching
         let module_hash = Self::compute_hash(module_bytes);
 
@@ -153,12 +197,26 @@ impl WasmDeploymentService {
             });
         }
 
-        tracing::info!(
-            module_name = name,
-            module_version = version,
-            module_hash = %module_hash,
-            "Module deployed successfully"
-        );
+        if let Some(ctx) = log_context {
+            tracing::info!(
+                module_name = name,
+                module_version = version,
+                module_hash = %module_hash,
+                tenant_id = %ctx.tenant_id,
+                namespace = %ctx.namespace,
+                version = %ctx.version,
+                has_wasm_module = ctx.has_wasm_module,
+                has_config = ctx.has_config,
+                "Module deployed successfully"
+            );
+        } else {
+            tracing::info!(
+                module_name = name,
+                module_version = version,
+                module_hash = %module_hash,
+                "Module deployed successfully"
+            );
+        }
 
         Ok(module_hash)
     }

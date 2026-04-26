@@ -387,6 +387,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
         tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
             actor_id: String::new(),
             actor_type: "TestActor".to_string(),
+            role: "TestActor".to_string(),
             initial_state: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
@@ -425,6 +426,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
         tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
             actor_id: String::new(),
             actor_type: "TestActor".to_string(),
+            role: "TestActor".to_string(),
             initial_state: vec![],
             config: None,
             labels: std::collections::HashMap::new(),

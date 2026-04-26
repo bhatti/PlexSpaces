@@ -73,11 +73,11 @@ async fn test_link_basic() {
 
     // Verify bidirectional linking: unlink should work from either direction
     // This confirms that linking is bidirectional (actor1->actor2 and actor2->actor1)
-    node.unlink(actor2.id(), actor1.id()).await.unwrap();
+    node.unlink(actor2.id(), actor1.id(), &ctx).await.unwrap();
 
     // Re-link to test unlinking from original direction
     node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
-    node.unlink(actor1.id(), actor2.id()).await.unwrap();
+    node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap();
 }
 
 #[tokio::test]
@@ -100,9 +100,12 @@ async fn test_unlink_nonexistent() {
 
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
     let actor2 = create_test_actor_ref(&node, "actor-2").await;
+    use plexspaces_core::RequestContext;
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     // Unlinking actors that aren't linked should succeed (idempotent)
-    node.unlink(actor1.id(), actor2.id()).await.unwrap();
+    node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap();
 }
 
 /// Helper to wait for an actor to die (or verify it's alive)
@@ -318,7 +321,7 @@ async fn test_exit_condition_cascading() {
         );
         node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
         node.link(actor1.id(), actor3.id(), &ctx).await.unwrap();
-        node.unlink(actor1.id(), actor2.id()).await.unwrap(); // Unlink actor2
+        node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap(); // Unlink actor2
         tokio::task::yield_now().await; // Give unlink time to process
 
         terminate_actor(

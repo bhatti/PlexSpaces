@@ -267,11 +267,15 @@ enum SupervisionStrategy {
 // - Shutdown timeout specification
 // - Support for nested supervisors
 message ChildSpec {
-  // Unique child identifier
-  string id = 1;
+  // Instance name + behavior class (canonical ActorId is derived at deploy time).
+  plexspaces.common.v1.ActorIdentity actor_identity = 1;
 
-  // Child type (worker or supervisor)
-  ChildType type = 2;
+  // Role of this child within the application (e.g. "worker", "leader", "supervisor").
+  // Maps 1:1 to the TOML `role` field in [[supervisor.children]].
+  // Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+  string role = 2 [
+    (buf.validate.field).string = {max_len: 128}
+  ];
 
   // Arguments to pass to start function
   map<string, string> args = 3;
@@ -294,18 +298,6 @@ message ChildSpec {
   // OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
   // When set, process_message spans and actor registration logs show this instead of the child id.
   optional string behavior_kind = 8;
-}
-
-// Child type
-enum ChildType {
-  // Unspecified (invalid)
-  CHILD_TYPE_UNSPECIFIED = 0;
-
-  // Worker process (actor)
-  CHILD_TYPE_WORKER = 1;
-
-  // Supervisor process (manages other children)
-  CHILD_TYPE_SUPERVISOR = 2;
 }
 
 // Restart policy (Erlang/OTP)

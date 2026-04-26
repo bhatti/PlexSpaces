@@ -9,13 +9,9 @@
 //! Uses NodeBuilder/ActorBuilder patterns for simplified setup.
 
 use async_trait::async_trait;
-use plexspaces_core::application::{
-    Application, ApplicationError, ApplicationNode, HealthStatus,
-};
-use crate::actors::{QcActorBehavior, AlignmentActorBehavior, VariantCallingActorBehavior};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode, HealthStatus};
 use std::sync::Arc;
 use tracing::info;
-use plexspaces_mailbox::mailbox_config_default;
 
 /// The Genomic Pipeline Application
 ///
@@ -47,7 +43,7 @@ impl Application for GenomicsPipelineApplication {
         &self.version
     }
 
-    async fn start(&mut self, node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
+    async fn start(&mut self, _node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
         info!("GenomicsPipelineApplication '{}' (v{}) starting...", self.name(), self.version());
 
         // Note: In a production implementation, actors would be spawned here using NodeBuilder/ActorBuilder

@@ -27,7 +27,9 @@ mod validate_toml_parsing {
         // Verify children
         assert_eq!(supervisor.children.len(), 1, "Should have 1 child");
         let child = &supervisor.children[0];
-        assert_eq!(child.id, "task-queue");
+        let idn = child.actor_identity.as_ref().expect("actor_identity");
+        assert_eq!(idn.name, "task-queue");
+        assert_eq!(idn.actor_type, "task_queue_worker");
 
         // Verify facets were parsed
         assert_eq!(
@@ -43,7 +45,7 @@ mod validate_toml_parsing {
 
         println!("✅ TOML config parsed successfully");
         println!("   - Supervisor: {:?} children", supervisor.children.len());
-        println!("   - Child: {}", child.id);
+        println!("   - Child: {} ({})", idn.name, idn.actor_type);
         println!("   - Facets: {} facet(s)", child.facets.len());
         for (i, facet) in child.facets.iter().enumerate() {
             println!(
@@ -62,8 +64,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "order-fulfillment"
-type = "worker"
+name = "order-fulfillment"
+actor_type = "order_fulfillment_worker"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "Workflow"
@@ -80,7 +83,9 @@ facets = [
         let spec = result.unwrap();
         assert!(spec.supervisor.is_some());
         let child = &spec.supervisor.as_ref().unwrap().children[0];
-        assert_eq!(child.id, "order-fulfillment");
+        let idn = child.actor_identity.as_ref().expect("actor_identity");
+        assert_eq!(idn.name, "order-fulfillment");
+        assert_eq!(idn.actor_type, "order_fulfillment_worker");
         assert_eq!(child.behavior_kind.as_deref(), Some("Workflow"));
     }
 }

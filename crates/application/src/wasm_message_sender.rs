@@ -93,6 +93,32 @@ impl ActorServiceMessageSender {
         dialable_node_address(address)
     }
 
+    /// Resolve tenant/namespace for a WASM caller from the registered sender actor (same rules as
+    /// [`Self::stop_actor`]). Used so monitor registration stores a real [`plexspaces_core::RequestContext`]
+    /// for cross-node `__DOWN__` routing instead of ad hoc parallel fields.
+    async fn request_context_from_registered_sender_actor(
+        &self,
+        from: &str,
+    ) -> Result<plexspaces_core::RequestContext, String> {
+        use plexspaces_core::{ActorId, RequestContext};
+
+        let registry = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let sender_id = ActorId::from_canonical(from)
+            .map_err(|e| format!("Invalid canonical sender actor ID '{from}': {e}"))?;
+
+        if let Some((tenant_id, namespace)) = registry.get_actor_metadata(&sender_id).await {
+            return Ok(RequestContext::new_without_auth(tenant_id, namespace));
+        }
+
+        Err(format!(
+            "Registered sender actor scope not found for '{from}'"
+        ))
+    }
+
     fn looks_like_node_address(target: &str) -> bool {
         let trimmed = target.trim();
         trimmed.starts_with("http://")
@@ -225,9 +251,9 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<(), String> {
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
-        let ctx = plexspaces_core::ActorId::from_canonical(from)
-            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
-            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
@@ -273,9 +299,9 @@ impl MessageSender for ActorServiceMessageSender {
             "WASM ask: sending request via ActorService"
         );
 
-        let ctx = plexspaces_core::ActorId::from_canonical(from)
-            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
-            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
 
         let msg = Message {
             id: request_id.clone(),
@@ -332,10 +358,9 @@ impl MessageSender for ActorServiceMessageSender {
         // TODO: Resolve module_ref to get actual actor_type
         let actor_type = module_ref.to_string();
 
-        // Derive namespace from calling actor's canonical ID
-        let ctx = plexspaces_core::ActorId::from_canonical(from)
-            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
-            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
         let spawned_id = self
             .actor_service
             .spawn_actor(
@@ -352,7 +377,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     #[instrument(skip(self), fields(from = %from, actor_id = %actor_id))]
     async fn stop_actor(&self, from: &str, actor_id: &str, _timeout_ms: u64) -> Result<(), String> {
-        use plexspaces_core::{ActorFactory, ActorId, RequestContext};
+        use plexspaces_core::{ActorFactory, ActorId};
 
         let actor_factory: Arc<dyn ActorFactory> =
             self.service_locator
@@ -360,30 +385,9 @@ impl MessageSender for ActorServiceMessageSender {
                 .await
                 .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
 
-        // Resolve caller scope from the registered sender so stop_actor respects
-        // tenant and namespace boundaries without relying on parallel registry maps.
-        let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
-            if let Ok(sender_id) = ActorId::from_canonical(from) {
-                if let Some(sender) = registry.lookup_actor(&sender_id).await {
-                    let tenant_id = sender.tenant_id().unwrap_or_default().to_string();
-                    let namespace = sender.namespace().unwrap_or_default().to_string();
-                    RequestContext::new_without_auth(tenant_id, namespace)
-                } else if let Some((tenant_id, namespace)) =
-                    registry.get_actor_metadata(&sender_id).await
-                {
-                    RequestContext::new_without_auth(tenant_id, namespace)
-                } else {
-                    RequestContext::new_without_auth(
-                        String::new(),
-                        sender_id.namespace().to_string(),
-                    )
-                }
-            } else {
-                RequestContext::new_without_auth(String::new(), String::new())
-            }
-        } else {
-            RequestContext::new_without_auth(String::new(), String::new())
-        };
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
 
         let actor_id_typed = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
@@ -453,11 +457,8 @@ impl MessageSender for ActorServiceMessageSender {
     }
 
     async fn monitor_actor(&self, from: &str, actor_id: &str) -> Result<u64, String> {
-        use plexspaces_core::ActorRegistry;
-
         use plexspaces_core::ActorId;
-
-        use tokio::sync::mpsc;
+        use plexspaces_core::ActorRegistry;
 
         let actor_registry: Arc<ActorRegistry> = self
             .service_locator
@@ -465,36 +466,20 @@ impl MessageSender for ActorServiceMessageSender {
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
+
         let target_id = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
         let monitor_id = ActorId::from_canonical(from)
             .map_err(|e| format!("Invalid canonical monitor actor ID '{from}': {e}"))?;
         let monitor_ref = ulid::Ulid::new().to_string();
 
-        // Create a channel for termination notifications
-        // For WASM actors, we'll need to handle DOWN messages differently
-        // For now, create a channel but we may need to integrate with WASM message handling
-        let (tx, mut rx) = mpsc::channel(10);
-
-        // Spawn a task to handle DOWN messages
-        let monitor_id_clone = monitor_id.clone();
-        tokio::spawn(async move {
-            while let Some((terminated_id, reason)) = rx.recv().await {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        monitor = %monitor_id_clone,
-                        terminated = %terminated_id,
-                        reason = ?reason,
-                        "Received DOWN notification for monitored actor"
-                    );
-                }
-                // TODO: Send DOWN message to WASM actor's mailbox
-                // This requires integration with WASM message handling
-            }
-        });
-
+        // Register the monitor. When the target terminates, ActorRegistry delivers a
+        // __DOWN__ message directly to the monitoring actor's mailbox — no separate channel needed.
         actor_registry
-            .monitor(&target_id, &monitor_id, monitor_ref.clone(), tx)
+            .monitor(&target_id, &monitor_id, monitor_ref.clone(), &ctx)
             .await
             .map_err(|e| format!("Failed to monitor actor: {}", e))?;
 
@@ -675,6 +660,67 @@ impl MessageSender for ActorServiceMessageSender {
             .ok_or_else(|| format!("Application '{}' metrics not found", application_id))
     }
 
+    async fn get_application_metrics(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        application_id: &str,
+        target_node: &str,
+    ) -> Result<ApplicationMetrics, String> {
+        let local_node_id = self.local_node_id().await?;
+        let resolved = self.resolve_node_endpoint(target_node).await.ok();
+        let target_is_address = Self::looks_like_node_address(target_node);
+        let (resolved_node_id, resolved_node_address) = resolved.clone().unwrap_or_else(|| {
+            (
+                target_node.to_string(),
+                Self::normalize_node_address(target_node),
+            )
+        });
+
+        let extract_metrics = |info: ApplicationInfo| {
+            info.metrics
+                .ok_or_else(|| format!("Application '{}' metrics not found", application_id))
+        };
+
+        if resolved_node_id == local_node_id {
+            let manager = self
+                .service_locator
+                .application_manager()
+                .await
+                .ok_or_else(|| "ApplicationManager not found in ServiceLocator".to_string())?;
+            return manager
+                .get_application_metrics(application_id)
+                .await
+                .ok_or_else(|| format!("Application '{}' metrics not found", application_id));
+        }
+
+        if let Ok((info, response_node_id, _response_node_address)) = self
+            .fetch_remote_application_status(application_id, &resolved_node_address)
+            .await
+        {
+            if target_is_address || response_node_id == target_node {
+                return extract_metrics(info);
+            }
+        }
+
+        for (candidate_id, candidate_address) in self.known_node_endpoints().await? {
+            let result = self
+                .fetch_remote_application_status(application_id, &candidate_address)
+                .await;
+            if let Ok((info, response_node_id, response_node_address)) = result {
+                if target_is_address
+                    || response_node_id == target_node
+                    || candidate_id == target_node
+                    || Self::canonical_node_address_key(&response_node_address)
+                        == Self::canonical_node_address_key(target_node)
+                {
+                    return extract_metrics(info);
+                }
+            }
+        }
+
+        Err(format!("Node not found: {}", target_node))
+    }
+
     async fn get_application_status(
         &self,
         _ctx: &plexspaces_core::RequestContext,
@@ -737,13 +783,170 @@ impl MessageSender for ActorServiceMessageSender {
 mod tests {
     use super::ActorServiceMessageSender;
     use async_trait::async_trait;
-    use plexspaces_core::ActorService as ActorServiceTrait;
+    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_core::{ActorId, ActorRegistry, ActorService as ActorServiceTrait};
     use plexspaces_proto::common::v1::Message;
     use plexspaces_proto::node::v1::NodeRegistration;
+    use plexspaces_proto::object_registry::v1::ObjectRegistration;
     use std::sync::Arc;
+    use std::sync::RwLock;
 
     struct RecordingActorService {
         reply_payload: Vec<u8>,
+    }
+
+    struct NoopObjectRegistry;
+
+    #[async_trait]
+    impl ObjectRegistryTrait for NoopObjectRegistry {
+        async fn lookup(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_id: &str,
+            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(None)
+        }
+
+        async fn lookup_full(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            _object_id: &str,
+        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(None)
+        }
+
+        async fn register(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _registration: ObjectRegistration,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn discover(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+            _object_category: Option<String>,
+            _capabilities: Option<Vec<String>>,
+            _labels: Option<Vec<String>>,
+            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+            _offset: usize,
+            _limit: usize,
+        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Vec::new())
+        }
+
+        async fn unregister(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            _object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn heartbeat(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            _object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    struct TestFrameworkSender {
+        actor_id: ActorId,
+        tenant_id: String,
+        namespace: String,
+        actor_type: RwLock<Option<String>>,
+        behavior_kind: RwLock<Option<String>>,
+        local_state_handle: RwLock<Option<Arc<dyn plexspaces_core::ActorStateHandle>>>,
+    }
+
+    impl TestFrameworkSender {
+        fn new(
+            actor_id: ActorId,
+            tenant_id: impl Into<String>,
+            namespace: impl Into<String>,
+        ) -> Self {
+            Self {
+                actor_id,
+                tenant_id: tenant_id.into(),
+                namespace: namespace.into(),
+                actor_type: RwLock::new(None),
+                behavior_kind: RwLock::new(None),
+                local_state_handle: RwLock::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl plexspaces_core::MessageSender for TestFrameworkSender {
+        async fn tell(
+            &self,
+            _message: Message,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        fn actor_id(&self) -> Option<String> {
+            Some(self.actor_id.to_string())
+        }
+
+        fn tenant_id(&self) -> Option<&str> {
+            Some(&self.tenant_id)
+        }
+
+        fn namespace(&self) -> Option<&str> {
+            Some(&self.namespace)
+        }
+
+        fn actor_type(&self) -> Option<String> {
+            self.actor_type.read().ok().and_then(|guard| guard.clone())
+        }
+
+        async fn set_actor_type(&self, actor_type: Option<String>) {
+            if let Ok(mut guard) = self.actor_type.write() {
+                *guard = actor_type;
+            }
+        }
+
+        fn behavior_kind(&self) -> Option<String> {
+            self.behavior_kind
+                .read()
+                .ok()
+                .and_then(|guard| guard.clone())
+        }
+
+        async fn set_behavior_kind(&self, behavior_kind: Option<String>) {
+            if let Ok(mut guard) = self.behavior_kind.write() {
+                *guard = behavior_kind;
+            }
+        }
+
+        fn local_state_handle(&self) -> Option<Arc<dyn plexspaces_core::ActorStateHandle>> {
+            self.local_state_handle
+                .read()
+                .ok()
+                .and_then(|guard| guard.clone())
+        }
+
+        async fn set_local_state_handle(
+            &self,
+            handle: Option<Arc<dyn plexspaces_core::ActorStateHandle>>,
+        ) {
+            if let Ok(mut guard) = self.local_state_handle.write() {
+                *guard = handle;
+            }
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     #[async_trait]
@@ -769,18 +972,20 @@ mod tests {
 
         async fn send_and_wait(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_core::RequestContext,
             actor_id: &str,
             message: Message,
             _timeout: Option<std::time::Duration>,
         ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+            assert_eq!(ctx.tenant_id(), "tenant-a");
+            assert_eq!(ctx.namespace(), "heat-diffusion-rust");
             assert_eq!(
                 actor_id,
                 "heat-diffusion-1//worker::heat-diffusion-rust@test-node-8093"
             );
             assert_eq!(
                 message.sender_id,
-                "leader::heat-diffusion-rust@test-node-8091"
+                "leader//gen_server::heat-diffusion-rust@test-node-8091"
             );
             assert_eq!(message.message_type, "init");
             Ok(Message {
@@ -839,11 +1044,45 @@ mod tests {
             reply_payload: br#"{"status":"ok"}"#.to_vec(),
         });
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(NoopObjectRegistry);
+        let actor_registry = Arc::new(ActorRegistry::new(
+            object_registry,
+            "test-node-8091".to_string(),
+        ));
+        service_locator
+            .register_actor_registry(actor_registry.clone())
+            .await;
+
+        let sender_id =
+            ActorId::new("leader", "gen_server", "heat-diffusion-rust", "test-node-8091")
+                .expect("sender actor id");
+        let sender_ctx = plexspaces_core::RequestContext::new_without_auth(
+            "tenant-a".to_string(),
+            "heat-diffusion-rust".to_string(),
+        );
+        let sender_ref: Arc<dyn plexspaces_core::MessageSender> =
+            Arc::new(TestFrameworkSender::new(
+                sender_id.clone(),
+                sender_ctx.tenant_id().to_string(),
+                sender_ctx.namespace().to_string(),
+            ));
+        actor_registry
+            .register_actor(
+                &sender_ctx,
+                sender_id.clone(),
+                sender_ref,
+                "gen_server".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await;
+
         let sender = ActorServiceMessageSender::new(actor_service, service_locator);
 
         let reply = plexspaces_wasm_runtime::MessageSender::ask(
             &sender,
-            "leader::heat-diffusion-rust@test-node-8091",
+            &sender_id.to_string(),
             "heat-diffusion-1//worker::heat-diffusion-rust@test-node-8093",
             "init",
             br#"{"region":0}"#.to_vec(),

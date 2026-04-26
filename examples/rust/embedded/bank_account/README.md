@@ -74,7 +74,7 @@ Step 2: Setting up journal storage
   Storage: In-memory SQLite (use file-based for production)
 
 Step 3: Spawn durable bank account actor
-  ✓ Account 'account-123@bank-node' spawned
+  ✓ Account 'account-123//bank_account::accounts@bank-node' spawned
   Durability facet attached (journaling enabled)
 
 Step 4: Process 1000 Transactions (All Journaled)

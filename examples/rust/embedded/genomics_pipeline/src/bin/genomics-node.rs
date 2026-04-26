@@ -21,8 +21,10 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber;
 
-use plexspaces_node::{NodeBuilder, ConfigBootstrap};
-use genomics_pipeline::{GenomicsPipelineApplication, config::GenomicsPipelineConfig};
+use plexspaces_application::ApplicationNode;
+use plexspaces_core::RequestContext;
+use plexspaces_node::{ConfigBootstrap, NodeBuilder};
+use genomics_pipeline::{config::GenomicsPipelineConfig, GenomicsPipelineApplication};
 
 /// Command line arguments
 #[derive(Parser, Debug)]
@@ -93,18 +95,23 @@ async fn main() -> Result<()> {
 
     // Create application with loaded config
     let app = Box::new(GenomicsPipelineApplication::with_config(app_config));
-    node.register_application(app)
+    let ctx = RequestContext::new_without_auth(String::new(), "genomics-pipeline".to_string());
+
+    node.application_manager()
+        .register(&ctx, app)
         .await
         .with_context(|| "Failed to register genomics application")?;
 
-    info!("Registered genomics-pipeline application");
+    node.application_manager()
+        .ensure_node_context(node.clone() as Arc<dyn ApplicationNode>)
+        .await;
 
-    // Start genomics pipeline application
-    node.start_application("genomics-pipeline")
+    node.application_manager()
+        .start("genomics-pipeline")
         .await
         .with_context(|| "Failed to start genomics application")?;
 
-    info!("Started genomics-pipeline application");
+    info!("Registered and started genomics-pipeline application");
 
     // Start node (this will start gRPC server, health checks, etc.)
     // This blocks until SIGTERM/SIGINT is received, then performs graceful shutdown

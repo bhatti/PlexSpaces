@@ -765,7 +765,9 @@ async fn test_reply_with_sender_id() {
     };
 
     let ctx = RequestContext::new_without_auth(String::new(), "test-ns".to_string());
-    let result = actor_service.send(&ctx, &original_msg.sender_id, reply_msg).await;
+    let result = actor_service
+        .send(&ctx, &original_msg.sender_id, reply_msg)
+        .await;
     assert!(result.is_ok());
 
     let sent = sent_messages.lock().unwrap();

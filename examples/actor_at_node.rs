@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;
     println!("\nSpawning counter on node1...");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let req_ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     )
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .with_admin(true);
     let counter1_ref = ActorBuilder::new(Box::new(Counter { count: 0 }))
         .with_name("counter")
-        .spawn(&ctx, node1.service_locator().clone())
+        .spawn(&req_ctx, node1.service_locator().clone())
         .await?;
 
     println!(
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .ok_or("ActorService not available")?;
     actor_service
-        .send(&counter1_ref.id(), msg1)
+        .send(&req_ctx, &counter1_ref.id(), msg1)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
     println!(
@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .get_actor_service()
         .await
         .ok_or("ActorService not available")?;
-    actor_service.send(&counter1_ref.id(), msg3).await?;
+    actor_service.send(&req_ctx, &counter1_ref.id(), msg3).await?;
     println!(
         "   ✅ Sent 'get' to {} via ActorService.send()",
         counter1_ref.id()
@@ -170,7 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("\n4. Sending another 'increment' command:");
     let msg4 = create_message(b"increment".to_vec());
     actor_service
-        .send(&counter1_ref.id(), msg4)
+        .send(&req_ctx, &counter1_ref.id(), msg4)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
     println!(
@@ -184,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("\n5. Sending final 'get' command:");
     let msg5 = create_message(b"get".to_vec());
     actor_service
-        .send(&counter1_ref.id(), msg5)
+        .send(&req_ctx, &counter1_ref.id(), msg5)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
     println!(

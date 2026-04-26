@@ -68,25 +68,15 @@ mod wasm_app {
     }
 
     fn canonical_actor_target(target: &str) -> String {
-        if target.contains('@') {
-            return target.to_string();
-        }
-        if let Some((actor_type, actor_name)) = target.split_once(':') {
-            let self_id = host::self_id();
-            let namespace = actor_application_id(&self_id);
-            let node_id = self_id
-                .rsplit_once('@')
-                .map(|(_, node_id)| node_id.to_string())
-                .unwrap_or_default();
-            if !actor_name.is_empty()
-                && !actor_type.is_empty()
-                && !namespace.is_empty()
-                && !node_id.is_empty()
-            {
-                return format!("{actor_name}//{actor_type}::{namespace}@{node_id}");
-            }
-        }
         target.to_string()
+    }
+
+    fn actor_type_from_actor_id(actor_id: &str) -> Option<String> {
+        actor_id
+            .split_once("//")
+            .and_then(|(_, suffix)| suffix.split_once('@').map(|(qualified, _)| qualified))
+            .and_then(|qualified| qualified.split_once("::").map(|(actor_type, _)| actor_type))
+            .map(str::to_string)
     }
 
     fn parse_op(msg_type: &str, payload: &[u8]) -> Result<String, String> {
@@ -600,14 +590,17 @@ mod wasm_app {
         let module_ref = payload
             .get("module_ref")
             .and_then(|value| value.as_str())
-            .unwrap_or("abstractions");
+            .map(str::to_string)
+            .filter(|value| !value.is_empty())
+            .or_else(|| with_state(|state| actor_type_from_actor_id(&state.actor_id)))
+            .unwrap_or_else(|| "abstractions_wasm".to_string());
         let actor_id = payload
             .get("actor_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let init_config = payload.get("config").cloned().unwrap_or_else(|| json!({}));
         let init_bytes = init_config.to_string().into_bytes();
-        match host_result(host::spawn(module_ref, actor_id, &init_bytes), "spawn") {
+        match host_result(host::spawn(&module_ref, actor_id, &init_bytes), "spawn") {
             Ok(spawned_id) => {
                 with_state(|state| {
                     state.last_spawned_id = spawned_id.clone();

@@ -59,7 +59,7 @@ sequenceDiagram
     Leader->>Workers: scatter_gather(finalize_round)
     Workers-->>Leader: reduced vector checksum + metrics
   end
-  Leader->>Leader: aggregate status + per-node metrics
+  Leader->>Leader: aggregate per-node metrics + node metadata
   Leader-->>Client: benchmark report
 ```
 
@@ -71,7 +71,8 @@ sequenceDiagram
   - `scatter_gather`
 - Application metrics/status host functions:
   - `application_metrics_add`
-  - `application_get_status`
+  - `application_get_metrics`
+  - `application_get_status` (node-address labeling only)
 
 ## Files
 

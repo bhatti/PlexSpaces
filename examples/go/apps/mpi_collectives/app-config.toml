@@ -9,15 +9,17 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "leader"
-type = "leader"
+name = "leader"
+actor_type = "mpi_collectives_wasm"
+role = "leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "leader", worker_count = "8", elements_per_worker = "24000", rounds = "8" }
 
 [[supervisor.children]]
-id = "worker"
-type = "worker"
+name = "worker"
+actor_type = "mpi_collectives_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "worker" }

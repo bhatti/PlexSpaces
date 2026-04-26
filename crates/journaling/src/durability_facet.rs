@@ -893,27 +893,37 @@ impl Facet for DurabilityFacet {
                     }
 
                     // Step 3: Attempt automatic state loading.
-                    let state_adapter = self.checkpoint_state_adapter.read().await;
-                    if let Some(adapter) = state_adapter.as_ref() {
-                        match adapter.restore_state(&checkpoint.state_data).await {
-                            Ok(true) => {
-                                tracing::info!(
-                                    actor_id = %actor_id,
-                                    sequence = checkpoint.sequence,
-                                    schema_version = checkpoint.state_schema_version,
-                                    "Checkpoint state automatically restored"
-                                );
-                            }
-                            Ok(false) => {}
-                            Err(e) => {
-                                return Err(FacetError::InvalidConfig(format!(
-                                    "Failed to restore checkpoint state: {}",
-                                    e
-                                )));
+                    //
+                    // `CheckpointStateAdapter` is always installed for actors with durability; its
+                    // default delegates to `Actor::restore_checkpoint_state`, which returns
+                    // `Ok(false)` when the behavior does not handle bytes. In that case we still
+                    // try an optional `StateLoader` (tests and custom facets) before manual mode.
+                    let mut checkpoint_restored = false;
+                    {
+                        let state_adapter = self.checkpoint_state_adapter.read().await;
+                        if let Some(adapter) = state_adapter.as_ref() {
+                            match adapter.restore_state(&checkpoint.state_data).await {
+                                Ok(true) => {
+                                    checkpoint_restored = true;
+                                    tracing::info!(
+                                        actor_id = %actor_id,
+                                        sequence = checkpoint.sequence,
+                                        schema_version = checkpoint.state_schema_version,
+                                        "Checkpoint state automatically restored"
+                                    );
+                                }
+                                Ok(false) => {}
+                                Err(e) => {
+                                    return Err(FacetError::InvalidConfig(format!(
+                                        "Failed to restore checkpoint state: {}",
+                                        e
+                                    )));
+                                }
                             }
                         }
-                    } else {
-                        drop(state_adapter);
+                    }
+
+                    if !checkpoint_restored {
                         let state_loader = self.state_loader.read().await;
                         if let Some(loader) = state_loader.as_ref() {
                             match loader.deserialize(&checkpoint.state_data) {
@@ -928,7 +938,7 @@ impl Facet for DurabilityFacet {
                                         actor_id = %actor_id,
                                         sequence = checkpoint.sequence,
                                         schema_version = checkpoint.state_schema_version,
-                                        "Checkpoint state automatically restored"
+                                        "Checkpoint state automatically restored via StateLoader"
                                     );
                                 }
                                 Err(e) => {

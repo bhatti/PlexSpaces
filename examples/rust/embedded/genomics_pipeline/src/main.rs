@@ -7,6 +7,8 @@
 //!
 //! Simple standalone runner for development and testing.
 //! For production deployment, use `genomics-node` binary instead.
+//! This is the package default run target, so `cargo run -- ...` starts this
+//! orchestrator without needing `--bin genomics-pipeline`.
 
 use anyhow::Result;
 use clap::Parser;
@@ -65,11 +67,9 @@ async fn main() -> Result<()> {
     println!();
 
     // Create node using NodeBuilder
-    let node = Arc::new(
-        NodeBuilder::new("genomics-pipeline-node")
-            .with_listen_addr("0.0.0.0:9000")
-            .build().await
-    );
+    let node = NodeBuilder::new("genomics-pipeline-node")
+        .with_listen_addr("0.0.0.0:9000")
+        .build_started().await;
     info!("✅ Node created: genomics-pipeline-node");
     println!();
 
@@ -79,14 +79,14 @@ async fn main() -> Result<()> {
     // Spawn coordinator
     info!("🎭 Spawning coordinator...");
     metrics_tracker.start_coordinate();
-    let coordinator_id = format!("coordinator@{}", node.id().as_str());
+    let coordinator_name = "coordinator".to_string();
     let ctx = RequestContext::new_without_auth("genomics".to_string(), "pipeline".to_string());
     let coordinator_ref = spawn_with_facets(
         &ctx,
         node.service_locator(),
-        coordinator_id.clone(),
+        coordinator_name.clone(),
         "pipeline",
-        GenomicsCoordinator::new(coordinator_id.clone()),
+        GenomicsCoordinator::new(coordinator_name.clone()),
         vec![],
     )
     .await
@@ -117,7 +117,8 @@ async fn main() -> Result<()> {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     } else {
         info!("ℹ️  No sample provided. Use --sample-id and --fastq to process a sample.");
-        info!("   Example: cargo run -- --sample-id SAMPLE001 --fastq /path/to/sample.fastq");
+        info!("   Example: cargo run -- --sample-id SAMPLE001 --fastq test_data/sample001.fastq");
+        info!("   Or use ./scripts/run.sh to run the bundled sample dataset.");
         println!();
     }
 
@@ -140,7 +141,7 @@ async fn main() -> Result<()> {
     println!("╚════════════════════════════════════════════════════════════════╝");
     println!();
     println!("💡 For production deployment, use:");
-    println!("   cargo run --bin genomics-node");
+    println!("   cargo run --bin genomics-node -- --config config/node1.toml");
     println!();
 
     Ok(())

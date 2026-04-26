@@ -73,6 +73,10 @@ impl EntityRecognitionApplication {
 
 #[async_trait]
 impl Application for EntityRecognitionApplication {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "entity-recognition"
     }
@@ -97,51 +101,54 @@ impl Application for EntityRecognitionApplication {
 
         // Spawn loader actors (CPU-intensive) via SDK helper
         for i in 0..self.config.loader_count {
-            let actor_id = format!("loader-{}@{}", i, node.id());
-            spawn_with_facets(
+            let actor_name = format!("loader-{}", i);
+            let actor_ref = spawn_with_facets(
                 &ctx,
                 service_locator.clone(),
-                actor_id.clone(),
+                actor_name.clone(),
                 "entity-recognition",
                 LoaderBehavior::new(vec![]),
                 vec![],
             )
             .await
-            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_name.clone(), e.to_string()))?;
+            let actor_id = actor_ref.id().to_string();
             self.actor_ids.write().await.push(actor_id.clone());
             info!(actor_id = %actor_id, "spawned loader actor");
         }
 
         // Spawn processor actors (GPU-intensive) via SDK helper
         for i in 0..self.config.processor_count {
-            let actor_id = format!("processor-{}@{}", i, node.id());
-            spawn_with_facets(
+            let actor_name = format!("processor-{}", i);
+            let actor_ref = spawn_with_facets(
                 &ctx,
                 service_locator.clone(),
-                actor_id.clone(),
+                actor_name.clone(),
                 "entity-recognition",
                 ProcessorBehavior::new(),
                 vec![],
             )
             .await
-            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_name.clone(), e.to_string()))?;
+            let actor_id = actor_ref.id().to_string();
             self.actor_ids.write().await.push(actor_id.clone());
             info!(actor_id = %actor_id, "spawned processor actor");
         }
 
         // Spawn aggregator actors (CPU-intensive) via SDK helper
         for i in 0..self.config.aggregator_count {
-            let actor_id = format!("aggregator-{}@{}", i, node.id());
-            spawn_with_facets(
+            let actor_name = format!("aggregator-{}", i);
+            let actor_ref = spawn_with_facets(
                 &ctx,
                 service_locator.clone(),
-                actor_id.clone(),
+                actor_name.clone(),
                 "entity-recognition",
                 AggregatorBehavior::new(0),
                 vec![],
             )
             .await
-            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_name.clone(), e.to_string()))?;
+            let actor_id = actor_ref.id().to_string();
             self.actor_ids.write().await.push(actor_id.clone());
             info!(actor_id = %actor_id, "spawned aggregator actor");
         }

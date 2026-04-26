@@ -43,6 +43,22 @@ from plexspaces.host import host, ServiceHttpClient
 CACHE_TTL_MS = 5 * 60 * 1000  # 5 minutes
 
 
+def actor_node_id(actor_id: str) -> str:
+    if "@" in actor_id:
+        return actor_id.rsplit("@", 1)[1]
+    return "local"
+
+
+def actor_application_id(actor_id: str) -> str:
+    if "//" in actor_id and "::" in actor_id:
+        suffix = actor_id.split("//", 1)[1]
+        qualified = suffix.split("@", 1)[0]
+        return qualified.rsplit("::", 1)[1]
+    if ":" in actor_id and "@" in actor_id:
+        return actor_id.split(":", 1)[1].split("@", 1)[0]
+    return ""
+
+
 def _parse_weather_body(body_str: str) -> dict:
     if not body_str:
         return {}
@@ -65,19 +81,38 @@ class WeatherActor:
     """
 
     actor_id: str = state(default="")
+    application_id: str = state(default="")
+    node_id: str = state(default="")
     cache_hits: int = state(default=0)
     cache_misses: int = state(default=0)
 
     @init_handler
     def on_init(self, config: dict):
         self.actor_id = config.get("actor_id", "")
+        self.application_id = actor_application_id(self.actor_id)
+        self.node_id = actor_node_id(self.actor_id)
         host.log("info", f"WeatherActor initialized: {self.actor_id}")
+
+    def _cache_key_prefix(self) -> str:
+        return f"{self.actor_id}:weather:"
+
+    def _record_metrics(self, metric_name: str, extra_counters: dict = None) -> None:
+        counters = {"weather_requests": 1, metric_name: 1}
+        if isinstance(extra_counters, dict):
+            counters.update(extra_counters)
+        host.application_metrics_add(
+            self.application_id,
+            {
+                "message_count": 1,
+                "counter_metrics": counters,
+            },
+        )
 
     @handler("get_weather")
     def get_weather(self, city: str = "London") -> dict:
         """Fetch weather for a city, using KV cache to avoid redundant calls."""
-        cache_key = f"weather:{city}"
-        cached_raw = host.kv_get(cache_key)
+        cache_key = f"{self._cache_key_prefix()}{city}"
+        cached_raw = host.kv_get(cache_key) or ""
         if cached_raw.startswith("ERROR:"):
             host.log("warn", f"Cache read failed for {city}: {cached_raw}")
         elif cached_raw:
@@ -88,12 +123,14 @@ class WeatherActor:
                 now_ms = host.now_ms()
                 if now_ms - fetched_at < CACHE_TTL_MS:
                     self.cache_hits += 1
+                    self._record_metrics("weather_cache_hits", {"cache_hits": 1})
                     host.log("debug", f"Cache HIT for {city}")
                     return {"city": city, **data, "source": "cache"}
             except (json.JSONDecodeError, KeyError):
                 pass
 
         self.cache_misses += 1
+        self._record_metrics("weather_cache_misses", {"cache_misses": 1})
         host.log("info", f"Cache MISS for {city} — calling weather-api")
 
         try:
@@ -110,17 +147,20 @@ class WeatherActor:
                 "wind_kph": current.get("wind_speed_10m", 0),
                 "fetched_at_ms": host.now_ms(),
             }
-            cache_write = host.kv_put(cache_key, json.dumps(result))
+            cache_write = host.kv_put(cache_key, json.dumps(result)) or ""
             if cache_write.startswith("ERROR:"):
                 host.log("warn", f"Cache write failed for {city}: {cache_write}")
+            self._record_metrics("weather_api_calls", {"weather_api_calls": 1})
             return {"city": city, **result, "source": "api"}
         except RuntimeError as exc:
+            self._record_metrics("weather_errors", {"weather_errors": 1})
             host.log("error", f"Weather API call failed: {exc}")
             return {"city": city, "error": str(exc), "source": "api"}
 
     @handler("cache_stats")
     def cache_stats(self) -> dict:
         """Return cache hit/miss statistics."""
+        self._record_metrics("weather_cache_stats")
         return {"hits": self.cache_hits, "misses": self.cache_misses}
 
     @handler("clear_cache")
@@ -128,4 +168,20 @@ class WeatherActor:
         """Clear all cached weather data."""
         self.cache_hits = 0
         self.cache_misses = 0
+        prefix = self._cache_key_prefix()
+        keys_raw = host.kv_list(prefix) or "[]"
+        try:
+            keys = json.loads(keys_raw)
+        except json.JSONDecodeError:
+            keys = []
+        if isinstance(keys, list):
+            for key in keys:
+                if isinstance(key, str):
+                    host.kv_delete(key)
+        self._record_metrics("weather_cache_clears")
         return {"cleared": True}
+
+    @handler("app_metrics")
+    def app_metrics(self) -> dict:
+        """Return unified application metrics for this node via the WASM host path."""
+        return host.application_get_metrics(self.application_id, self.node_id)

@@ -17,7 +17,7 @@ use genomic_workflow_pipeline::config::GenomicPipelineConfig;
 use genomic_workflow_pipeline::processor;
 use genomic_workflow_pipeline::recovery::WorkflowRecoveryService;
 use genomic_workflow_pipeline::types::*;
-use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker};
+use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker, NodeBuilder};
 use plexspaces_workflow::*;
 use serde_json::json;
 use std::time::Duration;
@@ -72,6 +72,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("   Resuming execution: {}", exec_id);
     }
     println!();
+
+    let node_id = if config.node.id.is_empty() {
+        "genomic-pipeline-node".to_string()
+    } else {
+        config.node.id.clone()
+    };
+    let _node = NodeBuilder::new(node_id)
+        .with_listen_addr(config.node.listen_address.clone())
+        .with_shared_db_connection_string(args.storage.clone())
+        .build_started()
+        .await;
 
     // Create metrics tracker
     let mut metrics_tracker = CoordinationComputeTracker::new("genomic-pipeline".to_string());
@@ -328,7 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╚════════════════════════════════════════════════════════════╝");
     println!();
     println!("💡 Recovery Tip: If this workflow is interrupted, resume it with:");
-    println!("   cargo run --release -- --resume {}", execution_id);
+    println!("   cargo run -- --resume {}", execution_id);
     println!();
 
     Ok(())

@@ -30,8 +30,7 @@
 
 use plexspaces_node::Node;
 use plexspaces_proto::application::v1::{
-    ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, SupervisionStrategy,
-    SupervisorSpec,
+    ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
 };
 use plexspaces_proto::node::v1::ReleaseSpec;
 use std::sync::Arc;

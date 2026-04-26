@@ -38,7 +38,7 @@
 //! and conversion methods.
 
 use crate::Actor;
-use plexspaces_core::{ActorError, ActorRef};
+use plexspaces_core::{ActorError, ActorId, ActorIdError, ActorRef};
 use plexspaces_proto::supervision::v1::{
     ChildSpec as ProtoChildSpec, ChildType as ProtoChildType,
     RestartStrategy as ProtoRestartStrategy,
@@ -51,27 +51,20 @@ use std::time::Duration;
 /// Boxed future type for async start functions
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
-/// Child specification - mirrors proto ChildSpec exactly
+/// Child specification — runtime supervision binding
 ///
 /// ## Purpose
 /// Defines a child process (actor or supervisor) managed by a supervisor.
-/// This is the unified specification that replaces ActorSpec.
+/// Carries the resolved [`ActorId`] (internal canonical identity); wire/proto
+/// declarations use [`plexspaces_proto::common::v1::ActorIdentity`] plus namespace/node.
 ///
 /// ## Design
-/// - Proto-first: Defined in `proto/plexspaces/v1/supervision/supervision.proto`
-/// - Erlang/OTP semantics: Maps directly to Erlang child_spec
-/// - Type-safe: Uses enums for restart strategy and child type
+/// - Aligns with `proto/plexspaces/v1/supervision/supervision.proto` `ChildSpec`
+/// - `start_fn` is Rust-only (not on the wire)
 #[derive(Clone)]
 pub struct ChildSpec {
-    /// Unique identifier for this child within the supervisor
-    /// This is the child's local name, like "worker1" or "db_supervisor"
-    pub child_id: String,
-
-    /// ID of the actor or supervisor to supervise
-    /// - For actors: actor ID (e.g., "worker1@localhost")
-    /// - For supervisors: supervisor ID (e.g., "db-supervisor")
-    /// The supervisor monitors this process regardless of its type
-    pub actor_or_supervisor_id: String,
+    /// Resolved canonical actor (or supervisor process) identity.
+    pub actor_id: ActorId,
 
     /// How to handle child failures
     pub restart_strategy: RestartStrategy,
@@ -82,7 +75,8 @@ pub struct ChildSpec {
     /// - For supervisors: typically set high or infinity to allow children to shutdown
     pub shutdown_timeout: Option<Duration>,
 
-    /// Child type: actor (worker) or supervisor
+    /// Worker vs supervisor for **supervision policy** (restart/shutdown paths). Not used as the
+    /// actor registry identity — that is always the canonical [`ActorId`] on this struct.
     pub child_type: ChildType,
 
     /// Metadata for child configuration
@@ -192,27 +186,16 @@ pub enum ShutdownSpec {
 }
 
 impl ChildSpec {
-    /// Create a new ChildSpec for a worker (actor)
+    /// Create a new ChildSpec for a supervised **worker** (leaf actor).
     ///
-    /// ## Arguments
-    /// * `child_id` - Unique identifier within supervisor
-    /// * `actor_id` - Actor ID to supervise
-    /// * `start_fn` - Factory function to create/start the actor
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let spec = ChildSpec::worker("worker1", "worker1@node1", Arc::new(|| {
-    ///     Box::pin(async move {
-    ///         let actor = Actor::new(...);
-    ///         let actor_ref = ActorRef::local(...);
-    ///         Ok(StartedChild::Worker { actor, actor_ref })
-    ///     })
-    /// }));
-    /// ```
-    pub fn worker(child_id: String, actor_id: String, start_fn: StartFn) -> Self {
+    /// `child_actor_id` is the resolved canonical [`ActorId`] for this child process
+    /// (`ActorIdentity.name` + behavior-class `actor_type` + namespace + node). It must
+    /// stay distinct from the parent supervisor's **label** string (`Supervisor::new` first argument) and
+    /// from every sibling's [`ActorId`]. Supervision policy lives in [`ChildType::Actor`];
+    /// registry routing always uses this [`ActorId`], not the word "worker".
+    pub fn worker(child_actor_id: ActorId, start_fn: StartFn) -> Self {
         Self {
-            child_id,
-            actor_or_supervisor_id: actor_id,
+            actor_id: child_actor_id,
             restart_strategy: RestartStrategy::Permanent,
             shutdown_timeout: Some(Duration::from_secs(5)),
             child_type: ChildType::Actor,
@@ -222,33 +205,9 @@ impl ChildSpec {
         }
     }
 
-    /// Create a new ChildSpec for a worker using a synchronous factory
-    ///
-    /// ## Purpose
-    /// Convenience constructor that wraps a sync factory in an async one.
-    /// This is useful for tests and simple cases where async is not needed.
-    ///
-    /// ## Arguments
-    /// * `child_id` - Unique identifier within supervisor
-    /// * `actor_id` - Actor ID to supervise
-    /// * `sync_factory` - Synchronous factory function that creates an Actor
-    /// * `actor_ref` - ActorRef for the actor
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let spec = ChildSpec::worker_sync(
-    ///     "worker1".to_string(),
-    ///     "worker1@node1".to_string(),
-    ///     Arc::new(|| {
-    ///         let actor = Actor::new(...);
-    ///         Ok(actor)
-    ///     }),
-    ///     actor_ref,
-    /// );
-    /// ```
+    /// Worker with a synchronous factory (common in tests).
     pub fn worker_sync(
-        child_id: String,
-        actor_id: String,
+        child_actor_id: ActorId,
         sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync>,
         actor_ref: ActorRef,
     ) -> Self {
@@ -260,29 +219,15 @@ impl ChildSpec {
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
         });
-        Self::worker(child_id, actor_id, start_fn)
+        Self::worker(child_actor_id, start_fn)
     }
 
-    /// Create a new ChildSpec for a supervisor
-    ///
-    /// ## Arguments
-    /// * `child_id` - Unique identifier within supervisor
-    /// * `supervisor_id` - Supervisor ID to supervise
-    /// * `start_fn` - Factory function to create/start the supervisor
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let spec = ChildSpec::supervisor("db-supervisor", "db-supervisor", Arc::new(|| {
-    ///     Box::pin(async move {
-    ///         let supervisor = Supervisor::new(...);
-    ///         Ok(StartedChild::Supervisor { supervisor })
-    ///     })
-    /// }));
-    /// ```
-    pub fn supervisor(child_id: String, supervisor_id: String, start_fn: StartFn) -> Self {
+    /// Nested **supervisor** child; `supervisor_actor_id` is the resolved identity of the
+    /// supervisor **process** (another [`ActorId`]), not the same string as any supervised
+    /// worker's name and not the parent supervisor's opaque label string.
+    pub fn supervisor(supervisor_actor_id: ActorId, start_fn: StartFn) -> Self {
         Self {
-            child_id,
-            actor_or_supervisor_id: supervisor_id,
+            actor_id: supervisor_actor_id,
             restart_strategy: RestartStrategy::Permanent,
             shutdown_timeout: None, // Infinity for supervisors
             child_type: ChildType::Supervisor,
@@ -346,11 +291,9 @@ impl ChildSpec {
         self
     }
 
-    /// Convert to proto ChildSpec
+    /// Convert to proto ChildSpec (identity only; no `start_fn` on wire).
     pub fn to_proto(&self) -> ProtoChildSpec {
         ProtoChildSpec {
-            child_id: self.child_id.clone(),
-            actor_or_supervisor_id: self.actor_or_supervisor_id.clone(),
             restart_strategy: self.restart_strategy.to_proto() as i32,
             shutdown_timeout: self.shutdown_timeout.map(|d| prost_types::Duration {
                 seconds: d.as_secs() as i64,
@@ -359,18 +302,27 @@ impl ChildSpec {
             child_type: self.child_type.to_proto() as i32,
             metadata: self.metadata.clone(),
             facets: self.facets.clone(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: self.actor_id.name().to_string(),
+                actor_type: self.actor_id.actor_type().to_string(),
+            }),
         }
     }
 
-    /// Convert from proto ChildSpec
-    ///
-    /// ## Note
-    /// This method cannot reconstruct the `start_fn` since it's not serializable.
-    /// The caller must provide the start_fn separately.
-    pub fn from_proto(proto: &ProtoChildSpec, start_fn: StartFn) -> Self {
-        Self {
-            child_id: proto.child_id.clone(),
-            actor_or_supervisor_id: proto.actor_or_supervisor_id.clone(),
+    /// Convert from proto plus deployment context. Caller supplies `start_fn`.
+    pub fn from_proto(
+        proto: &ProtoChildSpec,
+        start_fn: StartFn,
+        namespace: &str,
+        node_id: &str,
+    ) -> Result<Self, ActorIdError> {
+        let identity = proto
+            .actor_identity
+            .as_ref()
+            .ok_or(ActorIdError::MissingField("actor_identity"))?;
+        let actor_id = ActorId::from_actor_identity(identity, namespace, node_id)?;
+        Ok(Self {
+            actor_id,
             restart_strategy: RestartStrategy::from_proto(proto.restart_strategy),
             shutdown_timeout: proto.shutdown_timeout.as_ref().map(|d| {
                 Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
@@ -379,7 +331,7 @@ impl ChildSpec {
             metadata: proto.metadata.clone(),
             facets: proto.facets.clone(),
             start_fn,
-        }
+        })
     }
 }
 
@@ -455,15 +407,19 @@ impl ShutdownSpec {
 mod tests {
     use super::*;
 
+    fn test_worker_actor_id() -> ActorId {
+        ActorId::new("worker1", "worker", "default", "node1").expect("valid test id")
+    }
+
     #[tokio::test]
     async fn test_child_spec_worker_creation() {
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn);
+        let spec = ChildSpec::worker(test_worker_actor_id(), start_fn);
 
-        assert_eq!(spec.child_id, "worker1");
-        assert_eq!(spec.actor_or_supervisor_id, "worker1@node1");
+        assert_eq!(spec.actor_id.name(), "worker1");
+        assert_eq!(spec.actor_id.actor_type(), "worker");
         assert_eq!(spec.restart_strategy, RestartStrategy::Permanent);
         assert_eq!(spec.child_type, ChildType::Actor);
         assert!(spec.shutdown_timeout.is_some());
@@ -474,14 +430,11 @@ mod tests {
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::supervisor(
-            "db-supervisor".to_string(),
-            "db-supervisor".to_string(),
-            start_fn,
-        );
+        let sid =
+            ActorId::new("db-supervisor", "supervisor", "default", "node1").expect("valid test id");
+        let spec = ChildSpec::supervisor(sid, start_fn);
 
-        assert_eq!(spec.child_id, "db-supervisor");
-        assert_eq!(spec.actor_or_supervisor_id, "db-supervisor");
+        assert_eq!(spec.actor_id.name(), "db-supervisor");
         assert_eq!(spec.child_type, ChildType::Supervisor);
         assert!(spec.shutdown_timeout.is_none()); // Infinity for supervisors
     }
@@ -491,7 +444,7 @@ mod tests {
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
+        let spec = ChildSpec::worker(test_worker_actor_id(), start_fn)
             .with_restart(RestartStrategy::Temporary);
 
         assert_eq!(spec.restart_strategy, RestartStrategy::Temporary);
@@ -502,7 +455,7 @@ mod tests {
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
+        let spec = ChildSpec::worker(test_worker_actor_id(), start_fn)
             .with_shutdown(ShutdownSpec::BrutalKill);
 
         assert_eq!(spec.shutdown_timeout, Some(Duration::ZERO));
@@ -590,15 +543,16 @@ mod tests {
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
+        let spec = ChildSpec::worker(test_worker_actor_id(), start_fn)
             .with_restart(RestartStrategy::Transient)
             .with_shutdown(ShutdownSpec::Timeout(Duration::from_secs(10)))
             .with_metadata("start_module".to_string(), "my_module".to_string());
 
         let proto = spec.to_proto();
 
-        assert_eq!(proto.child_id, "worker1");
-        assert_eq!(proto.actor_or_supervisor_id, "worker1@node1");
+        let id = proto.actor_identity.as_ref().expect("identity set");
+        assert_eq!(id.name, "worker1");
+        assert_eq!(id.actor_type, "worker");
         assert_eq!(
             proto.restart_strategy,
             ProtoRestartStrategy::Transient as i32
@@ -617,8 +571,6 @@ mod tests {
         use prost_types::Duration as ProtoDuration;
 
         let proto = ProtoChildSpec {
-            child_id: "worker1".to_string(),
-            actor_or_supervisor_id: "worker1@node1".to_string(),
             restart_strategy: ProtoRestartStrategy::Transient as i32,
             shutdown_timeout: Some(ProtoDuration {
                 seconds: 10,
@@ -631,15 +583,19 @@ mod tests {
                 m
             },
             facets: Vec::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "worker1".to_string(),
+                actor_type: "worker".to_string(),
+            }),
         };
 
         let start_fn: StartFn =
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
 
-        let spec = ChildSpec::from_proto(&proto, start_fn);
+        let spec = ChildSpec::from_proto(&proto, start_fn, "default", "node1").expect("from_proto");
 
-        assert_eq!(spec.child_id, "worker1");
-        assert_eq!(spec.actor_or_supervisor_id, "worker1@node1");
+        assert_eq!(spec.actor_id.name(), "worker1");
+        assert_eq!(spec.actor_id.actor_type(), "worker");
         assert_eq!(spec.restart_strategy, RestartStrategy::Transient);
         assert_eq!(spec.child_type, ChildType::Actor);
         assert_eq!(spec.shutdown_timeout, Some(Duration::from_secs(10)));

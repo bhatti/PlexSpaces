@@ -245,9 +245,9 @@ async fn create_test_registry_with_remote_actors(
             .split_once('@')
             .map(|(name, node)| (name, node))
             .unwrap_or((actor_id_with_node, remote_node_id));
-        let local_actor_id = ActorId::new(actor_name, "TestActor", "default", local_node_id)
+        let local_actor_id = ActorId::new(actor_name, "test_actor", "default", local_node_id)
             .expect("valid actor id");
-        let alias_actor_id = ActorId::new(actor_name, "TestActor", "default", alias_node_id)
+        let alias_actor_id = ActorId::new(actor_name, "test_actor", "default", alias_node_id)
             .expect("valid actor id");
 
         // Create actor using ActorBuilder
@@ -270,7 +270,7 @@ async fn create_test_registry_with_remote_actors(
                 &ctx,
                 local_actor_id.clone(),
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -284,7 +284,7 @@ async fn create_test_registry_with_remote_actors(
                     &ctx,
                     alias_actor_id,
                     sender_clone,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -326,6 +326,7 @@ async fn test_remote_message_delivery() {
     let request = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "receiver@node2".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"hello from node1".to_vec(),
         headers: Default::default(),
@@ -365,6 +366,7 @@ async fn test_bidirectional_communication() {
     let request1 = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "actor2@node2".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"hello node2".to_vec(),
         headers: Default::default(),
@@ -385,6 +387,7 @@ async fn test_bidirectional_communication() {
     let request2 = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "actor1@node1".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"hello node1".to_vec(),
         headers: Default::default(),
@@ -419,6 +422,7 @@ async fn test_actor_not_found_remote() {
     let request = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "nonexistent@node2".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"test".to_vec(),
         headers: Default::default(),
@@ -461,6 +465,7 @@ async fn test_connection_pooling() {
         let request = Request::new(SendMessageRequest {
             namespace: String::new(),
             actor_type: "echo@node2".to_string(),
+            actor_name: String::new(),
             http_method: "POST".to_string(),
             payload: payload.as_bytes().to_vec(),
             headers: Default::default(),
@@ -502,6 +507,7 @@ async fn test_multiple_target_nodes() {
     let request1 = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "actor@node2".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"to node2".to_vec(),
         headers: Default::default(),
@@ -522,6 +528,7 @@ async fn test_multiple_target_nodes() {
     let request2 = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "actor@node3".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"to node3".to_vec(),
         headers: Default::default(),
@@ -556,6 +563,7 @@ async fn test_node_not_found() {
     let request = Request::new(SendMessageRequest {
         namespace: String::new(),
         actor_type: "actor@nonexistent_node".to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: b"test".to_vec(),
         headers: Default::default(),

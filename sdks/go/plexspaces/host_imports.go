@@ -519,6 +519,14 @@ func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
+//go:wasmimport plexspaces:actor/host@0.1.0 application-get-metrics
+func rawHostApplicationGetMetrics(applicationID, nodeID string, retptr unsafe.Pointer)
+
+func hostApplicationGetMetrics(applicationID, nodeID string) string {
+	rawHostApplicationGetMetrics(applicationID, nodeID, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
 //go:wasmimport plexspaces:actor/host@0.1.0 application-get-status
 func rawHostApplicationGetStatus(applicationID, nodeID string, retptr unsafe.Pointer)
 

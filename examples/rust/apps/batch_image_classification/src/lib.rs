@@ -70,6 +70,8 @@ struct AppState {
 #[derive(Debug, Deserialize)]
 struct InitConfig {
     actor_id: Option<String>,
+    role: Option<String>,
+    declaration_name: Option<String>,
     args: Option<HashMap<String, String>>,
 }
 
@@ -141,6 +143,23 @@ fn default_batches() -> usize {
 
 fn default_image_vector_size() -> usize {
     DEFAULT_IMAGE_VECTOR_SIZE
+}
+
+fn actor_name_from_actor_id(actor_id: &str) -> Option<String> {
+    actor_id
+        .split_once("//")
+        .map(|(name, _)| name.to_string())
+        .or_else(|| actor_id.split_once(':').map(|(name, _)| name.to_string()))
+}
+
+fn resolve_role(config: &InitConfig, actor_id: &str) -> Option<String> {
+    config
+        .args
+        .as_ref()
+        .and_then(|args| args.get("role").cloned())
+        .or_else(|| config.role.clone())
+        .or_else(|| config.declaration_name.clone())
+        .or_else(|| actor_name_from_actor_id(actor_id))
 }
 
 fn state_cell() -> &'static Mutex<AppState> {
@@ -698,11 +717,9 @@ impl BatchImageClassificationApp {
             .map_err(|err| format!("invalid init config: {}", err))?;
         let actor_id = config
             .actor_id
+            .clone()
             .unwrap_or_else(|| "batch-image-classification".to_string());
-        let args = config.args.unwrap_or_default();
-        let role = args
-            .get("role")
-            .cloned()
+        let role = resolve_role(&config, &actor_id)
             .ok_or_else(|| format!("missing required role for actor {}", actor_id))?;
         if role != "leader" && role != "worker" {
             return Err(format!("invalid role '{}' for actor {}", role, actor_id));
@@ -779,10 +796,72 @@ export!(BatchImageClassificationApp);
 #[cfg(test)]
 mod tests {
     use super::{
-        accumulate_status_delta, actor_application_id, distribute_images, normalize_worker_payload,
-        NodeMetrics, RoleMetrics,
+        accumulate_status_delta, actor_application_id, actor_name_from_actor_id, distribute_images,
+        normalize_worker_payload, resolve_role, InitConfig, NodeMetrics, RoleMetrics,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn actor_name_from_actor_id_extracts_name() {
+        assert_eq!(
+            actor_name_from_actor_id(
+                "worker//batch_image_classification_wasm::batch-image-classification-rust@test-node"
+            )
+            .as_deref(),
+            Some("worker")
+        );
+        assert_eq!(
+            actor_name_from_actor_id("leader:batch-image-classification-rust@test-node").as_deref(),
+            Some("leader")
+        );
+    }
+
+    #[test]
+    fn resolve_role_prefers_args_then_payload_then_actor_name() {
+        let actor_id =
+            "worker//batch_image_classification_wasm::batch-image-classification-rust@test-node";
+        let mut args = HashMap::new();
+        args.insert("role".to_string(), "leader".to_string());
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: Some("worker".to_string()),
+                    declaration_name: Some("worker".to_string()),
+                    args: Some(args),
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("leader")
+        );
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: None,
+                    declaration_name: Some("worker".to_string()),
+                    args: None,
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("worker")
+        );
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: None,
+                    declaration_name: None,
+                    args: None,
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("worker")
+        );
+    }
 
     #[test]
     fn actor_application_id_extracts_namespace() {

@@ -1348,6 +1348,18 @@ impl Mailbox {
 
         Ok(())
     }
+
+    /// Mark the start of message processing so graceful shutdown can wait for ACK/NACK completion.
+    pub async fn begin_processing(&self) {
+        let mut in_progress = self.in_progress_count.write().await;
+        *in_progress += 1;
+    }
+
+    /// Mark the end of message processing.
+    pub async fn end_processing(&self) {
+        let mut in_progress = self.in_progress_count.write().await;
+        *in_progress = in_progress.saturating_sub(1);
+    }
 }
 
 /// Mailbox statistics for observability (public API)

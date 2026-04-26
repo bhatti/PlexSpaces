@@ -13,8 +13,9 @@ max_restart_window_seconds = 60
 
 # Rate limiter actor (GenServer equivalent)
 [[supervisor.children]]
-id = "rate-limiter"
-type = "worker"
+name = "rate-limiter"
+actor_type = "migrating_erlang_otp_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 

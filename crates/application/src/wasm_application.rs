@@ -35,7 +35,11 @@
 
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
-use plexspaces_core::{Actor, ActorError, ActorId, BehaviorError, BehaviorType};
+use plexspaces_core::{
+    wasm_root_supervisor_actor_type_from_application_name,
+    wasm_worker_actor_type_from_application_name, Actor, ActorError, ActorId, BehaviorError,
+    BehaviorType,
+};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::v1::application::HealthStatus;
@@ -94,93 +98,6 @@ fn parse_behavior_kind(s: Option<&str>) -> plexspaces_core::BehaviorType {
         Some("Workflow") | Some("workflow") => plexspaces_core::BehaviorType::Workflow,
         _ => plexspaces_core::BehaviorType::GenServer,
     }
-}
-
-fn actor_id_from_initial_state(
-    initial_state: &[u8],
-    child_id: &str,
-    namespace: &str,
-    node_id: &str,
-) -> String {
-    serde_json::from_slice::<serde_json::Value>(initial_state)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("actor_id")
-                .and_then(|actor_id| actor_id.as_str())
-                .map(str::trim)
-                .filter(|actor_id| !actor_id.is_empty())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| {
-            ActorId::new(child_id, child_id, namespace, node_id)
-                .expect("framework-generated wasm actor id should be valid")
-                .to_string()
-        })
-}
-
-/// Merges framework fields into a JSON object for WASM `Init(config_json)`.
-///
-/// ShardGroup and similar paths often pass `initial_state` as `{}` (non-empty bytes). Returning
-/// that verbatim omitted `actor_id`, which breaks multi-role WASM guests (e.g. Go `ActorRouter`)
-/// that route by normalized `actor_id`. When `actor_id` is already present and non-empty, the
-/// payload is left unchanged so materialized virtual-actor configs stay stable.
-fn init_config_from_initial_state_or_child_spec(
-    initial_state: &[u8],
-    child_spec: &plexspaces_proto::application::v1::ChildSpec,
-    actor_id: &str,
-) -> Vec<u8> {
-    fn apply_child_spec_to_object(
-        obj: &mut serde_json::Map<String, serde_json::Value>,
-        child_spec: &plexspaces_proto::application::v1::ChildSpec,
-        actor_id: &str,
-    ) {
-        obj.insert(
-            "actor_id".to_string(),
-            serde_json::Value::String(actor_id.to_string()),
-        );
-        if let Some(ref bk) = child_spec.behavior_kind {
-            obj.entry("behavior_kind".to_string())
-                .or_insert_with(|| serde_json::Value::String(bk.clone()));
-        }
-        if !child_spec.args.is_empty() {
-            obj.entry("args".to_string()).or_insert_with(|| {
-                let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
-                    .args
-                    .iter()
-                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                    .collect();
-                serde_json::Value::Object(args_obj)
-            });
-        }
-    }
-
-    if initial_state.is_empty() {
-        let mut init_config = serde_json::Map::new();
-        apply_child_spec_to_object(&mut init_config, child_spec, actor_id);
-        return serde_json::to_vec(&serde_json::Value::Object(init_config)).unwrap_or_default();
-    }
-
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(initial_state) else {
-        return initial_state.to_vec();
-    };
-    let serde_json::Value::Object(mut obj) = value else {
-        return initial_state.to_vec();
-    };
-
-    let has_actor_id = obj
-        .get("actor_id")
-        .and_then(|v| v.as_str())
-        .map(|s| !s.is_empty())
-        .unwrap_or(false);
-
-    if !has_actor_id {
-        apply_child_spec_to_object(&mut obj, child_spec, actor_id);
-        return serde_json::to_vec(&serde_json::Value::Object(obj))
-            .unwrap_or_else(|_| initial_state.to_vec());
-    }
-
-    initial_state.to_vec()
 }
 
 fn wasm_config_for_child_spec(
@@ -247,13 +164,15 @@ impl Actor for WasmActorBehavior {
         let payload_len = message.payload.len();
 
         // Single prominent line for observability: actor invoked, op, payload size
-        tracing::info!(
-            actor_id = %message.receiver_id,
-            op = %message_type,
-            payload_len = payload_len,
-            message_id = %message_id,
-            "WasmActor invoked"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_id = %message.receiver_id,
+                op = %message_type,
+                payload_len = payload_len,
+                message_id = %message_id,
+                "WasmActor invoked"
+            );
+        }
         match instance
             .handle_message_with_id(from, message_type.as_str(), payload, &message_id)
             .await
@@ -496,11 +415,11 @@ impl WasmApplication {
     /// WasmInstance ready for use in WasmActorBehavior
     async fn create_wasm_instance_for_behavior(
         node: Arc<dyn ApplicationNode>,
-        child_spec: &plexspaces_proto::application::v1::ChildSpec,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         module_hash: &str,
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         actor_id: &str,
-        initial_state: &[u8],
+        init_payload: &[u8],
     ) -> Result<Arc<WasmInstance>, ApplicationError> {
         // Get ServiceLocator from node
         let service_locator = node
@@ -562,8 +481,12 @@ impl WasmApplication {
             service_locator.get_process_group_registry().await;
 
         let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
-        let config_any: Arc<dyn std::any::Any + Send + Sync> =
-            Arc::new(wasm_config_for_child_spec(child_spec));
+        // Derive WasmConfig from spec.facets — durability enabled when spec carries a durability facet.
+        let wasm_config = plexspaces_wasm_runtime::WasmConfig {
+            durability_enabled: spec.facets.iter().any(|f| f.r#type == "durability"),
+            ..Default::default()
+        };
+        let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(wasm_config);
 
         // Create MessageSender for inter-actor communication (host.ask, host.tell)
         let message_sender: Option<Arc<dyn std::any::Any + Send + Sync>> = {
@@ -579,18 +502,15 @@ impl WasmApplication {
             }
         };
 
-        // Virtual actor reactivation must reuse the original/materialized init payload so the
-        // guest sees the same identity, role, and facet-facing config as the framework runtime.
-        let init_config_json =
-            init_config_from_initial_state_or_child_spec(initial_state, child_spec, actor_id);
-
+        // init_payload is already the full wasm_init_payload — actor_id, args, declaration_name, etc.
+        // Pass it directly so the WASM guest's init() sees the canonical payload.
         let outbound_http_client = service_locator.get_outbound_http_client().await;
 
         let instance_any = runtime
             .instantiate(
                 module_any,
                 actor_id.to_string(),
-                &init_config_json,
+                init_payload,
                 config_any,
                 Some(channel_service),
                 message_sender,
@@ -618,12 +538,15 @@ impl WasmApplication {
     /// Register behaviors from supervisor tree in BehaviorRegistry
     ///
     /// ## Purpose
-    /// Registers behaviors for each ChildSpec.id in the supervisor tree, enabling ShardGroups
-    /// to spawn actors using actor_type="worker" (or any ChildSpec.id).
+    /// Registers one [`BehaviorRegistry`] entry per distinct **behavior class** taken from
+    /// `ChildSpec.actor_identity.actor_type` (proto field name; same string becomes the
+    /// `actor_type` segment in the child’s deterministic [`ActorId`] and the factory lookup key).
+    /// This is **not** OTP `behavior_kind` (`GenServer`, `GenEvent`, …); that lives in `behavior_kind`
+    /// and is only for logging / spans inside [`WasmActorBehavior`].
     ///
     /// ## Design
-    /// - Extracts all ChildSpec.id values from supervisor tree
-    /// - Registers each as a behavior in BehaviorRegistry
+    /// - Walks the supervisor tree and collects `ChildSpec` entries for behavior registration
+    /// - Registers each distinct behavior class string once
     /// - Behavior constructor creates WasmActorBehavior wrapping WASM instance
     /// - Works for both embedded (explicit registration) and WASM (auto-registration) apps
     /// - Reuses `create_wasm_instance_for_behavior` helper to avoid code duplication
@@ -680,7 +603,7 @@ impl WasmApplication {
             }
         };
 
-        // Extract all ChildSpec.id values recursively
+        // Extract all ChildSpec entries recursively
         let mut child_specs = Vec::new();
         fn collect_child_specs(
             spec: &SupervisorSpec,
@@ -695,7 +618,10 @@ impl WasmApplication {
         }
         collect_child_specs(&supervisor_spec, &mut child_specs);
 
-        let behavior_names: Vec<&str> = child_specs.iter().map(|c| c.id.as_str()).collect();
+        let behavior_classes: Vec<&str> = child_specs
+            .iter()
+            .filter_map(|c| c.actor_identity.as_ref().map(|i| i.actor_type.as_str()))
+            .collect();
 
         // Register each child spec as a behavior
         let module_hash = self.module_hash.clone();
@@ -704,33 +630,147 @@ impl WasmApplication {
         // Namespace is required so spawned actors get canonical ActorIds scoped to the app.
         let namespace = self.namespace.read().await.clone();
 
+        // Convert each ChildSpec to an ActorSpawnSpec so the BehaviorRegistry closure
+        // captures a single, self-contained spawn spec rather than raw ChildSpec entries.
+        let mut spawn_specs_by_behavior_class: std::collections::HashMap<
+            String,
+            Vec<plexspaces_proto::actor::v1::ActorSpawnSpec>,
+        > = std::collections::HashMap::new();
         for child_spec in &child_specs {
-            let behavior_name = child_spec.id.clone();
-            let child_spec_clone = child_spec.clone();
+            let Some(identity) = child_spec.actor_identity.as_ref() else {
+                continue;
+            };
+            if identity.actor_type.is_empty() {
+                continue;
+            }
+            let spawn_spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: identity.name.clone(),
+                    actor_type: identity.actor_type.clone(),
+                }),
+                role: child_spec.role.clone(),
+                namespace: namespace.clone(),
+                tenant_id: String::new(), // overridden at service layer
+                behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
+                args: child_spec.args.clone(),
+                facets: child_spec.facets.clone(),
+                labels: std::collections::HashMap::new(),
+                config: None,
+            };
+            spawn_specs_by_behavior_class
+                .entry(identity.actor_type.clone())
+                .or_default()
+                .push(spawn_spec);
+        }
+
+        // Register child declaration mappings for ALL children at deploy time, including lazy actors.
+        // build_wasm_actor() is only called when the supervisor starts an actor (which may be deferred
+        // for lazy children). If we wait, named_virtual_actor_definitions and name_to_actor_type are
+        // never populated, so resolve_actor_type_for_name("ephemeral") returns "ephemeral" instead of
+        // the correct behavior class. Bare client targets for default single-actor apps (for example
+        // `/api/v1/actors/audit-log-test/audit-log-test`) also rely on this name → behavior-class mapping.
+        for child_spec in &child_specs {
+            let Some(identity) = child_spec.actor_identity.as_ref() else {
+                continue;
+            };
+            if identity.actor_type.is_empty() {
+                continue;
+            }
+            let spawn_spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: identity.name.clone(),
+                    actor_type: identity.actor_type.clone(),
+                }),
+                role: child_spec.role.clone(),
+                namespace: namespace.clone(),
+                tenant_id: String::new(),
+                behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
+                args: child_spec.args.clone(),
+                facets: child_spec.facets.clone(),
+                labels: std::collections::HashMap::new(),
+                config: None,
+            };
+            let _ = plexspaces_core::register_virtual_actor_definition(&service_locator, spawn_spec).await;
+        }
+
+        for (behavior_class, behavior_spawn_specs) in spawn_specs_by_behavior_class {
             let node_clone = node.clone();
             let module_hash_clone = module_hash.clone();
             let runtime_clone = runtime.clone();
-            let node_id_clone = node_id.clone();
-            let namespace_clone = namespace.clone();
+            let behavior_spawn_specs_clone = behavior_spawn_specs.clone();
 
-            // Register async behavior constructor
-            let behavior_name_for_error = behavior_name.clone();
+            // Register async behavior constructor (factory key == behavior class == ActorId.actor_type segment).
+            let behavior_class_for_error = behavior_class.clone();
             registry
-                .register(behavior_name.clone(), move |initial_state: &[u8]| {
-                    // Clone captured variables for async block
+                .register(behavior_class.clone(), move |initial_state: &[u8]| {
                     let rt = runtime_clone.clone();
                     let hash = module_hash_clone.clone();
-                    let spec = child_spec_clone.clone();
+                    let specs = behavior_spawn_specs_clone.clone();
                     let node_ref = node_clone.clone();
-                    let nid = node_id_clone.clone();
-                    let name_for_error = behavior_name_for_error.clone();
+                    let name_for_error = behavior_class_for_error.clone();
                     let initial_state = initial_state.to_vec();
 
-                    // Create WASM instance asynchronously (no block_on deadlock)
-                    let ns = namespace_clone.clone();
                     Box::pin(async move {
-                        let actor_id =
-                            actor_id_from_initial_state(&initial_state, &spec.id, &ns, &nid);
+                        // Dispatch to the right spec by matching declaration_name from the payload.
+                        // wasm_init_payload always includes declaration_name so multi-spec
+                        // behavior classes (e.g. "abstractions" + "ephemeral" sharing a class)
+                        // resolve correctly.
+                        let declaration_name = serde_json::from_slice::<serde_json::Value>(&initial_state)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("declaration_name")
+                                    .and_then(|n| n.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(str::to_string)
+                            });
+
+                        let spec = if specs.len() == 1 {
+                            specs[0].clone()
+                        } else {
+                            let dn = declaration_name.ok_or_else(|| {
+                                BehaviorFactoryError::CreationFailed(
+                                    name_for_error.clone(),
+                                    format!(
+                                        "Ambiguous behavior class '{}' across {} specs; declaration_name is required in init payload",
+                                        name_for_error,
+                                        specs.len()
+                                    ),
+                                )
+                            })?;
+                            specs
+                                .iter()
+                                .find(|s| {
+                                    if !s.role.is_empty() {
+                                        s.role == dn
+                                    } else {
+                                        s.identity
+                                            .as_ref()
+                                            .map(|id| id.name == dn)
+                                            .unwrap_or(false)
+                                    }
+                                })
+                                .cloned()
+                                .ok_or_else(|| {
+                                    BehaviorFactoryError::CreationFailed(
+                                        name_for_error.clone(),
+                                        format!(
+                                            "No spec for behavior class '{}' matches declaration_name '{}'",
+                                            name_for_error, dn
+                                        ),
+                                    )
+                                })?
+                        };
+
+                        // actor_id is injected into the payload by wasm_init_payload at activation.
+                        let actor_id = serde_json::from_slice::<serde_json::Value>(&initial_state)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("actor_id")
+                                    .and_then(|id| id.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or_default();
 
                         let instance = Self::create_wasm_instance_for_behavior(
                             node_ref,
@@ -748,10 +788,17 @@ impl WasmApplication {
                             )
                         })?;
 
+                        let wasm_dispatch_type = spec
+                            .identity
+                            .as_ref()
+                            .map(|i| i.actor_type.clone())
+                            .unwrap_or_default();
                         Ok(Box::new(WasmActorBehavior {
                             instance,
-                            actor_type: spec.id.clone(),
-                            behavior_kind: parse_behavior_kind(spec.behavior_kind.as_deref()),
+                            actor_type: wasm_dispatch_type,
+                            behavior_kind: parse_behavior_kind(
+                                if spec.behavior_kind.is_empty() { None } else { Some(spec.behavior_kind.as_str()) }
+                            ),
                         }) as Box<dyn CoreActor>)
                     })
                 })
@@ -763,12 +810,14 @@ impl WasmApplication {
             service_locator.register_behavior_registry(registry).await;
         }
 
-        tracing::info!(
-            application = %self.name,
-            behavior_count = child_specs.len(),
-            behavior_names = ?behavior_names,
-            "Registered WASM behaviors from supervisor tree for ShardGroup support"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                application = %self.name,
+                behavior_count = child_specs.len(),
+                behavior_classes = ?behavior_classes,
+                "Registered WASM behaviors from supervisor tree for ShardGroup support"
+            );
+        }
 
         Ok(())
     }
@@ -822,32 +871,31 @@ impl WasmApplication {
         };
         let final_namespace = namespace; // Must come from user request; never substitute with config
 
-        // Precompute expected actor_id for error logging using factory method
-        let actor_id = ulid::Ulid::new().to_string();
-        let actor_type = format!("{}Supervisor", self.name);
-        let expected_actor_id = ActorId::new(&actor_id, &actor_type, &final_namespace, node.id())
-            .map_err(|e| {
-                ApplicationError::Other(format!(
-                    "Failed to construct expected WASM actor ID for '{}': {}",
-                    self.name, e
-                ))
-            })?
-            .to_string();
+        // Leaf worker: behavior class is a slug derived from the app name (not `*Supervisor`,
+        // which is reserved for the auto-created root supervisor in `initialize_supervisor_tree`).
+        let worker_actor_type = wasm_worker_actor_type_from_application_name(&self.name);
+        let worker_identity = plexspaces_proto::common::v1::ActorIdentity {
+            name: self.name.clone(),
+            actor_type: worker_actor_type.clone(),
+        };
+        let expected_actor_id = Self::build_supervised_actor_id(
+            &self.name,
+            &worker_actor_type,
+            &final_namespace,
+            node.id(),
+        );
 
         // Create a simple ChildSpec for the actor
-        use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
+        use plexspaces_proto::application::v1::{ChildSpec, RestartPolicy};
         let child_spec = ChildSpec {
-            id: self.name.clone(),
-            r#type: ChildType::ChildTypeWorker as i32,
-            args: std::collections::HashMap::new(),
+            actor_identity: Some(worker_identity),
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent as i32,
             shutdown_timeout: Some(prost_types::Duration {
                 seconds: 5,
                 nanos: 0,
             }),
-            supervisor: None, // No nested supervisor
-            facets: vec![],
-            behavior_kind: None,
+            ..Default::default()
         };
 
         // Spawn the WASM actor using the existing internal spawn method
@@ -1010,10 +1058,13 @@ impl WasmApplication {
 
         // Create root supervisor using factory method
         let supervisor_id_ulid = ulid::Ulid::new().to_string();
-        let supervisor_type = format!("{}Supervisor", self.name);
+        // Root supervisor: unique **instance name** (ULID) avoids colliding with user-declared
+        // child `ActorIdentity.name` values; **behavior class** (`actor_type` segment) is app-scoped.
+        let supervisor_behavior_class =
+            wasm_root_supervisor_actor_type_from_application_name(&self.name);
         let supervisor_id = ActorId::new(
             &supervisor_id_ulid,
-            &supervisor_type,
+            &supervisor_behavior_class,
             &supervisor_namespace,
             node.id(),
         )
@@ -1037,8 +1088,9 @@ impl WasmApplication {
 
         // Add children to supervisor
         for child in &supervisor_spec.children {
-            match child.r#type() {
-                plexspaces_proto::application::v1::ChildType::ChildTypeWorker => {
+            let identity = crate::child_spec_util::require_child_identity(child)?;
+            {
+                {
                     // Get tenant_id/namespace from stored values. Tenant comes from auth, not config.
                     let tenant_id = self.tenant_id.read().await.clone();
                     let namespace = self.namespace.read().await.clone();
@@ -1065,7 +1117,7 @@ impl WasmApplication {
                             let actor_id = actor_ref.id().to_string();
                             tracing::info!(
                                 supervisor_id = %supervisor_id,
-                                child_id = %child.id,
+                                child_name = %identity.name,
                                 actor_id = %actor_id,
                                 "Added WASM actor to supervisor"
                             );
@@ -1074,62 +1126,16 @@ impl WasmApplication {
                         Err(e) => {
                             tracing::error!(
                                 supervisor_id = %supervisor_id,
-                                child_id = %child.id,
+                                child_name = %identity.name,
                                 error = %e,
                                 "Failed to add WASM actor to supervisor"
                             );
                             return Err(ApplicationError::ActorSpawnFailed(
-                                child.id.clone(),
+                                identity.name.clone(),
                                 format!("Failed to add to supervisor: {}", e),
                             ));
                         }
                     }
-                }
-                plexspaces_proto::application::v1::ChildType::ChildTypeSupervisor => {
-                    // Nested supervisors not yet fully supported for WASM
-                    // For now, treat as worker and log warning
-                    tracing::warn!(
-                        supervisor_id = %supervisor_id,
-                        child_id = %child.id,
-                        "Nested supervisor in WASM app - treating as worker"
-                    );
-
-                    // Get tenant_id/namespace from stored values. Tenant comes from auth, not config.
-                    let tenant_id = self.tenant_id.read().await.clone();
-                    let namespace = self.namespace.read().await.clone();
-                    let final_tenant_id = if tenant_id.is_empty() {
-                        String::new() // Tenant comes from auth, not config
-                    } else {
-                        tenant_id
-                    };
-                    let final_namespace = namespace; // Must come from user request; never substitute with config
-
-                    let child_spec = Self::create_wasm_actor_child_spec(
-                        node.clone(),
-                        child,
-                        &module_hash,
-                        self.runtime.clone(),
-                        final_tenant_id.clone(),
-                        final_namespace.clone(),
-                    )?;
-
-                    match supervisor.add_child(child_spec).await {
-                        Ok(actor_ref) => {
-                            actor_ids.push(actor_ref.id().to_string());
-                        }
-                        Err(e) => {
-                            return Err(ApplicationError::ActorSpawnFailed(
-                                child.id.clone(),
-                                format!("Failed to add to supervisor: {}", e),
-                            ));
-                        }
-                    }
-                }
-                _ => {
-                    return Err(ApplicationError::Other(format!(
-                        "Invalid child type for '{}'",
-                        child.id
-                    )));
                 }
             }
         }
@@ -1207,7 +1213,7 @@ impl WasmApplication {
     /// Create a ChildSpec with factory function for WASM actor
     ///
     /// ## Purpose
-    /// Creates an actor ChildSpec using the existing `ChildSpec::worker()` pattern
+    /// Creates an actor [`ActorChildSpec`] using `ChildSpec::worker(child_actor_id, start_fn)`
     /// with a factory function that can recreate WASM actors on restart.
     ///
     /// ## Design
@@ -1224,8 +1230,17 @@ impl WasmApplication {
         namespace: String,
     ) -> Result<ActorChildSpec, ApplicationError> {
         let node_id = node.id().to_string();
-        let child_id = proto_child_spec.id.clone();
-        let actor_id = Self::build_supervised_actor_id(&child_id, &namespace, &node_id);
+        let identity = crate::child_spec_util::require_child_identity(proto_child_spec)?;
+        let instance_name = identity.name.as_str();
+        let behavior_class = identity.actor_type.as_str();
+        let actor_id_string =
+            Self::build_supervised_actor_id(instance_name, behavior_class, &namespace, &node_id);
+        let child_actor_id = ActorId::from_canonical(&actor_id_string).map_err(|e| {
+            ApplicationError::ConfigError(format!(
+                "Invalid supervised actor id '{}': {}",
+                actor_id_string, e
+            ))
+        })?;
 
         // Capture context for factory
         let node_clone = node.clone();
@@ -1234,9 +1249,9 @@ impl WasmApplication {
         let runtime_clone = runtime.clone();
         let tenant_id_clone = tenant_id.clone();
         let namespace_clone = namespace.clone();
-        let actor_id_clone = actor_id.clone();
+        let actor_id_string_clone = actor_id_string.clone();
 
-        // Create factory using ChildSpec::worker() pattern
+        // Create factory using runtime ChildSpec::worker(child_actor_id, start_fn)
         let factory: plexspaces_actor::StartFn = Arc::new(move || {
             let node = node_clone.clone();
             let child_spec = child_spec_clone.clone();
@@ -1244,7 +1259,7 @@ impl WasmApplication {
             let runtime = runtime_clone.clone();
             let tenant_id = tenant_id_clone.clone();
             let namespace = namespace_clone.clone();
-            let actor_id = actor_id_clone.clone();
+            let actor_id = actor_id_string_clone.clone();
 
             Box::pin(async move {
                 // Use unified helper that builds Actor with all services
@@ -1264,8 +1279,8 @@ impl WasmApplication {
             })
         });
 
-        // Use ChildSpec::worker() constructor for consistency
-        let mut spec = ActorChildSpec::worker(child_id.clone(), actor_id, factory);
+        // Supervised leaf: runtime worker ChildSpec carries the child's canonical ActorId only.
+        let mut spec = ActorChildSpec::worker(child_actor_id, factory);
 
         // Apply restart policy from proto
         spec.restart_strategy = Self::convert_restart_policy(proto_child_spec)?;
@@ -1309,9 +1324,18 @@ impl WasmApplication {
     /// - ChannelService, TupleSpaceProvider, ObjectRegistry
     /// - JournalStorage, LockManager, KeyValueStore
     /// - All services from ServiceLocator
-    fn build_supervised_actor_id(child_id: &str, namespace: &str, node_id: &str) -> String {
-        let actor_id_ulid = ulid::Ulid::new().to_string();
-        ActorId::new(&actor_id_ulid, child_id, namespace, node_id)
+    fn build_supervised_actor_id(
+        instance_name: &str,
+        behavior_class: &str,
+        namespace: &str,
+        node_id: &str,
+    ) -> String {
+        // Deterministic canonical id: declaration `ActorIdentity.name` + `actor_identity.actor_type`
+        // (behavior class; same string used as `BehaviorRegistry` key) + deploy namespace + node.
+        // ActorRegistry indexes the full canonical string; `ChildType` only drives supervision
+        // restart/shutdown — it is not the registry identity. Root supervisor processes use a fresh
+        // instance name (see `initialize_supervisor_tree`) so they do not collide with configured child names.
+        ActorId::new(instance_name, behavior_class, namespace, node_id)
             .expect("generated supervised actor id should be valid")
             .to_string()
     }
@@ -1327,34 +1351,57 @@ impl WasmApplication {
     ) -> Result<(plexspaces_actor::Actor, plexspaces_core::ActorRef), ApplicationError> {
         use plexspaces_core::Actor as CoreActor;
 
+        let identity = crate::child_spec_util::require_child_identity(child_spec)?;
+
         // Get ServiceLocator from node
         let service_locator = node
             .service_locator()
             .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
 
-        // Resolve module by hash and create WASM instance using the caller-assigned
-        // actor ID so supervisor tracking, shutdown, and routing stay aligned.
+        // Build ActorSpawnSpec from child_spec so create_wasm_instance_for_behavior has the unified form.
+        let build_spec = plexspaces_proto::actor::v1::ActorSpawnSpec {
+            identity: child_spec.actor_identity.clone().map(|ident| {
+                plexspaces_proto::common::v1::ActorIdentity {
+                    name: ident.name,
+                    actor_type: ident.actor_type,
+                }
+            }),
+            role: child_spec.role.clone(),
+            namespace: namespace.clone(),
+            tenant_id: tenant_id.clone(),
+            behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
+            args: child_spec.args.clone(),
+            facets: child_spec.facets.clone(),
+            labels: std::collections::HashMap::new(),
+            config: None,
+        };
+        // Parse actor_id before WASM init so we can derive the canonical init payload.
+        // actor_id already has node_id injected by build_supervised_actor_id().
+        use plexspaces_actor::ActorBuilder;
+        let canonical_actor_id = ActorId::from_canonical(actor_id).map_err(|e| {
+            ApplicationError::Other(format!("Invalid actor ID format '{}': {}", actor_id, e))
+        })?;
+
+        // Derive init payload from spec + actor_id — same derivation used by reactivation path.
+        let init_payload = plexspaces_core::wasm_init_payload(&build_spec, &canonical_actor_id);
+
+        // Create WASM instance using the caller-assigned actor ID so supervisor tracking,
+        // shutdown, and routing stay aligned.
         let wasm_instance = Self::create_wasm_instance_for_behavior(
             node.clone(),
-            child_spec,
+            &build_spec,
             module_hash,
             runtime,
             actor_id,
-            &[],
+            &init_payload,
         )
         .await?;
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
         let behavior: Box<dyn CoreActor> = Box::new(WasmActorBehavior {
             instance: wasm_instance.clone(),
-            actor_type: child_spec.id.clone(),
+            actor_type: identity.actor_type.clone(),
             behavior_kind,
         });
-
-        // Build unstarted Actor using ActorBuilder
-        use plexspaces_actor::ActorBuilder;
-        let canonical_actor_id = ActorId::from_canonical(actor_id).map_err(|e| {
-            ApplicationError::Other(format!("Invalid actor ID format '{}': {}", actor_id, e))
-        })?;
 
         let mut actor = ActorBuilder::new(behavior)
             .with_id(canonical_actor_id.clone())
@@ -1403,7 +1450,7 @@ impl WasmApplication {
                     if let Err(e) = actor.attach_facet(facet).await {
                         tracing::warn!(
                             actor_id = %actor_id,
-                            child_id = %child_spec.id,
+                            child_name = %identity.name,
                             error = %e,
                             "Failed to attach facet to WASM actor (continuing with other facets)"
                         );
@@ -1442,68 +1489,39 @@ impl WasmApplication {
             } else {
                 tracing::warn!(
                     actor_id = %actor_id,
-                    child_id = %child_spec.id,
+                    child_name = %identity.name,
                     facet_count = child_spec.facets.len(),
                     "FacetRegistry not available - facets not attached to WASM actor"
                 );
             }
         }
 
-        // CRITICAL: Register virtual actor TYPE if VirtualActorFacet is attached
-        // This enables automatic activation of any actor ID matching the type pattern
-        // Format: `{id}//{actor_type}::{namespace}@{node_id}` (e.g., `user-1//read-state-tracker::orbit-read-state-ts@node-id`)
-        // Works for both WASM and Rust applications
-        // Uses centralized helper for consistent behavior across SDK, WASM, and app-config.toml
-        if has_virtual_actor_facet {
-            let actor_type = child_spec.id.clone();
-            let namespace_for_type = namespace_for_registration.clone();
-            let config_for_type = actor.context().config.clone();
-
-            // Build init config template from child_spec.args (same structure as ApplicationSpec deployment)
-            // This preserves the config structure so virtual actors activated via HTTP receive proper config
-            let init_config_template = {
-                let mut init_config = serde_json::Map::new();
-                // actor_id will be replaced when activating virtual actor
-                init_config.insert(
-                    "actor_id".to_string(),
-                    serde_json::Value::String(String::new()),
-                );
-                if let Some(ref bk) = child_spec.behavior_kind {
-                    init_config.insert(
-                        "behavior_kind".to_string(),
-                        serde_json::Value::String(bk.clone()),
-                    );
-                }
-                if !child_spec.args.is_empty() {
-                    let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
-                        .args
-                        .iter()
-                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                        .collect();
-                    init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
-                }
-                let template_result = serde_json::to_vec(&serde_json::Value::Object(init_config));
-                template_result.ok()
-            };
-
-            // Register virtual actor type with ALL facet configs from app-config.toml.
-            // child_spec.facets includes virtual_actor + timer + reminder + workflow configs,
-            // so resurrection recreates every facet with the original configuration.
-            // Type registration persists until application is undeployed — it is NOT evicted
-            // when individual actor instances are deactivated/vacationed.
-            let _ = plexspaces_core::register_virtual_actor_type_consistent(
-                &service_locator,
-                actor_type.clone(),
-                namespace_for_type,
-                None,                     // No facet trait objects for WASM (use proto facets)
-                Some(&child_spec.facets), // Proto facets from app-config.toml (all facet types)
-                config_for_type,
-                None,                 // tenant_id - None for type-level registration
-                init_config_template, // Init config template for WASM actors
-            )
-            .await;
-            virtual_actor_registered = true;
-        }
+        // Register the child declaration mapping using ActorSpawnSpec as the single source of truth.
+        // This keeps name → behavior-class lookup aligned for both virtual actors and ordinary
+        // named singleton children reached through `/api/v1/actors/{namespace}/{declaration_name}`.
+        let actor_type = identity.actor_type.clone();
+        let instance_name = identity.name.clone();
+        let namespace_for_type = namespace_for_registration.clone();
+        let config_for_type = actor.context().config.clone();
+        let _ = plexspaces_core::register_virtual_actor_definition(
+            &service_locator,
+            plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: instance_name,
+                    actor_type: actor_type.clone(),
+                }),
+                role: child_spec.role.clone(),
+                namespace: namespace_for_type,
+                tenant_id: String::new(),
+                behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
+                args: child_spec.args.clone(),
+                facets: child_spec.facets.clone(),
+                labels: std::collections::HashMap::new(),
+                config: config_for_type,
+            },
+        )
+        .await;
+        virtual_actor_registered = true;
 
         let attached_facet_list = if attached_facet_types.is_empty() {
             "none".to_string()
@@ -1519,12 +1537,16 @@ impl WasmApplication {
         };
         tracing::info!(
             actor_id = %actor_id,
-            child_id = %child_spec.id,
+            child_name = %identity.name,
+            actor_type = %identity.actor_type,
+            child_role = %child_spec.role,
             behavior_kind = %child_spec.behavior_kind.as_deref().unwrap_or("unknown"),
             configured_facets = child_spec.facets.len(),
             attached_facets = %attached_facet_list,
             has_virtual_actor_facet = has_virtual_actor_facet,
             virtual_actor_registered = virtual_actor_registered,
+            binding_type = "SimpleActor",
+            wasm_module_hash = %module_hash,
             args_keys = %args_keys,
             "WASM actor child initialized"
         );
@@ -1556,7 +1578,10 @@ impl WasmApplication {
         tenant_id: String,
         namespace: String,
     ) -> Result<String, ApplicationError> {
-        let actor_id = Self::build_supervised_actor_id(&child_spec.id, &namespace, node.id());
+        let identity = crate::child_spec_util::require_child_identity(child_spec)?;
+        let behavior_class = identity.actor_type.as_str();
+        let actor_id =
+            Self::build_supervised_actor_id(&identity.name, behavior_class, &namespace, node.id());
 
         // Use unified helper to build actor
         let (mut actor, _actor_ref) = Self::build_wasm_actor(
@@ -1721,21 +1746,19 @@ impl WasmApplication {
             // Stop actor with timeout (default: 5 seconds per actor)
             let timeout_duration = Duration::from_secs(5);
 
-            // Use ActorFactory directly from ServiceLocator
-            let _service_locator = node.service_locator().ok_or_else(|| {
+            let service_locator = node.service_locator().ok_or_else(|| {
                 ApplicationError::ActorStopFailed(
                     actor_id.to_string(),
                     "ServiceLocator not available from node".to_string(),
                 )
             })?;
 
-            // Get ActorFactory from ApplicationNode (avoids circular dependency)
             use plexspaces_actor::ActorFactory;
             let actor_factory: Arc<dyn ActorFactory> =
-                node.actor_factory().await.ok_or_else(|| {
+                service_locator.get_actor_factory().await.ok_or_else(|| {
                     ApplicationError::ActorStopFailed(
                         actor_id.to_string(),
-                        "ActorFactory not found in ServiceLocator".to_string(),
+                        "ActorFactory not available from ServiceLocator".to_string(),
                     )
                 })?;
 
@@ -1858,7 +1881,7 @@ impl Application for WasmApplication {
         }
 
         // Register behaviors from supervisor tree (for ShardGroup support)
-        // This allows ShardGroups to spawn actors using actor_type="worker" (or ChildSpec.id)
+        // This allows ShardGroups to spawn actors using the registered behavior class (`actor_identity.actor_type`).
         if let Err(e) = self
             .register_behaviors_from_supervisor_tree(node.clone())
             .await
@@ -1947,10 +1970,12 @@ impl Application for WasmApplication {
 
             match supervisor_shutdown {
                 Ok(Ok(())) => {
-                    tracing::info!(
-                        application = %self.name,
-                        "Root supervisor shutdown completed"
-                    );
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(
+                            application = %self.name,
+                            "Root supervisor shutdown completed"
+                        );
+                    }
                 }
                 Ok(Err(e)) => {
                     tracing::warn!(
@@ -2121,8 +2146,10 @@ impl Application for WasmApplication {
             use plexspaces_actor::ActorFactory;
 
             let actor_factory: Arc<dyn ActorFactory> =
-                node.actor_factory().await.ok_or_else(|| {
-                    ApplicationError::Other("ActorFactory not found in ServiceLocator".to_string())
+                service_locator.get_actor_factory().await.ok_or_else(|| {
+                    ApplicationError::Other(
+                        "ActorFactory not available from ServiceLocator".to_string(),
+                    )
                 })?;
 
             for actor_id in &live_actor_ids {
@@ -2292,13 +2319,32 @@ mod tests {
 
     #[test]
     fn test_build_supervised_actor_id_includes_type_namespace_and_node() {
-        let actor_id =
-            WasmApplication::build_supervised_actor_id("leader", "heat-diffusion-rust", "test-1");
+        // name == type (same child_id for both)
+        let actor_id = WasmApplication::build_supervised_actor_id(
+            "leader",
+            "leader",
+            "heat-diffusion-rust",
+            "test-1",
+        );
         let parsed = ActorId::from_canonical(&actor_id).expect("actor id should parse");
 
+        // Supervised actors have stable deterministic IDs using child_id as name.
+        assert_eq!(parsed.name(), "leader");
         assert_eq!(parsed.actor_type(), "leader");
         assert_eq!(parsed.namespace(), "heat-diffusion-rust");
         assert_eq!(parsed.node_id(), "test-1");
+
+        // actor_type distinct from child_id (e.g. inference_worker_a uses type inference_worker)
+        let actor_id2 = WasmApplication::build_supervised_actor_id(
+            "inference_worker_a",
+            "inference_worker",
+            "my-app",
+            "node-1",
+        );
+        let parsed2 = ActorId::from_canonical(&actor_id2).expect("actor id should parse");
+        assert_eq!(parsed2.name(), "inference_worker_a");
+        assert_eq!(parsed2.actor_type(), "inference_worker");
+        assert_eq!(parsed2.namespace(), "my-app");
     }
 
     #[tokio::test]
@@ -2544,9 +2590,10 @@ mod tests {
 
         // Create ApplicationSpec with supervisor tree
         use plexspaces_proto::application::v1::{
-            ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy,
+            ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy,
             SupervisionStrategy, SupervisorSpec,
         };
+        use plexspaces_proto::common::v1::ActorIdentity;
         use prost_types::Duration;
 
         let supervisor_spec = SupervisorSpec {
@@ -2557,17 +2604,17 @@ mod tests {
                 nanos: 0,
             }),
             children: vec![ChildSpec {
-                id: "worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: std::collections::HashMap::new(),
+                actor_identity: Some(ActorIdentity {
+                    name: "worker-1".to_string(),
+                    actor_type: "worker-1".to_string(),
+                }),
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(Duration {
                     seconds: 5,
                     nanos: 0,
                 }),
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             }],
         };
 
@@ -2828,111 +2875,10 @@ mod tests {
         // 5. Other actors should continue running
     }
 
-    #[test]
-    fn test_actor_id_from_initial_state_prefers_materialized_actor_id() {
-        let actor_id = super::actor_id_from_initial_state(
-            br#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091"}"#,
-            "abstractions",
-            "abstractions-rust",
-            "test-node-8091",
-        );
-        assert_eq!(
-            actor_id,
-            "cart-1//abstractions::abstractions-rust@test-node-8091"
-        );
-    }
-
-    #[test]
-    fn test_actor_id_from_initial_state_falls_back_to_canonical_actor_id() {
-        let actor_id = super::actor_id_from_initial_state(
-            br#"{"behavior_kind":"GenServer"}"#,
-            "abstractions",
-            "abstractions-rust",
-            "test-node-8091",
-        );
-        assert_eq!(
-            actor_id,
-            "abstractions//abstractions::abstractions-rust@test-node-8091"
-        );
-    }
-
-    #[test]
-    fn test_init_config_from_initial_state_preserves_materialized_virtual_actor_config() {
-        let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "abstractions".to_string(),
-            behavior_kind: Some("GenServer".to_string()),
-            ..Default::default()
-        };
-        let init_config = super::init_config_from_initial_state_or_child_spec(
-            br#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091","role":"abstractions"}"#,
-            &child_spec,
-            "abstractions//abstractions::abstractions-rust@test-node-8091",
-        );
-        assert_eq!(
-            std::str::from_utf8(&init_config).unwrap(),
-            r#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091","role":"abstractions"}"#
-        );
-    }
-
-    #[test]
-    fn test_init_config_from_empty_json_object_injects_actor_id_for_wasm_router() {
-        let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "worker".to_string(),
-            behavior_kind: Some("GenServer".to_string()),
-            ..Default::default()
-        };
-        let canonical = "01ABC//worker::data-lake-rag-go@test-node-8093".to_string();
-        let init_config =
-            super::init_config_from_initial_state_or_child_spec(b"{}", &child_spec, &canonical);
-        let value: serde_json::Value = serde_json::from_slice(&init_config).unwrap();
-        assert_eq!(
-            value.get("actor_id").and_then(|v| v.as_str()),
-            Some(canonical.as_str())
-        );
-        assert_eq!(
-            value.get("behavior_kind").and_then(|v| v.as_str()),
-            Some("GenServer")
-        );
-    }
-
-    #[test]
-    fn test_init_config_from_child_spec_builds_default_actor_config() {
-        let mut child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "channel".to_string(),
-            behavior_kind: Some("GenEvent".to_string()),
-            ..Default::default()
-        };
-        child_spec
-            .args
-            .insert("role".to_string(), "channel".to_string());
-
-        let init_config = super::init_config_from_initial_state_or_child_spec(
-            &[],
-            &child_spec,
-            "channel:abstractions-rust@test-node-8091",
-        );
-        let value: serde_json::Value = serde_json::from_slice(&init_config).unwrap();
-        assert_eq!(
-            value.get("actor_id").and_then(|value| value.as_str()),
-            Some("channel:abstractions-rust@test-node-8091")
-        );
-        assert_eq!(
-            value.get("behavior_kind").and_then(|value| value.as_str()),
-            Some("GenEvent")
-        );
-        assert_eq!(
-            value
-                .get("args")
-                .and_then(|value| value.get("role"))
-                .and_then(|value| value.as_str()),
-            Some("channel")
-        );
-    }
 
     #[test]
     fn test_wasm_config_for_child_spec_enables_durability_from_facets() {
         let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "abstractions".to_string(),
             facets: vec![plexspaces_proto::common::v1::Facet {
                 r#type: "durability".to_string(),
                 priority: 90,
@@ -2953,7 +2899,6 @@ mod tests {
     #[test]
     fn test_wasm_config_for_child_spec_keeps_non_durable_actor_fresh() {
         let child_spec = plexspaces_proto::application::v1::ChildSpec {
-            id: "ephemeral".to_string(),
             facets: vec![plexspaces_proto::common::v1::Facet {
                 r#type: "virtual_actor".to_string(),
                 priority: 100,

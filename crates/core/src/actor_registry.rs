@@ -23,7 +23,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::actor_context::ObjectRegistry;
+use crate::actor_context::{ActorService, ObjectRegistry};
+use crate::service_locator_trait::ServiceLocator;
 use crate::ActorFactory;
 use crate::Service;
 use crate::{
@@ -39,23 +40,10 @@ use ulid::Ulid;
 use metrics;
 use tracing;
 
-/// Create an EXIT message for linked actor notification
-/// This is the message sent when an actor terminates to notify linked actors
-fn create_exit_message(from: String, reason_str: &str) -> Message {
-    let mut headers = std::collections::HashMap::new();
-    headers.insert("type".to_string(), "__EXIT__".to_string());
-    headers.insert("exit_from".to_string(), from.clone());
-    headers.insert("exit_reason".to_string(), reason_str.to_string());
-
-    Message {
-        id: ulid::Ulid::new().to_string(),
-        sender_id: from,
-        message_type: "__EXIT__".to_string(),
-        payload: b"__EXIT__".to_vec(),
-        headers,
-        ..Default::default()
-    }
-}
+// Re-export from actor_monitor for use within this module.
+use crate::actor_monitor::{create_down_message, create_exit_message, exit_reason_to_string};
+// MonitorLink is now defined in actor_monitor and re-exported from crate root.
+pub use crate::actor_monitor::MonitorLink;
 
 /// Error types for ActorRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -116,13 +104,8 @@ pub struct ActorRegistry {
     virtual_actor_manager: Arc<RwLock<Option<Arc<VirtualActorManager>>>>,
     /// ReplyWaiterRegistry is used by local ask() to await replies.
     reply_waiter_registry: Arc<RwLock<Option<Arc<ReplyWaiterRegistry>>>>,
-    /// Monitoring links: actor_id -> Vec<MonitorLink>
-    /// Supports multiple supervisors monitoring the same actor (Erlang-style)
-    monitors: Arc<RwLock<HashMap<ActorId, Vec<MonitorLink>>>>,
-    /// Actor links: actor_id -> Vec<ActorId> (bidirectional death propagation)
-    /// Supports multiple links per actor (Erlang-style)
-    /// Links are bidirectional: if A links to B, B is linked to A
-    links: Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>>,
+    /// Monitor and link state (see actor_monitor module).
+    actor_monitor: Arc<crate::actor_monitor::ActorMonitor>,
     /// Lifecycle event subscribers (for observability backends like Prometheus, StatsD)
     /// Supports multiple subscribers with independent filtering and backpressure
     lifecycle_subscribers: Arc<RwLock<Vec<mpsc::UnboundedSender<ActorLifecycleEvent>>>>,
@@ -134,6 +117,11 @@ pub struct ActorRegistry {
     /// This includes actors that are known to the system even when no live sender
     /// currently exists, such as passivated virtual actors retained for discovery.
     registered_actor_entries: Arc<RwLock<HashSet<ScopedActorKey>>>,
+    /// ActorService for routing messages to remote actors.
+    /// Initialized with `LocalOnlyActorService`; replaced by `set_actor_service()` during
+    /// node startup once a real service is available.  Always non-None so routing code
+    /// never checks for an Optional.
+    actor_service: Arc<RwLock<Arc<dyn ActorService>>>,
     /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
     /// Used for ask() pattern when called from outside actor context
     /// Key: structured temporary sender ActorId
@@ -175,14 +163,7 @@ pub struct TemporarySenderEntry {
     pub expires_at: Instant,
 }
 
-/// Monitor link for actor supervision (Erlang-style)
-#[derive(Clone, Debug)]
-pub struct MonitorLink {
-    /// Monitor reference (unique ID for this monitor)
-    pub monitor_ref: String,
-    /// Sender for termination notifications
-    pub termination_sender: mpsc::Sender<(ActorId, String)>,
-}
+// MonitorLink is defined in crate::actor_monitor and re-exported above.
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct ScopedActorKey {
@@ -227,8 +208,7 @@ impl ActorRegistry {
             actors: Arc::new(RwLock::new(HashMap::new())),
             local_node_id,
             facet_manager: Arc::new(plexspaces_facet::FacetManager::new()),
-            monitors: Arc::new(RwLock::new(HashMap::new())),
-            links: Arc::new(RwLock::new(HashMap::new())),
+            actor_monitor: Arc::new(crate::actor_monitor::ActorMonitor::new()),
             lifecycle_subscribers: Arc::new(RwLock::new(Vec::new())),
             actor_configs: Arc::new(RwLock::new(HashMap::new())),
             registered_actor_entries: Arc::new(RwLock::new(HashSet::new())),
@@ -239,6 +219,9 @@ impl ActorRegistry {
             actor_factory: Arc::new(RwLock::new(None)),
             virtual_actor_manager: Arc::new(RwLock::new(None)),
             reply_waiter_registry: Arc::new(RwLock::new(None)),
+            actor_service: Arc::new(RwLock::new(Arc::new(
+                crate::actor_monitor::LocalOnlyActorService,
+            ) as Arc<dyn ActorService>)),
         }
     }
 
@@ -254,6 +237,20 @@ impl ActorRegistry {
     /// Sets the ReplyWaiterRegistry used by local ask().
     pub async fn set_reply_waiter_registry(&self, registry: Arc<ReplyWaiterRegistry>) {
         *self.reply_waiter_registry.write().await = Some(registry);
+    }
+
+    /// Replaces the ActorService used to route messages to remote actors.
+    /// Call this during node startup once the real service is available.
+    pub async fn set_actor_service(&self, actor_service: Arc<dyn ActorService>) {
+        *self.actor_service.write().await = actor_service;
+    }
+
+    /// Convenience: extracts ActorService from a ServiceLocator and installs it.
+    /// Must be called after node initialization so that ActorService is available.
+    pub async fn set_service_locator(&self, locator: Arc<dyn ServiceLocator>) {
+        if let Some(svc) = locator.get_actor_service().await {
+            *self.actor_service.write().await = svc;
+        }
     }
 
     // === Accessor methods for actor-related data ===
@@ -392,10 +389,10 @@ impl ActorRegistry {
         let manager = self.virtual_actor_manager.read().await.clone();
         if let Some(manager) = manager {
             if let Some(metadata) = manager.get_metadata(actor_id).await {
-                return Some((metadata.tenant_id, metadata.namespace));
+                return Some((metadata.tenant_id().to_string(), metadata.namespace().to_string()));
             }
             if let Some(metadata) = manager.get_virtual_actor_type(actor_id.actor_type()).await {
-                return Some((metadata.tenant_id, metadata.namespace));
+                return Some((metadata.tenant_id().to_string(), metadata.namespace().to_string()));
             }
         }
 
@@ -420,12 +417,12 @@ impl ActorRegistry {
         let manager = self.virtual_actor_manager.read().await.clone();
         let result = if let Some(manager) = manager {
             if let Some(metadata) = manager.get_metadata(actor_id).await {
-                Some(metadata.actor_type)
+                Some(metadata.actor_type().to_string())
             } else {
                 manager
                     .get_virtual_actor_type(actor_id.actor_type())
                     .await
-                    .map(|metadata| metadata.actor_type)
+                    .map(|metadata| metadata.actor_type().to_string())
             }
         } else {
             None
@@ -453,16 +450,6 @@ impl ActorRegistry {
     /// Get FacetManager
     pub fn facet_manager(&self) -> &Arc<FacetManager> {
         &self.facet_manager
-    }
-
-    /// Get monitors map
-    pub fn monitors(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<MonitorLink>>>> {
-        &self.monitors
-    }
-
-    /// Get links map
-    pub fn links(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>> {
-        &self.links
     }
 
     /// Get lifecycle subscribers
@@ -553,6 +540,11 @@ impl ActorRegistry {
     /// Get local node ID
     pub fn local_node_id(&self) -> &str {
         &self.local_node_id
+    }
+
+    /// Get the ActorMonitor (monitor/link state owner).
+    pub fn actor_monitor(&self) -> &Arc<crate::actor_monitor::ActorMonitor> {
+        &self.actor_monitor
     }
 
     /// Get actor type index (for efficient type-based lookups)
@@ -836,6 +828,20 @@ impl ActorRegistry {
         actors.keys().any(|key| key.actor_id == *actor_id)
     }
 
+    /// Returns `true` if the actor has any registration entry (may be passivated/inactive).
+    pub async fn is_actor_registered(&self, actor_id: &ActorId) -> bool {
+        if self
+            .registered_actor_entries
+            .read()
+            .await
+            .iter()
+            .any(|key| key.actor_id == *actor_id)
+        {
+            return true;
+        }
+        self.is_actor_activated(actor_id).await
+    }
+
     fn is_local_actor_id(&self, actor_id: &ActorId) -> bool {
         actor_id.node_id() == self.local_node_id
     }
@@ -975,14 +981,37 @@ impl ActorRegistry {
         Ok(())
     }
 
-    /// Sends a local message, activating a virtual actor transparently when needed.
+    /// Sends a message to an actor, routing locally or remotely as needed.
+    ///
+    /// If the actor's node_id matches the local node, dispatches via the local
+    /// mailbox (fast path). If the actor is on a different node and ActorService
+    /// has been wired up, routes via gRPC. Returns an error if the actor is not
+    /// found locally and no ActorService is available.
     pub async fn tell(
         &self,
         actor_id: &ActorId,
         message: Message,
     ) -> Result<(), ActorRegistryError> {
         let start = std::time::Instant::now();
-        let result = self.dispatch_local_message(actor_id, message).await;
+
+        // Routing: local fast-path when the actor is on this node, or its node_id is
+        // an unresolved local placeholder. Route via ActorService only when the actor
+        // is on an explicit, different node.
+        let is_remote = !actor_id.is_on_node(&self.local_node_id);
+
+        let result = if is_remote {
+            // Remote node: route via ActorService (gRPC).
+            let svc = self.actor_service.read().await.clone();
+            let ctx =
+                crate::RequestContext::new_without_auth("system".to_string(), "system".to_string());
+            svc.send(&ctx, &actor_id.to_string(), message)
+                .await
+                .map(|_| ())
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+        } else {
+            self.dispatch_local_message(actor_id, message).await
+        };
+
         metrics::histogram!("plexspaces_actor_registry_local_tell_duration_seconds")
             .record(start.elapsed().as_secs_f64());
         if result.is_ok() {
@@ -1032,7 +1061,19 @@ impl ActorRegistry {
             message.receiver_id = actor_id.to_string();
         }
 
-        let dispatch_result = self.dispatch_local_message(actor_id, message).await;
+        // Route: local fast-path or remote via ActorService.
+        // Only route remotely when node_id is an explicit non-local node name.
+        let is_remote = !actor_id.is_on_node(&self.local_node_id);
+
+        let dispatch_result = if is_remote {
+            let svc = self.actor_service.read().await.clone();
+            svc.send(ctx, &actor_id.to_string(), message)
+                .await
+                .map(|_| ())
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+        } else {
+            self.dispatch_local_message(actor_id, message).await
+        };
         if let Err(err) = dispatch_result {
             waiter_registry.remove(&correlation_id).await;
             self.remove_temporary_sender(&temp_sender_id).await;
@@ -1715,201 +1756,61 @@ impl ActorRegistry {
     ///
     /// ## Returns
     /// `Ok(())` on success, `Err(ActorRegistryError)` on failure
+    /// Add a bidirectional link between two actors.  Delegates to `ActorMonitor`.
     pub async fn link(
         &self,
         actor1_id: &ActorId,
         actor2_id: &ActorId,
     ) -> Result<(), ActorRegistryError> {
-        if actor1_id == actor2_id {
-            return Err(ActorRegistryError::RegistrationFailed(
-                "Cannot link actor to itself".to_string(),
-            ));
-        }
-
-        let mut links = self.links.write().await;
-
-        // Add actor2 to actor1's links (if not already present)
-        links
-            .entry(actor1_id.clone())
-            .or_insert_with(Vec::new)
-            .push(actor2_id.clone());
-
-        // Add actor1 to actor2's links (bidirectional)
-        links
-            .entry(actor2_id.clone())
-            .or_insert_with(Vec::new)
-            .push(actor1_id.clone());
-
-        // OBSERVABILITY: Log link creation
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor1 = %actor1_id,
-                actor2 = %actor2_id,
-                "Linked actors (bidirectional death propagation)"
-            );
-        }
-
-        Ok(())
+        self.actor_monitor
+            .add_link(actor1_id, actor2_id)
+            .await
+            .map_err(|e| ActorRegistryError::RegistrationFailed(e.to_string()))
     }
 
-    /// Unlink two actors
-    ///
-    /// ## Purpose
-    /// Removes the bidirectional link between two actors.
-    ///
-    /// ## Erlang Equivalent
-    /// Maps to Erlang's `unlink/1` function.
-    ///
-    /// ## Arguments
-    /// * `actor1_id` - First actor ID
-    /// * `actor2_id` - Second actor ID
-    ///
-    /// ## Returns
-    /// `Ok(())` on success, `Err(ActorRegistryError)` on failure
+    /// Remove the bidirectional link between two actors.  Delegates to `ActorMonitor`.
     pub async fn unlink(
         &self,
         actor1_id: &ActorId,
         actor2_id: &ActorId,
     ) -> Result<(), ActorRegistryError> {
-        let mut links = self.links.write().await;
-
-        // Remove actor2 from actor1's links
-        if let Some(actor1_links) = links.get_mut(actor1_id) {
-            actor1_links.retain(|id| id != actor2_id);
-            if actor1_links.is_empty() {
-                links.remove(actor1_id);
-            }
-        }
-
-        // Remove actor1 from actor2's links (bidirectional)
-        if let Some(actor2_links) = links.get_mut(actor2_id) {
-            actor2_links.retain(|id| id != actor1_id);
-            if actor2_links.is_empty() {
-                links.remove(actor2_id);
-            }
-        }
-
-        // OBSERVABILITY: Log link removal
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor1 = %actor1_id,
-                actor2 = %actor2_id,
-                "Unlinked actors"
-            );
-        }
-
+        self.actor_monitor.remove_link(actor1_id, actor2_id).await;
         Ok(())
     }
 
-    /// Get all linked actors for an actor
-    ///
-    /// ## Purpose
-    /// Returns all actors linked to the given actor.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor ID
-    ///
-    /// ## Returns
-    /// Vector of linked actor IDs
+    /// Return all actors linked to `actor_id`.  Delegates to `ActorMonitor`.
     pub async fn get_links(&self, actor_id: &ActorId) -> Vec<ActorId> {
-        let links = self.links.read().await;
-        links.get(actor_id).cloned().unwrap_or_default()
+        self.actor_monitor.get_links(actor_id).await
     }
 
-    /// Monitor an actor (one-way notification)
+    /// Register a one-way monitor.  Delegates to `ActorMonitor`.
     ///
-    /// ## Purpose
-    /// Sets up monitoring so the monitor receives DOWN messages when the target actor terminates.
-    /// Unlike links, monitors are one-way and don't cause cascading failures.
-    ///
-    /// ## Erlang Equivalent
-    /// Maps to Erlang's `monitor/2` function.
-    ///
-    /// ## Arguments
-    /// * `target_id` - Actor to monitor
-    /// * `monitor_id` - Actor doing the monitoring
-    /// * `monitor_ref` - Unique reference for this monitor
-    /// * `termination_sender` - Channel to send DOWN messages to
-    ///
-    /// ## Behavior
-    /// - Monitor receives DOWN message when target terminates
-    /// - Monitor does NOT die when target dies (one-way)
-    /// - Used for observability, health checks, supervision
-    ///
-    /// ## Returns
-    /// `Ok(())` on success, `Err(ActorRegistryError)` on failure
+    /// `ctx` must be the authenticated [`RequestContext`] for the monitor-establishing
+    /// operation (edge gRPC/JWT or explicit caller scope). It is stored and replayed
+    /// when delivering `__DOWN__` to a remote supervisor.
     pub async fn monitor(
         &self,
         target_id: &ActorId,
         monitor_id: &ActorId,
         monitor_ref: String,
-        termination_sender: mpsc::Sender<(ActorId, String)>,
+        ctx: &RequestContext,
     ) -> Result<(), ActorRegistryError> {
-        let mut monitors = self.monitors.write().await;
-
-        let monitor_link = MonitorLink {
-            monitor_ref: monitor_ref.clone(),
-            termination_sender,
-        };
-
-        monitors
-            .entry(target_id.clone())
-            .or_insert_with(Vec::new)
-            .push(monitor_link);
-
-        // OBSERVABILITY: Log monitor creation
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                target = %target_id,
-                monitor = %monitor_id,
-                monitor_ref = %monitor_ref,
-                "Registered monitor (one-way notification)"
-            );
-        }
-
+        self.actor_monitor
+            .add_monitor(target_id, monitor_id, monitor_ref, ctx.clone())
+            .await;
         Ok(())
     }
 
-    /// Remove monitor (demonitor)
-    ///
-    /// ## Purpose
-    /// Removes monitoring so the monitor no longer receives DOWN messages.
-    ///
-    /// ## Erlang Equivalent
-    /// Maps to Erlang's `demonitor/1` function.
-    ///
-    /// ## Arguments
-    /// * `target_id` - Actor being monitored
-    /// * `monitor_id` - Actor doing the monitoring
-    /// * `monitor_ref` - Monitor reference to remove
-    ///
-    /// ## Returns
-    /// `Ok(())` on success, `Err(ActorRegistryError)` on failure
+    /// Remove a specific monitor by its `monitor_ref`.  Delegates to `ActorMonitor`.
     pub async fn demonitor(
         &self,
         target_id: &ActorId,
-        monitor_id: &ActorId,
+        _monitor_id: &ActorId,
         monitor_ref: &str,
     ) -> Result<(), ActorRegistryError> {
-        let mut monitors = self.monitors.write().await;
-
-        if let Some(links) = monitors.get_mut(target_id) {
-            links.retain(|link| link.monitor_ref != monitor_ref);
-            if links.is_empty() {
-                monitors.remove(target_id);
-            }
-        }
-
-        // OBSERVABILITY: Log demonitor
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                target = %target_id,
-                monitor = %monitor_id,
-                monitor_ref = %monitor_ref,
-                "Removed monitor"
-            );
-        }
-
+        self.actor_monitor
+            .remove_monitor(target_id, monitor_ref)
+            .await;
         Ok(())
     }
 
@@ -1952,12 +1853,14 @@ impl ActorRegistry {
         // 3. Clean up this actor's link/monitor entries
         self.cleanup_terminated_actor_links_monitors(actor_id).await;
 
-        tracing::info!(
-            actor_id = %actor_id,
-            reason = ?reason,
-            propagated_exit_to_links = is_error,
-            "Actor termination handled; link and monitor state cleaned up"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_id = %actor_id,
+                reason = ?reason,
+                propagated_exit_to_links = is_error,
+                "Actor termination handled; link and monitor state cleaned up"
+            );
+        }
     }
 
     /// Send DOWN message to all monitors (Phase 6)
@@ -1970,52 +1873,37 @@ impl ActorRegistry {
     /// * `actor_id` - The actor that terminated
     /// * `reason` - Exit reason
     async fn send_down_to_monitors(&self, actor_id: &ActorId, reason: &ExitReason) {
-        let monitors = {
-            let map = self.monitors.read().await;
-            map.get(actor_id).cloned().unwrap_or_default()
-        };
+        let monitors = self.actor_monitor.get_monitors(actor_id).await;
 
-        // Convert ExitReason to string for DOWN message
-        let reason_str = match reason {
-            ExitReason::Normal => "normal".to_string(),
-            ExitReason::Shutdown => "shutdown".to_string(),
-            ExitReason::Killed => "killed".to_string(),
-            ExitReason::Error(msg) => msg.clone(),
-            ExitReason::Linked {
-                actor_id: linked_id,
-                reason: linked_reason,
-            } => {
-                format!(
-                    "linked:{}:{}",
-                    linked_id,
-                    match linked_reason.as_ref() {
-                        ExitReason::Normal => "normal",
-                        ExitReason::Shutdown => "shutdown",
-                        ExitReason::Killed => "killed",
-                        ExitReason::Error(msg) => msg,
-                        ExitReason::Linked { .. } => "linked",
-                    }
+        let reason_str = exit_reason_to_string(reason);
+
+        for monitor_link in &monitors {
+            let down_msg = create_down_message(actor_id, &monitor_link.monitor_ref, &reason_str);
+            let monitoring_id = &monitor_link.monitoring_actor_id;
+
+            let delivery_result = if monitoring_id.is_on_node(&self.local_node_id) {
+                self.dispatch_local_message(monitoring_id, down_msg).await
+            } else {
+                let svc = self.actor_service.read().await.clone();
+                svc.send(
+                    &monitor_link.monitoring_context,
+                    &monitoring_id.to_string(),
+                    down_msg,
                 )
+                .await
+                .map(|_| ())
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+            };
+            if let Err(e) = delivery_result {
+                tracing::warn!(
+                    from = %actor_id,
+                    to = %monitoring_id,
+                    error = %e,
+                    "Failed to deliver __DOWN__ to monitoring actor"
+                );
             }
-        };
 
-        // Clone monitors before iterating to avoid move
-        let monitors_clone = monitors.clone();
-        for monitor_link in monitors_clone {
-            // Phase 4: Monitoring/Linking Integration - Send DOWN notification
-            // The monitoring actor will receive this via termination_sender channel
-            // and should call facet.on_down() for all facets when processing the DOWN notification
-            let _ = monitor_link
-                .termination_sender
-                .send((actor_id.clone(), reason_str.clone()))
-                .await;
-
-            // Phase 4: Monitoring/Linking Integration - Call facet.on_down() for ALL facets on monitoring actor
-            // Note: monitor_ref is a String identifier, not necessarily the actor ID
-            // We use FacetManager to call facet.on_down() for all facets on the monitoring actor
-            // This avoids circular dependencies (plexspaces-core doesn't depend on plexspaces-facet)
-            // Use FacetManager to call facet.on_down() for all facets on the monitoring actor
-            // Convert core::ExitReason to facet::ExitReason
+            // Notify facets on the monitoring actor (best-effort; actor may be remote)
             let facet_exit_reason = match &reason {
                 ExitReason::Normal => FacetExitReason::Normal,
                 ExitReason::Shutdown => FacetExitReason::Shutdown,
@@ -2040,11 +1928,11 @@ impl ActorRegistry {
             };
 
             let facet_down_start = std::time::Instant::now();
-            let monitoring_actor_id = monitor_link.monitor_ref.clone();
+            let monitoring_actor_id_str = monitoring_id.to_string();
             let facet_down_result: Result<Vec<plexspaces_facet::FacetError>, String> = self
                 .facet_manager
                 .call_on_down(
-                    monitoring_actor_id.clone(),
+                    monitoring_actor_id_str.clone(),
                     actor_id.to_string(),
                     &facet_exit_reason,
                 )
@@ -2054,13 +1942,13 @@ impl ActorRegistry {
             match facet_down_result {
                 Ok(errors) if !errors.is_empty() => {
                     metrics::counter!("plexspaces_facet_down_errors_total",
-                        "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
+                        "monitoring_actor_id" => monitoring_actor_id_str.clone(),
                         "monitored_actor_id" => actor_id.to_string(),
                         "error_count" => errors.len().to_string()
                     )
                     .increment(errors.len() as u64);
                     tracing::warn!(
-                        monitoring_actor_id = %monitor_link.monitor_ref,
+                        monitoring_actor_id = %monitoring_actor_id_str,
                         monitored_actor_id = %actor_id,
                         error_count = errors.len(),
                         "Some facets failed to handle DOWN notification (continuing)"
@@ -2069,7 +1957,7 @@ impl ActorRegistry {
                 Ok(_) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                            monitoring_actor_id = %monitor_link.monitor_ref,
+                            monitoring_actor_id = %monitoring_actor_id_str,
                             monitored_actor_id = %actor_id,
                             duration_ms = facet_down_duration.as_millis(),
                             "All facets handled DOWN notification successfully"
@@ -2077,37 +1965,35 @@ impl ActorRegistry {
                     }
                 }
                 Err(e) => {
-                    // FacetManager couldn't find facets for this actor (expected for regular actors)
-                    // Facets will be called when the actor processes the DOWN notification via termination_sender channel
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                            monitoring_actor_id = %monitor_link.monitor_ref,
+                            monitoring_actor_id = %monitoring_actor_id_str,
                             monitored_actor_id = %actor_id,
                             error = %e,
-                            "Facets not found in FacetManager (regular actor) - facets will be called when actor processes DOWN notification"
+                            "Facets not found in FacetManager (regular actor)"
                         );
                     }
                 }
             }
 
             metrics::histogram!("plexspaces_facet_down_duration_seconds",
-                "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
+                "monitoring_actor_id" => monitoring_actor_id_str.clone(),
                 "monitored_actor_id" => actor_id.to_string()
             )
             .record(facet_down_duration.as_secs_f64());
             metrics::counter!("plexspaces_facet_down_total",
-                "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
+                "monitoring_actor_id" => monitoring_actor_id_str.clone(),
                 "monitored_actor_id" => actor_id.to_string()
             )
             .increment(1);
 
-            // OBSERVABILITY: Log DOWN message
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     from = %actor_id,
+                    to = %monitoring_id,
                     monitor_ref = %monitor_link.monitor_ref,
                     reason = %reason_str,
-                    "Sent DOWN notification to monitor"
+                    "Sent __DOWN__ notification to monitoring actor"
                 );
             }
         }
@@ -2136,11 +2022,7 @@ impl ActorRegistry {
     ///   - If trap_exit=true: Sends EXIT as message to actor's mailbox
     ///   - If trap_exit=false: Terminates actor immediately with Linked reason
     async fn propagate_exit_to_links(&self, actor_id: &ActorId, reason: &ExitReason) {
-        // Get all linked actors
-        let linked_actors = {
-            let links = self.links.read().await;
-            links.get(actor_id).cloned().unwrap_or_default()
-        };
+        let linked_actors = self.actor_monitor.get_links(actor_id).await;
 
         if linked_actors.is_empty() {
             return;
@@ -2162,79 +2044,35 @@ impl ActorRegistry {
             reason: Box::new(reason.clone()),
         };
 
-        // Clone linked_actors before iterating to avoid move
-        let linked_actors_clone = linked_actors.clone();
+        let reason_str = exit_reason_to_string(reason);
+
         // Propagate to each linked actor
-        for linked_id in linked_actors_clone {
-            // Check if linked actor exists and get its MessageSender
-            if let Some(actor_sender) = self.lookup_actor(&linked_id).await {
-                // Convert ExitReason to string for EXIT message
-                let reason_str = match reason {
-                    ExitReason::Normal => "normal".to_string(),
-                    ExitReason::Shutdown => "shutdown".to_string(),
-                    ExitReason::Killed => "killed".to_string(),
-                    ExitReason::Error(msg) => msg.clone(),
-                    ExitReason::Linked {
-                        actor_id: linked_actor_id,
-                        reason: linked_reason,
-                    } => {
-                        format!(
-                            "linked:{}:{}",
-                            linked_actor_id,
-                            match linked_reason.as_ref() {
-                                ExitReason::Normal => "normal",
-                                ExitReason::Shutdown => "shutdown",
-                                ExitReason::Killed => "killed",
-                                ExitReason::Error(msg) => msg,
-                                ExitReason::Linked { .. } => "linked",
-                            }
-                        )
-                    }
-                };
+        for linked_id in &linked_actors {
+            let exit_message = create_exit_message(actor_id.to_string(), &reason_str);
 
-                // Create EXIT message
-                let exit_message = create_exit_message(actor_id.to_string(), &reason_str);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    from = %actor_id,
+                    to = %linked_id,
+                    reason_str = %reason_str,
+                    "Sending EXIT to linked actor"
+                );
+            }
 
-                // Send EXIT signal to linked actor's mailbox
-                // The actor's message loop will handle it based on trap_exit setting
-                // Note: tell() takes only the message, no RequestContext
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        from = %actor_id,
-                        to = %linked_id,
-                        reason = ?reason,
-                        reason_str = %reason_str,
-                        "Attempting to send EXIT to linked actor"
-                    );
-                }
-                if let Err(e) = actor_sender.tell(exit_message).await {
-                    tracing::warn!(
-                        from = %actor_id,
-                        to = %linked_id,
-                        error = %e,
-                        reason = ?reason,
-                        "Failed to send EXIT to linked actor"
-                    );
-                } else {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            from = %actor_id,
-                            to = %linked_id,
-                            reason = ?reason,
-                            reason_str = %reason_str,
-                            "Successfully sent EXIT to linked actor"
-                        );
-                    }
-                }
-            } else {
-                // Linked actor doesn't exist (already terminated)
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        from = %actor_id,
-                        to = %linked_id,
-                        "Linked actor not found (already terminated)"
-                    );
-                }
+            // tell() routes locally or via ActorService automatically
+            if let Err(e) = self.tell(linked_id, exit_message).await {
+                tracing::warn!(
+                    from = %actor_id,
+                    to = %linked_id,
+                    error = %e,
+                    "Failed to deliver __EXIT__ to linked actor"
+                );
+            } else if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    from = %actor_id,
+                    to = %linked_id,
+                    "Delivered __EXIT__ to local linked actor"
+                );
             }
         }
 
@@ -2254,26 +2092,10 @@ impl ActorRegistry {
     /// ## Arguments
     /// * `actor_id` - The actor that terminated
     async fn cleanup_terminated_actor_links_monitors(&self, actor_id: &ActorId) {
-        // Remove from monitors (target is gone, no need to keep monitor entries)
-        {
-            let mut monitors = self.monitors.write().await;
-            monitors.remove(actor_id);
-        }
-
-        // Remove from links (remove actor from all other actors' link lists)
-        {
-            let mut links = self.links.write().await;
-
-            // Remove actor from all other actors' link lists
-            for (other_actor_id, other_links) in links.iter_mut() {
-                if other_actor_id != actor_id {
-                    other_links.retain(|id| id != actor_id);
-                }
-            }
-
-            // Remove actor's own link entry
-            links.remove(actor_id);
-        }
+        self.actor_monitor
+            .cleanup_monitors_for_actor(actor_id)
+            .await;
+        self.actor_monitor.cleanup_links_for_actor(actor_id).await;
 
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -2281,6 +2103,19 @@ impl ActorRegistry {
                 "Cleaned up link/monitor entries for terminated actor"
             );
         }
+    }
+
+    /// Return all monitor entries (delegates to `ActorMonitor`).
+    /// Used by the stale-monitor GC.
+    pub async fn all_monitor_entries(&self) -> Vec<(ActorId, String, ActorId)> {
+        self.actor_monitor.all_monitor_entries().await
+    }
+
+    /// Remove monitor entries for actors in `actor_ids` (delegates to `ActorMonitor`).
+    pub async fn remove_monitors_for_actors(&self, actor_ids: &[ActorId]) {
+        self.actor_monitor
+            .remove_monitors_for_actors(actor_ids)
+            .await;
     }
 }
 

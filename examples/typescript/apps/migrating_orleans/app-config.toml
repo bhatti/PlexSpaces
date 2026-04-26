@@ -17,27 +17,28 @@ max_restart_window_seconds = 60
 
 # Batch predictor model 1 - Virtual actor (Orleans-style)
 [[supervisor.children]]
-id = "batch-predictor-model-1"
-type = "worker"
+name = "batch-predictor-model-1"
+actor_type = "migrating_orleans_wasm"
+role = "batch-predictor-model-1"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 # Virtual actor facet: automatic activation/deactivation
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
 ]
-
 [[supervisor.children]]
-id = "batch-predictor-model-2"
-type = "worker"
+name = "batch-predictor-model-2"
+actor_type = "migrating_orleans_wasm"
+role = "batch-predictor-model-2"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
 ]
-
 [[supervisor.children]]
-id = "batch-predictor-model-3"
-type = "worker"
+name = "batch-predictor-model-3"
+actor_type = "migrating_orleans_wasm"
+role = "batch-predictor-model-3"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 facets = [

@@ -64,12 +64,15 @@ class WeatherActor extends PlexSpacesActor {
         }
         host.log("info", `WeatherActor initialized: ${this.state.actor_id}`);
     }
+    cacheKeyPrefix() {
+        return `${this.state.actor_id}:weather:`;
+    }
     onGet_weather(payload) {
         let city = "London";
         if (typeof payload.city === "string" && payload.city) {
             city = payload.city;
         }
-        const cacheKey = `weather:${city}`;
+        const cacheKey = `${this.cacheKeyPrefix()}${city}`;
         const cached = host.kvGet(cacheKey);
         if (cached.startsWith("ERROR:")) {
             host.log("warn", `Cache read failed for ${city}: ${cached}`);
@@ -118,6 +121,17 @@ class WeatherActor extends PlexSpacesActor {
     onClear_cache(_payload) {
         this.state.cache_hits = 0;
         this.state.cache_misses = 0;
+        const prefix = this.cacheKeyPrefix();
+        const keysJson = host.kvList(prefix);
+        try {
+            const keys = JSON.parse(keysJson);
+            for (const key of keys) {
+                host.kvDelete(key);
+            }
+        }
+        catch (e) {
+            host.log("warn", `kvList/delete error: ${e}`);
+        }
         return { cleared: true };
     }
 }

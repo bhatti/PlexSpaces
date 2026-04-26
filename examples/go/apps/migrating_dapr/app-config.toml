@@ -7,8 +7,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "job-processor"
-type = "worker"
+name = "job-processor"
+actor_type = "migrating_dapr_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "Workflow"

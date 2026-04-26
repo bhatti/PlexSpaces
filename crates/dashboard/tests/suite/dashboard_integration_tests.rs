@@ -1515,7 +1515,7 @@ async fn test_actors_by_type_on_home_page() {
     let service_locator = node.service_locator();
 
     // Register behavior types so actor spawning works
-    register_behavior_registry(&node, &["Counter", "Worker"]).await;
+    register_behavior_registry(&node, &["counter", "worker"]).await;
 
     // Spawn actors with different types
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
@@ -1528,46 +1528,54 @@ async fn test_actors_by_type_on_home_page() {
     for i in 0..3 {
         let actor_id = ActorId::new(
             format!("counter-{}", i),
-            "Counter",
+            "counter",
             "system",
             "test-node-actors-type",
         )
         .expect("valid counter actor id");
-        actor_factory
-            .spawn_actor(
-                &ctx,
-                &actor_id,
-                "Counter",
-                vec![],
-                None,
-                HashMap::new(),
-                vec![],
-            )
-            .await
-            .expect("Should spawn counter actor");
+        let spec = {
+            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_proto::common::v1::ActorIdentity;
+            ActorSpawnSpec {
+                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "counter".to_string() }),
+                role: String::new(),
+                namespace: "system".to_string(),
+                tenant_id: String::new(),
+                behavior_kind: String::new(),
+                args: HashMap::new(),
+                facets: vec![],
+                config: None,
+                labels: HashMap::new(),
+            }
+        };
+        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn counter actor");
     }
 
     // Spawn 2 Worker actors
     for i in 0..2 {
         let actor_id = ActorId::new(
             format!("worker-{}", i),
-            "Worker",
+            "worker",
             "system",
             "test-node-actors-type",
         )
         .expect("valid worker actor id");
-        actor_factory
-            .spawn_actor(
-                &ctx,
-                &actor_id,
-                "Worker",
-                vec![],
-                None,
-                HashMap::new(),
-                vec![],
-            )
-            .await
-            .expect("Should spawn worker actor");
+        let spec = {
+            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_proto::common::v1::ActorIdentity;
+            ActorSpawnSpec {
+                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "worker".to_string() }),
+                role: String::new(),
+                namespace: "system".to_string(),
+                tenant_id: String::new(),
+                behavior_kind: String::new(),
+                args: HashMap::new(),
+                facets: vec![],
+                config: None,
+                labels: HashMap::new(),
+            }
+        };
+        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn worker actor");
     }
 
     // ACT: Get summary from dashboard
@@ -1592,14 +1600,14 @@ async fn test_actors_by_type_on_home_page() {
 
     // Verify specific actor types
     assert_eq!(
-        summary.actors_by_type.get("Counter"),
+        summary.actors_by_type.get("counter"),
         Some(&3u32),
-        "Should have 3 Counter actors"
+        "Should have 3 counter actors"
     );
     assert_eq!(
-        summary.actors_by_type.get("Worker"),
+        summary.actors_by_type.get("worker"),
         Some(&2u32),
-        "Should have 2 Worker actors"
+        "Should have 2 worker actors"
     );
 }
 
@@ -1631,18 +1639,22 @@ async fn test_actors_by_type_on_node_page() {
             "test-node-actors-node-type",
         )
         .expect("valid calculator actor id");
-        actor_factory
-            .spawn_actor(
-                &ctx,
-                &actor_id,
-                "Calculator",
-                vec![],
-                None,
-                HashMap::new(),
-                vec![],
-            )
-            .await
-            .expect("Should spawn calculator actor");
+        let spec = {
+            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_proto::common::v1::ActorIdentity;
+            ActorSpawnSpec {
+                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "Calculator".to_string() }),
+                role: String::new(),
+                namespace: "system".to_string(),
+                tenant_id: String::new(),
+                behavior_kind: String::new(),
+                args: HashMap::new(),
+                facets: vec![],
+                config: None,
+                labels: HashMap::new(),
+            }
+        };
+        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn calculator actor");
     }
 
     // ACT: Get node dashboard

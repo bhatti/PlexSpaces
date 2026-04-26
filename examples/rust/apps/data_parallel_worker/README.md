@@ -13,7 +13,7 @@ flowchart TB
     L2[ask init per shard]
     L3[loop iterations]
     L4[scatter_gather query]
-    L5[merge application metrics]
+    L5["snapshot application metrics"]
     L1 --> L2 --> L3
     L3 --> L4
     L4 --> L3
@@ -35,6 +35,10 @@ The leader returns a JSON payload (also stored as `last_result`) including:
 - **Throughput**: `message_count`, `gradient_operation_count` (shard op count), `samples_processed`, `weight_update_count`.
 - **Flags**: `orchestration: "scatter_gather"`, `use_case: "data_parallel"`.
 - **Per-node / per-role** maps for actors, messages, latency, errors.
+
+The write path uses `host::application_metrics_add`, and the leader reads per-node snapshots with
+`host::application_get_metrics`. `host::application_get_status` is only used to label node
+addresses in the final report.
 
 `test.sh` prints a full block and validates multi-node expectations when more than one node is provided.
 

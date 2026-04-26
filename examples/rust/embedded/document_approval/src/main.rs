@@ -491,14 +491,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
     let node = NodeBuilder::new("approval-node")
         .with_clustering_enabled(false)
-        .build().await;
-    let node = Arc::new(node);
-    
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .build_started().await;
     
     let node_time = node_start.elapsed();
     metrics_tracker.end_coordinate();
@@ -525,11 +518,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let spawn_start = Instant::now();
     
     for i in 0..num_workflows {
-        let workflow_id = format!("contract-approval-{:03}@approval-node", i);
+        let workflow_name = format!("contract-approval-{:03}", i);
         let workflow: WorkflowRef = spawn_workflow_actor(
             &ctx,
             node.service_locator(),
-            &workflow_id,
+            &workflow_name,
             DocumentApprovalWorkflow::new(),
             vec![Box::new(TimerFacet::new(serde_json::json!({}), 50, node.service_locator()))],
         ).await?;

@@ -31,68 +31,59 @@ function assert(cond, msg) {
   }
 }
 
-function assertJsonEq(got, expected, msg) {
-  const g = typeof got === "string" ? JSON.parse(got) : got;
-  const e = typeof expected === "string" ? JSON.parse(expected) : expected;
-  const ok = JSON.stringify(g) === JSON.stringify(e);
-  if (!ok) {
-    console.error("FAIL:", msg, "\n  got:", JSON.stringify(g), "\n  expected:", JSON.stringify(e));
-    process.exit(1);
-  }
+function parse(r) {
+  return typeof r === "string" ? JSON.parse(r) : (r instanceof Uint8Array ? JSON.parse(new TextDecoder().decode(r)) : r);
 }
 
 console.log("Bank Account (TypeScript) – in-process verification");
 console.log("");
 
-// Reset state
-actor.init("{}");
-assert(actor.init("{}") === "", "init returns empty string");
+// Init with actor_type so ActorRouter can dispatch
+const initConfig = JSON.stringify({ actor_id: "account-alice//bank_account_wasm::test@node", actor_type: "bank_account_wasm" });
+assert(actor.init(initConfig) === "", "init returns empty string");
 
 // Balance initially 0
-let r = actor.handle("", "call", '{"op":"balance"}');
-assertJsonEq(r, { account: "", balance: 0 }, "initial balance");
+let r = parse(actor.handle("", "call", '{"op":"balance"}'));
+assert(r.success === true && r.balance === 0, "initial balance: " + JSON.stringify(r));
 
 // Deposit
-r = actor.handle("", "call", '{"op":"deposit","amount":1000}');
-assertJsonEq(r, { status: "ok", balance: 1000 }, "deposit 1000");
+r = parse(actor.handle("", "call", '{"op":"deposit","amount":1000}'));
+assert(r.success === true && r.balance === 1000, "deposit 1000: " + JSON.stringify(r));
 
 // Withdraw
-r = actor.handle("", "call", '{"op":"withdraw","amount":200}');
-assertJsonEq(r, { status: "ok", balance: 800 }, "withdraw 200");
+r = parse(actor.handle("", "call", '{"op":"withdraw","amount":200}'));
+assert(r.success === true && r.balance === 800, "withdraw 200: " + JSON.stringify(r));
 
 // Balance
-r = actor.handle("", "call", '{"op":"balance"}');
-assertJsonEq(r, { account: "", balance: 800 }, "balance 800");
+r = parse(actor.handle("", "call", '{"op":"balance"}'));
+assert(r.success === true && r.balance === 800, "balance 800: " + JSON.stringify(r));
 
 // Invalid deposit
-r = actor.handle("", "call", '{"op":"deposit","amount":0}');
-assert(JSON.parse(r).error === "invalid_amount", "invalid_amount");
+r = parse(actor.handle("", "call", '{"op":"deposit","amount":0}'));
+assert(r.success === false && r.error === "invalid_amount", "invalid_amount: " + JSON.stringify(r));
 
 // Insufficient funds
-r = actor.handle("", "call", '{"op":"withdraw","amount":10000}');
-assert(JSON.parse(r).error === "insufficient_funds", "insufficient_funds");
+r = parse(actor.handle("", "call", '{"op":"withdraw","amount":10000}'));
+assert(r.success === false && r.error === "insufficient_funds", "insufficient_funds: " + JSON.stringify(r));
 
 // History
-r = actor.handle("", "call", '{"op":"history","count":5}');
-const hist = JSON.parse(r);
-assert(Array.isArray(hist.transactions) && hist.transactions.length === 2, "history length");
+r = parse(actor.handle("", "call", '{"op":"history","count":5}'));
+assert(r.success === true && Array.isArray(r.transactions) && r.transactions.length === 2, "history length: " + JSON.stringify(r));
 
 // Replay
-r = actor.handle("", "call", '{"op":"replay"}');
-const replay = JSON.parse(r);
-assert(replay.replayed === 2 && replay.rebuilt_balance === 800 && replay.current_balance === 800, "replay");
+r = parse(actor.handle("", "call", '{"op":"replay"}'));
+assert(r.success === true && r.replayed === 2 && r.rebuilt_balance === 800 && r.current_balance === 800, "replay: " + JSON.stringify(r));
 
 // getState / setState (durability)
 const stateJson = actor.getState();
-actor.init("{}");
+actor.init(initConfig);
 actor.setState(stateJson);
-r = actor.handle("", "call", '{"op":"balance"}');
-assertJsonEq(r, { account: "", balance: 800 }, "state restore");
+r = parse(actor.handle("", "call", '{"op":"balance"}'));
+assert(r.success === true && r.balance === 800, "state restore: " + JSON.stringify(r));
 
-// set_account
-actor.handle("", "call", '{"op":"set_account","account_id":"alice"}');
-r = actor.handle("", "call", '{"op":"balance"}');
-assert(JSON.parse(r).account === "alice", "set_account");
+// tx_count
+r = parse(actor.handle("", "call", '{"op":"tx_count"}'));
+assert(r.success === true && r.count === 2, "tx_count: " + JSON.stringify(r));
 
 console.log("OK All assertions passed.");
 console.log("");

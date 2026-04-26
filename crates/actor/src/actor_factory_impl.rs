@@ -71,6 +71,17 @@ async fn debug_log_attached_facets(actor: &Actor, actor_id: &ActorId) {
     }
 }
 
+async fn actor_behavior_kind(actor: &Actor) -> Option<String> {
+    let behavior = actor.behavior().read().await;
+    Some(match behavior.behavior_kind() {
+        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+        plexspaces_core::BehaviorType::Custom(value) => value,
+    })
+}
+
 /// ActorFactory implementation
 ///
 /// ## Design
@@ -261,10 +272,12 @@ impl ActorFactoryImpl {
             let result = join_handle.await;
 
             if factory.take_actor_stopping(&actor_id_clone).await {
-                tracing::debug!(
-                    actor_id = %actor_id_clone,
-                    "Skipping watcher cleanup for actor handled by explicit stop_actor"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_id = %actor_id_clone,
+                        "Skipping watcher cleanup for actor handled by explicit stop_actor"
+                    );
+                }
                 return;
             }
 
@@ -529,7 +542,7 @@ impl ActorFactory for ActorFactoryImpl {
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
 
         let local_node_id = registry.local_node_id();
-        if actor_id.node_id() != local_node_id {
+        if !actor_id.is_on_node(local_node_id) {
             return Err(format!(
                 "Virtual actor '{}' targets node '{}' but activation only occurs on local node '{}'",
                 actor_id,
@@ -556,7 +569,7 @@ impl ActorFactory for ActorFactoryImpl {
         let actor_type = if !actor_id.actor_type().is_empty() {
             actor_id.actor_type().to_string()
         } else if let Some(metadata) = manager.get_metadata(&actor_id).await {
-            metadata.actor_type
+            metadata.actor_type().to_string()
         } else {
             return Err("Cannot determine actor_type for LRU eviction".into());
         };
@@ -584,7 +597,10 @@ impl ActorFactory for ActorFactoryImpl {
             let metadata = if let Some(instance_metadata) = manager.get_metadata(&actor_id).await {
                 instance_metadata
             } else {
-                // Fall back to type-level metadata using the structured actor identity.
+                // Fall back to type-level metadata.
+                // VirtualActorManager.virtual_actor_types is keyed by actor_type (e.g. "inference_worker"),
+                // which is the second segment of the canonical ActorId: {name}//{actor_type}::{ns}@{node}.
+                // This is distinct from behavior_kind ("GenServer", "GenEvent") for observability; BehaviorRegistry is keyed by actor_type slugs (e.g. gen_server).
                 let actor_type = actor_id.actor_type().to_string();
 
                 manager.get_virtual_actor_type(&actor_type).await
@@ -594,26 +610,25 @@ impl ActorFactory for ActorFactoryImpl {
                     ))?
             };
 
-            // Extract metadata needed for rebuilding
-            // actor_type is now required (not optional) per proto-first design
-            let actor_type = metadata.actor_type;
-            let config = metadata.config;
-            let tenant_id = metadata.tenant_id;
-            let namespace = metadata.namespace.clone();
-            // Use init_config_template as initial_state when initial_state is empty.
-            // init_config_template stores the JSON args used to initialize a new instance
-            // (e.g. {"initial_count":7}). For type-level registrations, initial_state is
-            // always empty so init_config_template is the correct source.
-            let initial_state = if metadata.initial_state.is_empty() {
-                plexspaces_core::materialize_init_config_template(
-                    metadata.init_config_template,
-                    &actor_id,
-                )
-                .unwrap_or_default()
-            } else {
-                metadata.initial_state
+            // Extract actor_type for BehaviorRegistry lookup and WasmActorBehavior construction.
+            // actor_type is the second segment of the canonical ActorId:
+            //   "inference_worker_a//inference_worker::ns@node" → actor_type() == "inference_worker"
+            // This is distinct from behavior_kind ("GenServer", …) which is the OTP model for logging.
+            // actor_id.actor_type() is authoritative; metadata.actor_type() is the fallback.
+            let actor_type = {
+                let id_type = actor_id.actor_type().to_string();
+                if !id_type.is_empty() {
+                    id_type
+                } else {
+                    metadata.actor_type().to_string()
+                }
             };
-            let labels = metadata.labels;
+            let config = metadata.spec.config.clone();
+            let tenant_id = metadata.spec.tenant_id.clone();
+            let namespace = metadata.spec.namespace.clone();
+            // Compute initial_state via wasm_init_payload (uses spec.args, injects actor_id).
+            let initial_state = plexspaces_core::wasm_init_payload(&metadata.spec, &actor_id);
+            let labels = metadata.spec.labels.clone();
             let tenant_id_clone = tenant_id.clone();
 
             // Create context for spawn_actor
@@ -626,7 +641,7 @@ impl ActorFactory for ActorFactoryImpl {
             // For type-level registration, use facet_config; for instance-level, use stored facet
             let mut facets_to_attach: Vec<Box<dyn plexspaces_facet::Facet>> = vec![];
 
-            if let Some(facet_config) = metadata.facet_config.clone() {
+            if let Some(facet_config) = metadata.facet_config() {
                 // Recreate all non-virtual facets from canonical stored config.
                 // This must work for both type-level metadata and instance-level metadata,
                 // because explicit stop removes live facet storage from FacetManager.
@@ -644,11 +659,10 @@ impl ActorFactory for ActorFactoryImpl {
                         }
                     }
                 } else {
-                    return Err(format!(
-                        "FacetRegistry not available - cannot recreate facets for virtual actor {}",
-                        actor_id
-                    )
-                    .into());
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        "FacetRegistry not available - non-virtual facets will not be recreated"
+                    );
                 }
             }
             // Default (no stored facet_config): VirtualActorFacet is added below.
@@ -673,8 +687,8 @@ impl ActorFactory for ActorFactoryImpl {
                             va_mgr
                                 .get_virtual_actor_type(&actor_type)
                                 .await
-                                .and_then(|meta| meta.facet_config)
-                                .and_then(|fc| {
+                                .and_then(|meta| meta.facet_config())
+                                .and_then(|fc: serde_json::Value| {
                                     fc.get("virtual_actor")
                                         .and_then(|v| v.get("idle_timeout"))
                                         .and_then(|v| v.as_str())
@@ -763,14 +777,31 @@ impl ActorFactory for ActorFactoryImpl {
 
             // Rebuild actor using spawn_actor with stored actor_type and recreated VirtualActorFacet
             // If BehaviorRegistry fails, try to ensure behavior is registered by re-registering from application
+            let rebuild_spec = {
+                use plexspaces_core::ActorSpawnSpec;
+                use plexspaces_proto::common::v1::ActorIdentity;
+                // identity.name must be the instance name ("session-1") so spawn_actor
+                // builds the correct ActorId. spec.role carries the declaration name
+                // (e.g. "worker") for BehaviorRegistry multi-spec dispatch via wasm_init_payload.
+                ActorSpawnSpec {
+                    identity: Some(ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: actor_type.clone(),
+                    }),
+                    role: metadata.spec.role.clone(),
+                    namespace: namespace.clone(),
+                    tenant_id: tenant_id.clone(),
+                    behavior_kind: String::new(),
+                    args: metadata.spec.args.clone(),
+                    facets: vec![],
+                    config: config.clone(),
+                    labels: labels.clone(),
+                }
+            };
             let actor_ref = match self
                 .spawn_actor(
                     &ctx,
-                    &actor_id,
-                    &actor_type,
-                    initial_state,
-                    config.clone(),
-                    labels,
+                    &rebuild_spec,
                     facets_to_attach, // Recreated VirtualActorFacet (and other facets from FacetManager if needed)
                 )
                 .await
@@ -865,22 +896,52 @@ impl ActorFactory for ActorFactoryImpl {
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
-        actor_id: &ActorId,
-        actor_type: &str,
-        initial_state: Vec<u8>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        labels: HashMap<String, String>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
-        use crate::ActorBuilder;
-        use async_trait::async_trait;
-        use plexspaces_core::{
-            behavior_factory::BehaviorFactory, Actor as ActorTrait, BehaviorType,
+        use plexspaces_core::{behavior_factory::BehaviorFactory, Actor as ActorTrait};
+
+        let actor_type = spec
+            .identity
+            .as_ref()
+            .map(|id| id.actor_type.as_str())
+            .unwrap_or("");
+
+        // If actor name is empty, assign a ULID so every actor has a stable unique identity.
+        let actor_name_raw = spec
+            .identity
+            .as_ref()
+            .map(|id| id.name.as_str())
+            .unwrap_or("");
+        let actor_name: std::borrow::Cow<str> = if actor_name_raw.is_empty() {
+            std::borrow::Cow::Owned(ulid::Ulid::new().to_string())
+        } else {
+            std::borrow::Cow::Borrowed(actor_name_raw)
         };
 
-        // Try to get BehaviorFactory from ServiceLocator
-        // Note: BehaviorFactory is a trait, so we need to get it as Arc<dyn BehaviorFactory>
-        // But ServiceLocator stores by TypeId, so we need to check if BehaviorRegistry is registered
+        // Namespace: prefer spec.namespace, fall back to ctx.namespace()
+        let namespace = if spec.namespace.is_empty() {
+            ctx.namespace().to_string()
+        } else {
+            spec.namespace.clone()
+        };
+
+        let registry: Arc<ActorRegistry> = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let local_node_id = registry.local_node_id();
+
+        // Build ActorId directly from spec identity + local node_id
+        let actor_id =
+            plexspaces_core::ActorId::new(actor_name.as_ref(), actor_type, &namespace, local_node_id)
+                .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
+
+        // Derive init payload from spec (deterministic; no stale state)
+        let initial_state = plexspaces_core::wasm_init_payload(spec, &actor_id);
+
+        // Create behavior via BehaviorRegistry using actor_type + init payload
         let behavior: Box<dyn ActorTrait> = {
             if let Some(behavior_registry) = self.service_locator.get_behavior_registry().await {
                 match behavior_registry.create(actor_type, &initial_state).await {
@@ -894,52 +955,61 @@ impl ActorFactory for ActorFactoryImpl {
                 }
             } else {
                 return Err(format!(
-                    "No BehaviorRegistry registered in ServiceLocator. Cannot create behavior for actor_type '{}'. Register BehaviorRegistry before spawning actors.",
+                    "No BehaviorRegistry registered in ServiceLocator. Cannot create behavior for actor_type '{}'.",
                     actor_type
                 ).into());
             }
         };
 
-        // Extract tenant_id and namespace from context (required, no defaults)
-        let _tenant_id = ctx.tenant_id().to_string();
-        let namespace = ctx.namespace().to_string();
-
-        // Actor identities are fully constructed before they reach the factory.
-        let registry: Arc<ActorRegistry> = self
-            .service_locator
-            .actor_registry()
+        // Build actor directly from spec fields — no ActorBuilder intermediate.
+        // Actor::new creates a stub context; spawn_built_actor_impl replaces it with the real one.
+        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
+        let mailbox_config = spec
+            .config
+            .as_ref()
+            .map(|c| {
+                let mut cfg = mailbox_config_default();
+                if c.max_mailbox_size > 0 {
+                    cfg.capacity = c.max_mailbox_size as u32;
+                }
+                cfg
+            })
+            .unwrap_or_else(mailbox_config_default);
+        let mailbox = Mailbox::new(mailbox_config, format!("mailbox_{}", actor_id))
             .await
-            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let local_node_id = registry.local_node_id();
+            .map_err(|e| format!("Failed to create mailbox: {}", e))?;
 
-        // Validate: actor identities are always local when created through the factory.
-        if actor_id.node_id() != local_node_id {
-            return Err(format!(
-                "Actor ID '{}' specifies node '{}' but actor must be spawned on local node '{}'. ActorService always creates actors locally.",
-                actor_id,
-                actor_id.node_id(),
-                local_node_id
-            )
-            .into());
+        let tenant_id = if spec.tenant_id.is_empty() {
+            ctx.tenant_id().to_string()
+        } else {
+            spec.tenant_id.clone()
+        };
+
+        let mut actor = crate::Actor::new(
+            actor_id.clone(),
+            behavior,
+            mailbox,
+            tenant_id,
+            namespace.clone(),
+            Some(local_node_id.to_string()),
+        );
+
+        // Apply ActorConfig if present (wraps actor with a config-carrying context)
+        if let Some(cfg) = spec.config.clone() {
+            use plexspaces_core::ActorContext;
+            use crate::TestServiceLocatorStub;
+            let sl: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+            let ctx_with_cfg = Arc::new(ActorContext::new(
+                local_node_id.to_string(),
+                ctx.tenant_id().to_string(),
+                namespace.clone(),
+                sl,
+                Some(cfg),
+            ));
+            actor = actor.set_context(ctx_with_cfg);
         }
 
-        // Create Actor using ActorBuilder with the already-validated canonical ID.
-        let mut builder = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .with_namespace(namespace); // Use namespace from RequestContext
-
-        // Apply config if provided
-        if let Some(cfg) = config {
-            builder = builder.with_config(Some(cfg));
-        }
-
-        // Build actor
-        let actor = builder
-            .build()
-            .await
-            .map_err(|e| format!("Failed to build actor: {}", e))?;
-
-        // Attach facets before spawning
+        // Attach runtime facets
         let num_facets = facets.len();
         for facet in facets {
             actor
@@ -948,11 +1018,10 @@ impl ActorFactory for ActorFactoryImpl {
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
         if num_facets > 0 {
-            debug_log_attached_facets(&actor, actor_id).await;
+            debug_log_attached_facets(&actor, &actor_id).await;
         }
 
-        // Spawn the built actor with type information
-        // spawn_built_actor_impl returns ActorRef, wrap for trait compatibility
+        let labels: HashMap<String, String> = spec.labels.clone();
         let actor_ref = self
             .spawn_built_actor_impl(
                 ctx,
@@ -1015,13 +1084,7 @@ impl ActorFactoryImpl {
             let behavior_guard = actor.behavior().read().await;
             let behavior_type = behavior_guard.behavior_type();
             drop(behavior_guard);
-            match behavior_type {
-                plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-                plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-                plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-                plexspaces_core::BehaviorType::Custom(s) => s,
-            }
+            behavior_type.actor_type_slug().into_owned()
         };
 
         // Add observability logging
@@ -1055,24 +1118,31 @@ impl ActorFactoryImpl {
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
 
-        // Actor IDs should already be canonical and local before build.
+        // Normalize actor ID to use the real local node_id.
+        // Actors built without an explicit node_id get a placeholder ("local") from
+        // ActorBuilder. Normalize to the actual node_id at spawn time so every
+        // registered actor has a fully-qualified canonical identity.
         let local_node_id = registry.local_node_id();
-        let actor_id = actor.id().clone();
-        if actor_id.node_id() != local_node_id {
-            return Err(format!(
-                "Actor '{}' was built for node '{}' but attempted to spawn on local node '{}'",
-                actor_id,
-                actor_id.node_id(),
-                local_node_id
-            )
-            .into());
-        }
+        let raw_actor_id = actor.id().clone();
+        let actor_id = if raw_actor_id.node_id() != local_node_id {
+            // Normalize: replace any non-matching node_id with the real local node_id.
+            // This covers "local" default and any other mismatch (which is an error in
+            // production but acceptable for tests that build actors before knowing node_id).
+            raw_actor_id
+                .with_node_id(local_node_id)
+                .map_err(|e| format!("Failed to normalize actor_id to local node: {}", e))?
+        } else {
+            raw_actor_id
+        };
 
         let actor_namespace = ctx.namespace().to_string();
         let actor_tenant_id = ctx.tenant_id().to_string();
 
         // Extract actor config from context (if available)
         let actor_config = actor.context().config.clone();
+
+        let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+            .map_err(|e| format!("Failed to construct actor self_ref: {}", e))?;
 
         // Create ActorContext (actor_id is no longer stored in context)
         let actor_context = ActorContext::new(
@@ -1081,10 +1151,17 @@ impl ActorFactoryImpl {
             actor_namespace.clone(),
             self.service_locator.clone(),
             actor_config.clone(),
-        );
+        )
+        .with_self_ref(self_ref);
 
         // Update actor with full context
         actor = actor.set_context(Arc::new(actor_context));
+
+        // Update actor's canonical ID to the normalized one.
+        // The actor struct carries its own id (used by register_started → registry lookup).
+        // Without this, register_started registers under the placeholder node_id ("unassigned"),
+        // while the returned ActorRef carries the real node_id — causing lookup mismatches.
+        actor = actor.with_normalized_id(actor_id.clone());
 
         // Update metrics before moving values into RequestContext
         metrics::gauge!("plexspaces_node_active_actors",
@@ -1183,13 +1260,18 @@ impl ActorFactoryImpl {
             use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
             let virtual_facet_for_reg =
                 VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
+            let behavior_kind = actor_behavior_kind(&actor).await;
 
             // Register as virtual actor (only if instance not already registered)
             // Store metadata in VirtualActorManager (source of truth for virtual actors)
             // CRITICAL: Check if instance is registered (not just type), because is_virtual()
             // returns true for type-level registration even if instance is not registered
             let instance_metadata = manager.get_metadata(&actor_id).await;
-            if instance_metadata.is_none() {
+            let needs_runtime_binding = instance_metadata
+                .as_ref()
+                .map(|metadata| metadata.facet.is_none())
+                .unwrap_or(true);
+            if needs_runtime_binding {
                 // Instance not registered - register it fresh.
                 // This happens on first spawn (lazy or eager) or when rebuilding a
                 // suspended actor that was only type-registered.
@@ -1208,7 +1290,7 @@ impl ActorFactoryImpl {
                     let type_strategy = manager
                         .get_virtual_actor_type(&actor_type)
                         .await
-                        .map(|m| m.activation_strategy);
+                        .map(|m| m.activation_strategy());
                     // Fall back to facet strategy, then default to lazy.
                     type_strategy.unwrap_or_else(|| {
                         activation_strategy_opt
@@ -1217,27 +1299,141 @@ impl ActorFactoryImpl {
                     })
                 };
 
-                // Register with full metadata including initial_state and labels.
+                // Register with full metadata (ActorSpawnSpec) including labels and args.
                 // This metadata persists across suspension and is used to rebuild actors.
+                // Inherit args from type-level spec so wasm_init_payload always has them.
+                // Fall back to instance_metadata (primed from named_virtual_actor_definitions)
+                // when the actor_type is only in named_virtual_actor_definitions (not virtual_actor_types).
+                let existing_spec = manager
+                    .get_virtual_actor_type(&actor_type)
+                    .await
+                    .map(|m| m.spec)
+                    .or_else(|| instance_metadata.as_ref().map(|m| m.spec.clone()));
+
+                // Capture all non-virtual facets attached to this actor as proto Facets.
+                // This ensures that facets like TimerFacet survive suspension/reactivation
+                // even when the actor was not registered via a type-level spec.
+                let actor_proto_facets: Vec<plexspaces_proto::common::v1::Facet> = {
+                    let facets_arc = actor.facets().clone();
+                    let facets_guard = facets_arc.read().await;
+                    let all = facets_guard.get_all_facets();
+                    let meta = facets_guard.get_metadata();
+                    let mut result = Vec::new();
+                    for facet_arc in all {
+                        let f = facet_arc.read().await;
+                        let ft = f.facet_type().to_string();
+                        if ft == "virtual_actor" || ft == "durability" {
+                            continue;
+                        }
+                        let config: std::collections::HashMap<String, String> = {
+                            let json_cfg = if let Some(fm) = meta.get(ft.as_str()) {
+                                fm.config.clone()
+                            } else {
+                                f.get_config()
+                            };
+                            if let serde_json::Value::Object(map) = json_cfg {
+                                map.into_iter().map(|(k, v)| {
+                                    let s = match v {
+                                        serde_json::Value::String(s) => s,
+                                        other => other.to_string(),
+                                    };
+                                    (k, s)
+                                }).collect()
+                            } else {
+                                std::collections::HashMap::new()
+                            }
+                        };
+                        result.push(plexspaces_proto::common::v1::Facet {
+                            r#type: ft,
+                            config,
+                            priority: 0,
+                            state: std::collections::HashMap::new(),
+                            metadata: None,
+                        });
+                    }
+                    result
+                };
+
+                // Prefer actor's own attached facets; fall back to type-level spec facets.
+                let effective_facets = if !actor_proto_facets.is_empty() {
+                    actor_proto_facets
+                } else {
+                    existing_spec
+                        .as_ref()
+                        .map(|s| s.facets.clone())
+                        .unwrap_or_default()
+                };
+
+                use plexspaces_core::ActorSpawnSpec;
+                use plexspaces_proto::common::v1::ActorIdentity;
+                // Use the declaration name from the type/definition-level spec (e.g. "ephemeral")
+                // so wasm_init_payload generates declaration_name that BehaviorRegistry can match.
+                // For type-level actors the definition name equals actor_type; for named virtual
+                // actors (name != actor_type) the instance name (e.g. "cart-1") differs from the
+                // declaration name registered in the TOML ("ephemeral").
+                let declaration_name = existing_spec
+                    .as_ref()
+                    .and_then(|s| s.identity.as_ref())
+                    .map(|id| id.name.clone())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| actor_id.name().to_string());
+                let spec = ActorSpawnSpec {
+                    identity: Some(ActorIdentity {
+                        name: declaration_name,
+                        actor_type: actor_type.clone(),
+                    }),
+                    role: existing_spec
+                        .as_ref()
+                        .map(|s| s.role.clone())
+                        .unwrap_or_default(),
+                    namespace: ctx.namespace().to_string(),
+                    tenant_id: ctx.tenant_id().to_string(),
+                    behavior_kind: behavior_kind.unwrap_or_default(),
+                    args: existing_spec
+                        .as_ref()
+                        .map(|s| s.args.clone())
+                        .unwrap_or_default(),
+                    facets: effective_facets,
+                    labels: labels.clone(),
+                    config: actor_config.clone(),
+                };
                 manager
-                    .register(
-                        actor_id.clone(),
-                        facet_box,
-                        actor_type.clone(),
-                        actor_config.clone(),
-                        ctx.tenant_id().to_string(),
-                        ctx.namespace().to_string(),
-                        initial_state.clone(),
-                        labels.clone(),
-                        activation_strategy,
-                    )
+                    .register(actor_id.clone(), facet_box, spec)
                     .await
                     .map_err(|e| format!("Failed to register virtual actor: {}", e))?;
             } else {
-                // Instance already registered - update mutable metadata fields only.
-                // initial_state and labels are immutable after first registration.
+                // Instance already registered — update facet binding and config while
+                // preserving all other spec fields (args, facets, behavior_kind) from the
+                // existing instance spec so nothing is lost on reactivation.
+                use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
+                let lifecycle_facet_update =
+                    virtual_actor_facet_to_lifecycle_facet(virtual_facet_for_reg);
+                let facet_box_update =
+                    Arc::new(tokio::sync::RwLock::new(lifecycle_facet_update));
+                // Build a minimal spec whose empty fields will be filled in by the merge
+                // logic inside register(), which falls back to the existing instance spec
+                // then the type-level spec.
+                use plexspaces_core::ActorSpawnSpec;
+                use plexspaces_proto::common::v1::ActorIdentity;
+                let spec_update = ActorSpawnSpec {
+                    identity: Some(ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: actor_type.clone(),
+                    }),
+                    role: instance_metadata
+                        .as_ref()
+                        .map(|m| m.spec.role.clone())
+                        .unwrap_or_default(),
+                    namespace: ctx.namespace().to_string(),
+                    tenant_id: ctx.tenant_id().to_string(),
+                    behavior_kind: String::new(), // merge picks up from existing instance/type spec
+                    args: Default::default(),     // merge picks up from existing instance/type spec
+                    facets: Default::default(),   // merge picks up from existing instance/type spec
+                    labels: labels.clone(),
+                    config: actor_config.clone(),
+                };
                 manager
-                    .update_metadata(&actor_id, actor_type.clone(), actor_config.clone())
+                    .register(actor_id.clone(), facet_box_update, spec_update)
                     .await
                     .map_err(|e| format!("Failed to update virtual actor metadata: {}", e))?;
             }
@@ -1283,12 +1479,11 @@ impl ActorFactoryImpl {
 
                 return Ok(actor_ref);
             } else {
-                let mailbox = actor.mailbox().clone();
                 let actor_ref = ActorRef::local(
                     actor_id.clone(),
                     ctx.tenant_id().to_string(),
                     ctx.namespace().to_string(),
-                    mailbox,
+                    actor.mailbox().clone(),
                     self.service_locator.clone(),
                 );
 
@@ -1708,13 +1903,7 @@ impl ActorFactoryImpl {
 
         // Get behavior type for logging/tracking
         let behavior_type = behavior.behavior_type();
-        let actor_type = match behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "GenServer",
-            plexspaces_core::BehaviorType::GenEvent => "GenEvent",
-            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine",
-            plexspaces_core::BehaviorType::Workflow => "Workflow",
-            plexspaces_core::BehaviorType::Custom(ref s) => s.as_str(),
-        };
+        let actor_type = behavior_type.actor_type_slug();
 
         // Build actor with the provided behavior
         let actor = ActorBuilder::new(Box::new(behavior))

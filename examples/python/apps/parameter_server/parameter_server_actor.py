@@ -29,12 +29,12 @@ def actor_application_id(actor_id: str) -> str:
     return ""
 
 
-def status_metrics_value(status: Mapping[str, Any], field: str) -> Any:
-    return status.get("application", {}).get("metrics", {}).get(field)
+def metrics_value(metrics: Mapping[str, Any], field: str) -> Any:
+    return metrics.get(field)
 
 
-def status_metrics_map(status: Mapping[str, Any], field: str) -> Dict[str, int]:
-    value = status_metrics_value(status, field)
+def metrics_map(metrics: Mapping[str, Any], field: str) -> Dict[str, int]:
+    value = metrics_value(metrics, field)
     if not isinstance(value, Mapping):
         return {}
     out: Dict[str, int] = {}
@@ -101,38 +101,37 @@ def compute_actor_counts(leader_node_id: str, shard_actor_ids: List[str]) -> Dic
     return nodes
 
 
-def apply_status_delta(
+def apply_metrics_delta(
     node_metrics: Dict[str, Dict[str, int]],
     role_metrics: Dict[str, Dict[str, int]],
-    start_status: Mapping[str, Any],
-    end_status: Mapping[str, Any],
+    start_metrics: Mapping[str, Any],
+    end_metrics: Mapping[str, Any],
+    node_id: str,
 ) -> None:
     counter_delta = saturating_map_delta(
-        status_metrics_map(end_status, "counter_metrics"),
-        status_metrics_map(start_status, "counter_metrics"),
+        metrics_map(end_metrics, "counter_metrics"),
+        metrics_map(start_metrics, "counter_metrics"),
     )
     latency_totals_delta = saturating_map_delta(
-        status_metrics_map(end_status, "latency_totals_ms"),
-        status_metrics_map(start_status, "latency_totals_ms"),
+        metrics_map(end_metrics, "latency_totals_ms"),
+        metrics_map(start_metrics, "latency_totals_ms"),
     )
-    latency_max_end = status_metrics_map(end_status, "latency_max_ms")
-    latency_max_start = status_metrics_map(start_status, "latency_max_ms")
+    latency_max_end = metrics_map(end_metrics, "latency_max_ms")
+    latency_max_start = metrics_map(start_metrics, "latency_max_ms")
     latency_samples_delta = saturating_map_delta(
-        status_metrics_map(end_status, "latency_samples"),
-        status_metrics_map(start_status, "latency_samples"),
+        metrics_map(end_metrics, "latency_samples"),
+        metrics_map(start_metrics, "latency_samples"),
     )
     message_delta = max(
         0,
-        int(status_metrics_value(end_status, "message_count") or 0)
-        - int(status_metrics_value(start_status, "message_count") or 0),
+        int(metrics_value(end_metrics, "message_count") or 0)
+        - int(metrics_value(start_metrics, "message_count") or 0),
     )
     error_delta = max(
         0,
-        int(status_metrics_value(end_status, "error_count") or 0)
-        - int(status_metrics_value(start_status, "error_count") or 0),
+        int(metrics_value(end_metrics, "error_count") or 0)
+        - int(metrics_value(start_metrics, "error_count") or 0),
     )
-
-    node_id = str(end_status.get("node_id") or "unknown")
     node = node_metrics.setdefault(
         node_id,
         {
@@ -290,18 +289,22 @@ class Leader:
         participant_node_ids = sorted(
             {leader_node_id, *(actor_node_id(actor_id) for actor_id in shard_actor_ids)}
         )
-        start_statuses: Dict[str, Dict[str, Any]] = {}
+        start_metrics_by_node: Dict[str, Dict[str, Any]] = {}
         node_addresses: Dict[str, str] = {}
         for node_id in participant_node_ids:
             try:
-                status = host.application_get_status(self.application_id, node_id)
+                metrics = host.application_get_metrics(self.application_id, node_id)
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"failed to capture application status for {node_id}: {exc}",
+                    "error": f"failed to capture application metrics for {node_id}: {exc}",
                 }
-            start_statuses[node_id] = status
-            node_address = status.get("node_address")
+            start_metrics_by_node[node_id] = metrics
+            try:
+                status = host.application_get_status(self.application_id, node_id)
+            except Exception:
+                status = {}
+            node_address = status.get("node_address") if isinstance(status, Mapping) else None
             if isinstance(node_address, str) and node_address:
                 node_addresses[node_id] = node_address
 
@@ -441,16 +444,26 @@ class Leader:
         role_metrics: Dict[str, Dict[str, int]] = {}
         for node_id in participant_node_ids:
             try:
-                status = host.application_get_status(self.application_id, node_id)
+                metrics = host.application_get_metrics(self.application_id, node_id)
             except Exception as exc:
                 return {
                     "status": "error",
-                    "error": f"failed to collect final application status for {node_id}: {exc}",
+                    "error": f"failed to collect final application metrics for {node_id}: {exc}",
                 }
-            node_address = status.get("node_address")
+            try:
+                status = host.application_get_status(self.application_id, node_id)
+            except Exception:
+                status = {}
+            node_address = status.get("node_address") if isinstance(status, Mapping) else None
             if isinstance(node_address, str) and node_address:
                 node_addresses[node_id] = node_address
-            apply_status_delta(node_metrics, role_metrics, start_statuses[node_id], status)
+            apply_metrics_delta(
+                node_metrics,
+                role_metrics,
+                start_metrics_by_node[node_id],
+                metrics,
+                node_id,
+            )
 
         topology_counts = compute_actor_counts(leader_node_id, shard_actor_ids)
         for node_id, counts in topology_counts.items():

@@ -35,14 +35,18 @@
 //! This enables clean separation and avoids circular dependencies.
 
 use plexspaces_application::ApplicationError as AppError;
-use plexspaces_core::{ApplicationManager as ApplicationManagerTrait, ServiceLocator};
+use plexspaces_core::{
+    wasm_worker_actor_type_from_application_name, ApplicationManager as ApplicationManagerTrait,
+    ServiceLocator,
+};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationRuntimeState, ApplicationSpec,
-    ApplicationStatus, ApplicationType, ChildSpec, ChildType, DeployApplicationRequest,
+    ApplicationStatus, ApplicationType, ChildSpec, DeployApplicationRequest,
     DeployApplicationResponse, GetApplicationStatusRequest, GetApplicationStatusResponse,
     ListApplicationsRequest, ListApplicationsResponse, RestartPolicy, ShutdownStrategy,
     SupervisionStrategy, SupervisorSpec, UndeployApplicationRequest, UndeployApplicationResponse,
 };
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::application::ApplicationState as CoreApplicationState;
 use plexspaces_wasm_runtime::WasmDeploymentService;
 use std::sync::Arc;
@@ -74,14 +78,14 @@ pub fn create_default_application_spec(
         max_restarts: 5,
         max_restart_window: None,
         children: vec![ChildSpec {
-            id: name.to_string(), // Use application name as actor ID
-            r#type: ChildType::ChildTypeWorker.into(),
-            args: std::collections::HashMap::new(),
+            actor_identity: Some(ActorIdentity {
+                name: name.to_string(),
+                actor_type: wasm_worker_actor_type_from_application_name(name),
+            }),
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![],
             behavior_kind: behavior_kind.map(String::from),
+            ..Default::default()
         }],
     };
 
@@ -284,16 +288,18 @@ impl ApplicationService for ApplicationServiceImpl {
             "application_name" => req.name.clone()
         )
         .increment(1);
-        tracing::info!(
-            application_id = %req.application_id,
-            application_name = %req.name,
-            tenant_id = %tenant_id,
-            namespace = %namespace,
-            version = %req.version,
-            has_wasm_module = req.wasm_module.is_some(),
-            has_config = req.config.is_some(),
-            "Deploying application"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                application_id = %req.application_id,
+                application_name = %req.name,
+                tenant_id = %tenant_id,
+                namespace = %namespace,
+                version = %req.version,
+                has_wasm_module = req.wasm_module.is_some(),
+                has_config = req.config.is_some(),
+                "Deploying application"
+            );
+        }
 
         // Validate request
         if req.application_id.is_empty() {
@@ -317,10 +323,13 @@ impl ApplicationService for ApplicationServiceImpl {
             // Deploy WASM module
             let deployment_service = WasmDeploymentService::new(wasm_runtime);
             let module_hash = deployment_service
-                .deploy_module(
+                .deploy_module_for_application(
                     &wasm_module.name,
                     &wasm_module.version,
                     &wasm_module.module_bytes,
+                    &tenant_id,
+                    &namespace,
+                    req.config.is_some(),
                 )
                 .await
                 .map_err(|e| {
@@ -417,11 +426,14 @@ impl ApplicationService for ApplicationServiceImpl {
             let app: Box<dyn plexspaces_application::Application> = Box::new(wasm_app);
 
             // Register with ApplicationManager
-            tracing::debug!(
-                application_id = %req.application_id,
-                application_name = %app_name,
-                "Registering WASM application with ApplicationManager"
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    application_id = %req.application_id,
+                    application_name = %app_name,
+                    deployment_type = "wasm",
+                    "Registering application with ApplicationManager"
+                );
+            }
 
             // Get ApplicationManager from ServiceLocator
             let application_manager = self.get_application_manager().await?;

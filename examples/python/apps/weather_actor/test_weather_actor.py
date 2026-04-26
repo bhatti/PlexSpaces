@@ -52,12 +52,17 @@ class MockWeatherActor:
     def __init__(self, mock_host: _MockHost):
         self._host = mock_host
         self.actor_id = "weather:test@node"
+        self.application_id = "weather-python-test"
+        self.node_id = "node"
         self.cache_hits = 0
         self.cache_misses = 0
 
+    def _cache_key_prefix(self):
+        return f"{self.actor_id}:weather:"
+
     def get_weather(self, city="London"):
-        cache_key = f"weather:{city}"
-        cached_raw = self._host.kv_get(cache_key)
+        cache_key = f"{self._cache_key_prefix()}{city}"
+        cached_raw = self._host.kv_get(cache_key) or ""
         if cached_raw:
             data = json.loads(cached_raw)
             fetched_at = data.get("fetched_at_ms", 0)
@@ -84,6 +89,9 @@ class MockWeatherActor:
     def clear_cache(self):
         self.cache_hits = 0
         self.cache_misses = 0
+        for key in list(self._host._kv.keys()):
+            if key.startswith(self._cache_key_prefix()):
+                del self._host._kv[key]
         return {"cleared": True}
 
 
@@ -175,10 +183,21 @@ def test_cache_ttl_expiry():
     print("test_cache_ttl_expiry: PASS")
 
 
+def test_clear_cache_removes_weather_keys():
+    mock = make_mock_host_with_weather()
+    actor = MockWeatherActor(mock)
+    actor.get_weather("London")
+    assert f"{actor._cache_key_prefix()}London" in mock._kv
+    actor.clear_cache()
+    assert f"{actor._cache_key_prefix()}London" not in mock._kv
+    print("test_clear_cache_removes_weather_keys: PASS")
+
+
 if __name__ == "__main__":
     test_get_weather_calls_service_link()
     test_get_weather_second_call_uses_cache()
     test_clear_cache_resets_stats()
     test_different_cities_cached_independently()
     test_cache_ttl_expiry()
+    test_clear_cache_removes_weather_keys()
     print("\n✅ All weather actor tests passed!")

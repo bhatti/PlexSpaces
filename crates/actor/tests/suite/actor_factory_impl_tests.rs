@@ -40,8 +40,31 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::Duration;
 
+fn make_spawn_spec(
+    actor_id: &ActorId,
+    actor_type: &str,
+    config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+    labels: HashMap<String, String>,
+) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
+    use plexspaces_proto::common::v1::ActorIdentity;
+    plexspaces_core::ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: actor_id.name().to_string(),
+            actor_type: actor_type.to_string(),
+        }),
+        role: String::new(),
+        namespace: actor_id.namespace().to_string(),
+        tenant_id: String::new(),
+        behavior_kind: String::new(),
+        args: HashMap::new(),
+        facets: vec![],
+        config,
+        labels,
+    }
+}
+
 fn test_actor_id(name: &str) -> ActorId {
-    ActorId::new(name, "GenServer", "default", "test-node").expect("valid test actor id")
+    ActorId::new(name, "gen_server", "default", "test-node").expect("valid test actor id")
 }
 
 /// Test behavior for actor factory tests
@@ -65,6 +88,30 @@ impl ActorTrait for TestBehavior {
         msg: Message,
     ) -> Result<(), BehaviorError> {
         self.received.lock().await.push(msg);
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> BehaviorType {
+        BehaviorType::GenServer
+    }
+}
+
+struct InitReadsActorIdBehavior {
+    observed_ids: Arc<tokio::sync::Mutex<Vec<ActorId>>>,
+}
+
+#[async_trait]
+impl ActorTrait for InitReadsActorIdBehavior {
+    async fn init(&mut self, ctx: &ActorContext) -> Result<(), plexspaces_core::ActorError> {
+        self.observed_ids.lock().await.push(ctx.actor_id().clone());
+        Ok(())
+    }
+
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
         Ok(())
     }
 
@@ -207,7 +254,7 @@ async fn create_test_service_locator() -> Arc<dyn plexspaces_core::ServiceLocato
         })
         .await;
     registry
-        .register("GenServer", |_args| {
+        .register("gen_server", |_args| {
             Box::pin(async move { Ok(Box::new(TestBehavior::new()) as Box<dyn ActorTrait2>) })
         })
         .await;
@@ -247,20 +294,24 @@ async fn test_activate_virtual_actor_success() {
         let f = virtual_actor_facet_to_lifecycle_facet(VirtualActorFacet::new(facet_config, 100));
         Arc::new(tokio::sync::RwLock::new(f))
     };
-    manager
-        .register(
-            actor_id.clone(),
-            facet_box,
-            "GenServer".to_string(), // actor_type
-            None,                    // config
-            "default".to_string(),   // tenant_id
-            "default".to_string(),   // namespace
-            vec![1, 2, 3],           // initial_state
-            HashMap::from([("source".to_string(), "test".to_string())]), // labels
-            plexspaces_common::ActivationStrategy::ActivationStrategyLazy, // activation_strategy
-        )
-        .await
-        .unwrap();
+    {
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: "gen_server".to_string(),
+            }),
+            tenant_id: "default".to_string(),
+            namespace: "default".to_string(),
+            labels: HashMap::from([("source".to_string(), "test".to_string())]),
+            ..Default::default()
+        };
+        manager
+            .register(actor_id.clone(), facet_box, spec)
+            .await
+            .unwrap();
+    }
 
     // Activate - this should rebuild the actor from virtual metadata.
     let result = factory.activate_virtual_actor(&actor_id).await;
@@ -294,20 +345,23 @@ async fn test_activate_virtual_actor_already_active() {
         ));
         Arc::new(tokio::sync::RwLock::new(f))
     };
-    manager
-        .register(
-            test_actor_id("test-actor"),
-            facet_box,
-            "GenServer".to_string(),          // actor_type
-            None,                             // config
-            "default".to_string(),            // tenant_id
-            "default".to_string(),            // namespace
-            vec![],                           // initial_state
-            std::collections::HashMap::new(), // labels
-            plexspaces_common::ActivationStrategy::ActivationStrategyLazy, // activation_strategy
-        )
-        .await
-        .unwrap();
+    {
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: "test-actor".to_string(),
+                actor_type: "gen_server".to_string(),
+            }),
+            tenant_id: "default".to_string(),
+            namespace: "default".to_string(),
+            ..Default::default()
+        };
+        manager
+            .register(test_actor_id("test-actor"), facet_box, spec)
+            .await
+            .unwrap();
+    }
 
     // Actually create and start a real actor (not just a mock)
     // This is needed for is_active() to return true
@@ -350,7 +404,7 @@ async fn test_activate_virtual_actor_already_active() {
             &ctx,
             actor_id.clone(),
             wrapper,
-            "TestActor".to_string(),
+            "test_actor".to_string(),
             None,
             Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorStateHandle>),
             None,
@@ -419,20 +473,76 @@ async fn test_spawn_actor_success() {
 
     let actor_id = test_actor_id("spawned-actor");
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test-type",
-            vec![],
-            None,
-            HashMap::new(),
-            vec![], // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test-type", None, HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
 
     assert!(result.is_ok(), "Spawn should succeed");
     let _sender = result.unwrap();
+}
+
+#[tokio::test]
+async fn test_spawn_actor_sets_self_ref_before_init() {
+    let service_locator = create_test_service_locator().await;
+    let observed_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let behavior_registry = service_locator
+        .get_behavior_registry()
+        .await
+        .expect("behavior registry should be registered for test service locator");
+    behavior_registry
+        .register("self_ref_init", {
+            let observed_ids = observed_ids.clone();
+            move |_args| {
+                let observed_ids = observed_ids.clone();
+                Box::pin(async move {
+                    Ok(Box::new(InitReadsActorIdBehavior {
+                        observed_ids: observed_ids.clone(),
+                    }) as Box<dyn ActorTrait>)
+                })
+            }
+        })
+        .await;
+
+    let factory = ActorFactoryImpl::new_arc(service_locator).await;
+    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
+    // Build spec directly — actor_type from spec drives the spawned ActorId
+    use plexspaces_proto::common::v1::ActorIdentity;
+    let spec = plexspaces_core::ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: "spawned-actor-init".to_string(),
+            actor_type: "self_ref_init".to_string(),
+        }),
+        role: String::new(),
+        namespace: "system".to_string(),
+        tenant_id: String::new(),
+        behavior_kind: String::new(),
+        args: HashMap::new(),
+        facets: vec![],
+        config: None,
+        labels: HashMap::new(),
+    };
+    let expected_actor_id =
+        ActorId::new("spawned-actor-init", "self_ref_init", "system", "test-node")
+            .expect("valid actor id");
+
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
+
+    assert!(result.is_ok(), "Spawn should succeed");
+    let observed_ids = observed_ids.lock().await.clone();
+    assert_eq!(
+        observed_ids.len(),
+        1,
+        "init() should be called exactly once"
+    );
+    assert_eq!(
+        observed_ids[0].name(),
+        expected_actor_id.name(),
+        "init() should see the actor's canonical self_ref-backed ActorId name"
+    );
+    assert_eq!(
+        observed_ids[0].actor_type(),
+        expected_actor_id.actor_type(),
+        "init() should see the actor's canonical self_ref-backed ActorId type"
+    );
 }
 
 #[tokio::test]
@@ -448,17 +558,8 @@ async fn test_spawn_actor_with_config() {
     });
 
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test-type",
-            vec![],
-            config,
-            HashMap::new(),
-            vec![], // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test-type", config, HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
 
     assert!(result.is_ok(), "Spawn with config should succeed");
 }
@@ -474,17 +575,8 @@ async fn test_spawn_actor_with_labels() {
     labels.insert("env".to_string(), "prod".to_string());
 
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test-type",
-            vec![],
-            None,
-            labels,
-            vec![], // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test-type", None, labels);
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
 
     assert!(result.is_ok(), "Spawn with labels should succeed");
 }
@@ -497,17 +589,8 @@ async fn test_spawn_actor_normalize_id() {
     // Test with actor ID without @ format
     let actor_id = test_actor_id("spawned-actor");
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test-type",
-            vec![],
-            None,
-            HashMap::new(),
-            vec![], // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test-type", None, HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
 
     assert!(result.is_ok(), "Spawn should normalize actor ID");
 }
@@ -523,17 +606,8 @@ async fn test_spawn_built_actor_regular() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test",                           // actor_type from TestBehavior
-            vec![],                           // initial_state
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![],                           // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test", None, std::collections::HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
     assert!(result.is_ok(), "Spawn regular actor should succeed");
 
     // Wait a bit for actor to start
@@ -702,17 +776,8 @@ async fn test_spawn_built_actor_multiple_references() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test",                           // actor_type
-            vec![],                           // initial_state
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![],                           // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test", None, std::collections::HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
     // spawn_actor should succeed
     assert!(result.is_ok(), "spawn_actor should succeed");
 }
@@ -732,17 +797,8 @@ async fn test_spawn_built_actor_service_not_found() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test",                           // actor_type
-            vec![],                           // initial_state
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![],                           // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test", None, std::collections::HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
     assert!(result.is_err(), "Should fail when ActorRegistry not found");
 }
 
@@ -757,17 +813,8 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let result = factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "test",                           // actor_type
-            vec![],                           // initial_state
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![],                           // facets
-        )
-        .await;
+    let spec = make_spawn_spec(&actor_id, "test", None, std::collections::HashMap::new());
+    let result = factory.spawn_actor(&ctx, &spec, vec![]).await;
     // This should work fine since it's a regular actor
     assert!(result.is_ok(), "Regular actor should spawn successfully");
 }
@@ -787,7 +834,7 @@ async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
     let manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await.unwrap();
 
     let actor_id = test_actor_id("idle-timeout-test");
-    let actor_type = "GenServer";
+    let actor_type = "gen_server";
 
     // Step 1: Register type-level metadata with idle_timeout="10m" (non-default).
     manager
@@ -816,20 +863,23 @@ async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
         ));
         Arc::new(tokio::sync::RwLock::new(f))
     };
-    manager
-        .register(
-            actor_id.clone(),
-            facet_box,
-            actor_type.to_string(),
-            None,
-            "default".to_string(),
-            "default".to_string(),
-            vec![],
-            HashMap::new(),
-            plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
-        )
-        .await
-        .unwrap();
+    {
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: actor_type.to_string(),
+            }),
+            tenant_id: "default".to_string(),
+            namespace: "default".to_string(),
+            ..Default::default()
+        };
+        manager
+            .register(actor_id.clone(), facet_box, spec)
+            .await
+            .unwrap();
+    }
 
     // Step 3: Activate (rebuild) — should pick up idle_timeout from type-level metadata.
     let result = factory.activate_virtual_actor(&actor_id).await;

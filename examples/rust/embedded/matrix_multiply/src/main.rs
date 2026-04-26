@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
 
     // Setup: Node
     let node = NodeBuilder::new("matrix-node".to_string())
-        .build()
+        .build_started()
         .await;
     let service_locator = node.service_locator();
 

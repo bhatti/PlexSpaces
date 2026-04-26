@@ -94,27 +94,10 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
     }
 
     const leaderNodeId = actorNodeId(this.state.actor_id);
-    const participantNodeIds: string[] = [leaderNodeId];
-    const seenNodes = new Set<string>([leaderNodeId]);
-    for (const actorId of shardActorIds) {
-      const nodeId = actorNodeId(actorId);
-      if (nodeId && !seenNodes.has(nodeId)) {
-        seenNodes.add(nodeId);
-        participantNodeIds.push(nodeId);
-      }
-    }
-
-    const startStatuses: Record<string, Record<string, unknown>> = {};
     const nodeAddresses: Record<string, string> = {};
-    for (const nodeId of participantNodeIds) {
-      const status = host.applicationGetStatus(this.state.application_id, nodeId);
-      startStatuses[nodeId] = status;
-      const address = stringValue(status.node_address);
-      if (address) {
-        nodeAddresses[nodeId] = address;
-      }
-    }
-
+    const startLeaderMetrics = host.applicationGetMetrics(this.state.application_id, leaderNodeId);
+    const nodeMetrics: Record<string, MetricMap> = {};
+    const roleMetrics: Record<string, MetricMap> = {};
     const results: Record<string, unknown>[] = [];
     const remoteNodesWithWork = new Set<string>();
     let totalErrors = 0;
@@ -168,7 +151,10 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
         if (stringValue(payloadMap.status) === "ok") {
           iterationResponses += 1;
           totalWorkerResponses += 1;
+          const actorId = stringValue(payloadMap.actor_id);
+          const nodeId = stringValue(payloadMap.node_id) || actorNodeId(actorId);
           const latencyMs = intValue(payloadMap.latency_ms, 0);
+          const tupleOperations = intValue(payloadMap.tuple_operations, 0);
           iterationLatencyMs += latencyMs;
           totalWorkerLatencyMs += latencyMs;
           iterationMaxLatencyMs = Math.max(iterationMaxLatencyMs, latencyMs);
@@ -179,11 +165,38 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
           iterationTransformed += intValue(payloadMap.transformed_events, 0);
           iterationDropped += intValue(payloadMap.dropped_events, 0);
           iterationBytes += intValue(payloadMap.bytes_processed, 0);
-          iterationTupleOps += intValue(payloadMap.tuple_operations, 0);
-          const nodeId = stringValue(payloadMap.node_id) || actorNodeId(stringValue(payloadMap.actor_id));
+          iterationTupleOps += tupleOperations;
           if (nodeId && nodeId !== leaderNodeId) {
             remoteNodesWithWork.add(nodeId);
           }
+          const workerNode = ensureNodeMetric(nodeMetrics, nodeId);
+          workerNode.messages += 1;
+          workerNode.worker_messages += 1;
+          workerNode.event_count += intValue(payloadMap.event_count, 0);
+          workerNode.filtered_events += intValue(payloadMap.filtered_events, 0);
+          workerNode.enriched_events += intValue(payloadMap.enriched_events, 0);
+          workerNode.transformed_events += intValue(payloadMap.transformed_events, 0);
+          workerNode.dropped_events += intValue(payloadMap.dropped_events, 0);
+          workerNode.bytes_processed += intValue(payloadMap.bytes_processed, 0);
+          workerNode.tuple_operations += tupleOperations;
+          workerNode.compute_time_ms += latencyMs;
+          workerNode.total_latency_ms += latencyMs;
+          workerNode.max_latency_ms = Math.max(workerNode.max_latency_ms, latencyMs);
+          workerNode.responses += 1;
+
+          const workerRole = ensureRoleMetric(roleMetrics, "worker");
+          workerRole.messages += 1;
+          workerRole.event_count += intValue(payloadMap.event_count, 0);
+          workerRole.filtered_events += intValue(payloadMap.filtered_events, 0);
+          workerRole.enriched_events += intValue(payloadMap.enriched_events, 0);
+          workerRole.transformed_events += intValue(payloadMap.transformed_events, 0);
+          workerRole.dropped_events += intValue(payloadMap.dropped_events, 0);
+          workerRole.bytes_processed += intValue(payloadMap.bytes_processed, 0);
+          workerRole.tuple_operations += tupleOperations;
+          workerRole.compute_time_ms += latencyMs;
+          workerRole.total_latency_ms += latencyMs;
+          workerRole.max_latency_ms = Math.max(workerRole.max_latency_ms, latencyMs);
+          workerRole.responses += 1;
           for (const streamCount of anyArray(payloadMap.top_streams)) {
             const streamMap = recordValue(streamCount);
             candidates.push({
@@ -259,16 +272,8 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       },
     });
 
-    const nodeMetrics: Record<string, MetricMap> = {};
-    const roleMetrics: Record<string, MetricMap> = {};
-    for (const nodeId of participantNodeIds) {
-      const status = host.applicationGetStatus(this.state.application_id, nodeId);
-      const address = stringValue(status.node_address);
-      if (address) {
-        nodeAddresses[nodeId] = address;
-      }
-      applyStatusDelta(nodeMetrics, roleMetrics, startStatuses[nodeId], status);
-    }
+    const endLeaderMetrics = host.applicationGetMetrics(this.state.application_id, leaderNodeId);
+    applyMetricsDelta(nodeMetrics, roleMetrics, startLeaderMetrics, endLeaderMetrics, leaderNodeId);
 
     for (const [nodeId, counts] of Object.entries(computeActorCounts(leaderNodeId, shardActorIds))) {
       const node = ensureNodeMetric(nodeMetrics, nodeId);
@@ -282,15 +287,11 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
     let totalMessages = 0;
     let totalComputeMs = 0;
     let totalCoordinationMs = 0;
-    let workerNodeCount = 0;
     const actorCounts: number[] = [];
     for (const [nodeId, metrics] of Object.entries(nodeMetrics)) {
       totalMessages += metrics.messages;
       totalComputeMs += metrics.compute_time_ms;
       totalCoordinationMs += metrics.coordination_time_ms;
-      if (nodeId !== leaderNodeId && metrics.responses > 0) {
-        workerNodeCount += 1;
-      }
       actorCounts.push(metrics.actors);
     }
     const actorDistributionSkew = actorCounts.length > 0
@@ -353,7 +354,7 @@ class LeaderActor extends PlexSpacesActor<LeaderState> {
       node_addresses: nodeAddresses,
       shard_actor_ids: shardActorIds,
       node_count: Object.keys(nodeMetrics).length,
-      worker_node_count: workerNodeCount,
+      worker_node_count: remoteNodesWithWork.size,
       actor_count: shardActorIds.length + 1,
       message_count: totalMessages,
       event_count: totalEventCount,
@@ -617,20 +618,21 @@ function ensureRoleMetric(metrics: Record<string, MetricMap>, role: string): Met
   return metrics[role];
 }
 
-function applyStatusDelta(
+function applyMetricsDelta(
   nodeMetrics: Record<string, MetricMap>,
   roleMetrics: Record<string, MetricMap>,
-  startStatus: Record<string, unknown>,
-  endStatus: Record<string, unknown>,
+  startMetrics: Record<string, unknown>,
+  endMetrics: Record<string, unknown>,
+  nodeId: string,
 ): void {
-  const counterDelta = saturatingMapDelta(statusMetricsMap(endStatus, "counter_metrics"), statusMetricsMap(startStatus, "counter_metrics"));
-  const latencyTotalsDelta = saturatingMapDelta(statusMetricsMap(endStatus, "latency_totals_ms"), statusMetricsMap(startStatus, "latency_totals_ms"));
-  const latencyMaxEnd = statusMetricsMap(endStatus, "latency_max_ms");
-  const latencyMaxStart = statusMetricsMap(startStatus, "latency_max_ms");
-  const latencySamplesDelta = saturatingMapDelta(statusMetricsMap(endStatus, "latency_samples"), statusMetricsMap(startStatus, "latency_samples"));
-  const messageDelta = Math.max(intValue(statusMetricsValue(endStatus, "message_count"), 0) - intValue(statusMetricsValue(startStatus, "message_count"), 0), 0);
-  const errorDelta = Math.max(intValue(statusMetricsValue(endStatus, "error_count"), 0) - intValue(statusMetricsValue(startStatus, "error_count"), 0), 0);
-  const nodeId = stringValue(endStatus.node_id);
+  const counterDelta = saturatingMapDelta(metricsMap(endMetrics, "counter_metrics"), metricsMap(startMetrics, "counter_metrics"));
+  const latencyTotalsDelta = saturatingMapDelta(metricsMap(endMetrics, "latency_totals_ms"), metricsMap(startMetrics, "latency_totals_ms"));
+  const latencyMaxEnd = metricsMap(endMetrics, "latency_max_ms");
+  const latencyMaxStart = metricsMap(startMetrics, "latency_max_ms");
+  const latencySamplesDelta = saturatingMapDelta(metricsMap(endMetrics, "latency_samples"), metricsMap(startMetrics, "latency_samples"));
+  const messageDelta = Math.max(intValue(endMetrics.message_count, 0) - intValue(startMetrics.message_count, 0), 0);
+  const errorDelta = Math.max(intValue(endMetrics.error_count, 0) - intValue(startMetrics.error_count, 0), 0);
+
   const node = ensureNodeMetric(nodeMetrics, nodeId);
   node.messages += messageDelta;
   node.leader_messages += counterDelta.leader_messages ?? 0;
@@ -652,7 +654,7 @@ function applyStatusDelta(
     latencyMaxEnd.leader ?? 0,
     latencyMaxStart.leader ?? 0,
   );
-  node.responses += latencySamplesDelta.worker ?? 0;
+  node.responses += (latencySamplesDelta.worker ?? 0) + (latencySamplesDelta.leader ?? 0);
   node.errors += errorDelta;
 
   const leader = ensureRoleMetric(roleMetrics, "leader");
@@ -663,6 +665,7 @@ function applyStatusDelta(
   leader.total_latency_ms += latencyTotalsDelta.leader ?? 0;
   leader.max_latency_ms = Math.max(leader.max_latency_ms, latencyMaxEnd.leader ?? 0, latencyMaxStart.leader ?? 0);
   leader.responses += latencySamplesDelta.leader ?? 0;
+  leader.errors += errorDelta;
 
   const worker = ensureRoleMetric(roleMetrics, "worker");
   worker.messages += counterDelta.worker_messages ?? 0;
@@ -681,14 +684,8 @@ function applyStatusDelta(
   worker.errors += errorDelta;
 }
 
-function statusMetricsValue(status: Record<string, unknown>, field: string): unknown {
-  const application = recordValue(status.application);
-  const metrics = recordValue(application.metrics);
-  return metrics[field];
-}
-
-function statusMetricsMap(status: Record<string, unknown>, field: string): MetricMap {
-  const value = recordValue(statusMetricsValue(status, field));
+function metricsMap(metrics: Record<string, unknown>, field: string): MetricMap {
+  const value = recordValue(metrics[field]);
   const result: MetricMap = {};
   for (const [key, raw] of Object.entries(value)) {
     result[key] = intValue(raw, 0);
@@ -791,9 +788,9 @@ const router = new ActorRouter({
 });
 
 export const actor = {
-  init: (configJson: string) => router.init(configJson),
-  handle: (from: string, msgType: string, payloadJson: string) =>
+  init: (configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.init(configJson),
+  handle: (from: string, msgType: string, payloadJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) =>
     router.handle(from, msgType, payloadJson),
   getState: () => router.getState(),
-  setState: (stateJson: string) => router.setState(stateJson),
+  setState: (stateJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.setState(stateJson),
 };

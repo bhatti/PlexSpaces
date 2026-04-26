@@ -249,6 +249,7 @@ pub use v1::actor::{
     ActorMigrating,
     ActorStarting,
     ActorTerminated,
+    DemonitorActorRequest,
     MonitorActorRequest,
     MonitorActorResponse,
 };
@@ -256,7 +257,7 @@ pub use v1::actor::{
 pub use v1::actor::{
     actor_lifecycle_event, ActorActivated, ActorCreated, ActorDeactivated, ActorDeactivating,
     ActorDownNotification, ActorFailed, ActorLifecycleEvent, ActorMigrating, ActorStarting,
-    ActorTerminated, MonitorActorRequest, MonitorActorResponse,
+    ActorTerminated, DemonitorActorRequest, MonitorActorRequest, MonitorActorResponse,
 };
 
 // Re-export v1 tuplespace service for convenience

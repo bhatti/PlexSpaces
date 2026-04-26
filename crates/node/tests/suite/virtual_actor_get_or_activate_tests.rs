@@ -2,17 +2,17 @@
 // Tests for get_or_activate_actor with VirtualActorFacet
 
 use super::test_helpers::{
-    activate_virtual_actor, get_or_activate_actor_helper, lookup_actor_ref,
-    spawn_actor_builder_helper, test_runtime_actor_id,
+    lookup_actor_ref, registry_ask, spawn_actor_helper, test_runtime_actor_id,
 };
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::Message;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
+};
 use plexspaces_journaling::VirtualActorFacet;
-use plexspaces_node::default_node_config;
-use plexspaces_node::{Node, NodeBuilder, NodeConfig, NodeId};
+use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -121,37 +121,23 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id = test_runtime_actor_id("test-actor", "test-node");
 
-    // Get or activate actor with VirtualActorFacet (eager)
-    let core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
-        let behavior = Box::new(TestActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRegistrationFailed(
-                    actor_id.clone().into(),
-                    format!("Failed to build actor: {}", e),
-                )
-            })?;
+    // Build and spawn actor with VirtualActorFacet (eager)
+    let behavior = Box::new(TestActor::new());
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .build()
+        .await
+        .unwrap();
 
-        // Attach VirtualActorFacet with eager activation
-        let virtual_facet_config = serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "eager"
-        });
-        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
-        actor.attach_facet(virtual_facet).await.map_err(|e| {
-            plexspaces_node::NodeError::ActorRegistrationFailed(
-                actor_id.clone().into(),
-                format!("Failed to attach VirtualActorFacet: {}", e),
-            )
-        })?;
+    // Attach VirtualActorFacet with eager activation
+    let virtual_facet_config = serde_json::json!({
+        "idle_timeout": "5m",
+        "activation_strategy": "eager"
+    });
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
 
-        Ok(actor)
-    })
-    .await
-    .unwrap();
+    spawn_actor_helper(&node, actor).await.unwrap();
 
     // Wait for actor to be registered
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -181,54 +167,50 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
 async fn test_get_or_activate_with_virtual_facet_lazy() {
     // Test: get_or_activate_actor with VirtualActorFacet (lazy activation) should activate on first message
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
+
+    // Register BehaviorRegistry so that activate_virtual_actor can rebuild the actor
+    // from its stored actor_type ("GenServer") when the lazy actor receives its first message.
+    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    let registry = BehaviorRegistry::new();
+    registry
+        .register_simple("gen_server", || {
+            Box::pin(
+                async move { Ok(Box::new(TestActor::new()) as Box<dyn plexspaces_core::Actor>) },
+            )
+        })
+        .await;
+    node.service_locator()
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+
     let actor_id = test_runtime_actor_id("test-actor-lazy", "test-node");
 
-    // Get or activate actor with VirtualActorFacet (lazy)
-    let core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
-        let behavior = Box::new(TestActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRegistrationFailed(
-                    actor_id.clone().into(),
-                    format!("Failed to build actor: {}", e),
-                )
-            })?;
+    // Build and spawn actor with VirtualActorFacet (lazy)
+    let behavior = Box::new(TestActor::new());
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .build()
+        .await
+        .unwrap();
 
-        // Attach VirtualActorFacet with lazy activation
-        let virtual_facet_config = serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "lazy"
-        });
-        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
-        actor.attach_facet(virtual_facet).await.map_err(|e| {
-            plexspaces_node::NodeError::ActorRegistrationFailed(
-                actor_id.clone().into(),
-                format!("Failed to attach VirtualActorFacet: {}", e),
-            )
-        })?;
+    // Attach VirtualActorFacet with lazy activation
+    let virtual_facet_config = serde_json::json!({
+        "idle_timeout": "5m",
+        "activation_strategy": "lazy"
+    });
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
 
-        Ok(actor)
-    })
-    .await
-    .unwrap();
+    spawn_actor_helper(&node, actor).await.unwrap();
 
     // Wait for actor to be registered
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Get ActorRef
-    let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
-
-    // Wait for actor to be ready (lazy should activate on first message, but give it time)
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    // Test ask() - this should work (lazy activation should activate on first message)
+    // Lazy actor is not in the live registry yet; route through registry so it activates on first message
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
 
-    let result = actor_ref.ask(msg, Duration::from_secs(5)).await;
+    let result = registry_ask(&node, &actor_id, msg, Duration::from_secs(5)).await;
 
     assert!(
         result.is_ok(),

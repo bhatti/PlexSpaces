@@ -28,7 +28,7 @@
 //! - **Application** = Business logic layer (supervision trees, workers, domain actors)
 //! - **Release** = Docker image with Node binary as entry point
 //!
-//! See: `docs/NODE_APPLICATION_ARCHITECTURE.md` for full architecture documentation.
+//! See: `docs/actor-system.md` for full architecture documentation.
 //!
 //! ## Design Principles
 //! 1. **Proto-First**: Data models defined in `proto/plexspaces/v1/application/application.proto`
@@ -216,6 +216,8 @@ pub trait Application: Send + Sync {
 /// - Applications should NOT access Node internals directly
 /// - This trait provides a stable interface for application development
 /// - Mock implementations can be used for testing applications in isolation
+/// - `ActorFactory` and other services are accessed via `service_locator().get_actor_factory()`,
+///   not as a direct method on `ApplicationNode` — keeping this trait minimal and stable
 #[async_trait]
 pub trait ApplicationNode: Send + Sync {
     /// Get node ID
@@ -233,19 +235,6 @@ pub trait ApplicationNode: Send + Sync {
     /// ## Returns
     /// Some(ServiceLocator) if available, None otherwise
     fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
-        None
-    }
-
-    /// Get ActorFactory (optional - only Node implements this)
-    ///
-    /// ## Purpose
-    /// Allows applications to access ActorFactory for spawning actors.
-    /// This method is provided to avoid circular dependencies (application can't depend on services).
-    /// Node implementations return Some(actor_factory), mocks return None.
-    ///
-    /// ## Returns
-    /// Some(ActorFactory) if available, None otherwise
-    async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
         None
     }
 

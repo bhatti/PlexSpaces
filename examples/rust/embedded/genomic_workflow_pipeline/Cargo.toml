@@ -11,9 +11,11 @@ edition = "2021"
 plexspaces-workflow = { path = "../../../../crates/workflow" }
 plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-application = { path = "../../../../crates/application" }
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 
 # CLI argument parsing
 clap = { version = "4.0", features = ["derive"] }

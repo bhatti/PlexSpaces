@@ -519,6 +519,15 @@ func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[str
 	return hostDecodeApplicationMetricsResponse(result)
 }
 
+// ApplicationGetMetrics returns node-local application metrics for a participating node.
+func (h *Host) ApplicationGetMetrics(applicationID, nodeID string) (map[string]any, error) {
+	result := hostApplicationGetMetrics(applicationID, nodeID)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return hostDecodeApplicationMetricsResponse(result)
+}
+
 // HTTPFetch executes an outbound HTTP request via a named service link.
 //
 // The link must be pre-configured in RuntimeConfig.service_links.

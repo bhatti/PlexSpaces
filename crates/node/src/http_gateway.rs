@@ -498,6 +498,63 @@ pub async fn actor_http_request(
     }
 }
 
+/// HTTP DELETE handler: stop a virtual actor by canonical or `name:id` address.
+///
+/// Resolves the client-facing target to a canonical actor ID (running
+/// `prime_instance_from_definition` as a side-effect so any subsequent
+/// reactivation re-derives `wasm_init_payload` from definition args), then
+/// calls `ActorFactory::stop_actor`.
+pub async fn stop_actor_http_request(
+    effective_tenant_id: String,
+    namespace: String,
+    actor_target: String,
+    actor_service: Arc<ActorServiceImpl>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        effective_tenant_id,
+        namespace,
+    );
+    let canonical_id = actor_service
+        .canonical_actor_id_from_client_target(&ctx, &actor_target)
+        .await
+        .unwrap_or_else(|| actor_target.clone());
+    let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error_message": format!("Invalid actor id '{}': {}", actor_target, e)
+            })),
+        )
+    })?;
+    let factory = actor_service
+        .service_locator()
+        .get_actor_factory()
+        .await
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error_message": "ActorFactory not available"
+                })),
+            )
+        })?;
+    factory.stop_actor(&ctx, &actor_id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "success": false,
+                "error_message": format!("Failed to stop actor: {}", e)
+            })),
+        )
+    })?;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "actor_id": canonical_id
+    })))
+}
+
 // Note: Full router creation is kept in mod.rs for now due to complexity
 // of the deploy/undeploy handlers. This module provides the foundation
 // for incremental extraction. Future work:

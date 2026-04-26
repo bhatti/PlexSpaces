@@ -536,6 +536,65 @@ func (x *ActorId) GetNodeId() string {
 	return ""
 }
 
+// Declaration-time actor identity (instance name + behavior class).
+//
+// Namespace and node_id are supplied at deploy/spawn time to build a full
+// `ActorId`. Client configuration, TOML, and supervision declarations should
+// use this message instead of overloading a single string field.
+type ActorIdentity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unique instance name within the actor type, namespace, and node scope.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Behavior class / registered type (WASM dispatch, VirtualActorManager index).
+	ActorType     string `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActorIdentity) Reset() {
+	*x = ActorIdentity{}
+	mi := &file_plexspaces_v1_common_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActorIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActorIdentity) ProtoMessage() {}
+
+func (x *ActorIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_plexspaces_v1_common_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActorIdentity.ProtoReflect.Descriptor instead.
+func (*ActorIdentity) Descriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ActorIdentity) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ActorIdentity) GetActorType() string {
+	if x != nil {
+		return x.ActorType
+	}
+	return ""
+}
+
 // Standard error details
 type ErrorDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -548,7 +607,7 @@ type ErrorDetail struct {
 
 func (x *ErrorDetail) Reset() {
 	*x = ErrorDetail{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -560,7 +619,7 @@ func (x *ErrorDetail) String() string {
 func (*ErrorDetail) ProtoMessage() {}
 
 func (x *ErrorDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[3]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -573,7 +632,7 @@ func (x *ErrorDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorDetail.ProtoReflect.Descriptor instead.
 func (*ErrorDetail) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ErrorDetail) GetCode() string {
@@ -610,7 +669,7 @@ type RetryPolicy struct {
 
 func (x *RetryPolicy) Reset() {
 	*x = RetryPolicy{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +681,7 @@ func (x *RetryPolicy) String() string {
 func (*RetryPolicy) ProtoMessage() {}
 
 func (x *RetryPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +694,7 @@ func (x *RetryPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryPolicy.ProtoReflect.Descriptor instead.
 func (*RetryPolicy) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RetryPolicy) GetMaxAttempts() uint32 {
@@ -683,7 +742,7 @@ type PageRequest struct {
 
 func (x *PageRequest) Reset() {
 	*x = PageRequest{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +754,7 @@ func (x *PageRequest) String() string {
 func (*PageRequest) ProtoMessage() {}
 
 func (x *PageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +767,7 @@ func (x *PageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageRequest.ProtoReflect.Descriptor instead.
 func (*PageRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{5}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PageRequest) GetOffset() int32 {
@@ -756,7 +815,7 @@ type PageResponse struct {
 
 func (x *PageResponse) Reset() {
 	*x = PageResponse{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +827,7 @@ func (x *PageResponse) String() string {
 func (*PageResponse) ProtoMessage() {}
 
 func (x *PageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +840,7 @@ func (x *PageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageResponse.ProtoReflect.Descriptor instead.
 func (*PageResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{6}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PageResponse) GetTotalSize() int32 {
@@ -839,7 +898,7 @@ type Facet struct {
 
 func (x *Facet) Reset() {
 	*x = Facet{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +910,7 @@ func (x *Facet) String() string {
 func (*Facet) ProtoMessage() {}
 
 func (x *Facet) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +923,7 @@ func (x *Facet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Facet.ProtoReflect.Descriptor instead.
 func (*Facet) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{7}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Facet) GetType() string {
@@ -916,7 +975,7 @@ type FacetDescriptor struct {
 
 func (x *FacetDescriptor) Reset() {
 	*x = FacetDescriptor{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -928,7 +987,7 @@ func (x *FacetDescriptor) String() string {
 func (*FacetDescriptor) ProtoMessage() {}
 
 func (x *FacetDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -941,7 +1000,7 @@ func (x *FacetDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FacetDescriptor.ProtoReflect.Descriptor instead.
 func (*FacetDescriptor) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{8}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FacetDescriptor) GetType() string {
@@ -993,7 +1052,7 @@ type ConfigOption struct {
 
 func (x *ConfigOption) Reset() {
 	*x = ConfigOption{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1005,7 +1064,7 @@ func (x *ConfigOption) String() string {
 func (*ConfigOption) ProtoMessage() {}
 
 func (x *ConfigOption) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1018,7 +1077,7 @@ func (x *ConfigOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigOption.ProtoReflect.Descriptor instead.
 func (*ConfigOption) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{9}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ConfigOption) GetKey() string {
@@ -1083,7 +1142,7 @@ type SecurityPolicy struct {
 
 func (x *SecurityPolicy) Reset() {
 	*x = SecurityPolicy{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1154,7 @@ func (x *SecurityPolicy) String() string {
 func (*SecurityPolicy) ProtoMessage() {}
 
 func (x *SecurityPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1167,7 @@ func (x *SecurityPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecurityPolicy.ProtoReflect.Descriptor instead.
 func (*SecurityPolicy) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{10}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SecurityPolicy) GetAllowCrossNamespace() bool {
@@ -1189,7 +1248,7 @@ type ResourceQuota struct {
 
 func (x *ResourceQuota) Reset() {
 	*x = ResourceQuota{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1201,7 +1260,7 @@ func (x *ResourceQuota) String() string {
 func (*ResourceQuota) ProtoMessage() {}
 
 func (x *ResourceQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1214,7 +1273,7 @@ func (x *ResourceQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceQuota.ProtoReflect.Descriptor instead.
 func (*ResourceQuota) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{11}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ResourceQuota) GetMaxActors() uint32 {
@@ -1291,7 +1350,7 @@ type ResourceSpec struct {
 
 func (x *ResourceSpec) Reset() {
 	*x = ResourceSpec{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1303,7 +1362,7 @@ func (x *ResourceSpec) String() string {
 func (*ResourceSpec) ProtoMessage() {}
 
 func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1375,7 @@ func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceSpec.ProtoReflect.Descriptor instead.
 func (*ResourceSpec) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{12}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ResourceSpec) GetCpuCores() float64 {
@@ -1454,7 +1513,7 @@ type RequestContext struct {
 
 func (x *RequestContext) Reset() {
 	*x = RequestContext{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1525,7 @@ func (x *RequestContext) String() string {
 func (*RequestContext) ProtoMessage() {}
 
 func (x *RequestContext) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1538,7 @@ func (x *RequestContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestContext.ProtoReflect.Descriptor instead.
 func (*RequestContext) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{13}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RequestContext) GetTenantId() string {
@@ -1628,7 +1687,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_plexspaces_v1_common_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1640,7 +1699,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_common_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_common_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1653,7 +1712,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{14}
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Message) GetId() string {
@@ -1804,7 +1863,11 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tB!\xe0A\x02\xbaH\x1br\x19\x10\x01\x18\x80\x012\x12^[a-z][a-z0-9_-]*$R\tactorType\x12+\n" +
 	"\tnamespace\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tnamespace\x12&\n" +
-	"\anode_id\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x06nodeId\"\xf9\x01\n" +
+	"\anode_id\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x06nodeId\"\x91\x01\n" +
+	"\rActorIdentity\x12>\n" +
+	"\x04name\x18\x01 \x01(\tB*\xe0A\x02\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name\x12@\n" +
+	"\n" +
+	"actor_type\x18\x02 \x01(\tB!\xe0A\x02\xbaH\x1br\x19\x10\x01\x18\x80\x012\x12^[a-z][a-z0-9_-]*$R\tactorType\"\xf9\x01\n" +
 	"\vErrorDetail\x12(\n" +
 	"\x04code\x18\x01 \x01(\tB\x14\xbaH\x11r\x0f\x10\x01\x18@2\t^[A-Z_]+$R\x04code\x12$\n" +
 	"\amessage\x18\x02 \x01(\tB\n" +
@@ -1988,7 +2051,7 @@ func file_plexspaces_v1_common_proto_rawDescGZIP() []byte {
 }
 
 var file_plexspaces_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_plexspaces_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_plexspaces_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_plexspaces_v1_common_proto_goTypes = []any{
 	(ActivationStrategy)(0),       // 0: plexspaces.common.v1.ActivationStrategy
 	(QoSLevel)(0),                 // 1: plexspaces.common.v1.QoSLevel
@@ -1996,55 +2059,56 @@ var file_plexspaces_v1_common_proto_goTypes = []any{
 	(*Empty)(nil),                 // 3: plexspaces.common.v1.Empty
 	(*Metadata)(nil),              // 4: plexspaces.common.v1.Metadata
 	(*ActorId)(nil),               // 5: plexspaces.common.v1.ActorId
-	(*ErrorDetail)(nil),           // 6: plexspaces.common.v1.ErrorDetail
-	(*RetryPolicy)(nil),           // 7: plexspaces.common.v1.RetryPolicy
-	(*PageRequest)(nil),           // 8: plexspaces.common.v1.PageRequest
-	(*PageResponse)(nil),          // 9: plexspaces.common.v1.PageResponse
-	(*Facet)(nil),                 // 10: plexspaces.common.v1.Facet
-	(*FacetDescriptor)(nil),       // 11: plexspaces.common.v1.FacetDescriptor
-	(*ConfigOption)(nil),          // 12: plexspaces.common.v1.ConfigOption
-	(*SecurityPolicy)(nil),        // 13: plexspaces.common.v1.SecurityPolicy
-	(*ResourceQuota)(nil),         // 14: plexspaces.common.v1.ResourceQuota
-	(*ResourceSpec)(nil),          // 15: plexspaces.common.v1.ResourceSpec
-	(*RequestContext)(nil),        // 16: plexspaces.common.v1.RequestContext
-	(*Message)(nil),               // 17: plexspaces.common.v1.Message
-	nil,                           // 18: plexspaces.common.v1.Metadata.LabelsEntry
-	nil,                           // 19: plexspaces.common.v1.Metadata.AnnotationsEntry
-	nil,                           // 20: plexspaces.common.v1.ErrorDetail.DetailsEntry
-	nil,                           // 21: plexspaces.common.v1.Facet.ConfigEntry
-	nil,                           // 22: plexspaces.common.v1.Facet.StateEntry
-	nil,                           // 23: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	nil,                           // 24: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	nil,                           // 25: plexspaces.common.v1.RequestContext.MetadataEntry
-	nil,                           // 26: plexspaces.common.v1.RequestContext.HeadersEntry
-	nil,                           // 27: plexspaces.common.v1.Message.HeadersEntry
-	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 29: google.protobuf.Duration
-	(*anypb.Any)(nil),             // 30: google.protobuf.Any
+	(*ActorIdentity)(nil),         // 6: plexspaces.common.v1.ActorIdentity
+	(*ErrorDetail)(nil),           // 7: plexspaces.common.v1.ErrorDetail
+	(*RetryPolicy)(nil),           // 8: plexspaces.common.v1.RetryPolicy
+	(*PageRequest)(nil),           // 9: plexspaces.common.v1.PageRequest
+	(*PageResponse)(nil),          // 10: plexspaces.common.v1.PageResponse
+	(*Facet)(nil),                 // 11: plexspaces.common.v1.Facet
+	(*FacetDescriptor)(nil),       // 12: plexspaces.common.v1.FacetDescriptor
+	(*ConfigOption)(nil),          // 13: plexspaces.common.v1.ConfigOption
+	(*SecurityPolicy)(nil),        // 14: plexspaces.common.v1.SecurityPolicy
+	(*ResourceQuota)(nil),         // 15: plexspaces.common.v1.ResourceQuota
+	(*ResourceSpec)(nil),          // 16: plexspaces.common.v1.ResourceSpec
+	(*RequestContext)(nil),        // 17: plexspaces.common.v1.RequestContext
+	(*Message)(nil),               // 18: plexspaces.common.v1.Message
+	nil,                           // 19: plexspaces.common.v1.Metadata.LabelsEntry
+	nil,                           // 20: plexspaces.common.v1.Metadata.AnnotationsEntry
+	nil,                           // 21: plexspaces.common.v1.ErrorDetail.DetailsEntry
+	nil,                           // 22: plexspaces.common.v1.Facet.ConfigEntry
+	nil,                           // 23: plexspaces.common.v1.Facet.StateEntry
+	nil,                           // 24: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	nil,                           // 25: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	nil,                           // 26: plexspaces.common.v1.RequestContext.MetadataEntry
+	nil,                           // 27: plexspaces.common.v1.RequestContext.HeadersEntry
+	nil,                           // 28: plexspaces.common.v1.Message.HeadersEntry
+	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 30: google.protobuf.Duration
+	(*anypb.Any)(nil),             // 31: google.protobuf.Any
 }
 var file_plexspaces_v1_common_proto_depIdxs = []int32{
-	28, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
-	28, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
-	18, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
-	19, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
-	20, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
-	29, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
-	29, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
-	21, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
-	22, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
+	29, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
+	29, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
+	19, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
+	20, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
+	21, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
+	30, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
+	30, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
+	22, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
+	23, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
 	4,  // 9: plexspaces.common.v1.Facet.metadata:type_name -> plexspaces.common.v1.Metadata
-	12, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
-	23, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	24, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	28, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
-	25, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
-	26, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
-	28, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
-	27, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
-	29, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
-	30, // 19: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
-	30, // 20: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
-	30, // 21: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
+	13, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
+	24, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	25, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	29, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
+	26, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
+	27, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
+	29, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
+	30, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
+	31, // 19: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
+	31, // 20: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
+	31, // 21: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
 	22, // [22:22] is the sub-list for method output_type
 	22, // [22:22] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
@@ -2063,7 +2127,7 @@ func file_plexspaces_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_common_proto_rawDesc), len(file_plexspaces_v1_common_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   25,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

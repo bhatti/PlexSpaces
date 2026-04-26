@@ -34,17 +34,7 @@ function applicationIdFromActorId(actorId: string): string {
 }
 
 function canonicalActorTarget(target: string): string {
-  if (target.includes("@")) {
-    return target;
-  }
-  const [actorType, actorName] = target.split(":", 2);
-  const selfId = host.selfId();
-  const namespace = applicationIdFromActorId(selfId);
-  const nodeId = selfId.split("@", 2)[1];
-  if (!actorType || !actorName || !namespace || !nodeId) {
-    return target;
-  }
-  return `${actorName}//${actorType}::${namespace}@${nodeId}`;
+  return target;
 }
 
 class AbstractionsActor extends PlexSpacesActor<State> {

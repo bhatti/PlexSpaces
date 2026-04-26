@@ -313,7 +313,10 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
                 Ok(child_spec) => parsed_children.push(child_spec),
                 Err(e) => {
                     return Err(WasmAppsLoaderError::Deployment(
-                        format!("Failed to parse supervisor.children[{}]: {}. ChildSpec 'id' and 'type' fields are required.", idx, e)
+                        format!(
+                            "Failed to parse supervisor.children[{}]: {}. ChildSpec requires `name` (or legacy `id`) and explicit `actor_type`.",
+                            idx, e
+                        ),
                     ));
                 }
             }
@@ -349,8 +352,9 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 /// ## TOML Structure
 /// ```toml
 /// [[supervisor.children]]
-/// id = "task-queue"
-/// type = "worker"
+/// name = "task-queue"
+/// actor_type = "task_queue_worker"
+/// role = "worker"
 /// facets = [{ type = "locks", priority = 50, config = {} }]
 /// ```
 ///
@@ -360,32 +364,44 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 fn parse_child_spec(
     value: &toml::Value,
 ) -> Result<plexspaces_proto::application::v1::ChildSpec, WasmAppsLoaderError> {
-    use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
-    use plexspaces_proto::common::v1::Facet;
+    use plexspaces_proto::application::v1::{ChildSpec, RestartPolicy};
+    use plexspaces_proto::common::v1::{ActorIdentity, Facet};
     use std::collections::HashMap;
 
-    let id = value
-        .get("id")
+    let instance_name = value
+        .get("name")
+        .or_else(|| value.get("id"))
         .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             WasmAppsLoaderError::Deployment(format!(
-                "ChildSpec 'id' field is required in supervisor.children[]. Found in child: {:?}",
+                "ChildSpec requires `name` (or legacy `id`) in supervisor.children[]. Found in child: {:?}",
                 value
             ))
         })?
         .to_string();
 
-    let child_type_str = value
-        .get("type")
+    let behavior_class = value
+        .get("actor_type")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| WasmAppsLoaderError::Deployment(
-            format!("ChildSpec 'type' field is required in supervisor.children[]. Found in child with id='{}'", id)
-        ))?;
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .ok_or_else(|| {
+            WasmAppsLoaderError::Deployment(format!(
+                "ChildSpec requires non-empty `actor_type` (behavior-class slug) in supervisor.children[]; instance name is {:?}. Legacy defaulting actor_type to the instance name is removed.",
+                instance_name
+            ))
+        })?;
 
-    let child_type = match child_type_str.to_lowercase().as_str() {
-        "supervisor" => ChildType::ChildTypeSupervisor,
-        _ => ChildType::ChildTypeWorker,
-    };
+    // `role` is the child's declaration name within the application.
+    // Default to "worker" when the config does not specify a role explicitly.
+    let role = value
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("worker")
+        .to_string();
 
     let restart_str = value
         .get("restart")
@@ -414,7 +430,7 @@ fn parse_child_spec(
                 Err(e) => {
                     // Log warning but continue parsing other facets (graceful degradation)
                     tracing::warn!(
-                        child_id = %id,
+                        child_name = %instance_name,
                         facet_index = idx,
                         error = %e,
                         "Failed to parse facet from TOML (skipping this facet, continuing with others)"
@@ -454,8 +470,11 @@ fn parse_child_spec(
         .map(String::from);
 
     Ok(ChildSpec {
-        id,
-        r#type: child_type as i32,
+        actor_identity: Some(ActorIdentity {
+            name: instance_name,
+            actor_type: behavior_class,
+        }),
+        role,
         restart: restart as i32,
         shutdown_timeout: Some(prost_types::Duration {
             seconds: shutdown_timeout_secs,
@@ -677,7 +696,8 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 id = "worker-1"
-type = "worker"
+actor_type = "spec_test_worker"
+role = "worker"
 restart = "permanent"
 "#;
         let parsed: toml::Value = toml::from_str(toml_str).unwrap();
@@ -689,7 +709,34 @@ restart = "permanent"
         );
         assert_eq!(supervisor.max_restarts, 10);
         assert_eq!(supervisor.children.len(), 1);
-        assert_eq!(supervisor.children[0].id, "worker-1");
+        let aid = supervisor.children[0]
+            .actor_identity
+            .as_ref()
+            .expect("actor_identity");
+        assert_eq!(aid.name, "worker-1");
+        assert_eq!(aid.actor_type, "spec_test_worker");
+    }
+
+    #[test]
+    fn test_parse_supervisor_spec_rejects_missing_actor_type() {
+        let toml_str = r#"
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "only-name"
+role = "worker"
+restart = "permanent"
+"#;
+        let parsed: toml::Value = toml::from_str(toml_str).unwrap();
+        let err = parse_supervisor_spec(parsed.get("supervisor").unwrap()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("actor_type"),
+            "expected actor_type error, got: {msg}"
+        );
     }
 
     #[test]
@@ -704,7 +751,8 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 id = "task-queue"
-type = "worker"
+actor_type = "task_queue_worker"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 facets = [
@@ -720,7 +768,12 @@ facets = [
         );
         assert_eq!(supervisor.max_restarts, 10);
         assert_eq!(supervisor.children.len(), 1);
-        assert_eq!(supervisor.children[0].id, "task-queue");
+        let aid = supervisor.children[0]
+            .actor_identity
+            .as_ref()
+            .expect("actor_identity");
+        assert_eq!(aid.name, "task-queue");
+        assert_eq!(aid.actor_type, "task_queue_worker");
 
         // Verify facets were parsed
         assert_eq!(
@@ -750,14 +803,16 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 id = "leader"
-type = "leader"
+actor_type = "leader"
+role = "leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "leader" }
 
 [[supervisor.children]]
 id = "worker"
-type = "worker"
+actor_type = "worker"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "worker" }

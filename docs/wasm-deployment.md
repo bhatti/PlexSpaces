@@ -1374,24 +1374,25 @@ WasmApplication
 
 ### Supervisor Tree Actor ID Format
 
-Applications with supervisor trees create actors whose IDs incorporate the child spec ID, namespace, and node ID. The format is:
+Applications with supervisor trees create actors whose IDs incorporate the child **`name`**, behavior **`actor_type`**, namespace, and node ID. The format is:
 
-**`child_spec_id//actor_type::namespace@node_id`**
+**`name//actor_type::namespace@node_id`**
 
-For example, given an application with namespace `my-app` deployed to `node-1` with a child spec ID of `worker-1`, the actor ID will be:
+For example, given an application with namespace `my-app` deployed to `node-1` with child identity `name = worker-1`, `actor_type = my_worker`, the actor ID will be:
 
 ```
-worker-1//worker::my-app@node-1
+worker-1//my_worker::my-app@node-1
 ```
 
 This format ensures that all actors within a supervisor tree are uniquely identifiable and properly scoped to their namespace, even when multiple applications share the same node.
 
 ### Key Components
 
-**`create_wasm_actor_child_spec()`** - Creates a ChildSpec with factory:
+**Runtime `plexspaces_actor::ChildSpec`** — created by the WASM layer with a factory, using the child’s resolved canonical identity:
 ```rust
-// Uses ChildSpec::worker() for consistency with Rust supervisor patterns
-let spec = ChildSpec::worker(child_id, actor_id, factory);
+// `child_actor_id` is the full canonical ActorId (from proto ActorIdentity + namespace + node).
+// The supervisor process uses an opaque label via Supervisor::new(supervisor_label, ...) — not this ActorId.
+let spec = ChildSpec::worker(child_actor_id, start_fn);
 ```
 
 **`build_wasm_actor()`** - Unified helper that:
@@ -1443,11 +1444,16 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "worker-1"
+name = "worker-1"
+actor_type = "my_worker"
 type = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 ```
+
+`name` and `actor_type` are the declaration-time slice (`ActorIdentity`); the server combines them with deploy **namespace** and **node_id** into the canonical `ActorId` string (`name//actor_type::namespace@node_id`). Use a lowercase **`actor_type`** slug matching `plexspaces.common.v1.ActorIdentity` (same pattern as the `actor_type` field on `ActorId`).
+
+Optional **`behavior_kind`** on the same child is **OTP-style metadata only** (for example `GenServer`, `GenEvent`, `Workflow`). It must not be reused as `actor_type`: the behavior class / WASM dispatch key and `BehaviorRegistry` factory key is always the **`actor_type`** slug.
 
 Deploy with custom config:
 ```bash

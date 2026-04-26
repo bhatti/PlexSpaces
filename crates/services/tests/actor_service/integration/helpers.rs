@@ -13,6 +13,7 @@ pub fn create_send_message_request(payload: &str, receiver: &str) -> SendMessage
     SendMessageRequest {
         namespace: String::new(),
         actor_type: receiver.to_string(),
+        actor_name: String::new(),
         http_method: "POST".to_string(),
         payload: payload.as_bytes().to_vec(),
         headers: Default::default(),

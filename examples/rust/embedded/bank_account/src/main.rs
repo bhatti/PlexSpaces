@@ -436,21 +436,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_start = Instant::now();
 
     // Create node with clustering disabled for single-node example
-    let node = Arc::new(
-        NodeBuilder::new(node_id)
-            .with_clustering_enabled(false)
-            .build()
-            .await,
-    );
-
-    // Start node in background task
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-
-    // Wait for node to initialize services
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let node = NodeBuilder::new(node_id)
+        .with_clustering_enabled(false)
+        .build_started()
+        .await;
 
     let node_time = node_start.elapsed();
     metrics_tracker.end_coordinate();
@@ -506,13 +495,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn durable bank account actor using SDK helper
     // Core durability behavior lives in the framework crates.
     // The SDK helper keeps application code on the public spawn path.
-    let account_id = format!("account-123@{}", node_id);
+    let account_name = "account-123";
     let account_ref = spawn_with_storage(
         &ctx,
         service_locator.clone(),
-        &account_id,
+        account_name,
         "accounts",
-        BankAccount::new("account-123"),
+        BankAccount::new(account_name),
         storage.clone(),
     )
     .await
@@ -521,6 +510,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create GenServerRef for typed call() API
     // Design: GenServerRef wraps ActorRef, provides typed call()/cast() methods
     // Client code uses GenServerRef, not ActorRef directly (hides mailbox internals)
+    let account_id = account_ref.id().to_string();
     let account = GenServerRef::new(account_ref);
 
     let spawn_time = spawn_start.elapsed();

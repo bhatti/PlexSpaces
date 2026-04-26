@@ -505,19 +505,19 @@ where
 
         let _ = plexspaces_core::register_virtual_actor_definition(
             &service_locator,
-            plexspaces_core::VirtualActorDefinitionRegistration {
-                actor_type: actor_type.clone(),
-                behavior_kind: Some(actor_type),
+            plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: String::new(), // standalone virtual actors: name == type
+                    actor_type: actor_type.clone(),
+                }),
+                role: String::new(),
                 namespace: namespace_str.clone(),
-                actor_config: None,
-                proto_facets: plexspaces_core::proto_facets_for_registration(Some(&facets), None),
-                facet_config:
-                    plexspaces_facet::facet_helpers::extract_facet_config_for_registration(
-                        Some(&facets),
-                        None,
-                    ),
-                tenant_id: Some(ctx.tenant_id().to_string()),
-                init_config_template: None,
+                tenant_id: ctx.tenant_id().to_string(),
+                behavior_kind: actor_type,
+                args: std::collections::HashMap::new(),
+                facets: plexspaces_core::proto_facets_for_registration(Some(&facets), None),
+                labels: std::collections::HashMap::new(),
+                config: None,
             },
         )
         .await;
@@ -605,16 +605,26 @@ pub async fn spawn_with_behavior_type(
     )
     .map_err(|e| format!("Failed to construct actor ID: {}", e))?;
 
+    let spawn_spec = {
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: behavior_type.clone(),
+            }),
+            role: String::new(),
+            namespace: ctx.namespace().to_string(),
+            tenant_id: ctx.tenant_id().to_string(),
+            behavior_kind: String::new(),
+            args: std::collections::HashMap::new(),
+            facets: vec![],
+            config: None,
+            labels: std::collections::HashMap::new(),
+        }
+    };
     let message_sender = actor_factory
-        .spawn_actor(
-            ctx,
-            &actor_id,
-            &behavior_type,
-            initial_state,
-            None,
-            std::collections::HashMap::new(),
-            facets,
-        )
+        .spawn_actor(ctx, &spawn_spec, facets)
         .await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
 
@@ -626,11 +636,8 @@ pub async fn spawn_with_behavior_type(
 #[cfg(feature = "native")]
 fn actor_type_from_behavior(behavior_type: &plexspaces_core::BehaviorType) -> String {
     match behavior_type {
-        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
         plexspaces_core::BehaviorType::Custom(s) => s.clone(),
+        bt => bt.actor_type_slug().into_owned(),
     }
 }
 

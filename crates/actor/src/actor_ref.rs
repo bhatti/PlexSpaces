@@ -913,10 +913,13 @@ impl ActorRef {
                 mailbox,
                 service_locator,
             } => {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        "[TELL] LOCAL PATH: actor_ref_id={}, sender={:?}, receiver={}, correlation_id={:?}",
-                        actor_id, message.sender_id, message.receiver_id, message.correlation_id
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_ref_id = %actor_id,
+                        sender = ?message.sender_id,
+                        receiver = %message.receiver_id,
+                        correlation_id = ?message.correlation_id,
+                        "[TELL] LOCAL PATH"
                     );
                 }
 
@@ -1564,7 +1567,7 @@ mod tests {
                     &ctx,
                     test_actor_id("test-actor", "node1"),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -1598,7 +1601,7 @@ mod tests {
             mailbox,
             service_locator,
         );
-        actor_ref.set_actor_type(Some("Counter".to_string())).await;
+        actor_ref.set_actor_type(Some("counter".to_string())).await;
         actor_ref
             .set_local_state_handle(Some(Arc::new(TestStateHandle)))
             .await;
@@ -1606,7 +1609,7 @@ mod tests {
         let sender: Arc<dyn MessageSender> = Arc::new(actor_ref);
         assert_eq!(sender.tenant_id(), Some("tenant-a"));
         assert_eq!(sender.namespace(), Some("ns-a"));
-        assert_eq!(sender.actor_type(), Some("Counter".to_string()));
+        assert_eq!(sender.actor_type(), Some("counter".to_string()));
         let handle = sender
             .local_state_handle()
             .expect("local handle should exist");
@@ -1798,7 +1801,7 @@ mod tests {
                     &ctx,
                     test_actor_id("test-actor", "node1"),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -1960,7 +1963,7 @@ mod tests {
                     &ctx,
                     test_actor_id("target-actor", "node1"),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -2137,7 +2140,7 @@ mod tests {
                     &ctx,
                     test_actor_id("target", "node1"),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -2390,7 +2393,7 @@ mod tests {
                     &ctx,
                     test_actor_id("actor", "node1"),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,

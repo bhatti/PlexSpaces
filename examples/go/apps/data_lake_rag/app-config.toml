@@ -9,15 +9,17 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "leader"
-type = "leader"
+name = "leader"
+actor_type = "data_lake_rag_wasm"
+role = "leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "leader", worker_count = "8", query_count = "12", chunks_per_query = "48", chunk_size_bytes = "2048", embedding_dim = "384", top_k = "5" }
 
 [[supervisor.children]]
-id = "worker"
-type = "worker"
+name = "worker"
+actor_type = "data_lake_rag_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "worker" }

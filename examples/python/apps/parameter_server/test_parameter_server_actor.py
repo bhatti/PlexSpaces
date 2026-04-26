@@ -2,9 +2,11 @@ from parameter_server_actor import (
     ACTOR_ROLES,
     Leader,
     Worker,
+    apply_metrics_delta,
     actor_application_id,
     actor_node_id,
     compute_actor_counts,
+    metrics_map,
     normalize_worker_payload,
     worker_seed,
 )
@@ -84,3 +86,46 @@ def test_compute_actor_counts_assigns_leader_and_workers_to_nodes():
     assert counts["test-node-8091"]["leader_actors"] == 1
     assert counts["test-node-8091"]["worker_actors"] == 1
     assert counts["test-node-8093"]["worker_actors"] == 1
+
+
+def test_metrics_map_filters_non_numeric_values():
+    metrics = {"counter_metrics": {"worker_messages": 4, "skip": "x", "samples_processed": 12.0}}
+    assert metrics_map(metrics, "counter_metrics") == {
+        "worker_messages": 4,
+        "samples_processed": 12,
+    }
+
+
+def test_apply_metrics_delta_uses_application_metrics_snapshots():
+    node_metrics = {}
+    role_metrics = {}
+    start_metrics = {
+        "message_count": 3,
+        "error_count": 0,
+        "counter_metrics": {"worker_messages": 2, "gradient_operation_count": 1, "samples_processed": 256},
+        "latency_totals_ms": {"worker": 10, "worker.compute": 9, "worker.coordination": 1},
+        "latency_max_ms": {"worker": 10},
+        "latency_samples": {"worker": 1},
+    }
+    end_metrics = {
+        "message_count": 9,
+        "error_count": 1,
+        "counter_metrics": {"worker_messages": 6, "gradient_operation_count": 4, "samples_processed": 1024},
+        "latency_totals_ms": {"worker": 55, "worker.compute": 48, "worker.coordination": 7},
+        "latency_max_ms": {"worker": 25},
+        "latency_samples": {"worker": 4},
+    }
+
+    apply_metrics_delta(node_metrics, role_metrics, start_metrics, end_metrics, "test-node-8093")
+
+    assert node_metrics["test-node-8093"]["messages"] == 6
+    assert node_metrics["test-node-8093"]["worker_messages"] == 4
+    assert node_metrics["test-node-8093"]["gradient_operations"] == 3
+    assert node_metrics["test-node-8093"]["samples_processed"] == 768
+    assert node_metrics["test-node-8093"]["compute_time_ms"] == 39
+    assert node_metrics["test-node-8093"]["coordination_time_ms"] == 6
+    assert node_metrics["test-node-8093"]["responses"] == 3
+    assert node_metrics["test-node-8093"]["errors"] == 1
+    assert role_metrics["worker"]["messages"] == 4
+    assert role_metrics["worker"]["gradient_operations"] == 3
+    assert role_metrics["worker"]["samples_processed"] == 768

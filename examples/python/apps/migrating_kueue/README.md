@@ -28,7 +28,7 @@ cd examples/python/apps/migrating_kueue
 - **complete**: `{"op":"complete","job_id":"j1"}` – free GPUs, mark completed.
 - **preempt**: `{"op":"preempt","job_id":"j1"}` – free GPUs, re-queue job as pending.
 - **list_queue**: `{"op":"list_queue"}` – pending and allocated lists.
-- **get_quotas**: `{"op":"get_quotas"}` – used_gpus, max_gpus, processed_count, metrics.
+- **get_quotas**: `{"op":"get_quotas"}` – current `used_gpus`, `peak_used_gpus`, max_gpus, processed_count, metrics.
 
 ## Native (Kueue) reference
 
@@ -39,7 +39,7 @@ Kueue uses Kubernetes ClusterQueue/LocalQueue and Job priority/quota. See **`nat
 | Feature      | Kueue                    | PlexSpaces Python              |
 |-------------|---------------------------|---------------------------------|
 | Queue       | ClusterQueue + LocalQueue | In-memory queue (state)         |
-| Quota       | nominalQuota (resources)   | max_gpus, used_gpus             |
+| Quota       | nominalQuota (resources)   | max_gpus, used_gpus, peak_used_gpus |
 | Priority    | Job priority class        | priority field, sort on allocate |
 | Preemption  | Controller-driven         | preempt handler (requeue)       |
 | Lock        | K8s controller single-writer | host.lock_acquire around allocate |

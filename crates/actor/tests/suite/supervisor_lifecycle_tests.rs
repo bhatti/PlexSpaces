@@ -45,7 +45,7 @@ use std::time::Duration as StdDuration;
 use tokio::time::{sleep, Duration};
 
 fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
-    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+    plexspaces_core::ActorId::new(name, "gen_server", "namespace", "test-node")
         .expect("valid test actor id")
 }
 
@@ -76,13 +76,8 @@ fn create_child_spec_from_factory(
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    let mut spec = ChildSpec::worker_sync(
-        id.clone(),
-        actor_id_from_legacy(&id).to_string(),
-        factory,
-        actor_ref,
-    )
-    .with_restart(restart_strategy);
+    let mut spec = ChildSpec::worker_sync(actor_id_from_legacy(&id), factory, actor_ref)
+        .with_restart(restart_strategy);
 
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
@@ -146,8 +141,7 @@ async fn test_start_child() {
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
-        child_id.clone(),
-        actor_id.clone(),
+        test_actor_id(&child_id),
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
@@ -192,8 +186,7 @@ async fn test_delete_child() {
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
-        child_id.clone(),
-        actor_id.clone(),
+        test_actor_id(&child_id),
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
@@ -243,8 +236,7 @@ async fn test_which_children() {
         let actor_id = test_actor_id(&child_id).to_string();
 
         let spec = ChildSpec::worker(
-            child_id.clone(),
-            actor_id.clone(),
+            test_actor_id(&child_id),
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
@@ -302,8 +294,7 @@ async fn test_count_children() {
         let actor_id = test_actor_id(&child_id).to_string();
 
         let spec = ChildSpec::worker(
-            child_id.clone(),
-            actor_id.clone(),
+            test_actor_id(&child_id),
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
@@ -349,8 +340,7 @@ async fn test_get_childspec() {
 
     let actor_id_for_closure = actor_id.clone();
     let original_spec = ChildSpec::worker(
-        child_id.clone(),
-        actor_id.clone(),
+        test_actor_id(&child_id),
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
@@ -387,9 +377,7 @@ async fn test_get_childspec() {
     assert!(retrieved_spec.is_some(), "get_childspec should return spec");
 
     let spec = retrieved_spec.unwrap();
-    assert_eq!(spec.child_id, child_id);
-    // Note: actor_or_supervisor_id might be the full actor_id (with @node), not just child_id
-    assert!(spec.actor_or_supervisor_id == actor_id || spec.actor_or_supervisor_id == child_id);
+    assert_eq!(spec.actor_id.to_string(), actor_id);
 }
 
 #[tokio::test]

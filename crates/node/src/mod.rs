@@ -231,7 +231,9 @@ impl Node {
         // This ensures --node-id "node1" overrides release.yaml's "my-node"
         let actual_node_id = self.id.as_str().to_string();
 
-        // Determine NodeConfig: use release_spec.node for other fields, but override id with actual_node_id
+        // Determine NodeConfig: use release_spec.node for defaults, but override runtime-resolved
+        // identity and addresses from NodeBuilder/CLI so multi-node local runs do not keep the
+        // release.yaml default port in SWIM, seed-node self-alias checks, or gRPC dialing.
         let mut proto_node_config = {
             let release_spec = self.release_spec.read().await;
             if let Some(ref spec) = *release_spec {
@@ -276,8 +278,16 @@ impl Node {
             }
         };
 
-        // CRITICAL: Ensure node ID matches actual node ID (defensive check)
+        // CRITICAL: Ensure runtime-resolved identity and addresses win over release defaults.
         proto_node_config.id = actual_node_id.clone();
+        if !self.config.listen_addr.is_empty() {
+            proto_node_config.listen_addr = self.config.listen_addr.clone();
+        }
+        if !self.config.grpc_address.is_empty() {
+            proto_node_config.grpc_address = self.config.grpc_address.clone();
+        } else {
+            proto_node_config.grpc_address = self.config.listen_addr.clone();
+        }
 
         // CRITICAL: Set PLEXSPACES_NODE_ID env var so config_manager::initialize() uses correct node ID
         // This ensures ActorRegistry and all components use the correct node ID (from CLI args, not release.yaml)
@@ -384,7 +394,7 @@ impl Node {
     /// ## Note
     /// This is called automatically in `start()` if release_spec is not already set.
     /// For embedded applications, call `set_release_spec()` before `start()`.
-    async fn load_release_config(
+    pub(crate) async fn load_release_config(
         &self,
     ) -> Result<plexspaces_proto::node::v1::ReleaseSpec, NodeError> {
         use crate::config::loader::ConfigLoader;
@@ -488,17 +498,24 @@ impl Node {
                 NodeError::ConfigError("ActorFactory not found in ServiceLocator".to_string())
             })?;
 
-        // spawn_actor returns Arc<dyn MessageSender> directly
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: actor_type.to_string(),
+            }),
+            role: String::new(),
+            namespace: ctx.namespace().to_string(),
+            tenant_id: ctx.tenant_id().to_string(),
+            behavior_kind: String::new(),
+            args: std::collections::HashMap::new(),
+            facets: vec![],
+            config,
+            labels,
+        };
         actor_factory
-            .spawn_actor(
-                ctx,
-                actor_id,
-                actor_type,
-                initial_state,
-                config,
-                labels,
-                facets,
-            )
+            .spawn_actor(ctx, &spec, facets)
             .await
             .map_err(|e| NodeError::ActorSpawnFailed(e.to_string()))
     }
@@ -1486,7 +1503,23 @@ impl Node {
 
         // Start background cleanup task for expired temporary senders (in ActorRegistry)
         let actor_registry = self.actor_registry().await?;
-        ActorRegistry::start_temporary_sender_cleanup(actor_registry);
+
+        // Wire ServiceLocator into ActorRegistry for remote DOWN/EXIT delivery.
+        actor_registry
+            .set_service_locator(
+                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+            )
+            .await;
+
+        ActorRegistry::start_temporary_sender_cleanup(actor_registry.clone());
+
+        // Start stale monitor GC background task (default 60s interval).
+        plexspaces_core::start_monitor_gc_task(
+            actor_registry.actor_monitor().clone(),
+            self.id.as_str().to_string(),
+            self.service_locator.clone(),
+            60,
+        );
 
         // Create scheduling components (Phase 4 & 5)
         use plexspaces_channel::InMemoryChannel;
@@ -1826,7 +1859,13 @@ impl Node {
 
         // Create NodeService first so we can inject it into ApplicationService for seed_nodes on deploy
         use plexspaces_services::node_service::NodeServiceImpl;
-        let release_spec_for_node_svc = self.release_spec.read().await.clone();
+        let release_spec_for_node_svc = {
+            let mut effective = self.release_spec.read().await.clone().unwrap_or_default();
+            if let Some(node_config) = self.service_locator.get_node_config().await {
+                effective.node = Some(node_config);
+            }
+            Some(effective)
+        };
         let node_service: Arc<NodeServiceImpl> = if let Some(ref spec) = release_spec_for_node_svc {
             Arc::new(NodeServiceImpl::with_release_spec(
                 self.service_locator.clone(),
@@ -2373,6 +2412,37 @@ impl Node {
                                 )
                                 .await
                             }
+                        })
+                        .delete({
+                            // DELETE /api/v1/actors/{namespace}/{actor_type_or_id} — stop actor
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
+                                  Path((namespace, actor_type)): Path<(String, String)>,
+                                  headers: axum::http::HeaderMap| async move {
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
+                                crate::http_gateway::stop_actor_http_request(
+                                    effective_tenant_id,
+                                    namespace,
+                                    actor_type,
+                                    actor_service,
+                                )
+                                .await
+                            }
                         }),
                     )
                     .route(
@@ -2604,13 +2674,20 @@ impl Node {
                                         ));
                                     }
 
-                                    // Log WASM file info for debugging
-                                    tracing::info!(
-                                    wasm_file_size = bytes.len(),
-                                    wasm_file_first_bytes = format!("{:02x?}", bytes.iter().take(8).collect::<Vec<_>>()),
-                                    wasm_version = format!("{:02x?}", bytes.get(4..8).unwrap_or(&[])),
-                                    "Read WASM file from multipart upload - magic number verified"
-                                );
+                                    if tracing::enabled!(tracing::Level::TRACE) {
+                                        tracing::trace!(
+                                            wasm_file_size = bytes.len(),
+                                            wasm_file_first_bytes = format!(
+                                                "{:02x?}",
+                                                bytes.iter().take(8).collect::<Vec<_>>()
+                                            ),
+                                            wasm_version = format!(
+                                                "{:02x?}",
+                                                bytes.get(4..8).unwrap_or(&[])
+                                            ),
+                                            "Read WASM file from multipart upload - magic number verified"
+                                        );
+                                    }
 
                                     wasm_file_data = Some(bytes.to_vec());
                                 }
@@ -2677,13 +2754,14 @@ impl Node {
                                         })
                                         .unwrap_or(0);
 
-                                    tracing::info!(
-                                        application_name = %name,
-                                        supervisor_children = spec.supervisor.as_ref().map(|s| s.children.len()).unwrap_or(0),
-                                        total_facets = total_facets,
-                                        "📦 Parsed ApplicationSpec from TOML config with {} facets",
-                                        total_facets
-                                    );
+                                    if tracing::enabled!(tracing::Level::TRACE) {
+                                        tracing::trace!(
+                                            application_name = %name,
+                                            supervisor_children = spec.supervisor.as_ref().map(|s| s.children.len()).unwrap_or(0),
+                                            total_facets = total_facets,
+                                            "Parsed ApplicationSpec from TOML config"
+                                        );
+                                    }
                                     spec
                                 }
                                 Err(e) => {
@@ -3065,115 +3143,117 @@ impl Node {
     /// Monitor an actor (Erlang-style location transparent monitoring)
     ///
     /// ## Purpose
-    /// Establishes a monitoring link from supervisor to actor. When the actor
-    /// terminates, the supervisor receives a notification via the provided channel.
+    /// Establishes a monitor from `supervisor_id` on `actor_id`. When the target actor
+    /// terminates (for any reason), a `__DOWN__` message is delivered to the supervisor's
+    /// mailbox. This is fully location-transparent: the same call works for local and
+    /// remote actors.
     ///
     /// ## Erlang Philosophy
-    /// In Erlang, `monitor(process, Pid)` works the same for local and remote processes.
-    /// The runtime handles location transparency - same API whether the process is
-    /// in the same node or a different node.
+    /// `monitor(process, Pid)` — one-way watch; supervisor always receives DOWN, never dies.
     ///
     /// ## Arguments
     /// * `actor_id` - The canonical actor ID of the actor to monitor
-    /// * `supervisor_id` - The supervisor that wants notifications
-    /// * `notification_tx` - Channel to send (actor_id, reason) when actor terminates
+    /// * `supervisor_id` - The actor that receives `__DOWN__` in its mailbox
+    /// * `ctx` - Authenticated [`plexspaces_core::RequestContext`] for this operation (JWT tenant,
+    ///   request namespace from gRPC/HTTP boundary). Stored on the monitored node and replayed
+    ///   when delivering `__DOWN__` to a remote supervisor.
     ///
     /// ## Returns
-    /// `Ok(monitor_ref)` - Unique monitor reference (ULID)
+    /// `Ok(monitor_ref)` - ULID monitor reference (use with `demonitor`)
     /// `Err(NodeError)` - If actor not found or remote node not connected
-    ///
-    /// ## Example
-    /// ```ignore
-    /// let (tx, mut rx) = mpsc::channel(1);
-    /// let monitor_ref = node.monitor(
-    ///     &ActorId::from_canonical("worker//gen_server::default@node2")?,
-    ///     &ActorId::from_canonical("supervisor//gen_server::default@node1")?,
-    ///     tx,
-    /// ).await?;
-    ///
-    /// // Later, when actor terminates:
-    /// let (actor_id, reason) = rx.recv().await.unwrap();
-    /// ```
     pub async fn monitor(
         &self,
         actor_id: &ActorId,
         supervisor_id: &ActorId,
-        notification_tx: TerminationSender,
+        ctx: &plexspaces_core::RequestContext,
     ) -> Result<MonitorRef, NodeError> {
         let is_local = actor_id.node_id() == self.id.as_str();
 
         if is_local {
-            // LOCAL MONITORING: Actor on this node
-            // Verify actor exists in ActorRegistry by checking if it's activated
+            // LOCAL MONITORING: Verify the actor is active and register in ActorRegistry.
             let actor_registry = self.actor_registry().await?;
             if !actor_registry.is_actor_activated(actor_id).await {
                 return Err(NodeError::ActorNotFound(actor_id.to_string()));
             }
 
-            // Generate unique monitor reference (ULID for sortability)
             let monitor_ref = ulid::Ulid::new().to_string();
-
-            // Delegate to ActorRegistry for local monitoring
             actor_registry
-                .monitor(
-                    actor_id,
-                    supervisor_id,
-                    monitor_ref.clone(),
-                    notification_tx,
-                )
+                .monitor(actor_id, supervisor_id, monitor_ref.clone(), ctx)
                 .await
                 .map_err(|e| NodeError::InvalidArgument(format!("Monitor failed: {}", e)))?;
 
             Ok(monitor_ref)
         } else {
-            // REMOTE MONITORING: Actor on different node
-            // Get remote node's address from NodeRegistry
+            // REMOTE MONITORING: Register on the remote node via MonitorActor RPC.
+            // The remote node's ActorRegistry will hold the entry; when the actor dies, the
+            // remote node calls NotifyActorDown on this node, which delivers __DOWN__ locally.
             let remote_node_id = crate::NodeId::new(actor_id.node_id().to_string());
             let node_address = self.lookup_node_address(&remote_node_id).await?;
 
-            // Generate unique monitor reference
-            let monitor_ref = ulid::Ulid::new().to_string();
-
-            // Call MonitorActor RPC on remote node
-            use plexspaces_proto::{v1::actor::MonitorActorRequest, ActorServiceClient};
-
-            let channel = tonic::transport::Channel::from_shared(node_address.clone())
-                .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
-                .connect()
+            let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
                 .await
                 .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
 
-            let mut client = ActorServiceClient::new(channel);
-
-            // Supervisor callback = this node's address
-            let supervisor_callback = format!("http://{}", self.config.listen_addr);
-
-            let request = tonic::Request::new(MonitorActorRequest {
-                actor_id: actor_id.to_string(),
-                supervisor_id: supervisor_id.to_string(),
-                supervisor_callback,
-            });
-
-            client
-                .monitor_actor(request)
+            let monitor_ref = client
+                .monitor_actor(
+                    ctx,
+                    actor_id.as_str(),
+                    supervisor_id.as_str(),
+                    &format!("http://{}", self.config.listen_addr),
+                )
                 .await
                 .map_err(|e| NodeError::NetworkError(format!("MonitorActor RPC failed: {}", e)))?;
 
-            // Store the notification channel for when remote node sends NotifyActorDown
-            // For remote monitoring, we still need to store locally to receive NotifyActorDown RPC
-            // Delegate to ActorRegistry for consistency
+            Ok(monitor_ref)
+        }
+    }
+
+    /// Cancel a previously established monitor (Erlang demonitor/1 equivalent).
+    ///
+    /// ## Purpose
+    /// Removes the monitor identified by `monitor_ref` so the supervisor no longer
+    /// receives `__DOWN__` notifications when `actor_id` terminates.  Safe to call
+    /// multiple times for the same ref — idempotent.
+    ///
+    /// ## Arguments
+    /// * `actor_id`     - The actor that was being monitored
+    /// * `supervisor_id` - The actor that was receiving `__DOWN__` notifications
+    /// * `monitor_ref`  - The ULID returned by a prior `monitor()` call
+    /// * `ctx` - RequestContext for tenant/namespace isolation on remote RPCs
+    ///
+    /// ## Returns
+    /// `Ok(())` always — missing refs are silently ignored (idempotent).
+    pub async fn demonitor(
+        &self,
+        actor_id: &ActorId,
+        supervisor_id: &ActorId,
+        monitor_ref: &str,
+        ctx: &RequestContext,
+    ) -> Result<(), NodeError> {
+        let is_local = actor_id.node_id() == self.id.as_str();
+        if is_local {
             let actor_registry = self.actor_registry().await?;
             actor_registry
-                .monitor(
-                    actor_id,
-                    supervisor_id,
-                    monitor_ref.clone(),
-                    notification_tx,
-                )
+                .demonitor(actor_id, supervisor_id, monitor_ref)
                 .await
-                .map_err(|e| NodeError::InvalidArgument(format!("Monitor failed: {}", e)))?;
+                .map_err(|e| NodeError::InvalidArgument(format!("Demonitor failed: {}", e)))?;
+            Ok(())
+        } else {
+            let remote_node_id = crate::NodeId::new(actor_id.node_id().to_string());
+            let node_address = self.lookup_node_address(&remote_node_id).await?;
 
-            Ok(monitor_ref)
+            let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
+                .await
+                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
+
+            client
+                .demonitor_actor(ctx, actor_id.as_str(), supervisor_id.as_str(), monitor_ref)
+                .await
+                .map_err(|e| {
+                    NodeError::NetworkError(format!("DemonitorActor RPC failed: {}", e))
+                })?;
+
+            Ok(())
         }
     }
 
@@ -3231,6 +3311,7 @@ impl Node {
         let is_local2 = linked_actor_id.node_id() == self.id.as_str();
 
         if is_local1 && is_local2 {
+            // Both local: register in ActorRegistry directly.
             let actor_registry = self.actor_registry().await?;
             actor_registry
                 .link(actor_id, linked_actor_id)
@@ -3238,10 +3319,51 @@ impl Node {
                 .map_err(|e| NodeError::InvalidArgument(format!("Link failed: {}", e)))?;
             Ok(())
         } else {
-            Err(NodeError::InvalidArgument(
-                "Remote link is not supported; link and unlink currently require local actors"
-                    .to_string(),
-            ))
+            // Cross-node: call link_actor RPC on BOTH nodes so each node's ActorRegistry
+            // holds the entry.  When either actor dies, propagate_exit_to_links() →
+            // ServiceLocator.get_actor_service().send() routes the EXIT across the network.
+            let link_on_node = |node_id: &str,
+                                a: ActorId,
+                                b: ActorId|
+             -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), NodeError>> + Send + '_>,
+            > {
+                let node_id = node_id.to_string();
+                Box::pin(async move {
+                    let remote_node_id = crate::NodeId::new(node_id.clone());
+                    let node_address = self.lookup_node_address(&remote_node_id).await?;
+                    let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
+                        .await
+                        .map_err(|e| {
+                            NodeError::NetworkError(format!("Connection failed: {}", e))
+                        })?;
+                    client
+                        .link_actor(ctx, a.as_str(), b.as_str())
+                        .await
+                        .map_err(|e| {
+                            NodeError::NetworkError(format!("LinkActor RPC failed: {}", e))
+                        })?;
+                    Ok(())
+                })
+            };
+
+            // Register link entry on the node that owns actor_id
+            link_on_node(
+                actor_id.node_id(),
+                actor_id.clone(),
+                linked_actor_id.clone(),
+            )
+            .await?;
+
+            // Register link entry on the node that owns linked_actor_id
+            link_on_node(
+                linked_actor_id.node_id(),
+                actor_id.clone(),
+                linked_actor_id.clone(),
+            )
+            .await?;
+
+            Ok(())
         }
     }
 
@@ -3254,6 +3376,7 @@ impl Node {
     /// ## Arguments
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link
+    /// * `ctx` - RequestContext for tenant/namespace isolation on remote RPCs
     ///
     /// ## Returns
     /// Success or error
@@ -3265,6 +3388,7 @@ impl Node {
         &self,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
+        ctx: &RequestContext,
     ) -> Result<(), NodeError> {
         let is_local1 = actor_id.node_id() == self.id.as_str();
         let is_local2 = linked_actor_id.node_id() == self.id.as_str();
@@ -3277,10 +3401,45 @@ impl Node {
                 .map_err(|e| NodeError::InvalidArgument(format!("Unlink failed: {}", e)))?;
             Ok(())
         } else {
-            Err(NodeError::InvalidArgument(
-                "Remote unlink is not supported; link and unlink currently require local actors"
-                    .to_string(),
-            ))
+            let unlink_on_node = |node_id: &str,
+                                  a: ActorId,
+                                  b: ActorId|
+             -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), NodeError>> + Send + '_>,
+            > {
+                let node_id = node_id.to_string();
+                Box::pin(async move {
+                    let remote_node_id = crate::NodeId::new(node_id.clone());
+                    let node_address = self.lookup_node_address(&remote_node_id).await?;
+                    let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
+                        .await
+                        .map_err(|e| {
+                            NodeError::NetworkError(format!("Connection failed: {}", e))
+                        })?;
+                    client
+                        .unlink_actor(ctx, a.as_str(), b.as_str())
+                        .await
+                        .map_err(|e| {
+                            NodeError::NetworkError(format!("UnlinkActor RPC failed: {}", e))
+                        })?;
+                    Ok(())
+                })
+            };
+
+            unlink_on_node(
+                actor_id.node_id(),
+                actor_id.clone(),
+                linked_actor_id.clone(),
+            )
+            .await?;
+            unlink_on_node(
+                linked_actor_id.node_id(),
+                actor_id.clone(),
+                linked_actor_id.clone(),
+            )
+            .await?;
+
+            Ok(())
         }
     }
 
@@ -3902,18 +4061,24 @@ impl Node {
         // Use VirtualActorManager for registration (source of truth for virtual actors)
         let manager = self.get_virtual_actor_manager().await?;
         let actor_id_clone = actor_id.clone();
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: actor_type.clone(),
+            }),
+            role: String::new(),
+            namespace: ctx.namespace().to_string(),
+            tenant_id: ctx.tenant_id().to_string(),
+            behavior_kind: String::new(),
+            args: std::collections::HashMap::new(),
+            facets: vec![],
+            labels: std::collections::HashMap::new(),
+            config,
+        };
         manager
-            .register(
-                actor_id,
-                facet_box,
-                actor_type,
-                config,
-                ctx.tenant_id().to_string(),
-                ctx.namespace().to_string(),
-                vec![],
-                std::collections::HashMap::new(),
-                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
-            )
+            .register(actor_id, facet_box, spec)
             .await
             .map_err(|e| NodeError::ActorRegistrationFailed(actor_id_clone, e.to_string()))
     }
@@ -4016,11 +4181,6 @@ impl ApplicationNode for Node {
     /// Get ServiceLocator
     fn service_locator(&self) -> Option<Arc<dyn ServiceLocatorTrait>> {
         Some(self.service_locator().clone() as Arc<dyn ServiceLocatorTrait>)
-    }
-
-    /// Get ActorFactory
-    async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
-        self.service_locator().get_actor_factory().await
     }
 
     /// Get BlobService for WASM actors
@@ -4352,7 +4512,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -4418,7 +4578,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -4435,7 +4595,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -4496,7 +4656,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -4516,7 +4676,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     None,
                     None,
                     None,
@@ -4565,7 +4725,7 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -4742,12 +4902,21 @@ mod tests {
         let _message_sender = actor_factory
             .spawn_actor(
                 &internal_ctx,
-                &actor_id,
-                "test",                           // actor_type
-                vec![],                           // initial_state
-                None,                             // config
-                std::collections::HashMap::new(), // labels
-                vec![],                           // facets
+                &plexspaces_core::ActorSpawnSpec {
+                    identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: "test".to_string(),
+                    }),
+                    role: String::new(),
+                    namespace: internal_ctx.namespace().to_string(),
+                    tenant_id: internal_ctx.tenant_id().to_string(),
+                    behavior_kind: String::new(),
+                    args: std::collections::HashMap::new(),
+                    facets: vec![],
+                    config: None,
+                    labels: std::collections::HashMap::new(),
+                },
+                vec![],
             )
             .await
             .unwrap();
@@ -4826,9 +4995,6 @@ mod tests {
                 .await;
         }
 
-        // Create monitor channel
-        let (tx, _rx) = mpsc::channel(1);
-
         // Get ActorFactory from ServiceLocator using extension trait
         let service_locator = node.service_locator();
         use plexspaces_core::ActorFactory;
@@ -4847,11 +5013,20 @@ mod tests {
         let _message_sender = actor_factory
             .spawn_actor(
                 &internal_ctx,
-                &actor_id,
-                "test",
-                vec![],
-                None,
-                std::collections::HashMap::new(),
+                &plexspaces_core::ActorSpawnSpec {
+                    identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                        name: actor_id.name().to_string(),
+                        actor_type: "test".to_string(),
+                    }),
+                    role: String::new(),
+                    namespace: internal_ctx.namespace().to_string(),
+                    tenant_id: internal_ctx.tenant_id().to_string(),
+                    behavior_kind: String::new(),
+                    args: std::collections::HashMap::new(),
+                    facets: vec![],
+                    config: None,
+                    labels: std::collections::HashMap::new(),
+                },
                 vec![],
             )
             .await
@@ -4873,9 +5048,11 @@ mod tests {
             service_locator,
         );
 
-        // Establish monitoring link
+        // Establish monitoring link — supervisor just needs to be registered to receive __DOWN__.
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(&actor_id, &supervisor_id, tx).await.unwrap();
+        node.monitor(&actor_id, &supervisor_id, &internal_ctx)
+            .await
+            .unwrap();
 
         // Send message to actor
         // Note: In real usage, this would be done via Node::route_message() or ActorService
@@ -5192,12 +5369,20 @@ mod tests {
             )
             .await;
 
-        // Create monitoring channel
-        let (tx, mut rx) = mpsc::channel(1);
+        // Register supervisor so it has a mailbox to receive __DOWN__ messages.
+        let sup_mailbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup-mailbox-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        register_actor_for_test(&node, &supervisor_id, sup_mailbox.clone()).await;
 
         // Monitor the actor
         let monitor_ref = node
-            .monitor(&monitored_actor_id, &supervisor_id, tx)
+            .monitor(&monitored_actor_id, &supervisor_id, &ctx)
             .await
             .unwrap();
 
@@ -5213,15 +5398,28 @@ mod tests {
             )
             .await;
 
-        // Should receive notification
-        let (actor_id, reason) =
-            tokio::time::timeout(tokio::time::Duration::from_millis(500), rx.recv())
+        // Supervisor's mailbox should receive __DOWN__ message.
+        let mut down_msg: Option<Message> = None;
+        for _ in 0..10 {
+            if let Some(msg) = sup_mailbox
+                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
                 .await
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(actor_id, monitored_actor_id);
-        assert_eq!(reason, "test reason");
+            {
+                if msg.message_type == "__DOWN__" {
+                    down_msg = Some(msg);
+                    break;
+                }
+            }
+        }
+        let msg = down_msg.expect("Supervisor must receive __DOWN__ message");
+        assert_eq!(
+            msg.headers.get("down_from").map(|s| s.as_str()),
+            Some(monitored_actor_id.to_string().as_str())
+        );
+        assert_eq!(
+            msg.headers.get("down_reason").map(|s| s.as_str()),
+            Some("test reason")
+        );
     }
 
     #[tokio::test]
@@ -5233,15 +5431,16 @@ mod tests {
         // Initialize services
         node.initialize_services().await.unwrap();
 
-        // Create monitoring channel
-        let (tx, _rx) = mpsc::channel(1);
-
         // Try to monitor non-existent actor
+        let ctx = node
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
         let result = node
             .monitor(
                 &test_runtime_actor_id("nonexistent", "test-node"),
                 &test_runtime_actor_id("supervisor", "test-node"),
-                tx,
+                &ctx,
             )
             .await;
 
@@ -5252,19 +5451,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_remote_actor_node_not_connected() {
-        use tokio::sync::mpsc;
-
         let node = Arc::new(NodeBuilder::new("node1").build().await);
 
-        // Create monitoring channel
-        let (tx, _rx) = mpsc::channel(1);
-
         // Try to monitor actor on unregistered remote node
+        let ctx = node
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
         let result = node
             .monitor(
                 &test_runtime_actor_id("test-actor", "node2"),
                 &test_runtime_actor_id("supervisor", "node1"),
-                tx,
+                &ctx,
             )
             .await;
 
@@ -5332,28 +5530,53 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
             )
             .await;
 
-        // Create 3 monitors
-        let (tx1, mut rx1) = mpsc::channel(1);
-        let (tx2, mut rx2) = mpsc::channel(1);
-        let (tx3, mut rx3) = mpsc::channel(1);
-
+        // Register 3 supervisor actors with mailboxes.
         let sup1_id = test_runtime_actor_id("sup1", "test-node");
         let sup2_id = test_runtime_actor_id("sup2", "test-node");
         let sup3_id = test_runtime_actor_id("sup3", "test-node");
-        node.monitor(&watched_actor_id, &sup1_id, tx1)
+
+        let sup1_mbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup1-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        let sup2_mbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup2-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        let sup3_mbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup3-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        register_actor_for_test(&node, &sup1_id, sup1_mbox.clone()).await;
+        register_actor_for_test(&node, &sup2_id, sup2_mbox.clone()).await;
+        register_actor_for_test(&node, &sup3_id, sup3_mbox.clone()).await;
+
+        node.monitor(&watched_actor_id, &sup1_id, &ctx)
             .await
             .unwrap();
-        node.monitor(&watched_actor_id, &sup2_id, tx2)
+        node.monitor(&watched_actor_id, &sup2_id, &ctx)
             .await
             .unwrap();
-        node.monitor(&watched_actor_id, &sup3_id, tx3)
+        node.monitor(&watched_actor_id, &sup3_id, &ctx)
             .await
             .unwrap();
 
@@ -5363,17 +5586,32 @@ mod tests {
             .handle_actor_termination(&watched_actor_id, ExitReason::Error("crashed".to_string()))
             .await;
 
-        // All 3 monitors should receive notification
-        let (id1, reason1) = rx1.recv().await.unwrap();
-        let (id2, reason2) = rx2.recv().await.unwrap();
-        let (id3, reason3) = rx3.recv().await.unwrap();
-
-        assert_eq!(id1, watched_actor_id);
-        assert_eq!(reason1, "crashed");
-        assert_eq!(id2, watched_actor_id);
-        assert_eq!(reason2, "crashed");
-        assert_eq!(id3, watched_actor_id);
-        assert_eq!(reason3, "crashed");
+        // All 3 supervisor mailboxes should receive __DOWN__ messages.
+        for (sup_mbox, sup_name) in [
+            (&sup1_mbox, "sup1"),
+            (&sup2_mbox, "sup2"),
+            (&sup3_mbox, "sup3"),
+        ] {
+            let mut found = false;
+            for _ in 0..10 {
+                if let Some(msg) = sup_mbox
+                    .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
+                    .await
+                {
+                    if msg.message_type == "__DOWN__" {
+                        assert_eq!(
+                            msg.headers.get("down_reason").map(|s| s.as_str()),
+                            Some("crashed"),
+                            "{} should get 'crashed' reason",
+                            sup_name
+                        );
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            assert!(found, "{} must receive __DOWN__", sup_name);
+        }
     }
 
     // ============================================================================
@@ -5509,7 +5747,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -5531,16 +5769,24 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
             )
             .await;
 
-        let (tx, mut rx) = mpsc::channel(1);
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(&monitored_actor_id, &supervisor_id, tx)
+        let sup_mbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
+        node.monitor(&monitored_actor_id, &supervisor_id, &ctx)
             .await
             .unwrap();
 
@@ -5563,10 +5809,24 @@ mod tests {
         // Handle the event
         node.handle_lifecycle_event(event).await.unwrap();
 
-        // Monitor should receive notification
-        let (actor_id, reason) = rx.recv().await.unwrap();
-        assert_eq!(actor_id, monitored_actor_id);
-        assert_eq!(reason, "normal");
+        // Supervisor mailbox should receive __DOWN__ message.
+        let mut down: Option<Message> = None;
+        for _ in 0..10 {
+            if let Some(msg) = sup_mbox
+                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
+                .await
+            {
+                if msg.message_type == "__DOWN__" {
+                    down = Some(msg);
+                    break;
+                }
+            }
+        }
+        let msg = down.expect("Supervisor must receive __DOWN__");
+        assert_eq!(
+            msg.headers.get("down_reason").map(|s| s.as_str()),
+            Some("normal")
+        );
     }
 
     #[tokio::test]
@@ -5623,7 +5883,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -5645,16 +5905,24 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
             )
             .await;
 
-        let (tx, mut rx) = mpsc::channel(1);
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(&monitored_actor_id, &supervisor_id, tx)
+        let sup_mbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                format!("sup-{}", ulid::Ulid::new()),
+            )
+            .await
+            .unwrap(),
+        );
+        register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
+        node.monitor(&monitored_actor_id, &supervisor_id, &ctx)
             .await
             .unwrap();
 
@@ -5676,10 +5944,24 @@ mod tests {
         // Handle the event
         node.handle_lifecycle_event(event).await.unwrap();
 
-        // Monitor should receive notification
-        let (actor_id, reason) = rx.recv().await.unwrap();
-        assert_eq!(actor_id, monitored_actor_id);
-        assert_eq!(reason, "panic: index out of bounds");
+        // Supervisor mailbox should receive __DOWN__ message.
+        let mut down: Option<Message> = None;
+        for _ in 0..10 {
+            if let Some(msg) = sup_mbox
+                .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(100)))
+                .await
+            {
+                if msg.message_type == "__DOWN__" {
+                    down = Some(msg);
+                    break;
+                }
+            }
+        }
+        let msg = down.expect("Supervisor must receive __DOWN__");
+        assert_eq!(
+            msg.headers.get("down_reason").map(|s| s.as_str()),
+            Some("panic: index out of bounds")
+        );
     }
 
     #[tokio::test]
@@ -5752,7 +6034,7 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -5895,7 +6177,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -5915,7 +6197,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config.clone()),
                     None,
                     None,
@@ -5988,7 +6270,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6048,7 +6330,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6067,7 +6349,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config),
                     None,
                     None,
@@ -6139,7 +6421,7 @@ mod tests {
                 &internal_ctx,
                 actor1_ref.id().clone(),
                 wrapper1,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6156,7 +6438,7 @@ mod tests {
                     &ctx,
                     actor1_ref.id().clone(),
                     sender1,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config1),
                     None,
                     None,
@@ -6201,7 +6483,7 @@ mod tests {
                 &internal_ctx,
                 actor2_ref.id().clone(),
                 wrapper2,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6216,7 +6498,7 @@ mod tests {
                     &ctx,
                     actor2_ref.id().clone(),
                     sender2,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config2),
                     None,
                     None,
@@ -6311,7 +6593,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6329,7 +6611,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config),
                     None,
                     None,
@@ -6382,7 +6664,7 @@ mod tests {
                 &ctx,
                 actor_id.clone(),
                 sender.clone(),
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 Some(config),
                 None,
                 None,
@@ -6482,7 +6764,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                "TestActor".to_string(),
+                "test_actor".to_string(),
                 None,
                 None,
                 None,
@@ -6497,7 +6779,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    "TestActor".to_string(),
+                    "test_actor".to_string(),
                     Some(config),
                     None,
                     None,

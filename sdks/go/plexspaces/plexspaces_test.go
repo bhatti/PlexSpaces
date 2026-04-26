@@ -380,6 +380,19 @@ func TestHostApplicationMetricsAdd(t *testing.T) {
 	}
 }
 
+func TestHostApplicationGetMetrics(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.ApplicationGetMetrics("app-a", "node-a")
+	if err != nil {
+		t.Fatalf("ApplicationGetMetrics returned error: %v", err)
+	}
+	mc, ok := out["message_count"].(float64)
+	if !ok || mc != 0 {
+		t.Fatalf("expected message_count 0, got %v", out["message_count"])
+	}
+}
+
 func TestCheckError(t *testing.T) {
 	err := checkError("")
 	if err != nil {
@@ -573,6 +586,24 @@ func TestActorRouterInit(t *testing.T) {
 	}
 }
 
+func TestActorRouterInitPrefersDeclarationNameOverActorType(t *testing.T) {
+	router := NewActorRouter()
+	counterCreated := false
+
+	router.Route("counter", func() Actor {
+		counterCreated = true
+		return newCounterActor()
+	})
+
+	result := router.Init(`{"actor_id":"counter//shared_wasm::app@test-node","actor_type":"shared_wasm","declaration_name":"counter","args":{}}`)
+	if result != "" {
+		t.Fatalf("router Init should succeed with declaration_name dispatch, got %q", result)
+	}
+	if !counterCreated {
+		t.Fatal("declaration_name should select the registered actor factory")
+	}
+}
+
 func TestActorRouterInitWithNamespace(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("rate-limiter", func() Actor { return newCounterActor() })
@@ -754,12 +785,21 @@ func TestActorRouterInvalidConfigJSON(t *testing.T) {
 
 func TestInitConfigParsing(t *testing.T) {
 	var config initConfig
-	err := json.Unmarshal([]byte(`{"actor_id":"test:ns@node","args":{"key":"value"}}`), &config)
+	err := json.Unmarshal([]byte(`{"actor_id":"test:ns@node","actor_type":"shared_wasm","declaration_name":"counter","role":"counter","args":{"key":"value"}}`), &config)
 	if err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
 	if config.ActorID != "test:ns@node" {
 		t.Errorf("expected test:ns@node, got %q", config.ActorID)
+	}
+	if config.ActorType != "shared_wasm" {
+		t.Errorf("expected shared_wasm, got %q", config.ActorType)
+	}
+	if config.DeclarationName != "counter" {
+		t.Errorf("expected counter declaration_name, got %q", config.DeclarationName)
+	}
+	if config.Role != "counter" {
+		t.Errorf("expected counter role, got %q", config.Role)
 	}
 	if config.Args == nil {
 		t.Error("Args should not be nil")

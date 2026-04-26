@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
     metrics_tracker.start_coordinate();
     let node_start = Instant::now();
     
-    let node = Arc::new(NodeBuilder::new("timers-node").build().await);
+    let node = NodeBuilder::new("timers-node").build_started().await;
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("acme-corp".to_string(), "sessions".to_string());
     

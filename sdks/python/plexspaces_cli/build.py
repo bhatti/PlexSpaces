@@ -95,6 +95,8 @@ def generate_wrapper(actor_file: Path, work_dir: Path) -> Path:
         if isinstance(obj, type) and hasattr(obj, '_plexspaces_is_actor'):
             actor_classes.append(obj)
 
+    actor_roles = getattr(module, "ACTOR_ROLES", None)
+
     if not actor_classes:
         # No @actor decorator - assume it's already a WIT-compatible module
         # Just use it as-is (backward compatible with old examples)
@@ -103,7 +105,7 @@ def generate_wrapper(actor_file: Path, work_dir: Path) -> Path:
     # Generate wrapper using SDK (supports single or multi-actor)
     from plexspaces.runtime import generate_wrapper as gen_wrapper
 
-    wrapper_code = gen_wrapper(actor_classes, actor_name)
+    wrapper_code = gen_wrapper(actor_classes, actor_name, actor_roles=actor_roles)
     wrapper_path = work_dir / f"{actor_name}_actor.py"
 
     with open(wrapper_path, 'w') as f:

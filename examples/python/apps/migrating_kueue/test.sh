@@ -7,9 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/job_scheduler_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8092}"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../../" && pwd)"
 
-APP_ID="migrating-kueue-scheduler-py"
+RUN_ID="$(date +%s)"
+APP_ID="migrating-kueue-scheduler-py-$RUN_ID"
 ACTOR_TYPE="job-scheduler"
+SCHED_ID="sched-$RUN_ID"
+BATCH_ID="batch-$RUN_ID"
 NUM_JOBS=30
 
 GREEN='\033[0;32m'
@@ -23,7 +27,7 @@ echo "  Kueue → PlexSpaces: GPU Job Scheduler (Python WASM)"
 echo "  GenServer + lock (allocate) + KV; priority, preemption"
 echo "================================================================"
 
-if [ ! -f "$WASM_FILE" ]; then
+if [ ! -f "$WASM_FILE" ] || [ "$SCRIPT_DIR/job_scheduler_actor.py" -nt "$WASM_FILE" ] || [ "$SCRIPT_DIR/build.sh" -nt "$WASM_FILE" ] || [ "$PROJECT_ROOT/sdks/python/plexspaces/runtime.py" -nt "$WASM_FILE" ] || [ "$PROJECT_ROOT/sdks/python/plexspaces_cli/build.py" -nt "$WASM_FILE" ]; then
   echo "Building WASM..."
   "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
   echo ""
@@ -59,19 +63,19 @@ send_op() {
 }
 
 echo "Step 2: Submit jobs (priority order)"
-send_op "sched-1" '{"op":"submit","job_id":"j1","priority":5,"gpu_request":2}' 10
+send_op "$SCHED_ID" '{"op":"submit","job_id":"j1","priority":5,"gpu_request":2}' 10
 echo ""
-send_op "sched-1" '{"op":"submit","job_id":"j2","priority":10,"gpu_request":1}' 10
+send_op "$SCHED_ID" '{"op":"submit","job_id":"j2","priority":10,"gpu_request":1}' 10
 echo ""
-send_op "sched-1" '{"op":"submit","job_id":"j3","priority":3,"gpu_request":4}' 10
+send_op "$SCHED_ID" '{"op":"submit","job_id":"j3","priority":3,"gpu_request":4}' 10
 echo ""
-if send_op "sched-1" '{"op":"submit","job_id":"j4","priority":8,"gpu_request":2}' 10 | grep -q '"ok":true'; then
+if send_op "$SCHED_ID" '{"op":"submit","job_id":"j4","priority":8,"gpu_request":2}' 10 | grep -q '"ok":true'; then
   echo -e "  ${GREEN}Submitted j1,j2,j3,j4${NC}"
 fi
 echo ""
 
 echo "Step 3: Allocate (with lock) – should return highest priority job"
-ALLOC=$(send_op "sched-1" '{"op":"allocate"}' 15)
+ALLOC=$(send_op "$SCHED_ID" '{"op":"allocate"}' 15)
 if echo "$ALLOC" | grep -q '"job_id":"j2"'; then
   echo -e "  ${GREEN}Allocated j2 (priority 10)${NC}"
 else
@@ -79,43 +83,45 @@ else
 fi
 
 echo "Step 4: List queue"
-send_op "sched-1" '{"op":"list_queue"}' 10 | head -c 140
+send_op "$SCHED_ID" '{"op":"list_queue"}' 10 | head -c 140
 echo "..."
 
 echo "Step 5: Complete j2, allocate again"
-CMP=$(send_op "sched-1" '{"op":"complete","job_id":"j2"}' 10)
+CMP=$(send_op "$SCHED_ID" '{"op":"complete","job_id":"j2"}' 10)
 echo "  complete j2: $(echo "$CMP" | head -c 200)"
 if echo "$CMP" | grep -q '"ok":true'; then
   echo -e "  ${GREEN}complete j2 ok${NC}"
 else
   echo -e "  ${RED}complete j2 failed (expected ok after allocate j2)${NC}"
 fi
-ALLOC2=$(send_op "sched-1" '{"op":"allocate"}' 10)
+ALLOC2=$(send_op "$SCHED_ID" '{"op":"allocate"}' 10)
 if echo "$ALLOC2" | grep -q '"job_id"'; then
   echo -e "  ${GREEN}Completed j2, allocated next${NC}"
 fi
 
 echo "Step 6: Preempt (allocate j4, then preempt)"
-send_op "sched-1" '{"op":"allocate"}' 10 >/dev/null
-send_op "sched-1" '{"op":"allocate"}' 10 >/dev/null
-PREEMPT=$(send_op "sched-1" '{"op":"allocate"}' 10)
-if echo "$PREEMPT" | grep -q '"job_id"'; then
-  JID=$(echo "$PREEMPT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('payload',d).get('job_id',''))" 2>/dev/null)
-  send_op "sched-1" "{\"op\":\"preempt\",\"job_id\":\"$JID\"}" 10 >/dev/null
+send_op "$SCHED_ID" '{"op":"allocate"}' 10 >/dev/null
+send_op "$SCHED_ID" '{"op":"allocate"}' 10 >/dev/null
+PREEMPT=$(send_op "$SCHED_ID" '{"op":"allocate"}' 10)
+JID=$(echo "$PREEMPT" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload', d); print((p.get('job_id') if isinstance(p, dict) else '') or '')" 2>/dev/null)
+if [ -n "$JID" ]; then
+  send_op "$SCHED_ID" "{\"op\":\"preempt\",\"job_id\":\"$JID\"}" 10 >/dev/null
   echo -e "  ${GREEN}Preempted $JID (requeued)${NC}"
+else
+  echo "  No allocatable job remained for preemption"
 fi
 
 echo "Step 7: Batch $NUM_JOBS jobs (submit → allocate → complete)"
 BATCH_START=$(date +%s%N)
 LAST_QUOTA=""
 for i in $(seq 1 $NUM_JOBS); do
-  send_op "batch" "{\"op\":\"submit\",\"job_id\":\"batch-$i\",\"priority\":$i,\"gpu_request\":1}" 10 >/dev/null
+  send_op "$BATCH_ID" "{\"op\":\"submit\",\"job_id\":\"batch-$i\",\"priority\":$i,\"gpu_request\":1}" 10 >/dev/null
 done
 for i in $(seq 1 $NUM_JOBS); do
-  A=$(send_op "batch" '{"op":"allocate"}' 10)
+  A=$(send_op "$BATCH_ID" '{"op":"allocate"}' 10)
   JID=$(echo "$A" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('job_id','') if p else '')" 2>/dev/null)
-  [ -n "$JID" ] && send_op "batch" "{\"op\":\"complete\",\"job_id\":\"$JID\"}" 10 >/dev/null
-  [ "$i" -eq "$NUM_JOBS" ] && LAST_QUOTA=$(send_op "batch" '{"op":"get_quotas"}' 10)
+  [ -n "$JID" ] && send_op "$BATCH_ID" "{\"op\":\"complete\",\"job_id\":\"$JID\"}" 10 >/dev/null
+  [ "$i" -eq "$NUM_JOBS" ] && LAST_QUOTA=$(send_op "$BATCH_ID" '{"op":"get_quotas"}' 10)
 done
 BATCH_END=$(date +%s%N)
 WALL_MS=$(( (BATCH_END - BATCH_START) / 1000000 ))
@@ -134,6 +140,7 @@ if isinstance(p, str):
   try: p = json.loads(p)
   except: p = {}
 used = p.get('used_gpus', 0)
+peak = p.get('peak_used_gpus', used)
 max_g = p.get('max_gpus', 0)
 proc = p.get('processed_count', 0)
 comp = p.get('total_compute_ms', 0) or 0
@@ -142,6 +149,7 @@ print()
 print('  GPU Job Scheduler (Kueue-style)')
 print('  ────────────────────────────────────────────')
 print(f'  Used GPUs:        {used} / {max_g}')
+print(f'  Peak GPUs:        {peak} / {max_g}')
 print(f'  Processed count:  {proc}')
 print(f'  Compute ms:       {comp:.1f}')
 print(f'  Coord ms:         {coord:.1f}')

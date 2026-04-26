@@ -168,6 +168,7 @@ func (l *LeaderActor) run(payloadJSON string) string {
 	}
 
 	startStatuses := map[string]map[string]any{}
+	startMetrics := map[string]map[string]any{}
 	nodeAddresses := map[string]string{}
 	for _, nodeID := range participantNodeIDs {
 		status, err := host.ApplicationGetStatus(l.ApplicationID(), nodeID)
@@ -175,6 +176,11 @@ func (l *LeaderActor) run(payloadJSON string) string {
 			return marshal(map[string]any{"error": fmt.Sprintf("failed to capture application status for %s: %v", nodeID, err)})
 		}
 		startStatuses[nodeID] = status
+		metrics, err := host.ApplicationGetMetrics(l.ApplicationID(), nodeID)
+		if err != nil {
+			return marshal(map[string]any{"error": fmt.Sprintf("failed to capture application metrics for %s: %v", nodeID, err)})
+		}
+		startMetrics[nodeID] = metrics
 		if address, ok := status["node_address"].(string); ok && address != "" {
 			nodeAddresses[nodeID] = address
 		}
@@ -375,10 +381,15 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		if err != nil {
 			return marshal(map[string]any{"error": fmt.Sprintf("failed to collect final application status for %s: %v", nodeID, err)})
 		}
+		metrics, err := host.ApplicationGetMetrics(l.ApplicationID(), nodeID)
+		if err != nil {
+			return marshal(map[string]any{"error": fmt.Sprintf("failed to collect final application metrics for %s: %v", nodeID, err)})
+		}
 		if address, ok := status["node_address"].(string); ok && address != "" {
 			nodeAddresses[nodeID] = address
 		}
-		applyStatusDelta(nodeMetrics, roleMetrics, startStatuses[nodeID], status)
+		_ = startStatuses[nodeID]
+		applyMetricsDelta(nodeMetrics, roleMetrics, nodeID, startMetrics[nodeID], metrics)
 	}
 
 	for nodeID, counts := range computeActorCounts(leaderNodeID, shardActorIDs) {
@@ -403,10 +414,13 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		totalElementOps += metrics["element_operations"]
 		totalComputeMs += metrics["compute_time_ms"]
 		totalCoordinationMs += metrics["coordination_time_ms"]
-		if nodeID != leaderNodeID && metrics["worker_messages"] > 0 {
+		if nodeID != leaderNodeID && metrics["responses"] > 0 {
 			workerNodeCount++
 		}
 		actorCounts = append(actorCounts, metrics["actors"])
+	}
+	if placementCount := len(remoteWorkerShardHostNodeIDs(leaderNodeID, shardActorIDs)); placementCount > workerNodeCount {
+		workerNodeCount = placementCount
 	}
 	actorDistributionSkew := 0
 	if len(actorCounts) > 0 {
@@ -715,11 +729,11 @@ func accumulateShardStats(
 	for _, shard := range anySlice(rawShards) {
 		shardMap, _ := shard.(map[string]any)
 		payloadMap := normalizeWorkerPayload(mapValue(shardMap, "payload"))
-		if status, _ := payloadMap["status"].(string); status != "ok" {
+		if shardFailed(shardMap, payloadMap) {
 			*totalErrors++
 			continue
 		}
-		latencyMs := uint64(anyToInt(payloadMap["latency_ms"], 0))
+		latencyMs := uint64(anyToInt(payloadMap["latency_ms"], anyToInt(shardMap["latency_ms"], 0)))
 		*totalWorkerLatencyMs += latencyMs
 		*totalWorkerResponses++
 		if latencyMs > *maxWorkerLatencyMs {
@@ -728,6 +742,9 @@ func accumulateShardStats(
 		nodeID := stringValue(payloadMap["node_id"])
 		if nodeID == "" {
 			nodeID = actorNodeID(stringValue(payloadMap["actor_id"]))
+		}
+		if nodeID == "" {
+			nodeID = actorNodeID(stringValue(shardMap["shard_actor_id"]))
 		}
 		if nodeID != "" && nodeID != leaderNodeID {
 			remoteNodesWithWork[nodeID] = true
@@ -752,11 +769,11 @@ func accumulateScatterStats(
 	for _, shard := range anySlice(rawShards) {
 		shardMap, _ := shard.(map[string]any)
 		payloadMap := normalizeWorkerPayload(mapValue(shardMap, "payload"))
-		if status, _ := payloadMap["status"].(string); status != "ok" {
+		if shardFailed(shardMap, payloadMap) {
 			*totalErrors++
 			continue
 		}
-		latencyMs := uint64(anyToInt(payloadMap["latency_ms"], 0))
+		latencyMs := uint64(anyToInt(payloadMap["latency_ms"], anyToInt(shardMap["latency_ms"], 0)))
 		*totalWorkerLatencyMs += latencyMs
 		*totalWorkerResponses++
 		if latencyMs > *maxWorkerLatencyMs {
@@ -768,11 +785,30 @@ func accumulateScatterStats(
 		if nodeID == "" {
 			nodeID = actorNodeID(stringValue(payloadMap["actor_id"]))
 		}
+		if nodeID == "" {
+			nodeID = actorNodeID(stringValue(shardMap["shard_actor_id"]))
+		}
 		if nodeID != "" && nodeID != leaderNodeID {
 			remoteNodesWithWork[nodeID] = true
 		}
 	}
 	return nil
+}
+
+func shardFailed(shardMap map[string]any, payloadMap map[string]any) bool {
+	if errText := stringValue(shardMap["error"]); errText != "" {
+		return true
+	}
+	if success, ok := shardMap["success"].(bool); ok {
+		return !success
+	}
+	if errText := stringValue(payloadMap["error"]); errText != "" {
+		return true
+	}
+	if status, ok := payloadMap["status"].(string); ok {
+		return status != "ok"
+	}
+	return false
 }
 
 func normalizeWorkerPayload(payload any) map[string]any {
@@ -852,20 +888,20 @@ func ensureRoleMetric(metrics map[string]map[string]int, role string) map[string
 	return entry
 }
 
-func applyStatusDelta(
+func applyMetricsDelta(
 	nodeMetrics map[string]map[string]int,
 	roleMetrics map[string]map[string]int,
-	startStatus map[string]any,
-	endStatus map[string]any,
+	nodeID string,
+	startMetrics map[string]any,
+	endMetrics map[string]any,
 ) {
-	counterDelta := saturatingMapDelta(statusMetricsMap(endStatus, "counter_metrics"), statusMetricsMap(startStatus, "counter_metrics"))
-	latencyTotalsDelta := saturatingMapDelta(statusMetricsMap(endStatus, "latency_totals_ms"), statusMetricsMap(startStatus, "latency_totals_ms"))
-	latencyMaxEnd := statusMetricsMap(endStatus, "latency_max_ms")
-	latencyMaxStart := statusMetricsMap(startStatus, "latency_max_ms")
-	latencySamplesDelta := saturatingMapDelta(statusMetricsMap(endStatus, "latency_samples"), statusMetricsMap(startStatus, "latency_samples"))
-	messageDelta := maxInt(anyToInt(statusMetricsValue(endStatus, "message_count"), 0)-anyToInt(statusMetricsValue(startStatus, "message_count"), 0), 0)
-	errorDelta := maxInt(anyToInt(statusMetricsValue(endStatus, "error_count"), 0)-anyToInt(statusMetricsValue(startStatus, "error_count"), 0), 0)
-	nodeID := stringValue(endStatus["node_id"])
+	counterDelta := saturatingMapDelta(metricsMap(endMetrics, "counter_metrics"), metricsMap(startMetrics, "counter_metrics"))
+	latencyTotalsDelta := saturatingMapDelta(metricsMap(endMetrics, "latency_totals_ms"), metricsMap(startMetrics, "latency_totals_ms"))
+	latencyMaxEnd := metricsMap(endMetrics, "latency_max_ms")
+	latencyMaxStart := metricsMap(startMetrics, "latency_max_ms")
+	latencySamplesDelta := saturatingMapDelta(metricsMap(endMetrics, "latency_samples"), metricsMap(startMetrics, "latency_samples"))
+	messageDelta := maxInt(anyToInt(endMetrics["message_count"], 0)-anyToInt(startMetrics["message_count"], 0), 0)
+	errorDelta := maxInt(anyToInt(endMetrics["error_count"], 0)-anyToInt(startMetrics["error_count"], 0), 0)
 	node := ensureNodeMetric(nodeMetrics, nodeID)
 	node["messages"] += messageDelta
 	node["leader_messages"] += counterDelta["leader_messages"]
@@ -900,14 +936,8 @@ func applyStatusDelta(
 	worker["errors"] += errorDelta
 }
 
-func statusMetricsValue(status map[string]any, field string) any {
-	application, _ := status["application"].(map[string]any)
-	metrics, _ := application["metrics"].(map[string]any)
-	return metrics[field]
-}
-
-func statusMetricsMap(status map[string]any, field string) map[string]int {
-	value, _ := statusMetricsValue(status, field).(map[string]any)
+func metricsMap(metrics map[string]any, field string) map[string]int {
+	value, _ := metrics[field].(map[string]any)
 	result := map[string]int{}
 	for key, raw := range value {
 		result[key] = anyToInt(raw, 0)
@@ -956,6 +986,25 @@ func computeActorCounts(leaderNodeID string, shardActorIDs []string) map[string]
 		node["worker_actors"]++
 	}
 	return nodes
+}
+
+// remoteWorkerShardHostNodeIDs returns sorted unique node IDs that host worker shards.
+// The leader node and synthetic "local" placement are excluded.
+func remoteWorkerShardHostNodeIDs(leaderNodeID string, shardActorIDs []string) []string {
+	seen := map[string]struct{}{}
+	for _, actorID := range shardActorIDs {
+		nodeID := actorNodeID(actorID)
+		if nodeID == "" || nodeID == "local" || nodeID == leaderNodeID {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for nodeID := range seen {
+		out = append(out, nodeID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func averageLatency(metric map[string]int) float64 {

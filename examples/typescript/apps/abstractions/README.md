@@ -13,6 +13,19 @@ node-backed lifecycle as the Rust, Go, and Python abstractions examples:
 Run it against a running node:
 
 ```bash
+cd /Users/shahzadbhatti/workspace/myspaces
+make build
+./scripts/server.sh 8091
+```
+
+Then in a second shell:
+
+```bash
+cd /Users/shahzadbhatti/workspace/myspaces/examples/typescript/apps/abstractions
 ./build.sh
 ./test.sh 8092
 ```
+
+`test.sh` refuses to run against a node that was not started by the current repo's
+`./scripts/server.sh` flow. That prevents stale-node failures where the TypeScript guest was
+rebuilt but the Rust backend reactivation logic was still coming from an older process.

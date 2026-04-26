@@ -8,9 +8,9 @@
 # WIT bindings.
 #
 # Supports multiple @actor classes in one module via Erlang-style ApplicationSpec:
-# The framework passes {"actor_id": "child-spec-id", ...} in init config,
-# and the wrapper selects the correct class based on a mapping defined
-# in the module-level ACTOR_ROLES dict.
+# The framework passes {"actor_id": "...", "actor_type": "...", "declaration_name": "..."}
+# in init config. The wrapper selects the correct class from declaration_name
+# or actor_id prefix matching.
 
 """
 Runtime support for PlexSpaces actors.
@@ -31,20 +31,18 @@ The generated wrapper implements the WIT actor interface:
 
 ## Multi-Actor Support
 
-When a module contains multiple @actor classes, the wrapper uses the
-init config's ``actor_id`` field to select which class to instantiate.
-Mapping is defined in the module via ``ACTOR_ROLES``:
+When a module contains multiple @actor classes, the wrapper selects the
+class from the init config in priority order:
 
-    ACTOR_ROLES = {
-        "parameter-server": ParameterServer,
-        "data-worker": DataWorker,        # prefix match
-    }
-
-If no mapping is found or only one @actor class exists, the first class is used.
+1. ``config["declaration_name"]`` — the child declaration role from
+   ``app-config.toml`` / ``ActorSpawnSpec.role``.
+2. Prefix match on the normalized ``actor_id`` against declaration and class
+   aliases (e.g. ``data-worker-0`` matches ``data-worker``).
+3. ``ACTOR_ROLES`` aliases embedded at build time when provided.
 """
 
 import json
-from typing import Type, Any, List, Dict
+from typing import Type, Any, List, Dict, Optional
 
 from .decorators import (
     get_state_dict,
@@ -69,24 +67,69 @@ def normalize_role_actor_id(actor_id: str) -> str:
     if not actor_id:
         return ""
     if "//" in actor_id:
-        suffix = actor_id.split("//", 1)[1]
-        return suffix.split("::", 1)[0]
+        return actor_id.split("//", 1)[0]
     if ":" in actor_id:
         return actor_id.split(":", 1)[0]
     return actor_id
 
 
-def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
+def _class_name_aliases(class_name: str) -> List[str]:
+    """Return stable snake_case and kebab-case aliases for a class name."""
+    snake = ""
+    kebab = ""
+    for i, ch in enumerate(class_name):
+        if ch.isupper() and i > 0:
+            snake += "_"
+            kebab += "-"
+        snake += ch.lower()
+        kebab += ch.lower()
+
+    aliases = [snake]
+    if snake != kebab:
+        aliases.append(kebab)
+    if snake.endswith("_actor"):
+        trimmed = snake[: -len("_actor")]
+        if trimmed:
+            aliases.append(trimmed)
+            aliases.append(trimmed.replace("_", "-"))
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def build_class_alias_map(
+    actor_classes: List[Type], actor_roles: Optional[Dict[str, Type]] = None
+) -> Dict[str, Type]:
+    """Build the alias map used for multi-actor dispatch."""
+    class_map: Dict[str, Type] = {}
+
+    if actor_roles:
+        for role, cls in actor_roles.items():
+            if cls not in actor_classes:
+                continue
+            normalized = role.replace("-", "_")
+            class_map[normalized] = cls
+            class_map[normalized.replace("_", "-")] = cls
+
+    for cls in actor_classes:
+        for alias in _class_name_aliases(cls.__name__):
+            class_map.setdefault(alias, cls)
+
+    return class_map
+
+
+def generate_wrapper(
+    actor_classes: List[Type], module_name: str, actor_roles: Optional[Dict[str, Type]] = None
+) -> str:
     """
     Generate the WIT interface wrapper code for one or more actor classes.
 
-    When multiple classes are provided, the wrapper reads ``actor_id`` from
-    the init config and uses ``ACTOR_ROLES`` (module-level dict) or prefix
-    matching on class names to select which class to instantiate.
+    When multiple classes are provided, the wrapper selects the class from the
+    init config in priority order: ``declaration_name`` exact match, prefix
+    match on normalized ``actor_id``, then ``actor_type`` exact match.
 
     Args:
         actor_classes: List of @actor decorated classes (at least one)
         module_name: Name of the module containing the actor classes
+        actor_roles: Optional declaration-name to actor-class mapping from ACTOR_ROLES
 
     Returns:
         Python source code for the wrapper
@@ -97,6 +140,7 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
     class_names = [cls.__name__ for cls in actor_classes]
     imports = ", ".join(class_names)
     default_class = class_names[0]
+    class_map = build_class_alias_map(actor_classes, actor_roles)
 
     # Build lines for the generated wrapper (no indentation tricks)
     lines = [
@@ -117,39 +161,29 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
         "    if not actor_id:",
         '        return ""',
         '    if "//" in actor_id:',
-        '        suffix = actor_id.split("//", 1)[1]',
-        '        return suffix.split("::", 1)[0]',
+        '        return actor_id.split("//", 1)[0]',
         '    if ":" in actor_id:',
         '        return actor_id.split(":", 1)[0]',
         "    return actor_id",
         "",
     ]
 
-    # Role mapping for multi-actor support
+    # Class map for multi-actor support.
+    # Selection priority in _select_class:
+    #   1. config["declaration_name"] — ChildSpec.role / ActorSpawnSpec.role
+    #   2. exact or prefix match on actor_id against declaration/class aliases
+    #   3. config["actor_type"] — shared behavior class when it uniquely maps
     if len(actor_classes) == 1:
         lines.append(f"_actor_class = {default_class}")
-        lines.append("_ROLE_MAP = {}")
+        lines.append("_CLASS_MAP = {}")
     else:
         lines.append(f"_actor_class = {default_class}  # default")
         lines.append("")
-        lines.append("# Auto-generated role mapping (CamelCase -> kebab-case prefix)")
-        lines.append("_AUTO_ROLES = {")
-        for cls_name in class_names:
-            # Convert CamelCase to kebab-case for prefix matching
-            kebab = ""
-            for i, ch in enumerate(cls_name):
-                if ch.isupper() and i > 0:
-                    kebab += "-"
-                kebab += ch.lower()
-            lines.append(f'    "{kebab}": {cls_name},')
+        lines.append("# Auto-generated class map: declaration aliases and class aliases -> class")
+        lines.append("_CLASS_MAP = {")
+        for alias, cls in class_map.items():
+            lines.append(f'    "{alias}": {cls.__name__},')
         lines.append("}")
-        lines.append("")
-        lines.append("# Merge user-defined ACTOR_ROLES (if any) with auto-generated ones")
-        lines.append("try:")
-        lines.append(f"    from {module_name} import ACTOR_ROLES as _USER_ROLES")
-        lines.append("    _ROLE_MAP = {**_AUTO_ROLES, **_USER_ROLES}")
-        lines.append("except ImportError:")
-        lines.append("    _ROLE_MAP = _AUTO_ROLES")
 
     lines.extend([
         "",
@@ -158,19 +192,36 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
         "",
         "",
         "def _select_class(config):",
-        '    """Select actor class based on init config actor_id."""',
+        '    """Select actor class from init config.',
+        "    Priority:",
+        '    1. declaration_name — ChildSpec.role / ActorSpawnSpec.role passed by the framework',
+        '    2. exact or prefix match on normalized actor_id against declaration/class aliases',
+        '    3. config["actor_type"] — ChildSpec.actor_type for single-role behavior classes',
+        '    """',
         "    global _actor_class",
-        '    actor_id = config.get("actor_id", "") if isinstance(config, dict) else ""',
-        "    actor_id = _normalize_role_actor_id(actor_id)",
-        "    if not actor_id or not _ROLE_MAP:",
+        "    if not isinstance(config, dict) or not _CLASS_MAP:",
         "        return _actor_class",
-        "    # Exact match first",
-        "    if actor_id in _ROLE_MAP:",
-        "        return _ROLE_MAP[actor_id]",
-        '    # Prefix match (e.g., "data-worker-0" matches "data-worker")',
-        "    for prefix, cls in sorted(_ROLE_MAP.items(), key=lambda x: -len(x[0])):",
-        "        if actor_id.startswith(prefix):",
-        "            return cls",
+        "    # 1. declaration_name — framework passes ChildSpec.role directly",
+        '    decl_name = config.get("declaration_name", "").replace("-", "_")',
+        "    if decl_name:",
+        "        if decl_name in _CLASS_MAP:",
+        "            return _CLASS_MAP[decl_name]",
+        "        for key, cls in _CLASS_MAP.items():",
+        '            if key.endswith(f"_{decl_name}") or key.endswith(f"-{decl_name}"):',
+        "                return cls",
+        "    # 2. exact or prefix match on actor_id",
+        '    actor_id = _normalize_role_actor_id(config.get("actor_id", ""))',
+        "    if actor_id:",
+        '        actor_id = actor_id.replace("-", "_")',
+        "        if actor_id in _CLASS_MAP:",
+        "            return _CLASS_MAP[actor_id]",
+        "        for prefix, cls in sorted(_CLASS_MAP.items(), key=lambda x: -len(x[0])):",
+        "            if actor_id.startswith(prefix):",
+        "                return cls",
+        "    # 3. actor_type — shared behavior class fallback",
+        '    actor_type = config.get("actor_type", "").replace("-", "_")',
+        "    if actor_type and actor_type in _CLASS_MAP:",
+        "        return _CLASS_MAP[actor_type]",
         "    return _actor_class",
         "",
         "",
@@ -285,8 +336,10 @@ def create_actor_module(user_module_path: str, output_path: str = None) -> str:
     if not actor_classes:
         raise ValueError(f"No @actor decorated class found in {user_module_path}")
 
+    actor_roles = getattr(module, "ACTOR_ROLES", None)
+
     # Generate wrapper
-    wrapper_code = generate_wrapper(actor_classes, module_name)
+    wrapper_code = generate_wrapper(actor_classes, module_name, actor_roles=actor_roles)
 
     # Write to output file
     if output_path is None:

@@ -11,361 +11,385 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Integration tests for distributed supervision (Phase 4)
+//! Integration tests for distributed supervision
 //!
-//! Tests validate Node.monitor() functionality for local and remote actors,
-//! following Erlang's location-transparent monitoring philosophy.
+//! Tests validate Node.monitor() functionality following Erlang's location-transparent
+//! monitoring philosophy.  DOWN notifications are delivered as `__DOWN__` messages into
+//! the supervisor actor's mailbox — no separate notification channel.
 
 use plexspaces_core::{ExitReason, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_proto::ActorServiceServer;
-use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
-use tonic::transport::Server;
 
 use super::test_helpers::{register_actor_with_message_sender, test_runtime_actor_id};
 
-/// Helper to start a gRPC server for testing
-async fn start_test_server(node: Arc<Node>) -> String {
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    let bound_addr = listener.local_addr().unwrap();
-
-    tokio::spawn(async move {
-        Server::builder()
-            .add_service(ActorServiceServer::new(service))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-            .await
-            .expect("Server failed");
-    });
-
-    // Wait for server to be ready - use a future that checks server readiness
-    let server_ready = async {
-        tokio::task::yield_now().await;
-    };
-    tokio::time::timeout(Duration::from_secs(1), server_ready)
+async fn node_request_context(node: &Node) -> plexspaces_core::RequestContext {
+    node.service_locator()
+        .request_context_for_system_operations()
         .await
-        .expect("Server should start quickly");
-    format!("http://{}", bound_addr)
 }
 
-/// Test 1: Monitor local actor - supervisor on same node as actor
+/// Register a supervisor actor that has its own mailbox so DOWN messages can land.
+async fn register_supervisor(
+    node: &Node,
+    supervisor_id: &plexspaces_core::ActorId,
+) -> Arc<Mailbox> {
+    let mailbox = Arc::new(
+        Mailbox::new(MailboxConfig::default(), supervisor_id.to_string())
+            .await
+            .unwrap(),
+    );
+    register_actor_with_message_sender(node, supervisor_id, mailbox.clone()).await;
+    mailbox
+}
+
+/// Wait up to `deadline` for a `__DOWN__` message to appear in `mailbox`.
+async fn wait_for_down(
+    mailbox: &Mailbox,
+    deadline: Duration,
+) -> Option<plexspaces_proto::common::v1::Message> {
+    let start = tokio::time::Instant::now();
+    loop {
+        let remaining = deadline.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return None;
+        }
+        let poll_timeout = remaining.min(Duration::from_millis(50));
+        if let Some(msg) = mailbox.dequeue_with_timeout(Some(poll_timeout)).await {
+            if msg.message_type == "__DOWN__"
+                || msg.headers.get("type").map_or(false, |v| v == "__DOWN__")
+            {
+                return Some(msg);
+            }
+        }
+        if start.elapsed() >= deadline {
+            return None;
+        }
+    }
+}
+
+// ─── tests ───────────────────────────────────────────────────────────────────
+
+/// Test 1: Monitor local actor — `monitor_ref` is returned without error.
 #[tokio::test]
 async fn test_monitor_local_actor() {
-    // Setup: Create node with local actor
-    use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
-    let mailbox = Arc::new(
+
+    // Register worker so monitoring can proceed.
+    let worker_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
 
-    // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
-
-    // Actor already registered - no need to update config
-    // Note: Metrics are updated internally by Node methods
-
-    // Create a channel to receive termination notifications
-    let (tx, mut rx) = mpsc::channel(1);
-
-    // Act: Monitor the local actor
-    let monitor_ref = node.monitor(&worker_id, &supervisor_id, tx).await;
-
-    // Assert: Monitor established successfully
+    let ctx = node_request_context(&node).await;
+    let monitor_ref = node.monitor(&worker_id, &supervisor_id, &ctx).await;
     assert!(monitor_ref.is_ok(), "Monitoring local actor should succeed");
     assert!(
         !monitor_ref.unwrap().is_empty(),
         "Monitor ref should not be empty"
     );
-
-    // Verify: No notification yet (actor still alive)
-    let no_msg = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await;
-    assert!(
-        no_msg.is_err(),
-        "Should not receive notification while actor is alive"
-    );
 }
 
-/// Test 2: Monitor remote actor - supervisor on different node than actor
+/// Test 2: Monitor non-existent actor — should fail.
 #[tokio::test]
-async fn test_monitor_remote_actor() {
-    // Setup: Create two nodes
-    let node1: Arc<Node> = Arc::new(NodeBuilder::new("node1").build().await);
+async fn test_monitor_nonexistent_actor() {
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
 
-    let node2: Arc<Node> = Arc::new(NodeBuilder::new("node2").build().await);
-
-    // Start gRPC server for node2
-    let node2_address = start_test_server(node2.clone()).await;
-
-    // Register actor on node2
-    let worker_id = test_runtime_actor_id("worker", "node2");
-    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
-    let mailbox2 = Arc::new(
-        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
-            .await
-            .unwrap(),
-    );
-
-    // Register actor's mailbox in ActorRegistry first (required for monitoring)
-    register_actor_with_message_sender(&node2, &worker_id, mailbox2.clone()).await;
-
-    // Actor already registered - no need to update config
-
-    // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
-    use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let ctx = node1
-        .service_locator()
-        .request_context_for_system_operations()
+    let ctx = node_request_context(&node).await;
+    let result = node
+        .monitor(
+            &test_runtime_actor_id("nonexistent", "node1"),
+            &test_runtime_actor_id("supervisor", "node1"),
+            &ctx,
+        )
         .await;
-    let registration = ObjectRegistration {
-        object_type: ObjectType::ObjectTypeNode as i32,
-        object_id: "node2".to_string(),
-        grpc_address: node2_address.clone(),
-        object_category: "Node".to_string(),
-        ..Default::default()
-    };
-    if let Some(object_registry) = node1.service_locator().object_registry().await {
-        let _ = object_registry.register(&ctx, registration).await;
-    }
 
-    // Create notification channel on supervisor node (node1)
-    let (tx, mut rx) = mpsc::channel(1);
-
-    // Act: Monitor remote actor from node1 (supervisor on node1, actor on node2)
-    let monitor_ref: Result<plexspaces_node::MonitorRef, plexspaces_node::NodeError> =
-        node1.monitor(&worker_id, &supervisor_id, tx).await;
-
-    // Assert: Remote monitoring established successfully
-    assert!(
-        monitor_ref.is_ok(),
-        "Monitoring remote actor should succeed"
-    );
-    assert!(
-        !monitor_ref.unwrap().is_empty(),
-        "Monitor ref should not be empty"
-    );
-
-    // Verify: No notification yet (actor still alive)
-    let no_msg = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await;
-    assert!(
-        no_msg.is_err(),
-        "Should not receive notification while actor is alive"
-    );
+    assert!(result.is_err(), "Monitoring non-existent actor should fail");
 }
 
-/// Test 3: Actor termination notification - local actor
+/// Test 3: Local actor terminates → supervisor receives `__DOWN__` in mailbox.
 #[tokio::test]
-async fn test_local_actor_termination_notification() {
-    // Setup: Create node with local actor
-    use plexspaces_node::NodeBuilder;
+async fn test_local_actor_termination_down_message() {
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
-    let mailbox = Arc::new(
+
+    // Register both actors.
+    let worker_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
 
-    // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
+    // Establish monitor.
+    let ctx = node_request_context(&node).await;
+    node.monitor(&worker_id, &supervisor_id, &ctx)
+        .await
+        .unwrap();
 
-    // Actor already registered - no need to update config
-    // Note: Metrics are updated internally by Node methods
-
-    // Create notification channel
-    let (tx, mut rx) = mpsc::channel(1);
-
-    // Monitor the actor
-    node.monitor(&worker_id, &supervisor_id, tx).await.unwrap();
-
-    // Act: Terminate the actor (unregister simulates termination)
+    // Terminate the worker.
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
         .handle_actor_termination(&worker_id, ExitReason::Normal)
         .await;
 
-    // Assert: Supervisor receives termination notification
-    let notification = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
-    assert!(
-        notification.is_ok(),
-        "Should receive termination notification"
+    // Supervisor's mailbox should receive a __DOWN__ message.
+    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    assert!(down.is_some(), "Supervisor must receive __DOWN__ message");
+
+    let msg = down.unwrap();
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(worker_id.to_string().as_str()),
+        "down_from header must match terminated actor"
     );
-
-    let (actor_id, reason) = notification.unwrap().unwrap();
-    assert_eq!(actor_id, worker_id);
-    assert_eq!(reason, "normal");
+    assert_eq!(
+        msg.headers.get("down_reason").map(|s| s.as_str()),
+        Some("normal"),
+        "down_reason header must be 'normal'"
+    );
 }
 
-// NOTE: test_remote_actor_termination_notification removed
-// Known bug: supervisor_callback address issue in remote monitoring.
-// The monitor() function uses config.listen_addr which may not match
-// the actual bound gRPC server address when using port 0.
-// TODO: Fix Node::monitor() to use resolved address for callbacks.
-
-/// Test 5: Monitor non-existent actor - should fail
-#[tokio::test]
-async fn test_monitor_nonexistent_actor() {
-    // Setup: Create node
-    use plexspaces_node::NodeBuilder;
-    let node = Arc::new(NodeBuilder::new("node1").build().await);
-
-    let (tx, _rx) = mpsc::channel(1);
-
-    // Act: Try to monitor non-existent actor
-    let result = node
-        .monitor(
-            &test_runtime_actor_id("nonexistent", "node1"),
-            &test_runtime_actor_id("supervisor", "node1"),
-            tx,
-        )
-        .await;
-
-    // Assert: Should fail with ActorNotFound error
-    assert!(result.is_err(), "Monitoring non-existent actor should fail");
-}
-
-/// Test 6: Multiple supervisors monitoring same actor
+/// Test 4: Multiple supervisors monitoring the same actor — both get __DOWN__.
 #[tokio::test]
 async fn test_multiple_monitors_same_actor() {
-    // Setup: Create node with actor
-    use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let worker_id = test_runtime_actor_id("worker", "node1");
-    let supervisor1_id = test_runtime_actor_id("supervisor1", "node1");
-    let supervisor2_id = test_runtime_actor_id("supervisor2", "node1");
-    let mailbox = Arc::new(
+    let sup1_id = test_runtime_actor_id("supervisor1", "node1");
+    let sup2_id = test_runtime_actor_id("supervisor2", "node1");
+
+    let worker_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    let sup1_mailbox = register_supervisor(&node, &sup1_id).await;
+    let sup2_mailbox = register_supervisor(&node, &sup2_id).await;
 
-    // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
+    let ctx = node_request_context(&node).await;
+    node.monitor(&worker_id, &sup1_id, &ctx).await.unwrap();
+    node.monitor(&worker_id, &sup2_id, &ctx).await.unwrap();
 
-    // Actor already registered - no need to update config
-    // Note: Metrics are updated internally by Node methods
-
-    // Create two supervisors
-    let (tx1, mut rx1) = mpsc::channel(1);
-    let (tx2, mut rx2) = mpsc::channel(1);
-
-    // Act: Both supervisors monitor same actor
-    let mon1 = node.monitor(&worker_id, &supervisor1_id, tx1).await;
-
-    let mon2 = node.monitor(&worker_id, &supervisor2_id, tx2).await;
-
-    assert!(mon1.is_ok(), "First monitor should succeed");
-    assert!(mon2.is_ok(), "Second monitor should succeed");
-
-    // Terminate actor
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
         .handle_actor_termination(&worker_id, ExitReason::Error("crash".to_string()))
         .await;
 
-    // Assert: BOTH supervisors receive notification
-    let notif1 = tokio::time::timeout(Duration::from_millis(500), rx1.recv()).await;
-    let notif2 = tokio::time::timeout(Duration::from_millis(500), rx2.recv()).await;
+    let down1 = wait_for_down(&sup1_mailbox, Duration::from_millis(500)).await;
+    let down2 = wait_for_down(&sup2_mailbox, Duration::from_millis(500)).await;
 
-    assert!(notif1.is_ok(), "Supervisor 1 should receive notification");
-    assert!(notif2.is_ok(), "Supervisor 2 should receive notification");
+    assert!(down1.is_some(), "Supervisor 1 must receive __DOWN__");
+    assert!(down2.is_some(), "Supervisor 2 must receive __DOWN__");
 
-    assert_eq!(notif1.unwrap().unwrap().1, "crash");
-    assert_eq!(notif2.unwrap().unwrap().1, "crash");
+    assert_eq!(
+        down1
+            .unwrap()
+            .headers
+            .get("down_reason")
+            .map(|s| s.as_str()),
+        Some("crash")
+    );
+    assert_eq!(
+        down2
+            .unwrap()
+            .headers
+            .get("down_reason")
+            .map(|s| s.as_str()),
+        Some("crash")
+    );
 }
 
-/// Test 7: Monitor reference is unique per monitor call
+/// Test 5: Monitor refs are unique per monitor() call.
 #[tokio::test]
 async fn test_monitor_ref_uniqueness() {
-    // Setup: Create node with actor
-    use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let worker_id = test_runtime_actor_id("worker", "node1");
-    let supervisor1_id = test_runtime_actor_id("supervisor1", "node1");
-    let supervisor2_id = test_runtime_actor_id("supervisor2", "node1");
-    let mailbox = Arc::new(
+    let sup1_id = test_runtime_actor_id("supervisor1", "node1");
+    let sup2_id = test_runtime_actor_id("supervisor2", "node1");
+
+    let worker_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    register_supervisor(&node, &sup1_id).await;
+    register_supervisor(&node, &sup2_id).await;
 
-    // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
+    let ctx = node_request_context(&node).await;
+    let mon1 = node.monitor(&worker_id, &sup1_id, &ctx).await.unwrap();
+    let mon2 = node.monitor(&worker_id, &sup2_id, &ctx).await.unwrap();
 
-    // Actor already registered - no need to update config
-    // Note: Metrics are updated internally by Node methods
-
-    let (tx1, _rx1) = mpsc::channel(1);
-    let (tx2, _rx2) = mpsc::channel(1);
-
-    // Act: Create two monitors
-    let mon1 = node
-        .monitor(&worker_id, &supervisor1_id, tx1)
-        .await
-        .unwrap();
-
-    let mon2 = node
-        .monitor(&worker_id, &supervisor2_id, tx2)
-        .await
-        .unwrap();
-
-    // Assert: Monitor refs are different (unique)
     assert_ne!(mon1, mon2, "Monitor refs should be unique");
 }
 
-/// Test 8: Actor crash reason propagated correctly
+/// Test 6: Crash reason is propagated verbatim in `down_reason` header.
 #[tokio::test]
 async fn test_actor_crash_reason_propagation() {
-    // Setup: Create node with actor
-    use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
     let worker_id = test_runtime_actor_id("worker", "node1");
     let supervisor_id = test_runtime_actor_id("supervisor", "node1");
-    let mailbox = Arc::new(
+
+    let worker_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
 
-    // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
+    let ctx = node_request_context(&node).await;
+    node.monitor(&worker_id, &supervisor_id, &ctx)
+        .await
+        .unwrap();
 
-    // Actor already registered - no need to update config
-    // Note: Metrics are updated internally by Node methods
-
-    let (tx, mut rx) = mpsc::channel(1);
-
-    node.monitor(&worker_id, &supervisor_id, tx).await.unwrap();
-
-    // Act: Terminate with specific error reason
     let crash_reason = "panic: index out of bounds at line 42";
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
         .handle_actor_termination(&worker_id, ExitReason::Error(crash_reason.to_string()))
         .await;
 
-    // Assert: Exact crash reason received
-    let notification = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
-    assert!(notification.is_ok());
+    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    assert!(down.is_some(), "Should receive __DOWN__");
 
-    let (_actor_id, reason) = notification.unwrap().unwrap();
+    let reason = down
+        .unwrap()
+        .headers
+        .get("down_reason")
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(
         reason, crash_reason,
-        "Crash reason should be propagated exactly"
+        "Crash reason must be propagated exactly"
     );
+}
+
+/// Test 7: demonitor cancels the watch — no __DOWN__ after demonitor.
+#[tokio::test]
+async fn test_demonitor_cancels_down_notification() {
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
+
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
+
+    let worker_mailbox = Arc::new(
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
+            .await
+            .unwrap(),
+    );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+
+    // Establish and then immediately cancel the monitor.
+    let ctx = node_request_context(&node).await;
+    let monitor_ref = node
+        .monitor(&worker_id, &supervisor_id, &ctx)
+        .await
+        .unwrap();
+
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
+    actor_registry
+        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .await
+        .unwrap();
+
+    // Terminate the worker — no DOWN should arrive because we demonitored.
+    actor_registry
+        .handle_actor_termination(&worker_id, ExitReason::Normal)
+        .await;
+
+    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(200)).await;
+    assert!(
+        down.is_none(),
+        "demonitor must prevent __DOWN__ delivery after cancellation"
+    );
+}
+
+/// Test 8: monitor — __DOWN__ fires on Shutdown exit (all exits trigger DOWN).
+#[tokio::test]
+async fn test_monitor_down_on_shutdown() {
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
+
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
+
+    let worker_mailbox = Arc::new(
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
+            .await
+            .unwrap(),
+    );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
+
+    let ctx = node_request_context(&node).await;
+    node.monitor(&worker_id, &supervisor_id, &ctx)
+        .await
+        .unwrap();
+
+    // Terminate with Shutdown — monitors receive __DOWN__ for all exit kinds.
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
+    actor_registry
+        .handle_actor_termination(&worker_id, ExitReason::Shutdown)
+        .await;
+
+    let down = wait_for_down(&supervisor_mailbox, Duration::from_millis(500)).await;
+    assert!(
+        down.is_some(),
+        "__DOWN__ must be delivered even on Shutdown exit"
+    );
+    assert_eq!(
+        down.unwrap().headers.get("down_reason").map(|s| s.as_str()),
+        Some("shutdown"),
+    );
+}
+
+/// Test 9: Multiple demonitor calls for the same ref are idempotent.
+#[tokio::test]
+async fn test_demonitor_idempotent() {
+    let node = Arc::new(NodeBuilder::new("node1").build().await);
+
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
+
+    let worker_mailbox = Arc::new(
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
+            .await
+            .unwrap(),
+    );
+    register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
+    register_supervisor(&node, &supervisor_id).await;
+
+    let ctx = node_request_context(&node).await;
+    let monitor_ref = node
+        .monitor(&worker_id, &supervisor_id, &ctx)
+        .await
+        .unwrap();
+
+    let actor_registry = node.service_locator().actor_registry().await.unwrap();
+    // First demonitor — should succeed.
+    actor_registry
+        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .await
+        .unwrap();
+    // Second demonitor — must also succeed (idempotent, no panic/error).
+    actor_registry
+        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .await
+        .unwrap();
 }

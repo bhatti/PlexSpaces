@@ -64,12 +64,18 @@ async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId
     false
 }
 
-/// Lookup ActorRef for an actor (replaces Node::lookup_actor_ref)
+/// Lookup ActorRef for a **live** actor in the registry.
+///
+/// Returns the registered `ActorRef` by downcasting the `MessageSender` stored in the live
+/// registry. Returns `None` if the actor is not currently active (e.g., lazy virtual actors
+/// that have not yet been activated, or actors on remote nodes).
+///
+/// For lazy virtual actors use `registry_tell` / `registry_ask` which route through
+/// `ActorRegistry` and trigger activation automatically on the first message.
 pub async fn lookup_actor_ref(
     node: &Node,
     actor_id: &ActorId,
 ) -> Result<Option<ActorRef>, plexspaces_node::NodeError> {
-    // Get ActorRegistry from ServiceLocator
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
         .actor_registry()
@@ -78,28 +84,62 @@ pub async fn lookup_actor_ref(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
 
-    if actor_exists_locally(&actor_registry, actor_id).await {
-        Ok(Some(ActorRef::remote(
-            actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            node.id().as_str().to_string(),
-            node.service_locator().clone(),
-        )))
-    } else {
-        let node_id = actor_id.node_id().to_string();
-        if node_id != node.id().as_str() {
-            Ok(Some(ActorRef::remote(
-                actor_id.clone(),
-                String::new(),
-                String::new(),
-                node_id,
-                node.service_locator().clone(),
-            )))
-        } else {
-            Ok(None)
+    // Return the live ActorRef by downcasting the registered MessageSender directly.
+    if let Some(sender) = actor_registry.lookup_actor(actor_id).await {
+        if let Some(actor_ref) = sender.as_any().downcast_ref::<ActorRef>() {
+            return Ok(Some(actor_ref.clone()));
         }
     }
+
+    Ok(None)
+}
+
+/// Send a message to an actor via the registry (fire-and-forget).
+///
+/// Routes through `ActorRegistry.tell()` which automatically activates lazy virtual actors
+/// on the first message. Use this instead of `ActorRef.tell()` for virtual actors.
+pub async fn registry_tell(
+    node: &Node,
+    actor_id: &ActorId,
+    message: plexspaces_core::Message,
+) -> Result<(), plexspaces_node::NodeError> {
+    let actor_registry: Arc<ActorRegistry> = node
+        .service_locator()
+        .actor_registry()
+        .await
+        .ok_or_else(|| {
+            plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
+        })?;
+    actor_registry
+        .tell(actor_id, message)
+        .await
+        .map_err(|e| plexspaces_node::NodeError::ConfigError(e.to_string()))
+}
+
+/// Send a request-reply message to an actor via the registry.
+///
+/// Routes through `ActorRegistry.ask()` which automatically activates lazy virtual actors.
+pub async fn registry_ask(
+    node: &Node,
+    actor_id: &ActorId,
+    message: plexspaces_core::Message,
+    timeout: std::time::Duration,
+) -> Result<plexspaces_core::Message, plexspaces_node::NodeError> {
+    let actor_registry: Arc<ActorRegistry> = node
+        .service_locator()
+        .actor_registry()
+        .await
+        .ok_or_else(|| {
+            plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
+        })?;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
+    actor_registry
+        .ask(&ctx, actor_id, message, timeout)
+        .await
+        .map_err(|e| plexspaces_node::NodeError::ConfigError(e.to_string()))
 }
 
 /// Wait for virtual actor to be activated (polls VirtualActorManager)
@@ -176,95 +216,6 @@ pub async fn activate_virtual_actor(
     lookup_actor_ref(node, actor_id)
         .await?
         .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
-}
-
-/// Get or activate an actor (replaces Node::get_or_activate_actor)
-pub async fn get_or_activate_actor_helper<F, Fut>(
-    node: &Node,
-    actor_id: ActorId,
-    actor_factory: F,
-) -> Result<ActorRef, plexspaces_node::NodeError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<plexspaces_actor::Actor, plexspaces_node::NodeError>>,
-{
-    // Get ActorRegistry and ActorFactory from ServiceLocator
-    let actor_registry: Arc<ActorRegistry> = node
-        .service_locator()
-        .actor_registry()
-        .await
-        .ok_or_else(|| {
-            plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
-        })?;
-    let actor_factory_trait: Arc<dyn plexspaces_core::ActorFactory> = node
-        .service_locator()
-        .get_actor_factory()
-        .await
-        .ok_or_else(|| {
-            plexspaces_node::NodeError::ConfigError("ActorFactory not found".to_string())
-        })?;
-
-    // Check if actor already exists (activated or virtual)
-    if actor_registry.is_actor_activated(&actor_id).await {
-        // Actor exists - get ActorRef
-        lookup_actor_ref(node, &actor_id)
-            .await?
-            .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
-    } else {
-        let parsed_node_id = actor_id.node_id().to_string();
-        if parsed_node_id != node.id().as_str() {
-            Ok(ActorRef::remote(
-                actor_id.clone(),
-                String::new(),
-                String::new(),
-                parsed_node_id,
-                node.service_locator().clone(),
-            ))
-        } else {
-            // Actor doesn't exist - use spawn_built_actor to preserve behavior and facets
-            let actor = actor_factory().await?;
-            let mailbox = actor.mailbox().clone();
-
-            // Extract actor_type from behavior
-            let behavior_type = actor.behavior().read().await.behavior_type();
-            let actor_type = match behavior_type {
-                plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
-                plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
-                plexspaces_core::BehaviorType::GenStateMachine => {
-                    Some("GenStateMachine".to_string())
-                }
-                plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
-                plexspaces_core::BehaviorType::Custom(ref s) => Some(s.clone()),
-            };
-
-            // Use spawn_actor to create the actor
-            // Note: spawn_actor normalizes the actor ID internally
-            let ctx = plexspaces_core::RequestContext::new_without_auth(
-                "default".to_string(),
-                "default".to_string(),
-            );
-            let actor_type_str = actor_type.unwrap_or_else(|| "GenServer".to_string());
-            let _message_sender = actor_factory_trait
-                .spawn_actor(
-                    &ctx,
-                    &actor_id,
-                    &actor_type_str,
-                    vec![],
-                    None,
-                    std::collections::HashMap::new(),
-                    vec![],
-                )
-                .await
-                .map_err(|e| {
-                    plexspaces_node::NodeError::ConfigError(format!("Failed to spawn actor: {}", e))
-                })?;
-
-            // Registration is synchronous - get ActorRef from registry to ensure we have the correct ID (normalized)
-            lookup_actor_ref(node, &actor_id)
-                .await?
-                .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
-        }
-    }
 }
 
 /// Spawn actor builder (replaces Node::spawn_actor_builder)
@@ -366,10 +317,16 @@ pub async fn find_actor_helper(
 }
 
 /// Spawn actor using ActorFactory (replaces Node::spawn_actor)
+///
+/// Uses `spawn_built_actor_impl` to register the pre-built actor directly, bypassing
+/// BehaviorRegistry. This allows test nodes to spawn actors without registering a
+/// BehaviorRegistry (which is only needed for type-driven spawning via actor_type string).
 pub async fn spawn_actor_helper(
     node: &Node,
     actor: plexspaces_actor::Actor,
 ) -> Result<ActorRef, plexspaces_node::NodeError> {
+    use plexspaces_actor::ActorFactoryImpl;
+
     // Get ActorFactory from ServiceLocator
     let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node
         .service_locator()
@@ -398,16 +355,24 @@ pub async fn spawn_actor_helper(
         "default".to_string(),
     );
 
-    // Use spawn_actor to create the actor
-    let _message_sender = actor_factory
-        .spawn_actor(
+    // Downcast to ActorFactoryImpl to use spawn_built_actor_impl, which registers
+    // the pre-built actor directly without going through BehaviorRegistry.
+    let factory_impl = actor_factory
+        .as_any()
+        .downcast_ref::<ActorFactoryImpl>()
+        .ok_or_else(|| {
+            plexspaces_node::NodeError::ConfigError(
+                "ActorFactory is not ActorFactoryImpl — cannot spawn pre-built actor".to_string(),
+            )
+        })?;
+
+    factory_impl
+        .spawn_built_actor_impl(
             &ctx,
-            &actor_id,
-            &actor_type_str,
+            Arc::new(actor),
+            actor_type_str,
             vec![],
-            None,
             std::collections::HashMap::new(),
-            vec![],
         )
         .await
         .map_err(|e| {
@@ -415,10 +380,5 @@ pub async fn spawn_actor_helper(
                 "Failed to spawn actor via ActorFactory: {}",
                 e
             ))
-        })?;
-
-    // Get ActorRef from ActorRegistry (should be local since we just spawned it)
-    lookup_actor_ref(node, &actor_id)
-        .await?
-        .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
+        })
 }

@@ -9,8 +9,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "indexer"
-type = "indexer"
+name = "indexer"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "indexer"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -22,8 +23,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "retriever"
-type = "retriever"
+name = "retriever"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "retriever"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -34,8 +36,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "generator"
-type = "generator"
+name = "generator"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "generator"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -47,8 +50,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "validator"
-type = "validator"
+name = "validator"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "validator"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -59,8 +63,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "rag_workflow"
-type = "rag_workflow"
+name = "rag_workflow"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "rag_workflow"
 restart = "permanent"
 shutdown_timeout_seconds = 30
 behavior_kind = "Workflow"
@@ -72,8 +77,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "pipeline_event"
-type = "pipeline_event"
+name = "pipeline_event"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "pipeline_event"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
@@ -83,8 +89,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "rag_fsm"
-type = "rag_fsm"
+name = "rag_fsm"
+actor_type = "agentic_rag_pipeline_wasm"
+role = "rag_fsm"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"

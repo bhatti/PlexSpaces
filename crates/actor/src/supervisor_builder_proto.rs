@@ -33,7 +33,7 @@
 
 use crate::{ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorError};
 use plexspaces_proto::application::v1::{
-    ChildSpec as ProtoChildSpec, ChildType as ProtoChildType, RestartPolicy as ProtoRestartPolicy,
+    ChildSpec as ProtoChildSpec, RestartPolicy as ProtoRestartPolicy,
     SupervisionStrategy as ProtoSupervisionStrategy, SupervisorSpec as ProtoSupervisorSpec,
 };
 use std::sync::Arc;
@@ -159,16 +159,21 @@ impl ProtoSupervisorBuilder {
         // For now, we just validate the spec
         // Future: Use ActorFactory to spawn actors
 
-        // Validate child spec
-        if child_spec.id.is_empty() {
+        let Some(id) = child_spec.actor_identity.as_ref() else {
             return Err(SupervisorError::ConfigError(
-                "Child spec must have non-empty ID".to_string(),
+                "Child spec must set actor_identity (name + actor_type)".to_string(),
+            ));
+        };
+        if id.name.is_empty() || id.actor_type.is_empty() {
+            return Err(SupervisorError::ConfigError(
+                "Child spec actor_identity must have non-empty name and actor_type".to_string(),
             ));
         }
 
         // Log child spec for now (actual spawning in next phase)
         tracing::debug!(
-            child_id = %child_spec.id,
+            child_name = %id.name,
+            actor_type = %id.actor_type,
             restart_policy = ?restart,
             child_type = ?child_type,
             "Validated child spec (spawning not yet implemented)"
@@ -187,23 +192,18 @@ impl ProtoSupervisorBuilder {
             Ok(ProtoRestartPolicy::RestartPolicyTransient) => Ok(RestartPolicy::Transient),
             Ok(ProtoRestartPolicy::RestartPolicyTemporary) => Ok(RestartPolicy::Temporary),
             Err(_) => Err(SupervisorError::ConfigError(format!(
-                "Unknown restart policy for child '{}': {}",
-                child_spec.id, child_spec.restart
+                "Unknown restart policy for child {:?}: {}",
+                child_spec.actor_identity.as_ref().map(|i| i.name.as_str()),
+                child_spec.restart
             ))),
         }
     }
 
-    /// Convert proto ChildType to Rust ChildType
+    /// Convert proto ChildSpec role string to Rust ChildType
     fn convert_child_type(child_spec: &ProtoChildSpec) -> Result<ChildType, SupervisorError> {
-        match ProtoChildType::try_from(child_spec.r#type) {
-            Ok(ProtoChildType::ChildTypeUnspecified) | Ok(ProtoChildType::ChildTypeWorker) => {
-                Ok(ChildType::Worker)
-            }
-            Ok(ProtoChildType::ChildTypeSupervisor) => Ok(ChildType::Supervisor),
-            Err(_) => Err(SupervisorError::ConfigError(format!(
-                "Unknown child type for child '{}': {}",
-                child_spec.id, child_spec.r#type
-            ))),
+        match child_spec.role.as_str() {
+            "supervisor" => Ok(ChildType::Supervisor),
+            _ => Ok(ChildType::Worker),
         }
     }
 }
@@ -217,8 +217,7 @@ mod tests {
     use super::*;
     use crate::SupervisionStrategy;
     use plexspaces_proto::application::v1::{
-        ChildSpec, ChildType, RestartPolicy, SupervisionStrategy as ProtoSupervisionStrategy,
-        SupervisorSpec,
+        ChildSpec, RestartPolicy, SupervisionStrategy as ProtoSupervisionStrategy, SupervisorSpec,
     };
     use plexspaces_services::ServiceLocatorImpl;
 
@@ -232,17 +231,17 @@ mod tests {
                 nanos: 0,
             }),
             children: vec![ChildSpec {
-                id: "worker1".to_string(),
-                r#type: ChildType::ChildTypeWorker as i32,
-                args: std::collections::HashMap::new(),
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "worker1".to_string(),
+                    actor_type: "worker".to_string(),
+                }),
+                role: "worker".to_string(),
                 restart: RestartPolicy::RestartPolicyPermanent as i32,
                 shutdown_timeout: Some(prost_types::Duration {
                     seconds: 30,
                     nanos: 0,
                 }),
-                supervisor: None,
-                facets: vec![],
-                behavior_kind: None,
+                ..Default::default()
             }],
         }
     }

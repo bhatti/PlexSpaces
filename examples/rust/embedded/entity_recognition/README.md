@@ -5,7 +5,7 @@
 This example demonstrates **resource-aware scheduling** with a realistic AI workload, similar to [Ray's entity recognition example](https://docs.ray.io/en/latest/ray-overview/examples/entity-recognition-with-llms/README.html).
 
 The example shows how to:
-- Use `NodeBuilder` and `ConfigBootstrap` for configuration
+- Use `NodeBuilder`, `build_started()`, and `ConfigBootstrap` for unified startup
 - Use `CoordinationComputeTracker` for metrics
 - Deploy actors with resource requirements (CPU/GPU)
 - Coordinate multi-stage workflows (Loader → Processor → Aggregator)
@@ -81,8 +81,8 @@ Environment variables can override configuration:
 # Build and run
 ./scripts/run.sh
 
-# Or manually:
-cargo run --release --bin entity-recognition-app -- \
+# Or manually (debug by default):
+cargo run -- \
     doc1.txt doc2.txt doc3.txt
 ```
 
@@ -96,10 +96,16 @@ docker run -d -p 6379:6379 redis:7-alpine
 ./scripts/deploy.sh
 
 # In another terminal, run application
-cargo run --release --bin entity-recognition-app -- \
+cargo run -- \
     --backend redis \
     --redis-url redis://localhost:6379 \
     doc1.txt doc2.txt doc3.txt
+```
+
+`cargo run` starts the application orchestrator by default. The node binary remains available explicitly with:
+
+```bash
+cargo run --bin entity-recognition-node -- --node-id node-1
 ```
 
 ## Scripts
@@ -152,6 +158,7 @@ Metrics are displayed at the end of execution:
 This example demonstrates the use of framework abstractions:
 
 - **`NodeBuilder`**: Fluent API for node creation
+- **`build_started()`**: Starts embedded examples with the same release-config, migration, service-init, and runtime path as the server
 - **`ConfigBootstrap`**: Erlang/OTP-style configuration loading
 - **`CoordinationComputeTracker`**: Standardized metrics tracking
 - **`ActorBehavior`**: Actor behavior implementations (GenServer pattern)
@@ -175,7 +182,7 @@ cargo fmt --check
 - Resource-aware scheduling via actor groups and labels
 - Configuration-driven via `release.toml` and environment variables
 - Metrics tracking for coordination vs compute analysis
-- Uses `NodeBuilder` for node creation (not `Node::new()` directly)
+- Uses `NodeBuilder` + `build_started()` for node creation and runtime startup (not `Node::new()` directly)
 - Uses `ConfigBootstrap` for configuration loading (Erlang/OTP-style)
 - Uses `CoordinationComputeTracker` for standardized metrics
 

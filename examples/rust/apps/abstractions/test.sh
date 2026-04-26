@@ -14,6 +14,8 @@ EPHEMERAL_ACTOR="ephemeral:session-1"
 WORKFLOW_ACTOR="workflow:order-1"
 CHANNEL_ACTOR="channel:alerts"
 CONTROLLER_ACTOR="controller"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+NODE_META="$REPO_ROOT/plexspaces-node-$((HTTP_PORT - 1)).meta"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -142,6 +144,66 @@ PY
   exit 1
 }
 
+current_binary_mtime_epoch() {
+  python3 - <<'PY'
+import os
+print(int(os.path.getmtime("target/debug/plexspaces")))
+PY
+}
+
+require_binary_newer_than_sources() {
+  cd "$REPO_ROOT"
+  python3 - <<'PY'
+import os
+import sys
+
+binary = "target/debug/plexspaces"
+sources = [
+    "crates/services/src/actor_service/mod.rs",
+    "crates/application/src/wasm_message_sender.rs",
+    "crates/application/src/wasm_application.rs",
+    "crates/core/src/virtual_actor_manager.rs",
+]
+
+binary_mtime = os.path.getmtime(binary)
+newer = [path for path in sources if os.path.exists(path) and os.path.getmtime(path) > binary_mtime]
+if newer:
+    print("\n".join(newer))
+    sys.exit(1)
+PY
+}
+
+require_fresh_server_sh_node() {
+  if [ ! -f "$NODE_META" ]; then
+    echo -e "${RED}Refusing to run against an untracked node on port $HTTP_PORT${NC}"
+    echo "  Expected metadata file: $NODE_META"
+    echo "  Start the node from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
+
+  local current_mtime meta_mtime meta_binary
+  current_mtime="$(cd "$REPO_ROOT" && current_binary_mtime_epoch)"
+  meta_mtime="$(grep '^binary_mtime_epoch=' "$NODE_META" | head -n1 | cut -d= -f2-)"
+  meta_binary="$(grep '^binary_path=' "$NODE_META" | head -n1 | cut -d= -f2-)"
+
+  if [ "$meta_binary" != "$REPO_ROOT/target/debug/plexspaces" ] || [ "$meta_mtime" != "$current_mtime" ]; then
+    echo -e "${RED}Node on port $HTTP_PORT is not running the current repo build${NC}"
+    echo "  Expected binary: $REPO_ROOT/target/debug/plexspaces"
+    echo "  Recorded binary: ${meta_binary:-missing}"
+    echo "  Expected mtime: $current_mtime"
+    echo "  Recorded mtime: ${meta_mtime:-missing}"
+    echo "  Rebuild and restart from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
+
+  if ! NEWER_SOURCES="$(require_binary_newer_than_sources)"; then
+    echo -e "${RED}Node binary is older than the spawn/role mapping sources${NC}"
+    echo "$NEWER_SOURCES" | sed 's/^/  newer source: /'
+    echo "  Rebuild and restart from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
+}
+
 echo "Step 0: Run native contract tests"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$SCRIPT_DIR/../../../.." && pwd)/target}"
 cargo test --manifest-path "$SCRIPT_DIR/Cargo.toml"
@@ -161,6 +223,8 @@ if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Start node with ./scripts/server.sh and re-run this test${NC}"
   exit 1
 fi
+
+require_fresh_server_sh_node
 
 echo "Step 2: Deploy"
 curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
@@ -335,7 +399,7 @@ fi
 echo -e "  ${GREEN}non-durable virtual actor reinitialized from init-config${NC}"
 
 echo "Step 10: Spawn helper actor through controller"
-SPAWN_RESULT=$(send_actor "$CONTROLLER_ACTOR" '{"op":"spawn_actor","module_ref":"abstractions","actor_id":"spawned-1","config":{"role":"abstractions"}}' 15)
+SPAWN_RESULT=$(send_actor "$CONTROLLER_ACTOR" '{"op":"spawn_actor","module_ref":"abstractions_wasm","actor_id":"spawned-1","config":{"role":"abstractions"}}' 15)
 assert_actor_ok "spawn_actor" "$SPAWN_RESULT"
 SPAWNED_ACTOR_ID="$(extract_payload_json "$SPAWN_RESULT")"
 echo "  spawned: $SPAWNED_ACTOR_ID"

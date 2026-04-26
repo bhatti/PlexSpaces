@@ -178,19 +178,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "webhook-handler-example-secret".to_string());
     std::env::set_var("PLEXSPACES_JWT_SECRET", &jwt_secret);
 
-    let node = NodeBuilder::new("webhook-handler-node")
+    let node_arc = NodeBuilder::new("webhook-handler-node")
         .with_listen_addr(format!("0.0.0.0:{}", GRPC_PORT))
         .with_in_memory_backends()
-        .build()
+        .build_started()
         .await;
-
-    let node_arc = Arc::new(node);
-    let node_for_server = node_arc.clone();
-    let _start_handle = tokio::spawn(async move {
-        if let Err(e) = node_for_server.start().await {
-            eprintln!("Node start error: {}", e);
-        }
-    });
 
     wait_for_port(HTTP_PORT).await?;
     info!("✅ Node listening (gRPC {} HTTP {})", GRPC_PORT, HTTP_PORT);
@@ -201,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        format!("webhook-handler-1@{}", node_arc.id()),
+        "webhook-handler-1".to_string(),
         NAMESPACE,
         WebhookHandlerActor::new(),
         vec![],

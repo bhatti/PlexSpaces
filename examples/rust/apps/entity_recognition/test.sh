@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Entity recognition (Rust WASM). process_document, batch, get_status, application metrics.
+# Entity recognition (Rust WASM). process_document, batch, get_status, get_metrics.
 # Usage: ./test.sh [HTTP_PORT]
 set -euo pipefail
 
@@ -136,14 +136,14 @@ echo -e "  ${GREEN}Batch wall: ${WALL_MS}ms${NC}"
 echo "Step 4: Metrics"
 METRICS=$(send_op '{"op":"get_status"}' 15)
 assert_actor_ok "get_status" "$METRICS"
+APP_METRICS=$(send_op '{"op":"get_metrics"}' 15)
+assert_actor_ok "get_metrics" "$APP_METRICS"
 
-APP_LIST_JSON=$(fetch_applications_list_json "http://localhost:$HTTP_PORT")
-
-if ! METRICS_JSON="$METRICS" APP_LIST_JSON="$APP_LIST_JSON" WALL_MS="$WALL_MS" APP_ID="$APP_ID" HTTP_PORT="$HTTP_PORT" python3 - <<'PY'
+if ! METRICS_JSON="$METRICS" APP_METRICS_JSON="$APP_METRICS" WALL_MS="$WALL_MS" APP_ID="$APP_ID" HTTP_PORT="$HTTP_PORT" python3 - <<'PY'
 import json
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 def unwrap_actor_payload(raw: str) -> Dict[str, Any]:
@@ -161,26 +161,6 @@ def unwrap_actor_payload(raw: str) -> Dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return p if isinstance(p, dict) else {}
-
-
-def find_app_record(data: Any, app_id: str) -> Optional[Dict[str, Any]]:
-    if isinstance(data, dict):
-        apps = data.get("applications", data.get("items"))
-        if apps is None and "application_id" in data:
-            apps = [data]
-    elif isinstance(data, list):
-        apps = data
-    else:
-        apps = []
-    if not isinstance(apps, list):
-        return None
-    for a in apps:
-        if not isinstance(a, dict):
-            continue
-        aid = str(a.get("application_id") or a.get("name") or a.get("id") or "")
-        if aid == app_id or app_id in aid:
-            return a
-    return None
 
 
 def print_metric_maps(m: Dict[str, Any], prefix: str) -> None:
@@ -234,30 +214,18 @@ print(f"  Granularity:      {gran:.1f}x (compute/coordinate)")
 print(f"  Batch wall (step 3): {wall_ms}ms")
 
 app_id = os.environ.get("APP_ID", "")
-raw_list = os.environ.get("APP_LIST_JSON", "[]").strip() or "[]"
 try:
-    data = json.loads(raw_list)
-except json.JSONDecodeError:
+    m = unwrap_actor_payload(os.environ.get("APP_METRICS_JSON", ""))
+except (json.JSONDecodeError, ValueError) as e:
     print()
-    print("  Application metrics: could not parse applications list (non-fatal)")
+    print(f"  Application metrics: could not parse get_metrics response: {e}")
     sys.exit(0)
-
-found = find_app_record(data, app_id)
-if not found:
-    print()
-    print(f"  Application metrics: no list entry for {app_id!r} (non-fatal)")
-    sys.exit(0)
-
-inner = found.get("application") if isinstance(found.get("application"), dict) else found
-m = inner.get("metrics") if isinstance(inner, dict) else None
-if not isinstance(m, dict):
-    m = found.get("metrics") if isinstance(found.get("metrics"), dict) else {}
 
 print()
-print("  Application metrics (host::application_metrics_add)")
+print("  Application metrics (host::application_get_metrics)")
 print("  ────────────────────────────────────────────")
 if not m:
-    print("  (no metrics object on application record)")
+    print("  (no metrics payload)")
     sys.exit(0)
 
 mc = m.get("message_count")

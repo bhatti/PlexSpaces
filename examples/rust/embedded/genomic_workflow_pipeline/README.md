@@ -7,6 +7,7 @@ A simplified example demonstrating PlexSpaces **workflow orchestration** with a 
 - **Workflow Definition**: Multi-step pipeline with typed configurations
 - **Workflow Execution**: Real processing with simulated genomic operations
 - **ConfigBootstrap**: Erlang/OTP-style configuration loading
+- **NodeBuilder**: Unified embedded startup using the same release-config, migration, and service initialization path as the server
 - **CoordinationComputeTracker**: Standardized metrics for tracking coordination vs compute
 - **Durability**: Workflow state persistence via journaling (via WorkflowStorage)
 - **🔄 Automated Recovery**: Auto-recovery of interrupted workflows on node startup
@@ -19,7 +20,7 @@ A simplified example demonstrating PlexSpaces **workflow orchestration** with a 
 ### PlexSpaces Workflow Features
 - ✅ **Workflow Definition**: Multi-step pipeline with typed configurations
 - ✅ **Workflow Execution**: Real processing with simulated genomic operations
-- ✅ **Workflow Storage**: In-memory storage for definitions and execution metadata
+- ✅ **Workflow Storage**: File- or DB-backed storage for definitions and execution metadata
 - ✅ **Metrics Tracking**: Compute vs coordinate overhead measurement
 
 ### CLAUDE.md Principle #6: Granularity vs Communication Cost
@@ -39,6 +40,7 @@ A simplified example demonstrating PlexSpaces **workflow orchestration** with a 
 The example uses a standalone runner (`main.rs`) that:
 - Accepts number of reads as CLI argument
 - Loads configuration via `ConfigBootstrap`
+- Starts an embedded node with `build_started()` and `with_shared_db_connection_string(...)`
 - Creates workflow definition with 3 steps
 - Executes pipeline steps directly (simplified for demonstration)
 - Tracks metrics using `CoordinationComputeTracker`
@@ -50,7 +52,7 @@ The example includes actor implementations (`ActorBehavior`) that can be used fo
 - `AlignmentActorBehavior`: Genome alignment
 - `VariantCallingActorBehavior`: Variant calling
 
-These actors are available for integration with `NodeBuilder`/`ActorBuilder` patterns in production deployments.
+These actors are available for integration with node-managed deployments in production.
 
 ## Running the Example
 
@@ -58,7 +60,7 @@ These actors are available for integration with `NodeBuilder`/`ActorBuilder` pat
 
 ```bash
 # From example directory
-cd examples/genomic-workflow-pipeline
+cd examples/rust/embedded/genomic_workflow_pipeline
 
 # Run with default 1000 reads
 ./scripts/run.sh
@@ -66,8 +68,8 @@ cd examples/genomic-workflow-pipeline
 # Or specify number of reads
 ./scripts/run.sh 5000
 
-# Or use cargo directly
-cargo run --release -- 1000
+# Or use cargo directly (debug by default)
+cargo run -- 1000
 ```
 
 ### Workflow Recovery & Auto-Recovery
@@ -78,21 +80,21 @@ The example showcases **robust workflow recovery** with automated recovery on st
 
 ```bash
 # Start a workflow (saves execution ID to last_execution_id.txt)
-cargo run --release -- 1000
+cargo run -- 1000
 
 # If interrupted, resume using the execution ID
-cargo run --release -- --resume <execution_id>
+cargo run -- --resume <execution_id>
 
 # Or resume using the saved execution ID
 EXEC_ID=$(cat last_execution_id.txt)
-cargo run --release -- --resume $EXEC_ID
+cargo run -- --resume $EXEC_ID
 ```
 
 #### Automated Recovery on Startup
 
 ```bash
 # Enable auto-recovery to automatically resume interrupted workflows
-cargo run --release -- --auto-recover 1000
+cargo run -- --auto-recover 1000
 
 # Auto-recovery will:
 # 1. Find all RUNNING/PENDING workflows
@@ -107,27 +109,28 @@ The example supports both SQLite and PostgreSQL:
 
 ```bash
 # SQLite (default, for testing/embedded)
-cargo run --release -- --storage workflow.db 1000
+cargo run -- --storage workflow.db 1000
 
 # PostgreSQL (for production multi-node deployments)
-cargo run --release -- --storage "postgresql://user:pass@localhost/workflow_db" 1000
+cargo run -- --storage "postgresql://user:pass@localhost/workflow_db" 1000
 ```
 
 **How Recovery Works:**
-1. **Persistent Storage**: Workflow state is saved to database (SQLite or PostgreSQL)
+1. **Unified Node Startup**: The example starts an embedded node with `NodeBuilder::build_started()` and `with_shared_db_connection_string(...)`, so release config loading, unified migrations, and service initialization happen before workflow execution begins.
+2. **Persistent Storage**: Workflow state is saved to database (SQLite or PostgreSQL)
    - SQLite: File-based storage (default: `workflow.db`)
    - PostgreSQL: Connection string for multi-node deployments
    - Falls back to in-memory storage if database creation fails
-2. **Execution State**: Each workflow execution has:
+3. **Execution State**: Each workflow execution has:
    - Unique execution ID
    - Status (PENDING, RUNNING, COMPLETED, FAILED)
    - Version (for optimistic locking)
    - Node ownership (for multi-node recovery)
    - Heartbeat (for health monitoring)
-3. **Resume Capability**: Use `--resume <execution_id>` to continue from the last checkpoint
+4. **Resume Capability**: Use `--resume <execution_id>` to continue from the last checkpoint
    - Checks execution status and resumes if in RUNNING/PENDING state
    - Uses `WorkflowExecutor::execute_from_state()` to continue execution
-4. **Auto-Recovery**: Use `--auto-recover` to automatically resume interrupted workflows on startup
+5. **Auto-Recovery**: Use `--auto-recover` to automatically resume interrupted workflows on startup
    - Finds all RUNNING/PENDING workflows
    - Claims ownership with optimistic locking (prevents race conditions)
    - Transfers stale workflows from dead nodes (based on heartbeat threshold)
@@ -140,7 +143,7 @@ cargo run --release -- --storage "postgresql://user:pass@localhost/workflow_db" 
 - **Completed Workflow**: Resuming a completed workflow shows completion status
 
 **Recovery Implementation:**
-- Uses `WorkflowStorage::new_file()` or `WorkflowStorage::new_postgres()` for persistent storage
+- Uses node startup to run unified migrations before opening `WorkflowStorage::new_file()` or `WorkflowStorage::new_postgres()`
 - `WorkflowExecutor::execute_from_state()` resumes from last checkpoint
 - Execution state tracked in `workflow_executions` table with version and heartbeat
 - Step execution history preserved for debugging
@@ -176,14 +179,14 @@ This implementation follows best practices from **Temporal** and **AWS Step Func
 **Manual Testing:**
 ```bash
 # 1. Start workflow
-cargo run --release -- 1000
+cargo run -- 1000
 
 # 2. Kill process (simulate crash)
 kill -9 <pid>
 
 # 3. Resume workflow
 EXEC_ID=$(cat last_execution_id.txt)
-cargo run --release -- --resume $EXEC_ID
+cargo run -- --resume $EXEC_ID
 ```
 
 **Automated Testing:**
@@ -298,7 +301,15 @@ This example demonstrates the use of:
    let config: GenomicPipelineConfig = ConfigBootstrap::load().unwrap_or_default();
    ```
 
-2. **CoordinationComputeTracker**: Standardized metrics tracking
+2. **NodeBuilder**: Shared embedded startup path for release config, migrations, services, and runtime
+   ```rust
+   let node = NodeBuilder::new("genomic-pipeline-node")
+       .with_shared_db_connection_string("workflow.db")
+       .build_started()
+       .await;
+   ```
+
+3. **CoordinationComputeTracker**: Standardized metrics tracking
    ```rust
    let mut metrics_tracker = CoordinationComputeTracker::new("genomic-pipeline".to_string());
    metrics_tracker.start_coordinate();
@@ -307,7 +318,7 @@ This example demonstrates the use of:
    let metrics = metrics_tracker.finalize();
    ```
 
-3. **WorkflowStorage**: Workflow definition and execution metadata storage
+4. **WorkflowStorage**: Workflow definition and execution metadata storage
    ```rust
    let storage = WorkflowStorage::new_in_memory().await?;
    storage.save_definition(&definition).await?;
@@ -349,7 +360,7 @@ cargo test
   - Execution IDs saved to `last_execution_id.txt` for easy recovery
 - **Metrics**: Tracks coordination vs compute metrics to demonstrate CLAUDE.md Principle #6 (Granularity vs Communication Cost)
 - **Actors**: Actor implementations (`ActorBehavior`) provided for node-based deployment but not used in standalone runner
-- **Storage**: Uses `WorkflowStorage::new_file()` for persistent storage; `WorkflowExecutor::execute_from_state()` for recovery
+- **Storage**: Uses node-managed startup to prepare the shared database before `WorkflowStorage::new_file()` / `WorkflowStorage::new_postgres()` are used for persistence and recovery
 
 ## Related Examples
 

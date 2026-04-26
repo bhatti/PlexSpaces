@@ -102,3 +102,43 @@ pub async fn request_context_from_grpc_request(
         None, // No default namespace - must come from request
     )
 }
+
+/// Apply [`RequestContext`] to outbound gRPC metadata so a peer can run
+/// [`request_context_from_grpc_request`] and recover the same tenant (JWT / auth
+/// interceptor), namespace from the original edge request, and propagated auth headers.
+///
+/// Header names match the ingress contract used by [`request_context_from_grpc_request`]:
+/// `x-tenant-id`, `x-namespace`, `x-user-id`, `x-admin`, and `authorization` when present.
+pub fn apply_request_context_to_grpc_metadata(
+    ctx: &RequestContext,
+    md: &mut tonic::metadata::MetadataMap,
+) {
+    use tonic::metadata::MetadataValue;
+    if !ctx.tenant_id().is_empty() {
+        if let Ok(v) = MetadataValue::try_from(ctx.tenant_id()) {
+            let _ = md.insert("x-tenant-id", v);
+        }
+    }
+    if !ctx.namespace().is_empty() {
+        if let Ok(v) = MetadataValue::try_from(ctx.namespace()) {
+            let _ = md.insert("x-namespace", v);
+        }
+    }
+    if let Some(uid) = ctx.user_id() {
+        if !uid.is_empty() {
+            if let Ok(v) = MetadataValue::try_from(uid) {
+                let _ = md.insert("x-user-id", v);
+            }
+        }
+    }
+    if ctx.is_admin() {
+        let _ = md.insert("x-admin", MetadataValue::from_static("true"));
+    }
+    if let Some(authz) = ctx.get_header("authorization") {
+        if !authz.is_empty() {
+            if let Ok(v) = MetadataValue::try_from(authz) {
+                let _ = md.insert("authorization", v);
+            }
+        }
+    }
+}

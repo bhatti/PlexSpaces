@@ -9,8 +9,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "model_registry"
-type = "model_registry"
+name = "model_registry"
+actor_type = "resource_aware_inference_wasm"
+role = "model_registry"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -19,10 +20,10 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "metrics", priority = 80 }
 ]
-
 [[supervisor.children]]
-id = "inference_worker_small"
-type = "inference_worker"
+name = "inference_worker_small"
+actor_type = "resource_aware_inference_wasm"
+role = "inference_worker_small"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -31,10 +32,10 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "metrics", priority = 80 }
 ]
-
 [[supervisor.children]]
-id = "inference_worker_medium"
-type = "inference_worker"
+name = "inference_worker_medium"
+actor_type = "resource_aware_inference_wasm"
+role = "inference_worker_medium"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -43,10 +44,10 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "metrics", priority = 80 }
 ]
-
 [[supervisor.children]]
-id = "inference_worker_large"
-type = "inference_worker"
+name = "inference_worker_large"
+actor_type = "resource_aware_inference_wasm"
+role = "inference_worker_large"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -55,10 +56,10 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "metrics", priority = 80 }
 ]
-
 [[supervisor.children]]
-id = "budget_manager"
-type = "budget_manager"
+name = "budget_manager"
+actor_type = "resource_aware_inference_wasm"
+role = "budget_manager"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -68,10 +69,10 @@ facets = [
   { type = "durability", priority = 90, config = { checkpoint_interval = 5 } },
   { type = "metrics", priority = 80 }
 ]
-
 [[supervisor.children]]
-id = "routing_workflow"
-type = "routing_workflow"
+name = "routing_workflow"
+actor_type = "resource_aware_inference_wasm"
+role = "routing_workflow"
 restart = "permanent"
 shutdown_timeout_seconds = 30
 behavior_kind = "Workflow"
@@ -80,10 +81,10 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
 ]
-
 [[supervisor.children]]
-id = "inference_event"
-type = "inference_event"
+name = "inference_event"
+actor_type = "resource_aware_inference_wasm"
+role = "inference_event"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
@@ -91,10 +92,10 @@ args = { role = "inference_event" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
 ]
-
 [[supervisor.children]]
-id = "budget_fsm"
-type = "budget_fsm"
+name = "budget_fsm"
+actor_type = "resource_aware_inference_wasm"
+role = "budget_fsm"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"

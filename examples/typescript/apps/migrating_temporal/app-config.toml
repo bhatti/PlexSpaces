@@ -21,8 +21,9 @@ max_restart_window_seconds = 60
 # Order Fulfillment Workflow (one instance per order; workflow behavior)
 # virtual_actor: enables order-fulfillment:order-1, order-fulfillment:order-2, etc. (get_or_activate)
 [[supervisor.children]]
-id = "order-fulfillment"
-type = "worker"
+name = "order-fulfillment"
+actor_type = "migrating_temporal_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "Workflow"

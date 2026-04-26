@@ -81,7 +81,7 @@ async fn shared_registry_test_node() -> Arc<Node> {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
-        .register_simple("GenServer", || {
+        .register_simple("gen_server", || {
             Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
@@ -120,8 +120,13 @@ async fn spawn_registry_facet_actor(node: &Arc<Node>) -> (ActorRef, ActorId) {
 
     let node_id = node.id();
     let actor_name = format!("reg-tbl-{}", ulid::Ulid::new());
-    let actor_id = ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
-        .expect("test actor id should be valid");
+    let actor_id = ActorId::new(
+        &actor_name,
+        "gen_server",
+        "test-namespace",
+        node_id.as_str(),
+    )
+    .expect("test actor id should be valid");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),
@@ -130,7 +135,7 @@ async fn spawn_registry_facet_actor(node: &Arc<Node>) -> (ActorRef, ActorId) {
     node.spawn(
         &ctx,
         &actor_id,
-        "GenServer",
+        "gen_server",
         vec![],
         None,
         std::collections::HashMap::new(),

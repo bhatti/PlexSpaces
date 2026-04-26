@@ -72,19 +72,6 @@ class SupervisionStrategy(betterproto.Enum):
     """
 
 
-class ChildType(betterproto.Enum):
-    """Child type"""
-
-    UNSPECIFIED = 0
-    """Unspecified (invalid)"""
-
-    WORKER = 1
-    """Worker process (actor)"""
-
-    SUPERVISOR = 2
-    """Supervisor process (manages other children)"""
-
-
 class RestartPolicy(betterproto.Enum):
     """Restart policy (Erlang/OTP)"""
 
@@ -456,11 +443,17 @@ class ChildSpec(betterproto.Message):
      - Support for nested supervisors
     """
 
-    id: str = betterproto.string_field(1)
-    """Unique child identifier"""
+    actor_identity: "__common_v1__.ActorIdentity" = betterproto.message_field(1)
+    """
+    Instance name + behavior class (canonical ActorId is derived at deploy time).
+    """
 
-    type: "ChildType" = betterproto.enum_field(2)
-    """Child type (worker or supervisor)"""
+    role: str = betterproto.string_field(2)
+    """
+    Role of this child within the application (e.g. "worker", "leader", "supervisor").
+     Maps 1:1 to the TOML `type` field in [[supervisor.children]].
+     Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+    """
 
     args: Dict[str, str] = betterproto.map_field(
         3, betterproto.TYPE_STRING, betterproto.TYPE_STRING

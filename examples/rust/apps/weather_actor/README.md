@@ -30,6 +30,14 @@ To exercise the live outbound HTTP path, change `args.offline_mode` in [`app-con
 | `get_weather` | JSON `{ "op":"get_weather","city":"..." }` | JSON `{ city, temp_c, wind_kph, fetched_at_ms, source, error }` |
 | `cache_stats` | JSON `{ "op":"cache_stats" }` | JSON `{ hits, misses }` |
 | `clear_cache` | JSON `{ "op":"clear_cache" }` | JSON `{ cleared }` |
+| `get_metrics` | JSON `{ "op":"get_metrics" }` | JSON `ApplicationMetrics` snapshot for the local node |
+
+## Metrics
+
+The actor updates framework application metrics through `application_metrics_add` on each handled
+operation, and the example reads them back through `application_get_metrics` via the `get_metrics`
+message. That keeps the Rust example aligned with the newer metrics architecture used by the other
+language SDK examples instead of scraping application-list output.
 
 ## Further reading
 

@@ -65,6 +65,7 @@ pub struct NodeBuilder {
     node_id: NodeId,
     config: NodeConfig,
     release_spec: Option<ReleaseSpec>,
+    disable_auth: bool,
 }
 
 impl NodeBuilder {
@@ -85,6 +86,7 @@ impl NodeBuilder {
             node_id,
             config,
             release_spec: None,
+            disable_auth: false,
         }
     }
 
@@ -243,6 +245,50 @@ impl NodeBuilder {
         self
     }
 
+    /// Configure the shared database connection string used during service initialization.
+    ///
+    /// ## Purpose
+    /// Embedded examples that want the same unified migration/bootstrap path as the
+    /// full server can set the shared DB here before `build()` initializes services.
+    ///
+    /// Bare file paths are treated as SQLite database files and normalized to a
+    /// `sqlite://...?...` connection string automatically so embedded examples can
+    /// pass `workflow.db` without reimplementing server-side config shaping.
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let node = NodeBuilder::new("workflow-node")
+    ///     .with_shared_db_connection_string("workflow.db")
+    ///     .build_started()
+    ///     .await;
+    /// ```
+    pub fn with_shared_db_connection_string(mut self, connection_string: impl Into<String>) -> Self {
+        use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
+        use plexspaces_proto::storage::v1::SharedDbConfig;
+        let connection_string = normalize_shared_db_connection_string(connection_string.into());
+
+        let release_spec = self.release_spec.take().unwrap_or_else(|| ReleaseSpec {
+            name: "embedded".to_string(),
+            version: "0.0.0".to_string(),
+            ..Default::default()
+        });
+
+        let mut runtime = release_spec.runtime.clone().unwrap_or_default();
+        let existing_db = runtime.db.clone().unwrap_or_default();
+
+        runtime.db = Some(SharedDbConfig {
+            connection_string,
+            auto_migrate: true,
+            ..existing_db
+        });
+
+        self.release_spec = Some(ReleaseSpec {
+            runtime: Some(runtime),
+            ..release_spec
+        });
+        self
+    }
+
     /// Configure node to use Redis backends (common production setup)
     ///
     /// ## Purpose
@@ -348,6 +394,14 @@ impl NodeBuilder {
         self
     }
 
+    /// Disable authentication for this node (useful for tests)
+    ///
+    /// When set, all gRPC requests are accepted without tenant/auth headers.
+    pub fn with_auth_disabled(mut self) -> Self {
+        self.disable_auth = true;
+        self
+    }
+
     /// Build the node with the configured options
     ///
     /// ## Returns
@@ -377,10 +431,13 @@ impl NodeBuilder {
     /// // Node is ready to use - services are initialized
     /// ```
     pub async fn build(self) -> Node {
+        let disable_auth = self.disable_auth;
         let node = Node::new(self.node_id, self.config);
 
         // Set release_spec if provided
         if let Some(release_spec) = self.release_spec {
+            node.set_release_spec(release_spec).await;
+        } else if let Ok(release_spec) = node.load_release_config().await {
             node.set_release_spec(release_spec).await;
         }
 
@@ -389,8 +446,63 @@ impl NodeBuilder {
             .await
             .expect("Failed to initialize services in NodeBuilder::build()");
 
+        // Register security config after services are initialized
+        if disable_auth {
+            let sl = node.service_locator();
+            use plexspaces_proto::node::v1::SecurityConfig;
+            let security = SecurityConfig {
+                disable_auth: true,
+                ..Default::default()
+            };
+            sl.register_security_config(security).await;
+        }
+
         node
     }
+
+    /// Build the node, then start the full runtime in a background task.
+    ///
+    /// ## Purpose
+    /// Embedded examples often need the same startup path as the server:
+    /// release config loading, unified migrations, service initialization,
+    /// and the running node runtime. This helper provides that with one call.
+    ///
+    /// ## Returns
+    /// `Arc<Node>` so callers can use the running node immediately while the
+    /// background task owns the server/runtime loop.
+    ///
+    /// ## Example
+    /// ```rust,ignore
+    /// let node = NodeBuilder::new("example-node")
+    ///     .with_clustering_enabled(false)
+    ///     .build_started()
+    ///     .await;
+    /// ```
+    pub async fn build_started(self) -> std::sync::Arc<Node> {
+        let node = std::sync::Arc::new(self.build().await);
+        let node_for_start = node.clone();
+        tokio::spawn(async move {
+            if let Err(error) = node_for_start.start().await {
+                tracing::error!(error = %error, "Embedded node runtime exited with error");
+            }
+        });
+        node
+    }
+}
+
+fn normalize_shared_db_connection_string(connection_string: String) -> String {
+    let trimmed = connection_string.trim();
+    if trimmed.starts_with("sqlite://")
+        || trimmed.starts_with("sqlite::memory:")
+        || trimmed.starts_with("postgres://")
+        || trimmed.starts_with("postgresql://")
+        || trimmed.is_empty()
+        || trimmed.contains("://")
+    {
+        return trimmed.to_string();
+    }
+
+    format!("sqlite://{}?mode=rwc", trimmed)
 }
 
 #[cfg(test)]
@@ -513,6 +625,34 @@ mod tests {
         assert_eq!(
             metadata.get("backend.keyvalue"),
             Some(&"in-memory".to_string())
+        );
+    }
+
+    #[test]
+    fn test_normalize_shared_db_connection_string_file_path() {
+        assert_eq!(
+            normalize_shared_db_connection_string("workflow.db".to_string()),
+            "sqlite://workflow.db?mode=rwc"
+        );
+    }
+
+    #[test]
+    fn test_normalize_shared_db_connection_string_absolute_path() {
+        assert_eq!(
+            normalize_shared_db_connection_string("/tmp/workflow.db".to_string()),
+            "sqlite:///tmp/workflow.db?mode=rwc"
+        );
+    }
+
+    #[test]
+    fn test_normalize_shared_db_connection_string_preserves_explicit_urls() {
+        assert_eq!(
+            normalize_shared_db_connection_string("postgres://localhost/test".to_string()),
+            "postgres://localhost/test"
+        );
+        assert_eq!(
+            normalize_shared_db_connection_string("sqlite://workflow.db?mode=rwc".to_string()),
+            "sqlite://workflow.db?mode=rwc"
         );
     }
 

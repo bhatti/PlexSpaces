@@ -656,7 +656,11 @@ impl NodeRegistry {
         node_id: &str,
         cluster_name: Option<&str>,
     ) {
-        swim.declare_dead(node_id).await;
+        if Self::is_unknown_node_id(node_id) {
+            swim.remove_member_silently(node_id).await;
+        } else {
+            swim.declare_dead(node_id).await;
+        }
         let mut cache_guard = cache.write().await;
         cache_guard.remove(node_id);
         drop(cache_guard);
@@ -905,7 +909,7 @@ impl NodeRegistry {
             let registration_unknown = Self::is_unknown_node_id(&registration.node_id);
             match (existing_unknown, registration_unknown) {
                 (true, false) => {
-                    self.swim.declare_dead(&member.node_id).await;
+                    self.swim.remove_member_silently(&member.node_id).await;
                     self.remove_from_cache(&member.node_id).await;
                 }
                 (false, true) => return Ok(false),
@@ -1337,8 +1341,8 @@ impl NodeRegistry {
             if !Self::should_probe_member(&target) {
                 return;
             }
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     node_id = %target.node_id,
                     address = %target.address,
                     "Immediate seed reconcile ping (async)"

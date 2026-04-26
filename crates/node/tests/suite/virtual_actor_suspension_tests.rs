@@ -20,7 +20,9 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-use super::test_helpers::{get_or_activate_actor_helper, lookup_actor_ref, test_runtime_actor_id};
+use super::test_helpers::{
+    lookup_actor_ref, registry_ask, registry_tell, spawn_actor_helper, test_runtime_actor_id,
+};
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -209,23 +211,26 @@ impl GenServer for CounterActor {
         };
 
         if !msg.sender_id.is_empty() {
-            let target_actor_id = &msg.sender_id;
-            let is_temp = ActorId::from_canonical(target_actor_id)
+            // send_reply(correlation_id, sender_id, current_actor_id, reply):
+            //   sender_id      = where the reply goes TO  = msg.sender_id (the asker / temporary_sender)
+            //   current_actor_id = the actor replying FROM = msg.receiver_id (this counter actor)
+            let reply_to = &msg.sender_id;
+            let current_actor_id = &msg.receiver_id;
+            let is_temp = ActorId::from_canonical(reply_to)
                 .map(|actor_id| actor_id.is_temporary_sender())
                 .unwrap_or(false);
-            let current_actor_id = &msg.receiver_id; // Current actor is the receiver of the message
-            eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sending reply: current_actor={}, target_actor_id={}, is_temporary_sender={}, correlation_id={:?}", 
-                current_actor_id, target_actor_id, is_temp, msg.correlation_id);
+            eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sending reply: current_actor={}, reply_to={}, is_temporary_sender={}, correlation_id={:?}",
+                current_actor_id, reply_to, is_temp, msg.correlation_id);
             ctx.send_reply(
                 if msg.correlation_id.is_empty() {
                     None
                 } else {
                     Some(msg.correlation_id.as_str())
                 },
-                current_actor_id, // Current actor is the receiver of the request
-                ActorId::from_canonical(target_actor_id).map_err(|e| {
+                reply_to, // WHERE reply goes TO (the original sender / temporary_sender)
+                ActorId::from_canonical(current_actor_id).map_err(|e| {
                     BehaviorError::ProcessingError(format!(
-                        "Failed to parse reply target actor id: {}",
+                        "Failed to parse current actor id for reply: {}",
                         e
                     ))
                 })?,
@@ -239,7 +244,7 @@ impl GenServer for CounterActor {
                 );
                 BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
             })?;
-            eprintln!("🟢 [COUNTER_ACTOR::handle_request] Reply sent successfully: target_actor_id={}, is_temporary_sender={}", target_actor_id, is_temp);
+            eprintln!("🟢 [COUNTER_ACTOR::handle_request] Reply sent successfully: reply_to={}, is_temporary_sender={}", reply_to, is_temp);
         } else {
             eprintln!(
                 "🟡 [COUNTER_ACTOR::handle_request] No sender_id in message, cannot send reply"
@@ -267,7 +272,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
-        .register_simple("GenServer", || {
+        .register_simple("gen_server", || {
             Box::pin(
                 async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
             )
@@ -284,51 +289,31 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let storage_for_checkpoint = storage.clone();
 
     // Register eager virtual actor with DurabilityFacet
-    let _actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
-        let behavior = Box::new(CounterActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRegistrationFailed(
-                    actor_id.clone().into(),
-                    format!("Failed to build actor: {}", e),
-                )
-            })?;
+    let behavior = Box::new(CounterActor::new());
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .build()
+        .await
+        .unwrap();
 
-        // Attach VirtualActorFacet
-        let virtual_facet_config = serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "eager"
-        });
-        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
-        actor.attach_facet(virtual_facet).await.map_err(|e| {
-            plexspaces_node::NodeError::ActorRegistrationFailed(
-                actor_id.clone().into(),
-                format!("Failed to attach VirtualActorFacet: {}", e),
-            )
-        })?;
+    // Attach VirtualActorFacet
+    let virtual_facet_config = serde_json::json!({
+        "idle_timeout": "5m",
+        "activation_strategy": "eager"
+    });
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
 
-        // Attach DurabilityFacet (StateLoader will be set after actor is created and we have access to it)
-        let durability_config = serde_json::json!({
-            "checkpoint_interval": 100, // Don't auto-checkpoint (we'll do it manually)
-            "replay_on_activation": true, // Restore state on reactivation
-        });
-        let durability_facet =
-            Box::new(DurabilityFacet::new(storage.clone(), durability_config, 50));
+    // Attach DurabilityFacet (StateLoader will be set after actor is created and we have access to it)
+    let durability_config = serde_json::json!({
+        "checkpoint_interval": 100, // Don't auto-checkpoint (we'll do it manually)
+        "replay_on_activation": true, // Restore state on reactivation
+    });
+    let durability_facet = Box::new(DurabilityFacet::new(storage.clone(), durability_config, 50));
 
-        actor.attach_facet(durability_facet).await.map_err(|e| {
-            plexspaces_node::NodeError::ActorRegistrationFailed(
-                actor_id.clone().into(),
-                format!("Failed to attach DurabilityFacet: {}", e),
-            )
-        })?;
+    actor.attach_facet(durability_facet).await.unwrap();
 
-        Ok(actor)
-    })
-    .await
-    .unwrap();
+    let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active
     let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
@@ -408,14 +393,10 @@ async fn test_suspend_active_virtual_actor_then_ask() {
         "Actor should not be active after suspension"
     );
 
-    // Call ask() on suspended actor - should reactivate automatically
-    // Registry-owned local tell() should detect the actor is inactive and reactivate it
-    let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
-
+    // Call ask() on suspended actor - should reactivate automatically via registry routing
     let ask_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
-    let result = actor_ref
-        .ask(ask_msg, Duration::from_secs(5))
+    let result = registry_ask(&node, &actor_id, ask_msg, Duration::from_secs(5))
         .await
         .unwrap();
     let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
@@ -441,7 +422,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // actor_type is "GenServer" (extracted from behavior.behavior_type())
     let registry = BehaviorRegistry::new();
     registry
-        .register_simple("GenServer", || {
+        .register_simple("gen_server", || {
             Box::pin(
                 async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
             )
@@ -455,35 +436,21 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     let actor_id = test_runtime_actor_id("counter-suspend-tell", "test-node");
 
     // Register eager virtual actor
-    let actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
-        let behavior = Box::new(CounterActor::new());
-        let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
-            .build()
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRegistrationFailed(
-                    actor_id.clone().into(),
-                    format!("Failed to build actor: {}", e),
-                )
-            })?;
+    let behavior = Box::new(CounterActor::new());
+    let mut actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
+        .build()
+        .await
+        .unwrap();
 
-        let virtual_facet_config = serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "eager"
-        });
-        let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
-        actor.attach_facet(virtual_facet).await.map_err(|e| {
-            plexspaces_node::NodeError::ActorRegistrationFailed(
-                actor_id.clone().into(),
-                format!("Failed to attach VirtualActorFacet: {}", e),
-            )
-        })?;
+    let virtual_facet_config = serde_json::json!({
+        "idle_timeout": "5m",
+        "activation_strategy": "eager"
+    });
+    let virtual_facet = Box::new(VirtualActorFacet::new(virtual_facet_config.clone(), 100));
+    actor.attach_facet(virtual_facet).await.unwrap();
 
-        Ok(actor)
-    })
-    .await
-    .unwrap();
+    spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active immediately (spawn_built_actor is synchronous)
     let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
@@ -532,18 +499,16 @@ async fn test_suspend_active_virtual_actor_then_tell() {
         "Actor should not be active after suspension"
     );
 
-    // Call tell() on suspended actor - should reactivate automatically
-    // Registry-owned local tell() activates the actor synchronously
+    // Call tell() on suspended actor - should reactivate automatically via registry routing
     eprintln!(
         "🔵 [TEST] Calling tell() on suspended actor - should activate: actor_id={}",
         actor_id
     );
-    let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
     // Use "call" message type for GenServer (tell() can be used with call messages too)
     let tell_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
-    actor_ref.tell(tell_msg).await.unwrap();
+    registry_tell(&node, &actor_id, tell_msg).await.unwrap();
     eprintln!(
         "🟢 [TEST] tell() completed - actor should be activated: actor_id={}",
         actor_id
@@ -569,8 +534,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Verify message was processed
     let get_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
-    let result = actor_ref
-        .ask(get_msg, Duration::from_secs(5))
+    let result = registry_ask(&node, &actor_id, get_msg, Duration::from_secs(5))
         .await
         .unwrap();
     let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();

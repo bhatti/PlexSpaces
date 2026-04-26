@@ -9,10 +9,12 @@
 // - facet_storage_test.rs (1 test)
 // Total: 10 tests (+1 feature-gated)
 
-use super::test_helpers::{lookup_actor_ref, spawn_actor_helper, test_actor_id};
+use super::test_helpers::{
+    lookup_actor_ref, registry_tell, spawn_actor_helper, test_runtime_actor_id,
+};
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, Message};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, Message, ServiceLocator};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
@@ -97,7 +99,7 @@ async fn test_spawn_actor_no_facets() {
         .await
         .expect("Actor should be registered within 5 seconds");
 
-    assert_eq!(actor_id, test_actor_id("test-actor", "test-node"));
+    assert_eq!(actor_id, test_runtime_actor_id("test-actor", "test-node"));
 }
 
 /// Test 2: Attach facet WITHOUT spawning - should not hang
@@ -155,7 +157,7 @@ async fn test_spawn_actor_with_facet() {
         .await
         .expect("Actor should be registered within 5 seconds");
 
-    assert_eq!(actor_id, test_actor_id("test-actor", "test-node"));
+    assert_eq!(actor_id, test_runtime_actor_id("test-actor", "test-node"));
 }
 
 /// Test 4: Check facet storage after spawn
@@ -229,6 +231,18 @@ async fn test_facet_service_get_facet_normal_actor() {
 async fn test_facet_service_get_facet_virtual_actor() {
     let node = Arc::new(create_test_node().await);
 
+    // Register BehaviorRegistry so lazy virtual actor can be activated via registry_tell
+    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    let registry = BehaviorRegistry::new();
+    registry
+        .register_simple("gen_server", || {
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+        })
+        .await;
+    node.service_locator()
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
         .with_name("virtual-actor")
@@ -246,8 +260,9 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
 
+    // Lazy virtual actor: use registry_tell to activate (routes through ActorRegistry → dispatch_local_message)
     let message = create_test_message(b"activate".to_vec());
-    actor_ref.tell(message).await.unwrap();
+    registry_tell(&node, &actor_id, message).await.unwrap();
 
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);

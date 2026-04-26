@@ -11,20 +11,21 @@
 //! 3. Routes processed documents to Processor actors
 //! 4. Aggregates results from Processor actors
 //! 5. Displays final results
+//!
+//! This is the package default run target, so `cargo run -- ...` starts this
+//! orchestrator without needing `--bin entity-recognition-app`.
 
 use anyhow::Result;
 use clap::Parser;
 use entity_recognition::{
-    aggregator::{AggregatorBehavior, AggregatorRequest, AggregatorResponse},
+    aggregator::AggregatorBehavior,
     config::EntityRecognitionConfig,
-    loader::{LoaderBehavior, LoaderRequest, LoaderResponse},
-    processor::{ProcessorBehavior, ProcessorRequest, ProcessorResponse},
+    loader::{LoaderBehavior, LoaderRequest},
+    processor::ProcessorBehavior,
 };
-use plexspaces_core::ActorRef;
-use plexspaces_sdk::cast_message;
+use plexspaces_core::RequestContext;
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
-use std::collections::HashMap;
-use std::sync::Arc;
+use plexspaces_sdk::{cast_message, spawn_with_facets};
 use std::time::Instant;
 use tracing::{info, Level};
 use tracing_subscriber;
@@ -76,15 +77,12 @@ async fn main() -> Result<()> {
     let node = NodeBuilder::new("entity-recognition-app")
         .with_listen_addr("0.0.0.0:9000")
         .with_clustering_enabled(true)
-        .build().await;
-
-    let node = Arc::new(node);
-    // Note: We don't call node.start() here because:
-    // 1. This is a simple single-node example that doesn't need gRPC server
-    // 2. node.start() spawns background tasks (gRPC server, heartbeat) that keep the process alive
-    // 3. Actors can be spawned without starting the gRPC server (like nbody example)
-    // If you need remote actor communication, uncomment the line below:
-    // node.clone().start().await?;
+        .build_started().await;
+    let service_locator = node.service_locator();
+    let ctx = RequestContext::new_without_auth(
+        "entity-recognition".to_string(),
+        "entity-recognition".to_string(),
+    );
 
     info!("Node started, spawning actors...");
 
@@ -95,77 +93,52 @@ async fn main() -> Result<()> {
     // Spawn actors with resource requirements
     let start_time = Instant::now();
 
-    // Spawn Loader actors (CPU-intensive)
+    // Spawn Loader actors.
     let mut loader_refs = Vec::new();
     for i in 0..config.loader_count {
-        let loader_ref = node.clone()
-            .spawn_actor_builder()
-            .with_behavior(Box::new(LoaderBehavior::new(args.documents.clone())))
-            .with_name(format!("loader-{}", i))
-            .with_resource_requirements(
-                2.0,                              // CPU cores
-                1024 * 1024 * 1024,              // 1GB memory
-                0,                                // No disk
-                0,                                // No GPU
-                HashMap::from([
-                    ("workload".to_string(), "cpu-intensive".to_string()),
-                    ("service".to_string(), "loader".to_string()),
-                ]),
-                vec!["entity-recognition-loaders".to_string()],
-            )
-            .spawn()
-            .await?;
+        let loader_ref = spawn_with_facets(
+            &ctx,
+            service_locator.clone(),
+            format!("loader-{}", i),
+            "entity-recognition",
+            LoaderBehavior::new(args.documents.clone()),
+            vec![],
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to spawn loader-{i}: {e}"))?;
         let loader_id = loader_ref.id().clone();
         loader_refs.push(loader_ref);
         info!("Spawned loader actor: {}", loader_id);
     }
 
-    // Spawn Processor actors (GPU-intensive)
-    let mut processor_refs = Vec::new();
+    // Spawn Processor actors.
     for i in 0..config.processor_count {
-        let processor_ref = node.clone()
-            .spawn_actor_builder()
-            .with_behavior(Box::new(ProcessorBehavior::new()))
-            .with_name(format!("processor-{}", i))
-            .with_resource_requirements(
-                1.0,                              // CPU cores
-                4 * 1024 * 1024 * 1024,          // 4GB memory
-                0,                                // No disk
-                1,                                // 1 GPU
-                HashMap::from([
-                    ("workload".to_string(), "gpu-intensive".to_string()),
-                    ("service".to_string(), "processor".to_string()),
-                ]),
-                vec!["entity-recognition-processors".to_string()],
-            )
-            .spawn()
-            .await?;
+        let processor_ref = spawn_with_facets(
+            &ctx,
+            service_locator.clone(),
+            format!("processor-{}", i),
+            "entity-recognition",
+            ProcessorBehavior::new(),
+            vec![],
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to spawn processor-{i}: {e}"))?;
         let processor_id = processor_ref.id().clone();
-        processor_refs.push(processor_ref);
         info!("Spawned processor actor: {}", processor_id);
     }
 
-    // Spawn Aggregator actors (CPU-intensive)
-    let mut aggregator_refs = Vec::new();
+    // Spawn Aggregator actors.
     for i in 0..config.aggregator_count {
-        let aggregator_ref = node.clone()
-            .spawn_actor_builder()
-            .with_behavior(Box::new(AggregatorBehavior::new(args.documents.len() as u32)))
-            .with_name(format!("aggregator-{}", i))
-            .with_resource_requirements(
-                2.0,                              // CPU cores
-                1024 * 1024 * 1024,              // 1GB memory
-                0,                                // No disk
-                0,                                // No GPU
-                HashMap::from([
-                    ("workload".to_string(), "cpu-intensive".to_string()),
-                    ("service".to_string(), "aggregator".to_string()),
-                ]),
-                vec!["entity-recognition-aggregators".to_string()],
-            )
-            .spawn()
-            .await?;
-        aggregator_refs.push(aggregator_ref.clone());
+        let aggregator_ref = spawn_with_facets(
+            &ctx,
+            service_locator.clone(),
+            format!("aggregator-{}", i),
+            "entity-recognition",
+            AggregatorBehavior::new(args.documents.len() as u32),
+            vec![],
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to spawn aggregator-{i}: {e}"))?;
         info!("Spawned aggregator actor: {}", aggregator_ref.id());
     }
 
@@ -222,9 +195,8 @@ async fn main() -> Result<()> {
     println!();
     println!("Note: In a production implementation, use channels or ask() pattern for request-reply");
 
-    // Node will be cleaned up when process exits
-    // Since we don't call node.start(), there are no background tasks to stop
-    // (gRPC server, heartbeat, scheduler are only started by node.start())
+    // Node will be cleaned up when process exits.
+    // This example uses build_started(), so the embedded runtime is already
+    // running in the background with the same startup path as the server.
     Ok(())
 }
-

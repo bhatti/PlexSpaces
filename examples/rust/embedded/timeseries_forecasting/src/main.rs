@@ -543,10 +543,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create node
     let node = NodeBuilder::new("timeseries-node-1")
         .with_clustering_enabled(false)
-        .build().await;
-
-    let node_arc = Arc::new(node);
-    let service_locator = node_arc.service_locator();
+        .build_started().await;
+    let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth(
         "ml-tenant".to_string(),
         "forecasting".to_string(),
@@ -554,14 +552,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Node created: timeseries-node-1");
 
-    // Start node in background
-    let node_for_start = node_arc.clone();
-    tokio::spawn(async move {
-        if let Err(e) = node_for_start.start().await {
-            eprintln!("Node start error: {}", e);
-        }
-    });
-    
     sleep(Duration::from_millis(500)).await;
     info!("Node started");
 
@@ -576,7 +566,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _data_loader_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        "data-loader@timeseries-node-1",
+        "data-loader",
         "ml-pipeline",
         DataLoaderActor::new(),
         vec![],
@@ -589,7 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _preprocessor_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        "preprocessor@timeseries-node-1",
+        "preprocessor",
         "ml-pipeline",
         PreprocessorActor::new(10), // window_size = 10
         vec![],
@@ -602,7 +592,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _trainer_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        "trainer@timeseries-node-1",
+        "trainer",
         "ml-pipeline",
         TrainerActor::new(0.001, 500), // learning_rate, epochs
         vec![],
@@ -615,7 +605,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _validator_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        "validator@timeseries-node-1",
+        "validator",
         "ml-pipeline",
         ValidatorActor::new(),
         vec![],
@@ -628,7 +618,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _server_ref = spawn_actor(
         &ctx,
         service_locator.clone(),
-        "server@timeseries-node-1",
+        "server",
         "ml-pipeline",
         ServerActor::new(),
         vec![],

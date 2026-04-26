@@ -41,7 +41,9 @@ pub mod service_wrappers;
 
 // Re-export ServiceLocatorImpl and related types
 /// Single source of truth: RequestContext from gRPC metadata (tenant/namespace propagation).
-pub use plexspaces_core::request_context_from_grpc_request;
+pub use plexspaces_core::{
+    apply_request_context_to_grpc_metadata, request_context_from_grpc_request,
+};
 pub use service_locator::{ServiceLocatorImpl, ServiceStorage};
 // ActorFactory is now in core crate - use ServiceLocator methods directly:
 // Example: service_locator.get_actor_factory().await

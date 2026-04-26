@@ -73,11 +73,13 @@ The runnable example is in `src/main.rs`: it builds a node, registers a GenServe
 ## Running the Comparison
 
 ```bash
-cd examples/comparison/skypilot
-cargo build --release
-cargo run --release
+cd /Users/shahzadbhatti/workspace/myspaces/examples/rust/embedded/migrating_skypilot
+cargo build
+cargo run
 ./scripts/test.sh
 ```
+
+`cargo run` starts the comparison example by default.
 
 ---
 

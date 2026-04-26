@@ -34,6 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_core::{
+    apply_request_context_to_grpc_metadata,
     monitoring::{
         record_node_failed_delivery, record_node_local_delivery, record_node_messages_routed,
         record_node_remote_delivery,
@@ -107,6 +108,14 @@ fn parse_target_actor_id(actor_id: &str) -> Result<ActorId, ActorRefError> {
     })
 }
 
+fn remote_http_method(message: &Message) -> String {
+    if !message.uri_method.is_empty() {
+        message.uri_method.clone()
+    } else {
+        "POST".to_string()
+    }
+}
+
 /// Generic ask helper for shared temporary-sender fanout operations.
 /// Returns a Future for parallel operations (map/reduce).
 ///
@@ -148,13 +157,15 @@ pub fn ask_helper(
             message.receiver_id = target_actor_id.clone();
         }
 
-        tracing::debug!(
-            message_id = %message_id,
-            sender_id = %temp_sender_id,
-            recipient_id = %target_actor_id,
-            correlation_id = %correlation_id,
-            "ask_helper: routing request to target, waiting for reply on temp sender"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                message_id = %message_id,
+                sender_id = %temp_sender_id,
+                recipient_id = %target_actor_id,
+                correlation_id = %correlation_id,
+                "ask_helper: routing request to target, waiting for reply on temp sender"
+            );
+        }
 
         let waiter = ReplyWaiter::new();
         let waiter_registry = service_locator
@@ -218,13 +229,15 @@ pub fn ask_helper(
         waiter_registry.remove(&correlation_id).await;
         match &result {
             Ok(reply) => {
-                tracing::debug!(
-                    request_id = %message_id,
-                    reply_id = %reply.id,
-                    temp_sender = %temp_sender_id,
-                    correlation_id = %correlation_id,
-                    "ask_helper: reply received from target"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        request_id = %message_id,
+                        reply_id = %reply.id,
+                        temp_sender = %temp_sender_id,
+                        correlation_id = %correlation_id,
+                        "ask_helper: reply received from target"
+                    );
+                }
             }
             Err(e) => {
                 tracing::debug!(
@@ -432,61 +445,62 @@ pub fn route_remote(
             nanos: d.subsec_nanos() as i32,
         });
 
-        let method = if wait_for_response { "GET" } else { "POST" }.to_string();
+        // Preserve the actor message method when present. Internal actor asks often carry
+        // JSON bodies (for example shard-group scatter/gather queries), so defaulting
+        // remote request-reply to GET would discard the payload on the receiving side.
+        let method = remote_http_method(&proto_message);
 
         // Forward to remote ActorService using explicit tell vs ask RPCs.
         let response = match if wait_for_response {
-            client
-                .ask_reply(tonic::Request::new(AskReplyRequest {
-                    namespace: ctx.namespace().to_string(),
-                    actor_type: actor_id.clone(),
-                    actor_name: String::new(),
-                    http_method: method,
-                    payload: proto_message.payload.clone(),
-                    headers: proto_message.headers.clone(),
-                    query_params: Default::default(),
-                    path: proto_message.uri_path.clone(),
-                    subpath: String::new(),
-                    sender_id: proto_message.sender_id.clone(),
-                    message_type: proto_message.message_type.clone(),
-                    correlation_id: proto_message.correlation_id.clone(),
-                    reply_to: proto_message.reply_to.clone(),
-                    message_id: proto_message.id.clone(),
-                    timeout: proto_timeout,
-                }))
-                .await
-                .map(|resp| {
-                    let inner = resp.into_inner();
-                    (inner.actor_id, inner.payload, inner.headers, String::new())
-                })
+            let mut grpc_req = tonic::Request::new(AskReplyRequest {
+                namespace: ctx.namespace().to_string(),
+                actor_type: actor_id.clone(),
+                actor_name: String::new(),
+                http_method: method.clone(),
+                payload: proto_message.payload.clone(),
+                headers: proto_message.headers.clone(),
+                query_params: Default::default(),
+                path: proto_message.uri_path.clone(),
+                subpath: String::new(),
+                sender_id: proto_message.sender_id.clone(),
+                message_type: proto_message.message_type.clone(),
+                correlation_id: proto_message.correlation_id.clone(),
+                reply_to: proto_message.reply_to.clone(),
+                message_id: proto_message.id.clone(),
+                timeout: proto_timeout,
+            });
+            apply_request_context_to_grpc_metadata(&ctx, grpc_req.metadata_mut());
+            client.ask_reply(grpc_req).await.map(|resp| {
+                let inner = resp.into_inner();
+                (inner.actor_id, inner.payload, inner.headers, String::new())
+            })
         } else {
-            client
-                .send_message(tonic::Request::new(SendMessageRequest {
-                    namespace: ctx.namespace().to_string(),
-                    actor_type: actor_id.clone(),
-                    actor_name: String::new(),
-                    http_method: method,
-                    payload: proto_message.payload.clone(),
-                    headers: proto_message.headers.clone(),
-                    query_params: Default::default(),
-                    path: proto_message.uri_path.clone(),
-                    subpath: String::new(),
-                    sender_id: proto_message.sender_id.clone(),
-                    message_type: proto_message.message_type.clone(),
-                    correlation_id: proto_message.correlation_id.clone(),
-                    reply_to: proto_message.reply_to.clone(),
-                    message_id: proto_message.id.clone(),
-                }))
-                .await
-                .map(|resp| {
-                    let inner = resp.into_inner();
-                    (
-                        inner.actor_id,
-                        Vec::new(),
-                        Default::default(),
-                        inner.message_id,
-                    )
-                })
+            let mut grpc_req = tonic::Request::new(SendMessageRequest {
+                namespace: ctx.namespace().to_string(),
+                actor_type: actor_id.clone(),
+                actor_name: String::new(),
+                http_method: method,
+                payload: proto_message.payload.clone(),
+                headers: proto_message.headers.clone(),
+                query_params: Default::default(),
+                path: proto_message.uri_path.clone(),
+                subpath: String::new(),
+                sender_id: proto_message.sender_id.clone(),
+                message_type: proto_message.message_type.clone(),
+                correlation_id: proto_message.correlation_id.clone(),
+                reply_to: proto_message.reply_to.clone(),
+                message_id: proto_message.id.clone(),
+            });
+            apply_request_context_to_grpc_metadata(&ctx, grpc_req.metadata_mut());
+            client.send_message(grpc_req).await.map(|resp| {
+                let inner = resp.into_inner();
+                (
+                    inner.actor_id,
+                    Vec::new(),
+                    Default::default(),
+                    inner.message_id,
+                )
+            })
         } {
             Ok(r) => r,
             Err(e) => {
@@ -546,6 +560,27 @@ pub fn route_remote(
             Ok((message_id, None))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remote_http_method;
+    use plexspaces_proto::common::v1::Message;
+
+    #[test]
+    fn remote_http_method_preserves_explicit_method() {
+        let message = Message {
+            uri_method: "PUT".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(remote_http_method(&message), "PUT");
+    }
+
+    #[test]
+    fn remote_http_method_defaults_to_post_for_body_messages() {
+        let message = Message::default();
+        assert_eq!(remote_http_method(&message), "POST");
+    }
 }
 
 /// Route message to local or remote actor (unified routing).

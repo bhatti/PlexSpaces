@@ -9,8 +9,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "tool_registry"
-type = "tool_registry"
+name = "tool_registry"
+actor_type = "mcp_tool_server_wasm"
+role = "tool_registry"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -22,8 +23,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "calculator_tool"
-type = "calculator_tool"
+name = "calculator_tool"
+actor_type = "mcp_tool_server_wasm"
+role = "calculator_tool"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
@@ -33,8 +35,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "search_tool"
-type = "search_tool"
+name = "search_tool"
+actor_type = "mcp_tool_server_wasm"
+role = "search_tool"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
@@ -45,8 +48,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "weather_tool"
-type = "weather_tool"
+name = "weather_tool"
+actor_type = "mcp_tool_server_wasm"
+role = "weather_tool"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
@@ -57,8 +61,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "mcp_gateway"
-type = "mcp_gateway"
+name = "mcp_gateway"
+actor_type = "mcp_tool_server_wasm"
+role = "mcp_gateway"
 restart = "permanent"
 shutdown_timeout_seconds = 15
 behavior_kind = "Workflow"
@@ -69,8 +74,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "tool_audit"
-type = "tool_audit"
+name = "tool_audit"
+actor_type = "mcp_tool_server_wasm"
+role = "tool_audit"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
@@ -80,8 +86,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "circuit_breaker"
-type = "circuit_breaker"
+name = "circuit_breaker"
+actor_type = "mcp_tool_server_wasm"
+role = "circuit_breaker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"

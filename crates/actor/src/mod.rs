@@ -674,7 +674,8 @@ impl Actor {
         node_id: Option<String>,
     ) -> Self {
         // Create context with ServiceLocator - Node will update it with full services when spawning
-        let node_id_str = node_id.clone().unwrap_or_else(|| "local".to_string());
+        // node_id is normalized to the real node at spawn time by spawn_built_actor_impl.
+        let node_id_str = node_id.clone().unwrap_or_else(|| "unassigned".to_string());
         // Note: This is a sync function, so we create a minimal ServiceLocator stub
         // Node will replace it with full services when spawning
         use crate::TestServiceLocatorStub;
@@ -768,6 +769,12 @@ impl Actor {
     /// Get the actor's ID
     pub fn id(&self) -> &ActorId {
         &self.id
+    }
+
+    /// Replace the actor's canonical ID (used by spawn_built_actor_impl to normalize node_id).
+    pub fn with_normalized_id(mut self, id: ActorId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Get the current state
@@ -1345,6 +1352,7 @@ impl Actor {
                                 actor_id_for_logging, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
                             );
                         }
+                        mailbox.begin_processing().await;
                         let result = Self::process_message(
                             message.clone(),
                             &actor_id_for_logging,
@@ -1404,6 +1412,7 @@ impl Actor {
                                 }
                             }
                         }
+                        mailbox.end_processing().await;
 
                         if let Err(e) = &result {
                             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1528,8 +1537,8 @@ impl Actor {
         }
         drop(state);
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %self.id, "Stopping actor - starting graceful shutdown");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %self.id, "Stopping actor - starting graceful shutdown");
         }
 
         // Mark as stopping (prevents new messages from being processed and duplicate terminate() calls)
@@ -2297,15 +2306,17 @@ impl Actor {
                 actor_id, behavior_owned, message.receiver_id, message.id, message.message_type, message.sender_id
             );
         }
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[ACTOR::PROCESS_MESSAGE] START: actor_id={}, behavior={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}",
-                actor_id, behavior_owned, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
-            );
-        }
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, behavior={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
-                actor_id, behavior_owned, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
+            tracing::trace!(
+                actor_id = %actor_id,
+                behavior = %behavior_owned,
+                message_id = %message.id,
+                message_type = %message.message_type,
+                sender_id = %message.sender_id,
+                receiver_id = %message.receiver_id,
+                correlation_id = %message.correlation_id,
+                "[ACTOR::PROCESS_MESSAGE] START"
+            );
         }
 
         // OBSERVABILITY: Tracing span for message processing (TRACE to reduce log noise; use RUST_LOG=plexspaces_actor=trace to enable)
@@ -2583,7 +2594,7 @@ mod tests {
     }
 
     fn runtime_actor_id(name: &str) -> ActorId {
-        ActorId::new(name, "GenServer", "test-namespace", "test-node")
+        ActorId::new(name, "gen_server", "test-namespace", "test-node")
             .expect("test actor id should be valid")
     }
 

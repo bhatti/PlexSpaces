@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
     info!("Step 1: Create node and JournalStorage for durable reminders");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    let node = Arc::new(NodeBuilder::new("billing-node").build().await);
+    let node = NodeBuilder::new("billing-node").build_started().await;
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("acme-corp".to_string(), "billing".to_string());
 

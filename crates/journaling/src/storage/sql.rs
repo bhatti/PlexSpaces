@@ -3088,7 +3088,7 @@ mod tests {
             compression: 1,
             metadata: HashMap::from([
                 ("version".to_string(), "1.0".to_string()),
-                ("actor_type".to_string(), "GenServer".to_string()),
+                ("actor_type".to_string(), "gen_server".to_string()),
                 ("timestamp".to_string(), "2025-01-11T12:00:00Z".to_string()),
                 ("compressed".to_string(), "true".to_string()),
             ]),

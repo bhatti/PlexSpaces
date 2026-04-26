@@ -809,6 +809,106 @@ def _parse_duration_ms(data: bytes) -> int:
     return sec * 1000 + nanos // 1_000_000
 
 
+def _parse_timestamp_ms(data: bytes) -> int:
+    """Decode google.protobuf.Timestamp to Unix epoch milliseconds."""
+    pos = 0
+    sec = 0
+    nanos = 0
+    while pos < len(data):
+        tag_val, n = _decode_varint(data, pos)
+        pos += n
+        fn = tag_val >> 3
+        wt = tag_val & 7
+        if wt == 0:
+            val, m = _decode_varint(data, pos)
+            pos += m
+            if fn == 1:
+                sec = val
+            elif fn == 2:
+                nanos = val
+        else:
+            pos = _skip_field(data, pos, wt)
+    return sec * 1000 + nanos // 1_000_000
+
+
+def _parse_string_map_entry(data: bytes) -> Tuple[str, str]:
+    """Decode a single protobuf map<string, string> entry."""
+    pos = 0
+    key = ""
+    value = ""
+    while pos < len(data):
+        tag_val, n = _decode_varint(data, pos)
+        pos += n
+        fn = tag_val >> 3
+        wt = tag_val & 7
+        if wt != 2:
+            pos = _skip_field(data, pos, wt)
+            continue
+        chunk, pos = _read_length_delimited(data, pos)
+        decoded = chunk.decode("utf-8", errors="replace")
+        if fn == 1:
+            key = decoded
+        elif fn == 2:
+            value = decoded
+    return key, value
+
+
+def decode_lock_response(data: bytes) -> Dict[str, Any]:
+    """
+    Decode a plexspaces.locks.prv.Lock protobuf into the JSON-friendly shape
+    expected by Python lock helpers and examples.
+    """
+    if not data:
+        return {}
+    result: Dict[str, Any] = {
+        "lock_key": "",
+        "holder_id": "",
+        "version": "",
+        "expires_at_ms": 0,
+        "lease_duration_secs": 0,
+        "last_heartbeat_ms": 0,
+        "metadata": {},
+        "locked": False,
+    }
+    pos = 0
+    while pos < len(data):
+        tag_val, n = _decode_varint(data, pos)
+        pos += n
+        fn = tag_val >> 3
+        wt = tag_val & 7
+        if fn in (1, 2, 3) and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            value = chunk.decode("utf-8", errors="replace")
+            if fn == 1:
+                result["lock_key"] = value
+            elif fn == 2:
+                result["holder_id"] = value
+            else:
+                result["version"] = value
+        elif fn in (4, 6) and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            ts_ms = _parse_timestamp_ms(chunk)
+            if fn == 4:
+                result["expires_at_ms"] = ts_ms
+            else:
+                result["last_heartbeat_ms"] = ts_ms
+        elif fn == 5 and wt == 0:
+            value, n = _decode_varint(data, pos)
+            pos += n
+            result["lease_duration_secs"] = value
+        elif fn == 7 and wt == 2:
+            chunk, pos = _read_length_delimited(data, pos)
+            key, value = _parse_string_map_entry(chunk)
+            result["metadata"][key] = value
+        elif fn == 8 and wt == 0:
+            value, n = _decode_varint(data, pos)
+            pos += n
+            result["locked"] = value != 0
+        else:
+            pos = _skip_field(data, pos, wt)
+    return result
+
+
 def _parse_common_message(data: bytes) -> Tuple[str, bytes]:
     """Decode a plexspaces.common.v1.Message, returning (message_type, payload)."""
     pos = 0

@@ -1,61 +1,55 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+// Copyright (C) 2025 PlexSpaces Contributors
 //
-// Bank Account Actor - Durable State Example (TypeScript WASM)
+// Bank Account Actor - Named Virtual Actor Example (TypeScript WASM)
 //
 // Uses @plexspaces/sdk (inheritance-based). Same API as Python bank_account:
 // balance, deposit, withdraw, history, replay. Real-world: banking, wallets, ledgers.
-import { PlexSpacesActor } from "@plexspaces/sdk";
-export class BankAccountActor extends PlexSpacesActor {
+import { ActorRouter, PlexSpacesActor } from "@plexspaces/sdk";
+class BankAccountActor extends PlexSpacesActor {
     getDefaultState() {
-        return { account_id: "", balance: 0, transactions: [] };
+        return { actor_id: "", balance: 0, transactions: [] };
     }
     onInit(config) {
-        this.state.account_id = String(config.account_id ?? "");
+        if (typeof config.actor_id === "string" && config.actor_id) {
+            this.state.actor_id = config.actor_id;
+        }
         this.state.balance = 0;
         this.state.transactions = [];
     }
     onBalance() {
-        return { account: this.state.account_id, balance: this.state.balance };
+        return { success: true, account: this.state.actor_id, balance: this.state.balance };
     }
-    /** Alias for balance (same as Python handler("balance", "get")). */
+    /** Alias for balance. */
     onGet() {
         return this.onBalance();
     }
     onDeposit(payload) {
         const amount = Number(payload.amount ?? 0);
         if (amount <= 0)
-            return { error: "invalid_amount" };
+            return { success: false, error: "invalid_amount" };
         this.state.balance += amount;
-        this.state.transactions.push({
-            type: "deposit",
-            amount,
-            balance_after: this.state.balance,
-        });
-        return { status: "ok", balance: this.state.balance };
+        this.state.transactions.push({ type: "deposit", amount, balance_after: this.state.balance });
+        return { success: true, balance: this.state.balance };
     }
     onWithdraw(payload) {
         const amount = Number(payload.amount ?? 0);
         if (amount <= 0)
-            return { error: "invalid_amount" };
+            return { success: false, error: "invalid_amount" };
         if (amount > this.state.balance) {
-            return { error: "insufficient_funds", balance: this.state.balance };
+            return { success: false, error: "insufficient_funds", balance: this.state.balance };
         }
         this.state.balance -= amount;
-        this.state.transactions.push({
-            type: "withdraw",
-            amount,
-            balance_after: this.state.balance,
-        });
-        return { status: "ok", balance: this.state.balance };
+        this.state.transactions.push({ type: "withdraw", amount, balance_after: this.state.balance });
+        return { success: true, balance: this.state.balance };
     }
     onTx_count() {
-        return { count: this.state.transactions.length };
+        return { success: true, count: this.state.transactions.length };
     }
     onHistory(payload) {
         const count = Math.min(Number(payload.count ?? 5), this.state.transactions.length);
         const recent = count > 0 ? this.state.transactions.slice(-count) : [];
-        return { transactions: recent };
+        return { success: true, transactions: recent };
     }
     onReplay() {
         let rebuilt = 0;
@@ -66,21 +60,19 @@ export class BankAccountActor extends PlexSpacesActor {
                 rebuilt -= tx.amount;
         }
         return {
+            success: true,
             replayed: this.state.transactions.length,
             rebuilt_balance: rebuilt,
             current_balance: this.state.balance,
         };
     }
-    onSet_account(payload) {
-        this.state.account_id = String(payload.account_id ?? "");
-        return { status: "ok" };
-    }
 }
-// WIT actor export (used by component entry and verify)
-const instance = new BankAccountActor();
+const router = new ActorRouter({
+    bank_account_wasm: () => new BankAccountActor(),
+});
 export const actor = {
-    init: (configJson) => instance.init(configJson),
-    handle: (from, msgType, payloadJson) => instance.handle(from, msgType, payloadJson),
-    getState: () => instance.getState(),
-    setState: (stateJson) => instance.setState(stateJson),
+    init: (configJson) => router.init(configJson),
+    handle: (from, msgType, payloadJson) => router.handle(from, msgType, payloadJson),
+    getState: () => router.getState(),
+    setState: (stateJson) => router.setState(stateJson),
 };

@@ -27,7 +27,7 @@ fi
 # Build
 echo ""
 echo "Building example..."
-cargo build --release
+cargo build
 
 # Run unit tests
 echo ""
@@ -43,7 +43,7 @@ echo ""
 
 # Run the example to validate it works
 echo "Running example to validate..."
-timeout 30 cargo run --release --bin entity-recognition-app -- \
+timeout 30 cargo run -- \
     doc1.txt doc2.txt doc3.txt 2>&1 | tee /tmp/entity_recognition_test.txt || {
     if [ $? -eq 124 ]; then
         echo ""
@@ -77,4 +77,3 @@ echo ""
 echo "Or use the simple run script:"
 echo "  ./scripts/run.sh"
 echo ""
-

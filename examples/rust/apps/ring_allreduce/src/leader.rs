@@ -113,15 +113,15 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                     .map(|actor_id| actor_node_id(actor_id)),
             )
             .collect();
-    let mut start_statuses = HashMap::new();
+    let mut start_metrics = HashMap::new();
     for node_id in &participant_node_ids {
-        match application_status(node_id) {
-            Ok(status) => {
-                start_statuses.insert(node_id.clone(), status);
+        match application_metrics(node_id) {
+            Ok(metrics) => {
+                start_metrics.insert(node_id.clone(), metrics);
             }
             Err(err) => {
                 return super::json_bytes(serde_json::json!({
-                    "error": format!("failed to capture application status for {}: {}", node_id, err),
+                    "error": format!("failed to capture application metrics for {}: {}", node_id, err),
                 }));
             }
         }
@@ -337,8 +337,19 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     }
 
     let mut node_addresses = serde_json::Map::new();
-    let mut end_statuses = HashMap::new();
+    let mut end_metrics = HashMap::new();
     for node_id in &participant_node_ids {
+        match application_metrics(node_id) {
+            Ok(metrics) => {
+                end_metrics.insert(node_id.clone(), metrics);
+            }
+            Err(err) => {
+                return super::json_bytes(serde_json::json!({
+                    "error": format!("failed to collect final application metrics for {}: {}", node_id, err),
+                }));
+            }
+        }
+
         match application_status(node_id) {
             Ok(status) => {
                 if let Some(node_address) =
@@ -349,7 +360,6 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                         serde_json::Value::String(node_address.to_string()),
                     );
                 }
-                end_statuses.insert(node_id.clone(), status);
             }
             Err(err) => {
                 return super::json_bytes(serde_json::json!({
@@ -360,18 +370,18 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     }
 
     for node_id in &participant_node_ids {
-        let Some(start_status) = start_statuses.get(node_id) else {
+        let Some(start_metrics) = start_metrics.get(node_id) else {
             continue;
         };
-        let Some(end_status) = end_statuses.get(node_id) else {
+        let Some(end_metrics) = end_metrics.get(node_id) else {
             continue;
         };
         let node_metrics = per_node_metrics.entry(node_id.clone()).or_default();
-        accumulate_status_delta(
+        accumulate_metrics_delta(
             node_metrics,
             &mut per_role_metrics,
-            start_status,
-            end_status,
+            start_metrics,
+            end_metrics,
         );
     }
     apply_topology_actor_counts(

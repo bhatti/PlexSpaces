@@ -9,8 +9,9 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "router"
-type = "router"
+name = "router"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "router"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -20,8 +21,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "chain"
-type = "chain"
+name = "chain"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "chain"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -32,8 +34,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "judge"
-type = "judge"
+name = "judge"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "judge"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -44,8 +47,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "orchestrator"
-type = "orchestrator"
+name = "orchestrator"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "orchestrator"
 restart = "permanent"
 shutdown_timeout_seconds = 60
 behavior_kind = "Workflow"
@@ -56,8 +60,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "pipeline_audit"
-type = "pipeline_audit"
+name = "pipeline_audit"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "pipeline_audit"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
@@ -67,8 +72,9 @@ facets = [
 ]
 
 [[supervisor.children]]
-id = "quality_fsm"
-type = "quality_fsm"
+name = "quality_fsm"
+actor_type = "llm_workflow_orchestrator_wasm"
+role = "quality_fsm"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"

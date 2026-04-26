@@ -23,6 +23,7 @@ class JobSchedulerActor:
 
     queue: list = state(default_factory=list)   # [{job_id, priority, gpu_request, submitted_at_ms, status}]
     used_gpus: int = state(default=0)
+    peak_used_gpus: int = state(default=0)
     max_gpus: int = state(default=DEFAULT_MAX_GPUS)
     processed_count: int = state(default=0)
     total_compute_ms: float = state(default=0.0)
@@ -50,6 +51,8 @@ class JobSchedulerActor:
             self.queue = q
         if "used_gpus" in d:
             self.used_gpus = int(d["used_gpus"])
+        if "peak_used_gpus" in d:
+            self.peak_used_gpus = int(d["peak_used_gpus"])
         if "processed_count" in d:
             self.processed_count = int(d["processed_count"])
         if "total_compute_ms" in d:
@@ -63,6 +66,7 @@ class JobSchedulerActor:
             {
                 "queue": self.queue,
                 "used_gpus": self.used_gpus,
+                "peak_used_gpus": self.peak_used_gpus,
                 "processed_count": self.processed_count,
                 "total_compute_ms": self.total_compute_ms,
                 "total_coord_ms": self.total_coord_ms,
@@ -131,6 +135,7 @@ class JobSchedulerActor:
                 if self.used_gpus + need <= self.max_gpus:
                     j["status"] = "allocated"
                     self.used_gpus += need
+                    self.peak_used_gpus = max(self.peak_used_gpus, self.used_gpus)
                     # Per-job KV must reflect allocated so complete() works after WASM re-instantiation
                     self._put_job_entry(j)
                     host.lock_release(lock_id, tenant, ns, holder, lock_version)
@@ -245,6 +250,7 @@ class JobSchedulerActor:
         return {
             "ok": True,
             "used_gpus": self.used_gpus,
+            "peak_used_gpus": self.peak_used_gpus,
             "max_gpus": self.max_gpus,
             "processed_count": self.processed_count,
             "total_compute_ms": self.total_compute_ms,

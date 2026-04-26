@@ -39,11 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // =========================================================================
     // Step 2: Create Node
     // =========================================================================
-    let node = Arc::new(
-        NodeBuilder::new("byzantine-node")
-            .build()
-            .await
-    );
+    let node = NodeBuilder::new("byzantine-node")
+        .build_started()
+        .await;
 
     // =========================================================================
     // Step 3: Create and start Application

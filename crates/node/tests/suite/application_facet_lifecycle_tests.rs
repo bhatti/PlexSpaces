@@ -31,9 +31,9 @@ use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocato
 use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
+    ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use prost_types::Duration as ProstDuration;
 use serde_json::Value;
@@ -370,14 +370,15 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
 
     // Create ChildSpec with facets
     let child_spec = ChildSpec {
-        id: format!("{}-worker", name),
-        r#type: ChildType::ChildTypeWorker.into(),
-        args: HashMap::new(),
+        actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+            name: format!("{}-worker", name),
+            actor_type: "test_wasm_actor".to_string(),
+        }),
+
+        role: "worker".to_string(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
-        shutdown_timeout: None,
-        supervisor: None,
         facets: vec![proto_facet], // Facets from ChildSpec
-        behavior_kind: None,
+        ..Default::default()
     };
 
     // Create SupervisorSpec with ChildSpec

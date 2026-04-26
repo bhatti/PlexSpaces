@@ -1151,28 +1151,6 @@ impl ServiceLocatorImpl {
             .await
     }
 
-    /// Get ActorFactory as trait object
-    ///
-    /// ## Returns
-    /// `Some(Arc<dyn Any + Send + Sync>)` if registered, `None` otherwise.
-    /// The caller should use `plexspaces_actor::get_actor_factory()` helper to convert to `Arc<dyn ActorFactory>`.
-    ///
-    /// ## Note
-    /// Since ActorFactory trait is in the actor crate, we return Arc<dyn Any>.
-    /// Get ActorFactory as trait object
-    ///
-    /// ## Note
-    /// This is an alias for `get_actor_factory()`. Use `get_actor_factory()` directly instead.
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let factory = service_locator.actor_factory().await?;
-    /// factory.spawn_actor(&ctx, actor_id, ...).await?;
-    /// ```
-    pub async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
-        self.get_actor_factory().await
-    }
-
     /// Get ReplyWaiterRegistry service
     ///
     /// ## Returns
@@ -1611,12 +1589,24 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     }
 
     fn is_shutdown_requested(&self) -> bool {
-        // This is a sync method in the trait, but ServiceLocatorImpl uses async
-        // Use try_current() to avoid panicking if called from outside runtime
-        // If we're in a runtime, use block_in_place to avoid blocking the runtime
+        // This is a sync method in the trait, but ServiceLocatorImpl uses async.
+        // block_in_place requires a multi-threaded runtime; on a current-thread runtime
+        // (e.g., #[tokio::test]) it panics. Use spawn_blocking-free try_read on the
+        // underlying atomic / flag instead, falling back to `false` (not shutting down)
+        // when we cannot safely block.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            // We're in an async runtime - use block_in_place to avoid blocking
-            tokio::task::block_in_place(|| handle.block_on(async { self.is_shutting_down().await }))
+            // Only call block_in_place when the runtime is multi-threaded.
+            // On a current-thread runtime this would panic, so return false instead.
+            if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(async { self.is_shutting_down().await })
+                })
+            } else {
+                // Single-threaded runtime (e.g., #[tokio::test]): cannot block.
+                // Return false — callers that need this check in production use
+                // multi-threaded runtimes.
+                false
+            }
         } else {
             // Not in a runtime - can't check async state, return false
             false
@@ -2131,8 +2121,8 @@ async fn initialize_services_impl(
         .set_virtual_actor_manager(virtual_actor_manager.clone())
         .await;
 
-    // Phase 1: Unified Lifecycle - Create and register FacetRegistry with default factories
-    // FacetRegistry allows applications to create facets from proto configurations
+    // Create and register FacetRegistry with default factories.
+    // Applications use this to instantiate facets from proto configurations.
     use plexspaces_core::facet_service_wrapper::{
         FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
     };
@@ -2289,6 +2279,12 @@ async fn initialize_services_impl(
         service_locator_impl.clone(),
         node_id_str.clone(),
     ));
+    // `ActorRegistry::tell` routes remote IDs through the embedded `ActorService` (e.g. `__DOWN__`
+    // to a supervisor on another node). Wire the same instance used by `ServiceLocator` so
+    // registry-initiated delivery works without requiring `Node::start()` (tests and early init).
+    actor_registry
+        .set_actor_service(actor_service.clone())
+        .await;
     service_locator
         .register_actor_service(
             actor_service as Arc<dyn plexspaces_core::ActorService + Send + Sync>,

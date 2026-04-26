@@ -25,6 +25,8 @@ use tracing::{error, info};
 use crate::config::ByzantineConfig;
 use crate::general::{Decision, General, GeneralMessage, Value};
 
+const BYZANTINE_GENERAL_BEHAVIOR: &str = "byzantine_general";
+
 /// Byzantine Generals Application
 pub struct ByzantineApplication {
     config: ByzantineConfig,
@@ -85,20 +87,20 @@ impl Application for ByzantineApplication {
         })?;
 
         // =====================================================================
-        // Step 1: Register ByzantineGeneral behavior
+        // Step 1: Register custom general behavior
         // =====================================================================
         metrics_tracker.start_coordinate();
         let register_start = Instant::now();
 
         let behavior_registry = BehaviorRegistry::new();
         behavior_registry
-            .register("ByzantineGeneral", |initial_state: &[u8]| {
+            .register(BYZANTINE_GENERAL_BEHAVIOR, |initial_state: &[u8]| {
                 let initial_state = initial_state.to_vec();
                 Box::pin(async move {
                     let state: serde_json::Value =
                         serde_json::from_slice(&initial_state).map_err(|e| {
                             plexspaces_core::BehaviorFactoryError::InvalidArguments(
-                                "ByzantineGeneral".to_string(),
+                                BYZANTINE_GENERAL_BEHAVIOR.to_string(),
                                 format!("Invalid JSON: {}", e),
                             )
                         })?;
@@ -146,13 +148,13 @@ impl Application for ByzantineApplication {
                 "num_rounds": self.config.num_rounds,
             });
 
-            // Use SDK spawn_with_behavior_type helper for BehaviorRegistry-based actors
+            // Use the BehaviorRegistry-backed SDK spawn helper with the registered behavior id.
             let general_ref = spawn_with_behavior_type(
                 &ctx,
                 service_locator.clone(),
                 actor_name,
                 "consensus",
-                "ByzantineGeneral",
+                BYZANTINE_GENERAL_BEHAVIOR,
                 serde_json::to_vec(&initial_state).unwrap(),
                 vec![],
             )

@@ -33,17 +33,24 @@
 //! - Cascading failures
 //! - Multiple links/monitors
 
+use plexspaces_core::actor_trait::MessageSender;
 use plexspaces_core::{
-    Actor, ActorContext, ActorError, ActorId, ActorRef, ActorRegistry, BehaviorError, BehaviorType,
-    ExitAction, ExitReason, Message, RequestContext, ServiceLocator,
+    Actor, ActorContext, ActorError, ActorId, ActorRegistry, BehaviorError, BehaviorType,
+    ExitAction, ExitReason, Message, RequestContext,
 };
 // Note: Message is now unified proto Message from plexspaces_proto::common::v1
+
+use async_trait::async_trait;
 
 fn test_actor_id(name: &str) -> ActorId {
     ActorId::new(name, "gen_server", "default", "test-node").unwrap()
 }
-use async_trait::async_trait;
+
+fn monitoring_request_context_for_tests() -> RequestContext {
+    RequestContext::new_without_auth("test-tenant".into(), "default".into())
+}
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+use std::any::Any;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -190,6 +197,49 @@ async fn create_test_registry() -> Arc<ActorRegistry> {
             inner: object_registry_impl,
         });
     Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()))
+}
+
+/// Mock MessageSender that captures messages into an unbounded channel.
+/// Used to register a monitoring actor in the registry so DOWN messages
+/// can be delivered to its mailbox via ActorRegistry::tell().
+struct MockMessageSender {
+    tx: mpsc::UnboundedSender<Message>,
+}
+
+#[async_trait]
+impl MessageSender for MockMessageSender {
+    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.tx
+            .send(message)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Register a mock actor in the registry and return the receiver end of the channel.
+/// DOWN messages will be forwarded to this receiver when the monitored actor terminates.
+async fn register_mock_actor(
+    registry: &Arc<ActorRegistry>,
+    actor_id: ActorId,
+) -> mpsc::UnboundedReceiver<Message> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let sender = Arc::new(MockMessageSender { tx });
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+    registry
+        .register_actor(
+            &ctx,
+            actor_id,
+            sender,
+            "MockActor".to_string(),
+            None,
+            None,
+            None,
+        )
+        .await;
+    rx
 }
 
 /// Test actor that can trap exits
@@ -380,14 +430,19 @@ async fn test_monitor_receives_down_message() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    // Create monitor channel
-    let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
+
+    // Register the monitoring actor so DOWN messages can be delivered to its mailbox
+    let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
 
     // Register monitor
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -396,12 +451,19 @@ async fn test_monitor_receives_down_message() {
         .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
         .await;
 
-    // Monitor should receive DOWN message
+    // Monitor should receive a DOWN message via its mailbox
     let down_msg = rx.recv().await;
     assert!(down_msg.is_some());
-    let (terminated_actor_id, reason) = down_msg.unwrap();
-    assert_eq!(terminated_actor_id, actor_id);
-    assert_eq!(reason, "test error");
+    let msg = down_msg.unwrap();
+    assert_eq!(msg.message_type, "__DOWN__");
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(actor_id.to_string().as_str())
+    );
+    assert_eq!(
+        msg.headers.get("down_reason").map(|s| s.as_str()),
+        Some("test error")
+    );
 }
 
 /// Test: Multiple monitors receive DOWN messages
@@ -413,17 +475,27 @@ async fn test_multiple_monitors_receive_down() {
     let monitor1_id = test_actor_id("monitor1");
     let monitor2_id = test_actor_id("monitor2");
 
-    // Create monitor channels
-    let (tx1, mut rx1) = mpsc::channel(10);
-    let (tx2, mut rx2) = mpsc::channel(10);
+    // Register both monitoring actors so DOWN messages can be delivered to their mailboxes
+    let mut rx1 = register_mock_actor(&registry, monitor1_id.clone()).await;
+    let mut rx2 = register_mock_actor(&registry, monitor2_id.clone()).await;
 
     // Register both monitors
     registry
-        .monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1)
+        .monitor(
+            &actor_id,
+            &monitor1_id,
+            "monitor-ref-1".to_string(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
     registry
-        .monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2)
+        .monitor(
+            &actor_id,
+            &monitor2_id,
+            "monitor-ref-2".to_string(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -437,6 +509,8 @@ async fn test_multiple_monitors_receive_down() {
     let down2 = rx2.recv().await;
     assert!(down1.is_some());
     assert!(down2.is_some());
+    assert_eq!(down1.unwrap().message_type, "__DOWN__");
+    assert_eq!(down2.unwrap().message_type, "__DOWN__");
 }
 
 /// Test: Cascading failure through multiple links
@@ -471,13 +545,16 @@ async fn test_demonitor_removes_monitor() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, _rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    // Register monitor
+    // Register monitor (no channel needed since we only test registration/removal)
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -487,11 +564,11 @@ async fn test_demonitor_removes_monitor() {
         .await
         .unwrap();
 
-    // Terminate actor - monitor should NOT receive DOWN
+    // Terminate actor - monitor should NOT receive DOWN (it was demonitored)
     registry
         .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
         .await;
-    // Verify no DOWN message (would need to check rx, but it's dropped)
+    // No channel to check; correctness verified by absence of panic/error above
 }
 
 /// Test: Link during startup (before actor is fully started)
@@ -607,21 +684,23 @@ async fn test_monitor_nonexistent_actor() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, _rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    // Monitor non-existent actor should still work
+    // Monitor non-existent actor should still work (no channel needed for this test)
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
-    // When actor terminates, monitor should receive DOWN
+    // When actor terminates, monitor would receive DOWN (verified in other tests)
     registry
         .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
         .await;
-    // Monitor should have received DOWN (verified in other tests)
 }
 
 /// Test: Self-link prevention
@@ -701,12 +780,18 @@ async fn test_monitor_receives_down_normal_exit() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
+    // Register the monitoring actor so DOWN messages can be delivered to its mailbox
+    let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
+
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -718,9 +803,16 @@ async fn test_monitor_receives_down_normal_exit() {
     // Monitor should receive DOWN even for normal exit
     let down_msg = rx.recv().await;
     assert!(down_msg.is_some());
-    let (terminated_actor_id, reason) = down_msg.unwrap();
-    assert_eq!(terminated_actor_id, actor_id);
-    assert_eq!(reason, "normal");
+    let msg = down_msg.unwrap();
+    assert_eq!(msg.message_type, "__DOWN__");
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(actor_id.to_string().as_str())
+    );
+    assert_eq!(
+        msg.headers.get("down_reason").map(|s| s.as_str()),
+        Some("normal")
+    );
 }
 
 /// Test: Monitor receives DOWN for shutdown exit
@@ -730,12 +822,18 @@ async fn test_monitor_receives_down_shutdown_exit() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
+    // Register the monitoring actor so DOWN messages can be delivered to its mailbox
+    let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
+
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -747,9 +845,16 @@ async fn test_monitor_receives_down_shutdown_exit() {
     // Monitor should receive DOWN
     let down_msg = rx.recv().await;
     assert!(down_msg.is_some());
-    let (terminated_actor_id, reason) = down_msg.unwrap();
-    assert_eq!(terminated_actor_id, actor_id);
-    assert_eq!(reason, "shutdown");
+    let msg = down_msg.unwrap();
+    assert_eq!(msg.message_type, "__DOWN__");
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(actor_id.to_string().as_str())
+    );
+    assert_eq!(
+        msg.headers.get("down_reason").map(|s| s.as_str()),
+        Some("shutdown")
+    );
 }
 
 /// Test: Monitor receives DOWN for killed exit
@@ -759,12 +864,18 @@ async fn test_monitor_receives_down_killed_exit() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
+    // Register the monitoring actor so DOWN messages can be delivered to its mailbox
+    let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
+
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -776,9 +887,16 @@ async fn test_monitor_receives_down_killed_exit() {
     // Monitor should receive DOWN
     let down_msg = rx.recv().await;
     assert!(down_msg.is_some());
-    let (terminated_actor_id, reason) = down_msg.unwrap();
-    assert_eq!(terminated_actor_id, actor_id);
-    assert_eq!(reason, "killed");
+    let msg = down_msg.unwrap();
+    assert_eq!(msg.message_type, "__DOWN__");
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(actor_id.to_string().as_str())
+    );
+    assert_eq!(
+        msg.headers.get("down_reason").map(|s| s.as_str()),
+        Some("killed")
+    );
 }
 
 /// Test: Monitor receives DOWN for linked exit
@@ -788,12 +906,18 @@ async fn test_monitor_receives_down_linked_exit() {
 
     let actor_id = test_actor_id("actor1");
     let monitor_id = test_actor_id("monitor1");
-
-    let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
+    // Register the monitoring actor so DOWN messages can be delivered to its mailbox
+    let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
+
     registry
-        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .monitor(
+            &actor_id,
+            &monitor_id,
+            monitor_ref.clone(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -809,9 +933,22 @@ async fn test_monitor_receives_down_linked_exit() {
     // Monitor should receive DOWN with linked reason
     let down_msg = rx.recv().await;
     assert!(down_msg.is_some());
-    let (terminated_actor_id, reason) = down_msg.unwrap();
-    assert_eq!(terminated_actor_id, actor_id);
-    assert!(reason.contains("linked"));
+    let msg = down_msg.unwrap();
+    assert_eq!(msg.message_type, "__DOWN__");
+    assert_eq!(
+        msg.headers.get("down_from").map(|s| s.as_str()),
+        Some(actor_id.to_string().as_str())
+    );
+    let reason = msg
+        .headers
+        .get("down_reason")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    assert!(
+        reason.contains("linked"),
+        "Expected 'linked' in reason, got: {}",
+        reason
+    );
 }
 
 /// Test: Link cleanup on termination removes all references
@@ -861,15 +998,26 @@ async fn test_monitor_cleanup_on_termination() {
     let monitor1_id = test_actor_id("monitor1");
     let monitor2_id = test_actor_id("monitor2");
 
-    let (tx1, mut rx1) = mpsc::channel(10);
-    let (tx2, mut rx2) = mpsc::channel(10);
+    // Register both monitoring actors so DOWN messages can be delivered to their mailboxes
+    let mut rx1 = register_mock_actor(&registry, monitor1_id.clone()).await;
+    let mut rx2 = register_mock_actor(&registry, monitor2_id.clone()).await;
 
     registry
-        .monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1)
+        .monitor(
+            &actor_id,
+            &monitor1_id,
+            "monitor-ref-1".to_string(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
     registry
-        .monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2)
+        .monitor(
+            &actor_id,
+            &monitor2_id,
+            "monitor-ref-2".to_string(),
+            &monitoring_request_context_for_tests(),
+        )
         .await
         .unwrap();
 
@@ -883,6 +1031,8 @@ async fn test_monitor_cleanup_on_termination() {
     let down2 = rx2.recv().await;
     assert!(down1.is_some());
     assert!(down2.is_some());
+    assert_eq!(down1.unwrap().message_type, "__DOWN__");
+    assert_eq!(down2.unwrap().message_type, "__DOWN__");
 
     // Monitors should be cleaned up (no longer registered)
     // Note: This is verified by the fact that monitors are removed in handle_actor_termination

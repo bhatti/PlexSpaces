@@ -171,33 +171,17 @@ class ChildSpec(betterproto.Message):
        modules => [Module]}
      ```
 
-     ## Design: Unified Child Reference
-     In PlexSpaces, both actors and supervisors are identified by ID.
-     - For actors: `actor_or_supervisor_id` is the actor ID
-     - For supervisors: `actor_or_supervisor_id` is the supervisor ID
-     - The `child_type` field distinguishes them
-
-     This follows Erlang's approach where supervisors are just special processes.
+     Identity uses `ActorIdentity` (name + actor_type). The canonical `ActorId`
+     string is derived at runtime when namespace and node_id are known.
     """
 
-    child_id: str = betterproto.string_field(1)
-    """
-    Unique identifier for this child within the supervisor
-     This is the child's local name, like "worker1" or "db_supervisor"
-    """
+    actor_identity: "__common_v1__.ActorIdentity" = betterproto.message_field(1)
+    """Instance name + behavior class for this supervised process."""
 
-    actor_or_supervisor_id: str = betterproto.string_field(2)
-    """
-    ID of the actor or supervisor to supervise
-     - For actors: actor ID (e.g., "worker1@localhost")
-     - For supervisors: supervisor ID (e.g., "db-supervisor")
-     The supervisor monitors this process regardless of its type
-    """
-
-    restart_strategy: "RestartStrategy" = betterproto.enum_field(3)
+    restart_strategy: "RestartStrategy" = betterproto.enum_field(2)
     """How to handle child failures"""
 
-    shutdown_timeout: timedelta = betterproto.message_field(4)
+    shutdown_timeout: timedelta = betterproto.message_field(3)
     """
     Shutdown timeout for graceful termination
      - None/0 = brutal_kill (immediate)
@@ -205,11 +189,11 @@ class ChildSpec(betterproto.Message):
      - For supervisors: typically set high or infinity to allow children to shutdown
     """
 
-    child_type: "ChildType" = betterproto.enum_field(5)
+    child_type: "ChildType" = betterproto.enum_field(4)
     """Child type: actor (worker) or supervisor"""
 
     metadata: Dict[str, str] = betterproto.map_field(
-        6, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """
     Metadata for child configuration
@@ -219,7 +203,7 @@ class ChildSpec(betterproto.Message):
      - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
     """
 
-    facets: List["__common_v1__.Facet"] = betterproto.message_field(7)
+    facets: List["__common_v1__.Facet"] = betterproto.message_field(6)
     """
     Facet configuration (for automatic attachment during actor creation)
      Facets are attached in priority order (high priority first) before actor.init() is called

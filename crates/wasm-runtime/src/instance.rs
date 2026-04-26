@@ -205,8 +205,8 @@ unsafe impl Sync for WasmInstance {}
 impl Drop for WasmInstance {
     fn drop(&mut self) {
         metrics::gauge!("plexspaces_wasm_active_instances").decrement(1.0);
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 actor_id = %self.actor_id,
                 "WASM instance dropped (cleanup on undeploy/stop)"
             );
@@ -746,11 +746,13 @@ impl WasmInstance {
                             let mut guard = component_state_ref.lock().await;
                             *guard = new_state;
 
-                            tracing::debug!(
-                                actor_id = %actor_id,
-                                binding_type = if is_simple_actor { "SimpleActor" } else { "PlexspacesActor" },
-                                "Post-init re-instantiation completed (wasmtime#8943 workaround)"
-                            );
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                tracing::trace!(
+                                    actor_id = %actor_id,
+                                    binding_type = if is_simple_actor { "SimpleActor" } else { "PlexspacesActor" },
+                                    "Post-init re-instantiation completed (wasmtime#8943 workaround)"
+                                );
+                            }
                         }
 
                         return Ok(instance);

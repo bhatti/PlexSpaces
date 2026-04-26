@@ -10,9 +10,9 @@ echo "║          Entity Recognition Example                            ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Build in release mode
+# Build the default application binary in debug mode.
 echo "Building entity recognition example..."
-cargo build --release --bin entity-recognition-app
+cargo build
 
 echo ""
 echo "Running entity recognition application..."
@@ -24,7 +24,7 @@ echo ""
 DOCUMENTS="${@:-doc1.txt doc2.txt doc3.txt}"
 
 # Run with timeout to prevent stalling
-timeout 30 cargo run --release --bin entity-recognition-app -- $DOCUMENTS || {
+timeout 30 cargo run -- $DOCUMENTS || {
     if [ $? -eq 124 ]; then
         echo ""
         echo "⚠️  Command timed out after 30 seconds"
@@ -32,4 +32,3 @@ timeout 30 cargo run --release --bin entity-recognition-app -- $DOCUMENTS || {
     fi
     exit $?
 }
-

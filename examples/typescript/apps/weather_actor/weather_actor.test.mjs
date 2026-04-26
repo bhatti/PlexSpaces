@@ -17,6 +17,8 @@ function createMockHost(weatherBodyOverride = null) {
     kv, logs,
     kvGet(key) { return kv.get(key) ?? ''; },
     kvPut(key, value) { kv.set(key, value); return ''; },
+    kvDelete(key) { kv.delete(key); return ''; },
+    kvList(prefix) { return JSON.stringify([...kv.keys()].filter(k => k.startsWith(prefix))); },
     log(level, msg) { logs.push({ level, msg }); },
     nowMs() { return currentTimeMs; },
     advanceTimeMs(ms) { currentTimeMs += ms; },
@@ -49,11 +51,19 @@ class WeatherActor {
     return '';
   }
 
+  _cacheKeyPrefix() { return `${this.state.actor_id}:weather:`; }
+
   handle(_from, msgType, payloadJSON) {
     switch (msgType) {
       case 'get_weather': return this._getWeather(payloadJSON);
       case 'cache_stats': return JSON.stringify({ hits: this.state.cache_hits, misses: this.state.cache_misses });
-      case 'clear_cache': this.state.cache_hits = 0; this.state.cache_misses = 0; return JSON.stringify({ cleared: true });
+      case 'clear_cache': {
+        this.state.cache_hits = 0;
+        this.state.cache_misses = 0;
+        const keysJson = this._host.kvList(this._cacheKeyPrefix());
+        try { for (const key of JSON.parse(keysJson)) this._host.kvDelete(key); } catch {}
+        return JSON.stringify({ cleared: true });
+      }
       default: return JSON.stringify({ error: `unknown message type: ${msgType}` });
     }
   }
@@ -62,7 +72,7 @@ class WeatherActor {
     let city = 'London';
     try { const req = JSON.parse(payloadJSON); if (req.city) city = req.city; } catch {}
 
-    const cacheKey = `weather:${city}`;
+    const cacheKey = `${this._cacheKeyPrefix()}${city}`;
     const cached = this._host.kvGet(cacheKey);
     if (cached) {
       try {

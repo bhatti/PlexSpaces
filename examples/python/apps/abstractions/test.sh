@@ -214,21 +214,20 @@ echo "Step 9: Non-durable reactivation"
 EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
 assert_actor_ok "ephemeral status" "$EPHEMERAL_UPDATED"
 assert_actor_ok "ephemeral increment" "$(send_actor "$EPHEMERAL_ACTOR" '{"op":"increment","amount":2}' 15)"
-EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
-EPHEMERAL_INTERNAL_ID="$(PARSED="$(extract_payload_json "$EPHEMERAL_UPDATED")" python3 - <<'PY'
-import json, os
-print(json.loads(os.environ["PARSED"]).get("self_id", ""))
-PY
-)"
-STOP_EPHEMERAL_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$EPHEMERAL_INTERNAL_ID")"
-assert_actor_ok "stop_ephemeral" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_EPHEMERAL_PAYLOAD" 15)"
-sleep 1
-EPHEMERAL_REACTIVATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "ephemeral reactivated" "$EPHEMERAL_REACTIVATED"
-if ! echo "$(extract_payload_json "$EPHEMERAL_REACTIVATED")" | grep -q '"count": 5\|"count":5'; then
-  echo -e "${RED}Non-durable virtual actor did not reset to init-config after reactivation${NC}"
-  exit 1
-fi
+# Stop via DELETE API so the Rust node handles stop directly (no WASM controller indirection).
+# DELETE /api/v1/actors/{namespace}/{actor_type:id} resolves canonical ID, calls actor_factory.stop_actor,
+# then prime_instance_from_definition refreshes the spec so reactivation uses initial_count=5.
+STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+  "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
+  -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+assert_actor_ok "stop_ephemeral" "$STOP_RESULT"
+wait_for_json_field \
+  "$EPHEMERAL_ACTOR" \
+  '{"op":"status"}' \
+  "count" \
+  "5" \
+  30 \
+  0.2
 
 echo ""
 echo -e "${GREEN}Python abstractions example passed${NC}"

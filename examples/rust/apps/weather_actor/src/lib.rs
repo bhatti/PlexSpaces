@@ -8,6 +8,8 @@
 // - state is framework-owned protobuf bytes; ask replies stay JSON for example ergonomics
 
 use prost::Message;
+#[cfg(target_arch = "wasm32")]
+use std::collections::HashMap;
 use serde_json::{json, Value};
 
 const CACHE_TTL_MS: u64 = 5 * 60 * 1000;
@@ -185,6 +187,68 @@ fn normalize_city(city: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_application_id(actor_id: &str) -> String {
+    if let Some(namespace) = actor_id
+        .split_once("//")
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(qualified, _)| qualified))
+        .and_then(|qualified| qualified.rsplit_once("::").map(|(_, namespace)| namespace))
+    {
+        return namespace.to_string();
+    }
+
+    actor_id
+        .split_once(':')
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(namespace, _)| namespace))
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn actor_node_id(actor_id: &str) -> String {
+    actor_id
+        .rsplit_once('@')
+        .map(|(_, node_id)| node_id.to_string())
+        .unwrap_or_else(|| "local".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn json_object_to_metric_map(value: Option<&Value>) -> HashMap<String, u64> {
+    value.and_then(|value| value.as_object()).map(|entries| {
+        entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()
+    }).unwrap_or_default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn application_metrics_from_json(metrics: Value) -> plexspaces_proto::application::v1::ApplicationMetrics {
+    plexspaces_proto::application::v1::ApplicationMetrics {
+        actor_counts: json_object_to_metric_map(metrics.get("actor_counts")),
+        supervisor_count: metrics.get("supervisor_count").and_then(|value| value.as_u64()).unwrap_or(0) as u32,
+        uptime_seconds: metrics.get("uptime_seconds").and_then(|value| value.as_u64()).unwrap_or(0),
+        message_count: metrics.get("message_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        error_count: metrics.get("error_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        counter_metrics: json_object_to_metric_map(metrics.get("counter_metrics")),
+        latency_totals_ms: json_object_to_metric_map(metrics.get("latency_totals_ms")),
+        latency_max_ms: json_object_to_metric_map(metrics.get("latency_max_ms")),
+        latency_samples: json_object_to_metric_map(metrics.get("latency_samples")),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn application_metrics_to_json(metrics: &plexspaces_proto::application::v1::ApplicationMetrics) -> Value {
+    json!({
+        "actor_counts": metrics.actor_counts,
+        "supervisor_count": metrics.supervisor_count,
+        "uptime_seconds": metrics.uptime_seconds,
+        "message_count": metrics.message_count,
+        "error_count": metrics.error_count,
+        "counter_metrics": metrics.counter_metrics,
+        "latency_totals_ms": metrics.latency_totals_ms,
+        "latency_max_ms": metrics.latency_max_ms,
+        "latency_samples": metrics.latency_samples,
+    })
 }
 
 fn encode_message<M: Message>(message: &M) -> Vec<u8> {
@@ -411,6 +475,78 @@ mod wasm_app {
         STATE.get_or_init(|| Mutex::new(WeatherState::default()))
     }
 
+    fn current_actor_id() -> String {
+        state_cell()
+            .lock()
+            .expect("weather state lock poisoned")
+            .actor_id
+            .clone()
+    }
+
+    fn current_application_id() -> String {
+        actor_application_id(&current_actor_id())
+    }
+
+    fn current_node_id() -> String {
+        actor_node_id(&host::self_id())
+    }
+
+    fn merge_application_metrics(metrics: Value, context: &str) -> Result<(), String> {
+        let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
+        host::application_metrics_add(&current_application_id(), &metrics_bytes)
+            .map(|_| ())
+            .map_err(|err| format!("{context}: {err}"))
+    }
+
+    fn record_metrics(op: &str, payload: &[u8]) -> Result<(), String> {
+        let value = serde_json::from_slice::<Value>(payload).unwrap_or_else(|_| json!({}));
+        let has_error = value
+            .get("error")
+            .and_then(|entry| entry.as_str())
+            .map(|entry| !entry.is_empty())
+            .unwrap_or(false);
+
+        let mut counter_metrics = serde_json::Map::new();
+        if op == "get_weather" {
+            if let Some(source) = value.get("source").and_then(|entry| entry.as_str()) {
+                match source {
+                    "api" => {
+                        counter_metrics.insert(
+                            "weather_api_requests".to_string(),
+                            Value::from(1_u64),
+                        );
+                    }
+                    "cache" => {
+                        counter_metrics.insert(
+                            "weather_cache_hits".to_string(),
+                            Value::from(1_u64),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if op == "clear_cache" {
+            counter_metrics.insert("cache_clears".to_string(), Value::from(1_u64));
+        }
+
+        merge_application_metrics(
+            json!({
+                "message_count": 1,
+                "error_count": u64::from(has_error),
+                "counter_metrics": counter_metrics,
+            }),
+            "weather metrics update",
+        )
+    }
+
+    fn handle_get_metrics() -> Result<Vec<u8>, String> {
+        let response = host::application_get_metrics(&current_application_id(), &current_node_id())?;
+        let metrics = plexspaces_proto::application::v1::ApplicationMetrics::decode(response.as_slice())
+            .map_err(|err| format!("invalid ApplicationMetrics protobuf: {err}"))?;
+        Ok(application_metrics_to_json(&metrics).to_string().into_bytes())
+    }
+
     impl WeatherHost for WasmHost {
         fn now_ms(&self) -> u64 {
             host::now_ms()
@@ -439,6 +575,11 @@ mod wasm_app {
             msg_type: String,
             payload: Vec<u8>,
         ) -> Result<Vec<u8>, String> {
+            let op = parse_op(&msg_type, &payload)?;
+            if op == "get_metrics" || op == "metrics" {
+                return handle_get_metrics();
+            }
+
             let current_state = state_cell()
                 .lock()
                 .expect("weather state lock poisoned")
@@ -448,8 +589,13 @@ mod wasm_app {
             };
             let mut host_adapter = WasmHost;
             let result = actor.handle(&mut host_adapter, &msg_type, &payload);
-            let mut guard = state_cell().lock().expect("weather state lock poisoned");
-            *guard = actor.state;
+            {
+                let mut guard = state_cell().lock().expect("weather state lock poisoned");
+                *guard = actor.state;
+            }
+            if let Ok(ref response_payload) = result {
+                let _ = record_metrics(&op, response_payload);
+            }
             result
         }
 

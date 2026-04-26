@@ -16,6 +16,7 @@ CONTROLLER_ACTOR="controller"
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
+NODE_META="$REPO_ROOT/plexspaces-node-$((HTTP_PORT - 1)).meta"
 
 cleanup() {
   curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
@@ -96,8 +97,8 @@ PY
 }
 
 wait_for_json_field() {
-  local actor="$1" payload="$2" field="$3" expected="$4" attempts="${5:-20}" sleep_s="${6:-0.2}"
-  local i response parsed actual
+  local actor="$1" payload="$2" field="$3" expected="$4" attempts="${5:-20}" sleep_s="${6:-0.2}" hint="${7:-}"
+  local i response parsed actual last_actual=""
   for i in $(seq 1 "$attempts"); do
     response="$(send_actor "$actor" "$payload" 15)"
     assert_actor_ok "poll $actor $field" "$response"
@@ -119,13 +120,80 @@ else:
     print(value)
 PY
 )"
+    last_actual="$actual"
     if [ "$actual" = "$expected" ]; then
       return 0
     fi
     sleep "$sleep_s"
   done
   echo -e "${RED}Timed out waiting for $field=$expected on $actor${NC}"
+  if [ -n "$last_actual" ]; then
+    echo "  Last observed $field=$last_actual"
+  fi
+  if [ -n "$hint" ]; then
+    echo "  Hint: $hint"
+  fi
   exit 1
+}
+
+current_binary_mtime_epoch() {
+  python3 - <<'PY'
+import os
+print(int(os.path.getmtime("target/debug/plexspaces")))
+PY
+}
+
+require_binary_newer_than_sources() {
+  cd "$REPO_ROOT"
+  python3 - <<'PY'
+import os
+import sys
+
+binary = "target/debug/plexspaces"
+sources = [
+    "crates/node/src/wasm_apps_loader.rs",
+    "crates/application/src/wasm_application.rs",
+    "crates/actor/src/actor_factory_impl.rs",
+    "crates/core/src/virtual_actor_manager.rs",
+]
+
+binary_mtime = os.path.getmtime(binary)
+newer = [path for path in sources if os.path.exists(path) and os.path.getmtime(path) > binary_mtime]
+if newer:
+    print("\n".join(newer))
+    sys.exit(1)
+PY
+}
+
+require_fresh_server_sh_node() {
+  if [ ! -f "$NODE_META" ]; then
+    echo -e "${RED}Refusing to run against an untracked node on port $HTTP_PORT${NC}"
+    echo "  Expected metadata file: $NODE_META"
+    echo "  Start the node from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
+
+  local current_mtime meta_mtime meta_binary
+  current_mtime="$(cd "$REPO_ROOT" && current_binary_mtime_epoch)"
+  meta_mtime="$(grep '^binary_mtime_epoch=' "$NODE_META" | head -n1 | cut -d= -f2-)"
+  meta_binary="$(grep '^binary_path=' "$NODE_META" | head -n1 | cut -d= -f2-)"
+
+  if [ "$meta_binary" != "$REPO_ROOT/target/debug/plexspaces" ] || [ "$meta_mtime" != "$current_mtime" ]; then
+    echo -e "${RED}Node on port $HTTP_PORT is not running the current repo build${NC}"
+    echo "  Expected binary: $REPO_ROOT/target/debug/plexspaces"
+    echo "  Recorded binary: ${meta_binary:-missing}"
+    echo "  Expected mtime: $current_mtime"
+    echo "  Recorded mtime: ${meta_mtime:-missing}"
+    echo "  Rebuild and restart from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
+
+  if ! NEWER_SOURCES="$(require_binary_newer_than_sources)"; then
+    echo -e "${RED}Node binary is older than role-mapping runtime sources${NC}"
+    echo "$NEWER_SOURCES" | sed 's/^/  newer source: /'
+    echo "  Rebuild and restart from repo root with: make build && ./scripts/server.sh $((HTTP_PORT - 1))"
+    exit 1
+  fi
 }
 
 echo "Step 1: Build WASM"
@@ -137,6 +205,8 @@ if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Start node with ./scripts/server.sh and re-run this test${NC}"
   exit 1
 fi
+
+require_fresh_server_sh_node
 
 echo "Step 2: Deploy"
 curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
@@ -200,35 +270,27 @@ assert_actor_ok "broadcast_event" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"br
 echo "Step 7: Durable reactivation"
 STOP_DURABLE_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$INTERNAL_ACTOR_ID")"
 assert_actor_ok "stop_actor" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_DURABLE_PAYLOAD" 15)"
-sleep 1
-REACTIVATED="$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "reactivated status" "$REACTIVATED"
-if ! echo "$(extract_payload_json "$REACTIVATED")" | grep -q '"count": 2\|"count":2'; then
-  echo -e "${RED}Virtual actor did not preserve durable state after reactivation${NC}"
-  exit 1
-fi
+wait_for_json_field "$ABSTRACTIONS_ACTOR" '{"op":"status"}' "count" "2" 25 0.2
 
 echo "Step 8: Non-durable reactivation"
 EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
 assert_actor_ok "ephemeral status" "$EPHEMERAL_UPDATED"
 assert_actor_ok "ephemeral increment" "$(send_actor "$EPHEMERAL_ACTOR" '{"op":"increment","amount":2}' 15)"
-EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
-EPHEMERAL_INTERNAL_ID="$(PARSED="$(extract_payload_json "$EPHEMERAL_UPDATED")" python3 - <<'PY'
-import json, os
-parsed = json.loads(os.environ["PARSED"])
-obj = parsed if isinstance(parsed, dict) else {}
-print(obj.get("self_id", ""))
-PY
-)"
-STOP_EPHEMERAL_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$EPHEMERAL_INTERNAL_ID")"
-assert_actor_ok "stop_ephemeral" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_EPHEMERAL_PAYLOAD" 15)"
-sleep 1
-EPHEMERAL_REACTIVATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "ephemeral reactivated" "$EPHEMERAL_REACTIVATED"
-if ! echo "$(extract_payload_json "$EPHEMERAL_REACTIVATED")" | grep -q '"count": 5\|"count":5'; then
-  echo -e "${RED}Non-durable virtual actor did not reset to init-config after reactivation${NC}"
-  exit 1
-fi
+# Stop via DELETE API so the Rust node handles stop directly (no WASM controller indirection).
+# DELETE /api/v1/actors/{namespace}/{actor_type:id} resolves canonical ID, calls actor_factory.stop_actor,
+# then prime_instance_from_definition refreshes the spec so reactivation uses initial_count=5.
+STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+  "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
+  -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+assert_actor_ok "stop_ephemeral" "$STOP_RESULT"
+wait_for_json_field \
+  "$EPHEMERAL_ACTOR" \
+  '{"op":"status"}' \
+  "count" \
+  "5" \
+  30 \
+  0.2 \
+  "This reactivation path lives in the Rust node. Rebuild and restart the node from repo root with 'make build' and './scripts/server.sh 8091' before rerunning this test."
 
 echo ""
 echo -e "${GREEN}TypeScript abstractions example passed${NC}"

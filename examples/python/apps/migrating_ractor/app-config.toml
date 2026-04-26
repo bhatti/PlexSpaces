@@ -10,7 +10,8 @@ max_restart_window_seconds = 60
 
 # Calculator actor (Ractor-style typed message handler)
 [[supervisor.children]]
-id = "calculator"
-type = "worker"
+name = "calculator"
+actor_type = "migrating_ractor_wasm"
+role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10

@@ -538,6 +538,7 @@ Composable capabilities that extend actor behavior at runtime:
   - Implements `VirtualActorLifecycleFacet` trait (type-safe lifecycle management)
   - Uses `RuntimeConfig.default_virtual_actor_config` for defaults (idle_timeout: 5m, max_pool: 100, strategy: lazy)
   - Supports LRU eviction when max pool size per actor type is exceeded
+  - Spawn parameters (actor type, namespace, args, labels, facets, placement) are unified in a single `ActorSpawnSpec` proto message that serves as the source of truth for both initial spawn and subsequent reactivations
 - **DurabilityFacet**: Automatic persistence and recovery (Restate-inspired)
 - **MobilityFacet**: Actor migration between nodes
 

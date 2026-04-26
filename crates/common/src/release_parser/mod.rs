@@ -63,7 +63,7 @@ use thiserror::Error;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
-    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, ChildType, RestartPolicy,
+    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, RestartPolicy,
     ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{

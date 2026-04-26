@@ -57,12 +57,12 @@ Let's create a simple counter actor that demonstrates the core concepts. This ex
 The [PlexSpaces Rust SDK](sdk.md#rust-sdk) provides decorator-style annotations for minimal boilerplate:
 
 ```rust
+use plexspaces_node::NodeBuilder;
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
-    NodeBuilder, RequestContext, ActorId,
+    RequestContext,
     spawn_with_facets, call_message, json,
 };
-use std::sync::Arc;
 use std::time::Duration;
 
 // Step 1: Define actor with #[gen_server_actor] annotation
@@ -105,22 +105,13 @@ impl Counter {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create and start node
-    let node = Arc::new(
-        NodeBuilder::new("node1")
-            .with_clustering_enabled(false)
-            .build()
-            .await,
-    );
+    // Create and start node using the unified embedded startup path.
+    let node = NodeBuilder::new("node1")
+        .with_clustering_enabled(false)
+        .build_started()
+        .await;
     let service_locator = node.service_locator();
-    
-    // Start node in background
-    let node_for_start = node.clone();
-    tokio::spawn(async move {
-        let _ = node_for_start.start().await;
-    });
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    
+
     // Create request context with tenant/namespace (required for tenant isolation)
     let ctx = RequestContext::new_without_auth(
         "my-tenant".to_string(),

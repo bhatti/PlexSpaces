@@ -225,6 +225,3 @@ impl Default for ResourceConfig {
     }
 }
 
-// Legacy types for backward compatibility
-pub use EntityRecognitionConfig as AppConfig;
-

@@ -39,7 +39,7 @@ use plexspaces_common::RequestContext;
 use plexspaces_core::{
     object_registry_helpers, ApplicationManager as ApplicationManagerTrait, Service,
 };
-use plexspaces_proto::application::v1::{ApplicationSpec, ChildType, SupervisorSpec};
+use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -95,9 +95,7 @@ impl ApplicationManagerImpl {
             .children
             .iter()
             .map(|child| {
-                let is_supervisor = ChildType::try_from(child.r#type())
-                    .ok()
-                    .is_some_and(|child_type| child_type == ChildType::ChildTypeSupervisor);
+                let is_supervisor = child.role == "supervisor";
                 let nested_count = child
                     .supervisor
                     .as_ref()
@@ -350,8 +348,19 @@ impl ApplicationManagerImpl {
             )));
         }
 
-        if tracing::enabled!(tracing::Level::INFO) {
-            tracing::info!("Registering application: {}", name);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                application_id = %name,
+                application_name = %name,
+                application_type = if app.as_any().is::<WasmApplication>() {
+                    "wasm"
+                } else if app.as_any().is::<SpecApplication>() {
+                    "native"
+                } else {
+                    "unknown"
+                },
+                "Registering application"
+            );
         }
 
         if let Some(node_context) = self.node_context.read().await.as_ref() {
@@ -1317,7 +1326,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use plexspaces_proto::application::v1::{
-        ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy,
+        ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy, ShutdownStrategy,
         SupervisionStrategy, SupervisorSpec,
     };
     use std::collections::HashMap;
@@ -1326,29 +1335,30 @@ mod tests {
         RequestContext::new_without_auth(String::new(), name.to_string())
     }
 
-    fn worker_child(id: &str) -> ChildSpec {
+    /// Declared **worker** instance name (must not equal a nested supervisor instance name).
+    fn worker_child(instance_name: &str) -> ChildSpec {
         ChildSpec {
-            id: id.to_string(),
-            r#type: ChildType::ChildTypeWorker.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: instance_name.to_string(),
+                actor_type: "test_behavior_class".to_string(),
+            }),
+            role: "worker".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
-            supervisor: None,
-            facets: vec![],
-            behavior_kind: None,
+            ..Default::default()
         }
     }
 
-    fn supervisor_child(id: &str, nested: SupervisorSpec) -> ChildSpec {
+    /// Declared **supervisor** instance name (behavior class `test_supervisor_class`); distinct from worker names.
+    fn supervisor_child(supervisor_instance_name: &str, nested: SupervisorSpec) -> ChildSpec {
         ChildSpec {
-            id: id.to_string(),
-            r#type: ChildType::ChildTypeSupervisor.into(),
-            args: HashMap::new(),
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: supervisor_instance_name.to_string(),
+                actor_type: "test_supervisor_class".to_string(),
+            }),
+            role: "supervisor".to_string(),
             restart: RestartPolicy::RestartPolicyPermanent.into(),
-            shutdown_timeout: None,
             supervisor: Some(nested),
-            facets: vec![],
-            behavior_kind: None,
+            ..Default::default()
         }
     }
 
@@ -2225,8 +2235,7 @@ mod tests {
         // start() must complete — the mock app internally tries update_supervisor_count
         // with a 100ms timeout, confirms it deadlocks (timeout), then returns Ok.
         // The outer start() must then also complete.
-        let result =
-            tokio::time::timeout(Duration::from_secs(5), manager.start("test-app")).await;
+        let result = tokio::time::timeout(Duration::from_secs(5), manager.start("test-app")).await;
         assert!(
             result.is_ok(),
             "start() itself should not hang — the mock app handles the inner timeout"

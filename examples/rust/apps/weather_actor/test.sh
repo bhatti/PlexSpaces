@@ -135,7 +135,8 @@ assert_actor_ok "get_weather Sydney API" "$SYDNEY_API"
 STATS_AFTER_CLEAR=$(send_op '{"op":"cache_stats"}' 15)
 assert_actor_ok "cache_stats after clear" "$STATS_AFTER_CLEAR"
 
-APP_LIST_JSON=$(fetch_applications_list_json "http://localhost:$HTTP_PORT")
+APP_METRICS=$(send_op '{"op":"get_metrics"}' 15)
+assert_actor_ok "get_metrics" "$APP_METRICS"
 
 echo "Step 4: Output and metrics"
 if ! \
@@ -145,7 +146,7 @@ if ! \
   STATS_BEFORE_CLEAR="$STATS_BEFORE_CLEAR" \
   STATS_AFTER_CLEAR="$STATS_AFTER_CLEAR" \
   CLEAR_RESP="$CLEAR_RESP" \
-  APP_LIST_JSON="$APP_LIST_JSON" \
+  APP_METRICS="$APP_METRICS" \
   APP_ID="$APP_ID" \
   python3 - <<'PY'
 import json
@@ -160,19 +161,6 @@ def unwrap_payload(raw: str) -> Dict[str, Any]:
     if isinstance(payload, str):
         payload = json.loads(payload.strip() or "{}")
     return payload if isinstance(payload, dict) else {}
-
-
-def find_app_record(data: Any, app_id: str) -> Optional[Dict[str, Any]]:
-    apps = data.get("applications", data.get("items", [])) if isinstance(data, dict) else data
-    if not isinstance(apps, list):
-        return None
-    for app in apps:
-        if not isinstance(app, dict):
-            continue
-        candidate = str(app.get("application_id") or app.get("name") or app.get("id") or "")
-        if candidate == app_id or app_id in candidate:
-            return app
-    return None
 
 
 def print_map(metrics: Dict[str, Any], key: str) -> None:
@@ -241,26 +229,13 @@ if int(stats_after.get("hits", 0) or 0) != 0 or int(stats_after.get("misses", 0)
     print("Expected cache_stats after clear to reset hits and record one new miss", file=sys.stderr)
     sys.exit(1)
 
-raw_apps = (os.environ.get("APP_LIST_JSON") or "").strip() or '{"applications":[]}'
-try:
-    data = json.loads(raw_apps)
-except json.JSONDecodeError:
-    data = {"applications": []}
-
-record = find_app_record(data, os.environ.get("APP_ID", ""))
-metrics = {}
-if isinstance(record, dict):
-    inner = record.get("application") if isinstance(record.get("application"), dict) else record
-    if isinstance(inner, dict) and isinstance(inner.get("metrics"), dict):
-        metrics = inner["metrics"]
-    elif isinstance(record.get("metrics"), dict):
-        metrics = record["metrics"]
+metrics = unwrap_payload(os.environ["APP_METRICS"])
 
 print()
 print("  Application metrics")
 print("  ────────────────────────────────────────────")
 if not metrics:
-    print("  (no metrics object on application record)")
+    print("  (no metrics payload returned)")
 else:
     print(f"  message_count: {metrics.get('message_count')}")
     print(f"  error_count:   {metrics.get('error_count')}")

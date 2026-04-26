@@ -268,11 +268,11 @@ Actors are defined in `ApplicationSpec` and spawned automatically. Applications 
 **WASM Applications:**
 - WASM module is deployed at the **application level** via `DeployApplicationRequest.wasm_module`
 - All actors in the supervision tree use the same deployed WASM module
-- Actor type is derived from `child.id` in `ChildSpec`
+- The **behavior-class** segment comes from **`ChildSpec.actor_identity.actor_type`** (registry / `BehaviorRegistry` key), not from OTP `behavior_kind`
+- Instance **name** comes from **`actor_identity.name`**; together with namespace + node they form the canonical **`ActorId`**
 - Actors are instantiated from the deployed WASM module using `module_hash`
-- Behaviors are **automatically registered** from supervisor tree during `start()`
-- Each `ChildSpec.id` becomes a registered behavior name
-- Enables `ShardGroups` to spawn WASM actors using `actor_type="worker"` (or any `ChildSpec.id`)
+- Behaviors are **automatically registered** from supervisor tree during `start()` using those **`actor_type`** slugs
+- **`ChildType`** (worker vs supervisor) selects supervision policy only — it is **not** the registry key
 
 ```protobuf
 // Deploy WASM application
@@ -295,11 +295,16 @@ message SupervisorSpec {
 }
 
 message ChildSpec {
-  string id = 1;                    // Actor ID (also used as actor_type)
-  ChildType type = 2;              // Worker or Supervisor
-  map<string, string> args = 3;     // Arguments to pass to start function
-  RestartPolicy restart = 4;        // Restart policy
-  repeated Facet facets = 5;        // Facets to attach
+  // Declaration-time identity: instance name + behavior-class slug (→ ActorId at deploy).
+  plexspaces.common.v1.ActorIdentity actor_identity = 1;
+  // Structural supervision only (restart/shutdown paths), not the registry key.
+  ChildType type = 2;
+  map<string, string> args = 3;
+  RestartPolicy restart = 4;
+  google.protobuf.Duration shutdown_timeout = 5;
+  optional SupervisorSpec supervisor = 6;
+  repeated plexspaces.common.v1.Facet facets = 7;
+  optional string behavior_kind = 8; // OTP model (GenServer, …) — observability only
 }
 ```
 
@@ -682,22 +687,28 @@ node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).a
 
 WASM applications automatically register behaviors from their supervisor tree during `start()`:
 
-1. Application extracts all `ChildSpec.id` values from supervisor tree
-2. Each `id` becomes a registered behavior name
-3. Behavior constructor creates `WasmActorBehavior` wrapping WASM instance
-4. Enables `ShardGroups` to spawn WASM actors using `actor_type="worker"`
+1. Application walks each child’s **`actor_identity`** (`name` + **`actor_type`** behavior class)
+2. Each distinct **`actor_type`** slug is registered as a **behavior class** key (alongside virtual metadata when applicable)
+3. Behavior constructor creates `WasmActorBehavior` wrapping a WASM instance; **`behavior_kind`** is set separately for OTP observability
+4. **`ShardGroups`** and other callers address actors by canonical **`ActorId`** built from identity + deploy context
 
 ```protobuf
-// ApplicationSpec with supervisor tree
+// ApplicationSpec with supervisor tree (illustrative — see application.proto for full fields)
 supervisor: {
   children: [
-    { id: "worker"; type: CHILD_TYPE_WORKER; },
-    { id: "processor"; type: CHILD_TYPE_WORKER; }
+    {
+      actor_identity: { name: "worker-1", actor_type: "my_worker" }
+      type: CHILD_TYPE_WORKER
+    },
+    {
+      actor_identity: { name: "processor-1", actor_type: "stream_processor" }
+      type: CHILD_TYPE_WORKER
+    }
   ]
 }
 ```
 
-After deployment, both `"worker"` and `"processor"` behaviors are automatically registered.
+After deployment, behavior factories are keyed by **`my_worker`**, **`stream_processor`**, etc., not by conflating **`behavior_kind`** with **`actor_type`**.
 
 #### BehaviorRegistry API
 
@@ -1151,6 +1162,14 @@ sequenceDiagram
 - Supervisor doesn't die if child dies
 - Multiple supervisors can monitor the same actor
 
+### Multi-node monitoring
+
+- **Where state lives:** Monitor entries are stored on the **node that hosts the monitored actor** (`actor_id`). `Node::monitor` (or gRPC `MonitorActor` against that node) registers `supervisor_id` there.
+- **How `__DOWN__` is delivered:** When that node runs `ActorRegistry::handle_actor_termination`, it sends a **`__DOWN__` mailbox message** to each monitoring actor’s canonical `ActorId` via `ActorRegistry::tell`. For a supervisor on another node, `tell` routes over **gRPC** (`ActorService` / `SendMessage`), same family of path as remote `ActorRef::tell`.
+- **RequestContext flow:** The monitor registration stores the caller’s `RequestContext`. On remote `__DOWN__` delivery, the framework reuses that stored context so **tenant_id** remains the one derived from JWT/mTLS at the original API boundary and **namespace** remains the one supplied by the gRPC request when the monitor was established.
+- **Demonitor:** `DemonitorActor` (or local `demonitor`) runs on the **monitored actor’s host** and removes the entry; the caller must pass the `monitor_ref` returned from `MonitorActor`.
+- **Proto `supervisor_callback`:** Required on the wire for compatibility; the current Rust server does not use it for DOWN delivery (DOWN goes to `supervisor_id`’s mailbox). See `MonitorActorRequest` in `actor_runtime.proto`.
+
 ### Linking (Two-Way)
 
 Bidirectional link. If one actor dies abnormally, the other dies too:
@@ -1177,20 +1196,26 @@ sequenceDiagram
 - Only propagates abnormal deaths (not "normal" shutdowns)
 - Used internally by supervision (parent-child relationships)
 
-**Example**:
+**Cross-node `link`:** `Node::link` may contact **both** hosts via `ActorService`. Each node’s `NodeRegistry` must register **itself** and **peers** so RPC addresses resolve (integration tests mirror this).
+
+**Example** (high-level API; use `Node::link` with `RequestContext` — `ActorRegistry::link` takes only the two `ActorId`s and is for same-node registry operations):
+
 ```rust
-// Link two actors
-actor_registry
+use plexspaces_core::{ActorId, RequestContext};
+// `node` is the PlexSpaces `Node` where the call is made (location-transparent routing).
+let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
+node
     .link(
-        &ctx,
         &ActorId::from_canonical("actor1//gen_server::default@node1")?,
-        &ActorId::from_canonical("actor2//gen_server::default@node1")?,
+        &ActorId::from_canonical("actor2//gen_server::default@node2")?,
+        &ctx,
     )
     .await?;
 
-// If actor1 dies abnormally, actor2 also dies
-// If actor2 dies abnormally, actor1 also dies
+// If actor1 dies abnormally, actor2 also dies (and vice versa for abnormal exits).
 ```
+
+For **same-node** registration-only tests you can call `actor_registry.link(&id_a, &id_b).await?` directly (no `ctx`).
 
 ---
 
@@ -1246,9 +1271,10 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 
 Used by WASM host functions to provide JSON-in/JSON-out ask semantics. When a WASM actor calls the `ask` host function, this implementation:
 1. Accepts a JSON request from the WASM guest
-2. Routes the local request through `ActorRegistry::ask()`
-3. Lets the registry activate virtual actors on demand before delivering to the target runtime
-4. Returns the JSON response back to the WASM guest
+2. Reconstructs `RequestContext` from the registered sender actor so routing keeps the actor’s tenant/namespace scope
+3. Routes the local request through `ActorRegistry::ask()`
+4. Lets the registry activate virtual actors on demand before delivering to the target runtime
+5. Returns the JSON response back to the WASM guest
 
 ```rust
 // WASM guest calls host function: ask(target_actor_id, json_payload)

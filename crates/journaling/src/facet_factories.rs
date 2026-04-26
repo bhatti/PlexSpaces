@@ -464,9 +464,30 @@ mod tests {
         });
 
         let facet = factory.create(config).await;
-        assert!(facet.is_ok());
-        let facet = facet.unwrap();
-        assert_eq!(facet.facet_type(), "timer");
+        #[cfg(feature = "locks")]
+        {
+            assert!(facet.is_ok(), "factory.create failed: {:?}", facet.err().map(|e| e.to_string()));
+            let facet = facet.unwrap();
+            assert_eq!(facet.facet_type(), "timer");
+        }
+        #[cfg(not(feature = "locks"))]
+        {
+            assert!(facet.is_err());
+            match facet {
+                Err(FacetError::InvalidConfig(msg)) => {
+                    assert!(
+                        msg.contains("Distributed locking requires"),
+                        "unexpected message: {}",
+                        msg
+                    );
+                }
+                Err(other) => panic!(
+                    "expected InvalidConfig(distributed locking), got {:?}",
+                    other
+                ),
+                Ok(_) => panic!("expected error when locks feature is disabled"),
+            }
+        }
     }
 
     #[tokio::test]
@@ -478,28 +499,28 @@ mod tests {
             "enable_distributed_locking": true
         });
 
-        #[cfg(feature = "locks")]
-        {
-            let result = factory.create(config).await;
-            assert!(result.is_err());
-            match result {
-                Err(FacetError::InvalidConfig(msg)) => {
-                    assert!(msg.contains("LockManager not found"));
+        let result = factory.create(config).await;
+        assert!(result.is_err());
+        match result {
+            Err(FacetError::InvalidConfig(msg)) => {
+                #[cfg(feature = "locks")]
+                {
+                    assert!(
+                        msg.contains("LockManager not found"),
+                        "unexpected message: {}",
+                        msg
+                    );
                 }
-                _ => panic!("Expected InvalidConfig error"),
-            }
-        }
-
-        #[cfg(not(feature = "locks"))]
-        {
-            let result = factory.create(config).await;
-            assert!(result.is_err());
-            match result {
-                Err(FacetError::InvalidConfig(msg)) => {
-                    assert!(msg.contains("locks feature"));
+                #[cfg(not(feature = "locks"))]
+                {
+                    assert!(
+                        msg.contains("Distributed locking requires"),
+                        "unexpected message: {}",
+                        msg
+                    );
                 }
-                _ => panic!("Expected InvalidConfig error about locks feature"),
             }
+            _ => panic!("Expected InvalidConfig error"),
         }
     }
 

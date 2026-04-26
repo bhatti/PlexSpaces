@@ -60,6 +60,8 @@ struct AppState {
 #[derive(Debug, Deserialize)]
 struct InitConfig {
     actor_id: Option<String>,
+    role: Option<String>,
+    declaration_name: Option<String>,
     args: Option<HashMap<String, String>>,
 }
 
@@ -271,6 +273,13 @@ fn require_application_metrics_merge(
     merge_application_metrics(metrics).map_err(|err| format!("{}: {}", context, err))
 }
 
+fn application_metrics(node_id: &str) -> Result<serde_json::Value, String> {
+    let response = host::application_get_metrics(&current_application_id(), node_id)?;
+    let response = ApplicationMetrics::decode(response.as_slice())
+        .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
+    Ok(application_metrics_to_json(&response))
+}
+
 fn application_status(node_id: &str) -> Result<serde_json::Value, String> {
     let response = host::application_get_status(&current_application_id(), node_id)?;
     let response = GetApplicationStatusResponse::decode(response.as_slice())
@@ -382,50 +391,47 @@ fn saturating_map_delta(
         .collect()
 }
 
-fn status_metrics_value<'a>(
-    status: &'a serde_json::Value,
+fn metrics_value<'a>(
+    metrics: &'a serde_json::Value,
     field: &str,
 ) -> Option<&'a serde_json::Value> {
-    status
-        .get("application")
-        .and_then(|application| application.get("metrics"))
-        .and_then(|metrics| metrics.get(field))
+    metrics.get(field)
 }
 
-fn status_metrics_map(status: &serde_json::Value, field: &str) -> HashMap<String, u64> {
-    json_object_to_u64_map(status_metrics_value(status, field))
+fn metrics_map(metrics: &serde_json::Value, field: &str) -> HashMap<String, u64> {
+    json_object_to_u64_map(metrics_value(metrics, field))
 }
 
-fn status_metrics_scalar(status: &serde_json::Value, field: &str) -> u64 {
-    status_metrics_value(status, field)
+fn metrics_scalar(metrics: &serde_json::Value, field: &str) -> u64 {
+    metrics_value(metrics, field)
         .and_then(|value| value.as_u64())
         .unwrap_or(0)
 }
 
-fn accumulate_status_delta(
+fn accumulate_metrics_delta(
     node_metrics: &mut NodeMetrics,
     role_metrics: &mut HashMap<String, RoleMetrics>,
-    start_status: &serde_json::Value,
-    end_status: &serde_json::Value,
+    start_metrics: &serde_json::Value,
+    end_metrics: &serde_json::Value,
 ) {
-    let actor_counts = status_metrics_map(end_status, "actor_counts");
+    let actor_counts = metrics_map(end_metrics, "actor_counts");
     let counter_delta = saturating_map_delta(
-        &status_metrics_map(end_status, "counter_metrics"),
-        &status_metrics_map(start_status, "counter_metrics"),
+        &metrics_map(end_metrics, "counter_metrics"),
+        &metrics_map(start_metrics, "counter_metrics"),
     );
     let latency_total_delta = saturating_map_delta(
-        &status_metrics_map(end_status, "latency_totals_ms"),
-        &status_metrics_map(start_status, "latency_totals_ms"),
+        &metrics_map(end_metrics, "latency_totals_ms"),
+        &metrics_map(start_metrics, "latency_totals_ms"),
     );
-    let latency_max_end = status_metrics_map(end_status, "latency_max_ms");
+    let latency_max_end = metrics_map(end_metrics, "latency_max_ms");
     let latency_sample_delta = saturating_map_delta(
-        &status_metrics_map(end_status, "latency_samples"),
-        &status_metrics_map(start_status, "latency_samples"),
+        &metrics_map(end_metrics, "latency_samples"),
+        &metrics_map(start_metrics, "latency_samples"),
     );
-    let message_delta = status_metrics_scalar(end_status, "message_count")
-        .saturating_sub(status_metrics_scalar(start_status, "message_count"));
-    let error_delta = status_metrics_scalar(end_status, "error_count")
-        .saturating_sub(status_metrics_scalar(start_status, "error_count"));
+    let message_delta = metrics_scalar(end_metrics, "message_count")
+        .saturating_sub(metrics_scalar(start_metrics, "message_count"));
+    let error_delta = metrics_scalar(end_metrics, "error_count")
+        .saturating_sub(metrics_scalar(start_metrics, "error_count"));
 
     node_metrics.actors = actor_counts
         .get("total")
@@ -660,6 +666,23 @@ fn distribute_samples(total_samples: usize, worker_count: usize, shard_id: usize
     base + usize::from(shard_id < remainder)
 }
 
+fn actor_name_from_actor_id(actor_id: &str) -> Option<String> {
+    actor_id
+        .split_once("//")
+        .map(|(name, _)| name.to_string())
+        .or_else(|| actor_id.split_once(':').map(|(name, _)| name.to_string()))
+}
+
+fn resolve_role(config: &InitConfig, actor_id: &str) -> Option<String> {
+    config
+        .args
+        .as_ref()
+        .and_then(|args| args.get("role").cloned())
+        .or_else(|| config.role.clone())
+        .or_else(|| config.declaration_name.clone())
+        .or_else(|| actor_name_from_actor_id(actor_id))
+}
+
 struct DataParallelWorkerActor;
 
 impl DataParallelWorkerActor {
@@ -668,11 +691,9 @@ impl DataParallelWorkerActor {
             .map_err(|err| format!("invalid init config: {}", err))?;
         let actor_id = config
             .actor_id
+            .clone()
             .unwrap_or_else(|| "data-parallel-worker".to_string());
-        let args = config.args.unwrap_or_default();
-        let role = args
-            .get("role")
-            .cloned()
+        let role = resolve_role(&config, &actor_id)
             .ok_or_else(|| format!("missing required role for actor {}", actor_id))?;
         if role != "leader" && role != "worker" {
             return Err(format!("invalid role '{}' for actor {}", role, actor_id));
@@ -748,10 +769,73 @@ export!(DataParallelWorkerActor);
 #[cfg(test)]
 mod tests {
     use super::{
-        accumulate_status_delta, actor_application_id, distribute_samples,
-        normalize_worker_payload, NodeMetrics, RoleMetrics,
+        accumulate_metrics_delta, actor_application_id, actor_name_from_actor_id,
+        distribute_samples, normalize_worker_payload, resolve_role, InitConfig, NodeMetrics,
+        RoleMetrics,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn actor_name_from_actor_id_extracts_name() {
+        assert_eq!(
+            actor_name_from_actor_id(
+                "worker//data_parallel_worker_wasm::data-parallel-worker-rust@test-node"
+            )
+            .as_deref(),
+            Some("worker")
+        );
+        assert_eq!(
+            actor_name_from_actor_id("leader:data-parallel-worker-rust@test-node").as_deref(),
+            Some("leader")
+        );
+    }
+
+    #[test]
+    fn resolve_role_prefers_args_then_payload_then_actor_name() {
+        let actor_id =
+            "worker//data_parallel_worker_wasm::data-parallel-worker-rust@test-node";
+        let mut args = HashMap::new();
+        args.insert("role".to_string(), "leader".to_string());
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: Some("worker".to_string()),
+                    declaration_name: Some("worker".to_string()),
+                    args: Some(args),
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("leader")
+        );
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: None,
+                    declaration_name: Some("worker".to_string()),
+                    args: None,
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("worker")
+        );
+        assert_eq!(
+            resolve_role(
+                &InitConfig {
+                    actor_id: Some(actor_id.to_string()),
+                    role: None,
+                    declaration_name: None,
+                    args: None,
+                },
+                actor_id,
+            )
+            .as_deref(),
+            Some("worker")
+        );
+    }
 
     #[test]
     fn actor_application_id_extracts_namespace() {
@@ -811,85 +895,77 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_status_delta_collects_worker_and_leader_metrics() {
-        let start_status = serde_json::json!({
-            "application": {
-                "metrics": {
-                    "actor_counts": {
-                        "total": 2,
-                        "leader": 1,
-                        "worker": 1
-                    },
-                    "counter_metrics": {
-                        "leader_messages": 0,
-                        "worker_messages": 0,
-                        "gradient_operations": 0,
-                        "samples_processed": 0
-                    },
-                    "latency_totals_ms": {
-                        "leader": 0,
-                        "leader.compute": 0,
-                        "leader.coordination": 0,
-                        "worker": 0,
-                        "worker.compute": 0,
-                        "worker.coordination": 0
-                    },
-                    "latency_max_ms": {
-                        "leader": 0,
-                        "worker": 0
-                    },
-                    "latency_samples": {
-                        "leader": 0,
-                        "worker": 0
-                    },
-                    "message_count": 0,
-                    "error_count": 0
-                }
-            }
+    fn accumulate_metrics_delta_collects_worker_and_leader_metrics() {
+        let start_metrics = serde_json::json!({
+            "actor_counts": {
+                "total": 2,
+                "leader": 1,
+                "worker": 1
+            },
+            "counter_metrics": {
+                "leader_messages": 0,
+                "worker_messages": 0,
+                "gradient_operations": 0,
+                "samples_processed": 0
+            },
+            "latency_totals_ms": {
+                "leader": 0,
+                "leader.compute": 0,
+                "leader.coordination": 0,
+                "worker": 0,
+                "worker.compute": 0,
+                "worker.coordination": 0
+            },
+            "latency_max_ms": {
+                "leader": 0,
+                "worker": 0
+            },
+            "latency_samples": {
+                "leader": 0,
+                "worker": 0
+            },
+            "message_count": 0,
+            "error_count": 0
         });
-        let end_status = serde_json::json!({
-            "application": {
-                "metrics": {
-                    "actor_counts": {
-                        "total": 9,
-                        "leader": 1,
-                        "worker": 8
-                    },
-                    "counter_metrics": {
-                        "leader_messages": 3,
-                        "worker_messages": 8,
-                        "gradient_operations": 1024,
-                        "samples_processed": 2048
-                    },
-                    "latency_totals_ms": {
-                        "leader": 120,
-                        "leader.compute": 40,
-                        "leader.coordination": 80,
-                        "worker": 240,
-                        "worker.compute": 180,
-                        "worker.coordination": 60
-                    },
-                    "latency_max_ms": {
-                        "leader": 120,
-                        "worker": 75
-                    },
-                    "latency_samples": {
-                        "leader": 1,
-                        "worker": 8
-                    },
-                    "message_count": 11,
-                    "error_count": 0
-                }
-            }
+        let end_metrics = serde_json::json!({
+            "actor_counts": {
+                "total": 9,
+                "leader": 1,
+                "worker": 8
+            },
+            "counter_metrics": {
+                "leader_messages": 3,
+                "worker_messages": 8,
+                "gradient_operations": 1024,
+                "samples_processed": 2048
+            },
+            "latency_totals_ms": {
+                "leader": 120,
+                "leader.compute": 40,
+                "leader.coordination": 80,
+                "worker": 240,
+                "worker.compute": 180,
+                "worker.coordination": 60
+            },
+            "latency_max_ms": {
+                "leader": 120,
+                "worker": 75
+            },
+            "latency_samples": {
+                "leader": 1,
+                "worker": 8
+            },
+            "message_count": 11,
+            "error_count": 0
         });
 
         let mut node_metrics = NodeMetrics::default();
         let mut role_metrics = HashMap::<String, RoleMetrics>::new();
-        accumulate_status_delta(
+        accumulate_metrics_delta(
             &mut node_metrics,
             &mut role_metrics,
-            &start_status,
-            &end_status,
+            &start_metrics,
+            &end_metrics,
         );
 
         assert_eq!(node_metrics.actors, 9);

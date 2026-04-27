@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -174,7 +174,11 @@ fn extract_args_from_template(template: Option<&[u8]>) -> HashMap<String, String
                     Some((k.clone(), s))
                 })
                 .collect();
-            if flat.is_empty() { None } else { Some(flat) }
+            if flat.is_empty() {
+                None
+            } else {
+                Some(flat)
+            }
         })
         .unwrap_or_default()
 }

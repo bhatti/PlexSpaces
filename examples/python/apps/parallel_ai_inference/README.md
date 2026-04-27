@@ -8,7 +8,7 @@ This example showcases the four parallelization primitives available in PlexSpac
 
 | Mechanism | Actor/Handler | Description |
 |-----------|--------------|-------------|
-| **ShardGroup scatter-gather** | `BenchmarkActor.run_shard_benchmark`, `OrchestratorWorkflow` (shard mode) | Fan-out inference requests across N shards, collect and aggregate results |
+| **ShardGroup scatter-gather** | `BenchmarkActor.run_shard_benchmark`, `BenchmarkActor.run_scaling_benchmark`, `OrchestratorWorkflow` (shard mode) | Fan-out inference requests across N shards, collect and aggregate results |
 | **Elastic pool checkout/checkin** | `BenchmarkActor.run_pool_benchmark`, `OrchestratorWorkflow` (pool mode) | Dynamic worker pool management with borrow/return semantics |
 | **MPI collectives** | `BenchmarkActor.run_collective_benchmark` | `BroadcastShardGroup`, `ReduceShardGroup`, `AllReduceShardGroup`, `BarrierShardGroup` |
 | **Process group coordination** | `OrchestratorWorkflow` (collective mode) | Broadcast → Barrier → Scatter-gather → Reduce pipeline |
@@ -46,12 +46,47 @@ The test script:
 2. Deploys the application to all specified nodes
 3. Tests direct inference worker calls
 4. Runs shard benchmark (1 and 2 shards, 5 requests each)
-5. Runs collective benchmark (broadcast, barrier, reduce, allreduce)
-6. Runs orchestrator in shard mode
-7. Runs orchestrator in collective mode
-8. Queries orchestrator status
-9. Checks application metrics
-10. Retrieves all benchmark results
+5. Runs shard-sweep scaling benchmark
+6. Runs collective benchmark (broadcast, barrier, reduce, allreduce)
+7. Runs orchestrator in shard mode
+8. Runs orchestrator in collective mode
+9. Queries orchestrator status
+10. Checks application metrics
+11. Retrieves all benchmark results
+
+## Scaling benchmark
+
+The shard sweep is configured at runtime in `test.sh`, not in `app-config.toml`, so you can reuse the same deployment for multiple benchmark shapes.
+
+Example:
+
+```bash
+SCALING_SHARDS=2,4,6,8,16,32,64,128 \
+SCALING_REQUESTS_PER_SHARD=8 \
+SCALING_WARMUP_REQUESTS=2 \
+SCALING_LOGICAL_ACTORS=1000 \
+SCALING_DATA_SIZE_BYTES=65536 \
+SCALING_MODEL_TYPE=large \
+SCALING_WORK_MULTIPLIER=20 \
+./test.sh localhost:8092 localhost:8094
+```
+
+For blog-style runs, keep the node list, logical actor count, payload size, and work multiplier fixed, and only change `SCALING_SHARDS`.
+
+Each scaling row reports:
+
+- `throughput_rps`
+- `p50_latency_ms`
+- `p95_latency_ms`
+- `p99_latency_ms`
+- `compute_time_ms`
+- `coordination_time_ms`
+- `compute_pct`
+- `coordination_pct`
+- `granularity_ratio`
+- `parallel_efficiency_pct`
+- `worker_node_count`
+- `remote_nodes_with_work`
 
 ## Expected Output
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Order Fulfillment Workflow - Temporal-style saga (Go WASM)
 //
 // E-commerce order fulfillment with run/signal/query (Workflow behavior).

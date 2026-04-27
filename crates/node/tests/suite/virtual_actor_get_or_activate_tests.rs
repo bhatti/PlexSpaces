@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Tests for get_or_activate_actor with VirtualActorFacet
 
 use super::test_helpers::{

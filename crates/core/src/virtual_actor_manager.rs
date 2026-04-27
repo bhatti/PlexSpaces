@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -96,8 +96,10 @@ pub fn wasm_init_payload(spec: &ActorSpawnSpec, actor_id: &ActorId) -> Vec<u8> {
     if let (serde_json::Value::Object(ref mut obj), false) = (&mut payload, spec.args.is_empty()) {
         for (k, v) in &spec.args {
             // Only insert if not already a meta key or internal framework key.
-            if !matches!(k.as_str(), "actor_id" | "actor_type" | "declaration_name" | "behavior_kind" | "args")
-                && !k.starts_with("__")
+            if !matches!(
+                k.as_str(),
+                "actor_id" | "actor_type" | "declaration_name" | "behavior_kind" | "args"
+            ) && !k.starts_with("__")
             {
                 // Attempt numeric promotion so factories using as_i64()/as_f64() work.
                 let val = if let Ok(n) = v.parse::<i64>() {
@@ -353,7 +355,11 @@ fn extract_args_from_template(template: Option<&[u8]>) -> HashMap<String, String
                     Some((k.clone(), s))
                 })
                 .collect();
-            if flat.is_empty() { None } else { Some(flat) }
+            if flat.is_empty() {
+                None
+            } else {
+                Some(flat)
+            }
         })
         .unwrap_or_default()
 }
@@ -582,11 +588,14 @@ impl VirtualActorManager {
         // Always refresh the spec from the definition so the next activation re-derives
         // wasm_init_payload from definition args (e.g. initial_count=5), not stale instance args.
         // The definition is the ground truth; running actors use in-WASM state, not spec.args.
-        let entry = virtual_actors.entry(actor_id.clone()).or_insert_with(|| VirtualActorMetadata {
-            spec: definition.spec.clone(),
-            facet: None,
-            last_deactivated: None,
-        });
+        let entry =
+            virtual_actors
+                .entry(actor_id.clone())
+                .or_insert_with(|| VirtualActorMetadata {
+                    spec: definition.spec.clone(),
+                    facet: None,
+                    last_deactivated: None,
+                });
         entry.spec = definition.spec.clone();
     }
 
@@ -1112,7 +1121,6 @@ impl VirtualActorManager {
         }
     }
 
-
     /// Removes an actor from active instances tracking when it's deactivated.
     /// This keeps the LRU tracking accurate.
     ///
@@ -1631,9 +1639,7 @@ mod tests {
             config: config.clone(),
         };
 
-        let result = manager
-            .register(actor_id.clone(), facet, spec)
-            .await;
+        let result = manager.register(actor_id.clone(), facet, spec).await;
 
         assert!(result.is_ok());
 
@@ -1871,7 +1877,7 @@ mod tests {
                     tenant_id: "tenant-a".to_string(),
                     behavior_kind: String::new(), // empty — should inherit "GenServer"
                     args: HashMap::new(),
-                    facets: vec![],              // empty — should inherit from type
+                    facets: vec![], // empty — should inherit from type
                     labels: HashMap::new(),
                     config: None,
                 },
@@ -2148,7 +2154,10 @@ mod tests {
         let def = manager
             .get_virtual_actor_definition(namespace, instance_name)
             .await;
-        assert!(def.is_some(), "should be in named_virtual_actor_definitions");
+        assert!(
+            def.is_some(),
+            "should be in named_virtual_actor_definitions"
+        );
         assert_eq!(def.unwrap().spec.args.get("initial_count").unwrap(), "5");
 
         // Simulate prime_instance_from_definition (called by actor_service before first activation)
@@ -2220,10 +2229,19 @@ mod tests {
             labels: HashMap::new(),
             config: None,
         };
-        manager.register(actor_id.clone(), facet, spec).await.unwrap();
+        manager
+            .register(actor_id.clone(), facet, spec)
+            .await
+            .unwrap();
         // Simulate stop: no changes to VirtualActorManager — instance stays registered
-        assert!(manager.get_metadata(&actor_id).await.is_some(), "instance must be retained after stop");
-        assert!(manager.is_virtual(&actor_id).await, "is_virtual must remain true after stop");
+        assert!(
+            manager.get_metadata(&actor_id).await.is_some(),
+            "instance must be retained after stop"
+        );
+        assert!(
+            manager.is_virtual(&actor_id).await,
+            "is_virtual must remain true after stop"
+        );
     }
 
     /// After purging a non-durable instance, is_virtual must still return true when the
@@ -2248,9 +2266,18 @@ mod tests {
             labels: HashMap::new(),
             config: None,
         };
-        manager.register_virtual_actor_definition(spec).await.unwrap();
+        manager
+            .register_virtual_actor_definition(spec)
+            .await
+            .unwrap();
 
-        let actor_id = ActorId::new("session-1", "abstractions_wasm", "abstractions-typescript", "node-1").unwrap();
+        let actor_id = ActorId::new(
+            "session-1",
+            "abstractions_wasm",
+            "abstractions-typescript",
+            "node-1",
+        )
+        .unwrap();
         let instance_spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: "session-1".to_string(),
@@ -2266,12 +2293,24 @@ mod tests {
             config: None,
         };
         let facet = create_test_virtual_actor_facet();
-        manager.register(actor_id.clone(), facet, instance_spec).await.unwrap();
-        assert!(manager.is_virtual(&actor_id).await, "must be virtual before stop");
+        manager
+            .register(actor_id.clone(), facet, instance_spec)
+            .await
+            .unwrap();
+        assert!(
+            manager.is_virtual(&actor_id).await,
+            "must be virtual before stop"
+        );
 
         // Stop: no changes to VirtualActorManager — instance stays registered
-        assert!(manager.get_metadata(&actor_id).await.is_some(), "instance retained after stop");
-        assert!(manager.is_virtual(&actor_id).await, "is_virtual must return true after stop");
+        assert!(
+            manager.get_metadata(&actor_id).await.is_some(),
+            "instance retained after stop"
+        );
+        assert!(
+            manager.is_virtual(&actor_id).await,
+            "is_virtual must return true after stop"
+        );
     }
 
     /// Namespace isolation: is_virtual must NOT return true for an actor whose actor_type is
@@ -2295,11 +2334,17 @@ mod tests {
             labels: HashMap::new(),
             config: None,
         };
-        manager.register_virtual_actor_definition(spec).await.unwrap();
+        manager
+            .register_virtual_actor_definition(spec)
+            .await
+            .unwrap();
 
         // Actor in ns-a should be virtual
         let actor_in_ns_a = ActorId::new("w1", "worker_wasm", "ns-a", "node-1").unwrap();
-        assert!(manager.is_virtual(&actor_in_ns_a).await, "actor in ns-a must be virtual");
+        assert!(
+            manager.is_virtual(&actor_in_ns_a).await,
+            "actor in ns-a must be virtual"
+        );
 
         // Same actor_type in a different namespace must NOT be recognized as virtual
         let actor_in_ns_b = ActorId::new("w1", "worker_wasm", "ns-b", "node-1").unwrap();

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -1696,7 +1696,7 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
                 .lookup_full(&ctx, ObjectType::ObjectTypeNode, node_id)
                 .await
             {
-                Some(registration.grpc_address)
+                Some(dialable_node_address(&registration.grpc_address))
             } else {
                 None
             }
@@ -1713,12 +1713,7 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
                         .await
                         .map_err(|e| format!("NodeRegistry lookup failed: {}", e))?
                         .ok_or_else(|| format!("Node not found: {}", node_id))?;
-                    let addr = reg.node_address.trim();
-                    if addr.starts_with("http://") || addr.starts_with("https://") {
-                        addr.to_string()
-                    } else {
-                        format!("http://{}", addr)
-                    }
+                    dialable_node_address(reg.node_address.trim())
                 } else {
                     return Err(format!(
                         "Node not found: {} (no ObjectRegistry or NodeRegistry)",

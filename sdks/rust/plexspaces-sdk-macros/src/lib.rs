@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 PlexSpaces Contributors
 //
 // Procedural macros for PlexSpaces Rust SDK – reduce boilerplate like Python's @actor / @handler.

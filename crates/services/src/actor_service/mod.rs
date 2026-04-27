@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -121,10 +121,7 @@ use async_trait::async_trait;
 
 fn parse_spawn_init_state(
     initial_state: &[u8],
-) -> (
-    Option<String>,
-    std::collections::HashMap<String, String>,
-) {
+) -> (Option<String>, std::collections::HashMap<String, String>) {
     let init_payload = serde_json::from_slice::<serde_json::Value>(initial_state).ok();
     let requested_role = init_payload.as_ref().and_then(|value| {
         value
@@ -516,8 +513,13 @@ impl ActorServiceImpl {
             if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(requested_actor_type) {
                 if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                     let name = actor_id.name();
-                    if let Some(def) = manager.get_virtual_actor_definition(actor_id.namespace(), name).await {
-                        manager.prime_instance_from_definition(&actor_id, &def).await;
+                    if let Some(def) = manager
+                        .get_virtual_actor_definition(actor_id.namespace(), name)
+                        .await
+                    {
+                        manager
+                            .prime_instance_from_definition(&actor_id, &def)
+                            .await;
                     }
                 }
             }
@@ -542,9 +544,15 @@ impl ActorServiceImpl {
 
         // Step 1: O(1) — try left=instance_name, right=actor_type direct canonical lookup.
         // Build the canonical ID and check if the actor is already live in the registry.
-        if let Ok(candidate_id) = self.build_canonical_actor_id(left, right, &namespace, &self.local_node_id) {
+        if let Ok(candidate_id) =
+            self.build_canonical_actor_id(left, right, &namespace, &self.local_node_id)
+        {
             if let Some(registry) = self.service_locator.actor_registry().await {
-                if registry.lookup_actor_in_scope(ctx.tenant_id(), &namespace, &candidate_id).await.is_some() {
+                if registry
+                    .lookup_actor_in_scope(ctx.tenant_id(), &namespace, &candidate_id)
+                    .await
+                    .is_some()
+                {
                     return Some(candidate_id.to_string());
                 }
             }
@@ -554,9 +562,10 @@ impl ActorServiceImpl {
         // Handles cases where actor_type is the right side and multiple instances exist.
         if let Some(registry) = self.service_locator.actor_registry().await {
             let actor_ids = registry.discover_actors_by_type(ctx, right).await;
-            if let Some(live_id) = actor_ids.iter().find(|id| {
-                id.name() == left && id.namespace() == namespace
-            }) {
+            if let Some(live_id) = actor_ids
+                .iter()
+                .find(|id| id.name() == left && id.namespace() == namespace)
+            {
                 return Some(live_id.to_string());
             }
         }
@@ -581,7 +590,9 @@ impl ActorServiceImpl {
                 .build_canonical_actor_id(right, &resolved_actor_type, &def_ns, &self.local_node_id)
                 .ok()?;
             if let Some(manager) = virtual_actor_manager {
-                manager.prime_instance_from_definition(&actor_id, def_meta).await;
+                manager
+                    .prime_instance_from_definition(&actor_id, def_meta)
+                    .await;
             }
             return Some(actor_id.to_string());
         }
@@ -594,7 +605,9 @@ impl ActorServiceImpl {
 
         if let Some(manager) = &virtual_actor_manager {
             if let Some(type_meta) = manager.get_virtual_actor_type(right).await {
-                manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+                manager
+                    .prime_instance_from_definition(&actor_id, &type_meta)
+                    .await;
             }
         }
 
@@ -847,13 +860,14 @@ impl ActorServiceImpl {
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
         let requested_actor_type = actor_type.to_string();
         let (requested_role, mut init_args) = parse_spawn_init_state(&initial_state);
-        let resolved_actor_type = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
-            manager
-                .resolve_actor_type_for_name(ctx.namespace(), &requested_actor_type)
-                .await
-        } else {
-            requested_actor_type.clone()
-        };
+        let resolved_actor_type =
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                manager
+                    .resolve_actor_type_for_name(ctx.namespace(), &requested_actor_type)
+                    .await
+            } else {
+                requested_actor_type.clone()
+            };
         let role = if let Some(role) = requested_role {
             role
         } else if resolved_actor_type != requested_actor_type {
@@ -1918,8 +1932,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         } else {
             req.namespace.clone()
         };
-        let routing_ctx =
-            RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace);
+        let routing_ctx = RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace);
 
         if req.actor_id.is_empty() {
             return Err(Status::invalid_argument("actor_id is required"));
@@ -1931,8 +1944,9 @@ impl ActorServiceTrait for ActorServiceImpl {
             .await
             .unwrap_or_else(|| req.actor_id.clone());
 
-        let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid actor_id '{}': {}", req.actor_id, e)))?;
+        let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id).map_err(|e| {
+            Status::invalid_argument(format!("Invalid actor_id '{}': {}", req.actor_id, e))
+        })?;
 
         let factory = self
             .service_locator
@@ -2872,19 +2886,23 @@ impl ActorServiceImpl {
         // (e.g. "streaming_pipeline_wasm") via the VirtualActorManager name index.
         // When actor_type is already the behavior class the lookup returns it unchanged.
         let declaration_name = req.actor_type.clone();
-        let resolved_actor_type = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
-            manager.resolve_actor_type_for_name(ctx.namespace(), &req.actor_type).await
-        } else {
-            req.actor_type.clone()
-        };
-        let definition_spec = if let Some(manager) = self.service_locator.virtual_actor_manager().await {
-            manager
-                .get_virtual_actor_definition(ctx.namespace(), &declaration_name)
-                .await
-                .map(|metadata| metadata.spec)
-        } else {
-            None
-        };
+        let resolved_actor_type =
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                manager
+                    .resolve_actor_type_for_name(ctx.namespace(), &req.actor_type)
+                    .await
+            } else {
+                req.actor_type.clone()
+            };
+        let definition_spec =
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                manager
+                    .get_virtual_actor_definition(ctx.namespace(), &declaration_name)
+                    .await
+                    .map(|metadata| metadata.spec)
+            } else {
+                None
+            };
 
         let mut shard_actor_ids = Vec::with_capacity(shard_count as usize);
 
@@ -5185,7 +5203,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_actor_id_from_client_target_name_colon_type_no_live_actor_builds_canonical() {
+    async fn test_canonical_actor_id_from_client_target_name_colon_type_no_live_actor_builds_canonical(
+    ) {
         // name:actor_type where no live actor exists — falls through to Step 4 direct build.
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
@@ -5226,7 +5245,10 @@ mod tests {
                 labels: Default::default(),
                 config: None,
             };
-            manager.register_virtual_actor_definition(spec).await.unwrap();
+            manager
+                .register_virtual_actor_definition(spec)
+                .await
+                .unwrap();
         }
 
         let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
@@ -5263,7 +5285,10 @@ mod tests {
                 labels: Default::default(),
                 config: None,
             };
-            manager.register_virtual_actor_definition(spec).await.unwrap();
+            manager
+                .register_virtual_actor_definition(spec)
+                .await
+                .unwrap();
         }
 
         let ctx = RequestContext::new_without_auth(String::new(), "audit-log-test".to_string());

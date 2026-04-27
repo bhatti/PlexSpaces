@@ -3,8 +3,9 @@ name = "timeseries-forecasting"
 version = "0.1.0"
 edition = "2021"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 description = "Time-series forecasting example using PlexSpaces SDK annotations"
+default-run = "timeseries_forecasting"
 
 [workspace]
 

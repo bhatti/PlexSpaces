@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Integration tests for virtual actor activation, suspension, and reactivation
@@ -2590,9 +2590,7 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         actor_type
     );
     let meta = meta.unwrap();
-    let fc = meta
-        .facet_config()
-        .expect("facet_config must be present");
+    let fc = meta.facet_config().expect("facet_config must be present");
     assert!(
         fc.get("virtual_actor").is_some(),
         "virtual_actor facet config must be preserved in type metadata"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Build TypeScript bank_account to WASM component (no Python).
 # Uses: tsc → account_actor.js, then jco componentize → account_actor.wasm.
 

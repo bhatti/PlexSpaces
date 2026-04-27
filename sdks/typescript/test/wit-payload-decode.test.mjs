@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Regression: WIT `list<u8>` arrives as Uint8Array in jco guests; JSON must still parse.
 

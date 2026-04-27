@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -168,7 +168,12 @@ fn test_actor_id(name: &str) -> ActorId {
     ActorId::new(name, "gen_server", "default", "test-node").unwrap()
 }
 
-fn test_spawn_spec(actor_type: &str, namespace: &str, tenant: &str, strategy: ActivationStrategy) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
+fn test_spawn_spec(
+    actor_type: &str,
+    namespace: &str,
+    tenant: &str,
+    strategy: ActivationStrategy,
+) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
     use plexspaces_proto::actor::v1::ActorSpawnSpec;
     use plexspaces_proto::common::v1::ActorIdentity;
     use plexspaces_proto::common::v1::Facet;
@@ -188,9 +193,10 @@ fn test_spawn_spec(actor_type: &str, namespace: &str, tenant: &str, strategy: Ac
         args: std::collections::HashMap::new(),
         facets: vec![Facet {
             r#type: "virtual_actor".to_string(),
-            config: std::collections::HashMap::from([
-                ("activation_strategy".to_string(), activation_str.to_string()),
-            ]),
+            config: std::collections::HashMap::from([(
+                "activation_strategy".to_string(),
+                activation_str.to_string(),
+            )]),
             priority: 0,
             state: std::collections::HashMap::new(),
             metadata: None,
@@ -224,7 +230,12 @@ async fn test_lru_eviction_basic() {
             .register(
                 actor_id.clone(),
                 facet,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", plexspaces_common::ActivationStrategy::ActivationStrategyLazy),
+                test_spawn_spec(
+                    &actor_type.clone(),
+                    "namespace",
+                    "tenant",
+                    plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+                ),
             )
             .await
             .unwrap();
@@ -258,10 +269,15 @@ async fn test_lru_eviction_basic() {
     let facet_5 = create_mock_facet(actor_id_5.clone());
     manager
         .register(
-                actor_id_5.clone(),
-                facet_5,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id_5.clone(),
+            facet_5,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
 
@@ -317,10 +333,15 @@ async fn test_lru_eviction_ordering() {
     let facet_1 = create_mock_facet(actor_id_1.clone());
     manager
         .register(
-                actor_id_1.clone(),
-                facet_1,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id_1.clone(),
+            facet_1,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -340,10 +361,15 @@ async fn test_lru_eviction_ordering() {
     let facet_2 = create_mock_facet(actor_id_2.clone());
     manager
         .register(
-                actor_id_2.clone(),
-                facet_2,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id_2.clone(),
+            facet_2,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -366,10 +392,15 @@ async fn test_lru_eviction_ordering() {
     let facet_3 = create_mock_facet(actor_id_3.clone());
     manager
         .register(
-                actor_id_3.clone(),
-                facet_3,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id_3.clone(),
+            facet_3,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
     register_actor_as_active_in_registry(
@@ -415,7 +446,12 @@ async fn test_lru_eviction_multiple_types() {
             .register(
                 actor_id.clone(),
                 facet,
-                test_spawn_spec(&actor_type_1.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+                test_spawn_spec(
+                    &actor_type_1.clone(),
+                    "namespace",
+                    "tenant",
+                    ActivationStrategy::ActivationStrategyLazy,
+                ),
             )
             .await
             .unwrap();
@@ -439,7 +475,12 @@ async fn test_lru_eviction_multiple_types() {
             .register(
                 actor_id.clone(),
                 facet,
-                test_spawn_spec(&actor_type_2.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+                test_spawn_spec(
+                    &actor_type_2.clone(),
+                    "namespace",
+                    "tenant",
+                    ActivationStrategy::ActivationStrategyLazy,
+                ),
             )
             .await
             .unwrap();
@@ -523,7 +564,12 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
         .register(
             actor_id_4.clone(),
             create_mock_facet(actor_id_4.clone()),
-            test_spawn_spec(&actor_type, "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
+            test_spawn_spec(
+                &actor_type,
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
         )
         .await
         .unwrap();
@@ -549,10 +595,15 @@ async fn test_update_last_access() {
     let facet = create_mock_facet(actor_id.clone());
     manager
         .register(
-                actor_id.clone(),
-                facet,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id.clone(),
+            facet,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
 
@@ -600,10 +651,15 @@ async fn test_remove_from_active_tracking() {
     let facet = create_mock_facet(actor_id.clone());
     manager
         .register(
-                actor_id.clone(),
-                facet,
-                test_spawn_spec(&actor_type.clone(), "namespace", "tenant", ActivationStrategy::ActivationStrategyLazy),
-            )
+            actor_id.clone(),
+            facet,
+            test_spawn_spec(
+                &actor_type.clone(),
+                "namespace",
+                "tenant",
+                ActivationStrategy::ActivationStrategyLazy,
+            ),
+        )
         .await
         .unwrap();
 

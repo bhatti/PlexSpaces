@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -762,7 +762,9 @@ impl HostFunctions {
         node_id: &str,
     ) -> Result<ApplicationMetrics, String> {
         if let Some(sender) = &self.message_sender {
-            sender.get_application_metrics(ctx, application_id, node_id).await
+            sender
+                .get_application_metrics(ctx, application_id, node_id)
+                .await
         } else {
             Err("Application service not configured".to_string())
         }

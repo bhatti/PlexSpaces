@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -159,8 +159,8 @@ pub use virtual_actor_manager::{
 pub use plexspaces_proto::actor::v1::ActorSpawnSpec;
 // Re-export virtual actor registration helper
 pub use virtual_actor_registration::{
-    proto_facets_for_registration,
-    register_virtual_actor_definition, register_virtual_actor_type_consistent,
+    proto_facets_for_registration, register_virtual_actor_definition,
+    register_virtual_actor_type_consistent,
 };
 // FacetManager re-exported from plexspaces-facet crate for convenience
 pub use plexspaces_facet::FacetManager;

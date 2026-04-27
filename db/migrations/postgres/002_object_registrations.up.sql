@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: LGPL-2.1-or-later
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Unified migration: Object registry (PostgreSQL)
 
 CREATE TABLE IF NOT EXISTS object_registrations (

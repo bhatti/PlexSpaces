@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -63,8 +63,8 @@ use thiserror::Error;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
-    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, RestartPolicy,
-    ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy,
+    SupervisionStrategy, SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{
     GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, OutboundTransport, ReleaseSpec,

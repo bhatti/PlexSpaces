@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // In-process verification of TypeScript bank_account logic (same API as Python).
 // Run from this directory: node verify.mjs   OR   ./test.sh
 // account_actor.js must exist (checked in, or run: npm run build).

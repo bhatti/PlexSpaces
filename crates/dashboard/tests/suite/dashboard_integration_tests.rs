@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -1537,7 +1537,10 @@ async fn test_actors_by_type_on_home_page() {
             use plexspaces_core::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
-                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "counter".to_string() }),
+                identity: Some(ActorIdentity {
+                    name: actor_id.name().to_string(),
+                    actor_type: "counter".to_string(),
+                }),
                 role: String::new(),
                 namespace: "system".to_string(),
                 tenant_id: String::new(),
@@ -1548,7 +1551,10 @@ async fn test_actors_by_type_on_home_page() {
                 labels: HashMap::new(),
             }
         };
-        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn counter actor");
+        actor_factory
+            .spawn_actor(&ctx, &spec, vec![])
+            .await
+            .expect("Should spawn counter actor");
     }
 
     // Spawn 2 Worker actors
@@ -1564,7 +1570,10 @@ async fn test_actors_by_type_on_home_page() {
             use plexspaces_core::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
-                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "worker".to_string() }),
+                identity: Some(ActorIdentity {
+                    name: actor_id.name().to_string(),
+                    actor_type: "worker".to_string(),
+                }),
                 role: String::new(),
                 namespace: "system".to_string(),
                 tenant_id: String::new(),
@@ -1575,7 +1584,10 @@ async fn test_actors_by_type_on_home_page() {
                 labels: HashMap::new(),
             }
         };
-        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn worker actor");
+        actor_factory
+            .spawn_actor(&ctx, &spec, vec![])
+            .await
+            .expect("Should spawn worker actor");
     }
 
     // ACT: Get summary from dashboard
@@ -1643,7 +1655,10 @@ async fn test_actors_by_type_on_node_page() {
             use plexspaces_core::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
-                identity: Some(ActorIdentity { name: actor_id.name().to_string(), actor_type: "Calculator".to_string() }),
+                identity: Some(ActorIdentity {
+                    name: actor_id.name().to_string(),
+                    actor_type: "Calculator".to_string(),
+                }),
                 role: String::new(),
                 namespace: "system".to_string(),
                 tenant_id: String::new(),
@@ -1654,7 +1669,10 @@ async fn test_actors_by_type_on_node_page() {
                 labels: HashMap::new(),
             }
         };
-        actor_factory.spawn_actor(&ctx, &spec, vec![]).await.expect("Should spawn calculator actor");
+        actor_factory
+            .spawn_actor(&ctx, &spec, vec![])
+            .await
+            .expect("Should spawn calculator actor");
     }
 
     // ACT: Get node dashboard

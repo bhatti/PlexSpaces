@@ -3,13 +3,13 @@ Name: plexspaces
 Version: 0.1.0
 Summary: PlexSpaces Python SDK - Build actors with minimal boilerplate
 Author: PlexSpaces Contributors
-License: LGPL-2.1-or-later
+License: AGPL-3.0-or-later
 Project-URL: Homepage, https://github.com/plexspaces/plexspaces
 Project-URL: Documentation, https://docs.plexspaces.io
 Project-URL: Repository, https://github.com/plexspaces/plexspaces
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
-Classifier: License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)
+Classifier: License :: OSI Approved :: GNU AFFERO GENERAL PUBLIC LICENSE
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
@@ -443,4 +443,4 @@ plexspaces-py build chat_room.py -v
 
 ## License
 
-LGPL-2.1-or-later
+AGPL-3.0-or-later

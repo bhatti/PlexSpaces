@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Timers Example (TimerFacet) - SDK Annotations Demo
@@ -11,8 +11,8 @@
 // - CoordinationComputeTracker metrics for timer overhead analysis
 //
 // ## SDK Annotations Used
-// - `#[actor(facets = ["timer"])]` - marks struct as actor with timer facet
-// - `#[plexspaces_handlers(custom)]` - generates Actor impl for custom behavior
+// - `#[gen_server_actor(name = "session_actor", facets = ["timer"])]` - marks struct as actor with timer facet
+// - `#[plexspaces_handlers]` - generates Actor impl for SDK handlers
 // - `#[handler("timer_fired", cast)]` - fire-and-forget handler for timers
 //
 // Use Case: Session timeout, heartbeat, retry with backoff
@@ -34,7 +34,7 @@
 // - **Tenant Isolation**: Explicit RequestContext with tenant/namespace (no internal())
 
 use plexspaces_sdk::{
-    actor, plexspaces_handlers,
+    gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, Message, RequestContext, spawn_with_facets, TimerFacet,
 };
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
@@ -46,6 +46,7 @@ use tracing::info;
 use anyhow::Result;
 
 // Required for macro-generated code
+extern crate plexspaces_behavior;
 extern crate plexspaces_core;
 
 // =============================================================================
@@ -55,10 +56,10 @@ extern crate plexspaces_core;
 /// Session actor with timer facet for idle timeout and heartbeat.
 /// 
 /// ## Annotations
-/// - `#[actor(facets = ["timer"])]` - declares timer facet (documentation)
-/// - `#[plexspaces_handlers(custom)]` - generates Actor impl dispatching to handlers
+/// - `#[gen_server_actor(name = "session_actor", facets = ["timer"])]` - declares timer facet
+/// - `#[plexspaces_handlers]` - generates Actor impl dispatching to handlers
 /// - `#[handler("op", cast)]` - fire-and-forget handlers
-#[actor(facets = ["timer"])]
+#[gen_server_actor(name = "session_actor", facets = ["timer"])]
 struct SessionActor {
     user_id: String,
     is_active: bool,
@@ -80,7 +81,7 @@ impl SessionActor {
 /// Handler implementations - SDK generates Actor impl with dispatch.
 /// 
 /// Using `#[handler("op", cast)]` for fire-and-forget semantics (no reply).
-#[plexspaces_handlers(custom)]
+#[plexspaces_handlers]
 impl SessionActor {
     /// Handle timer_fired events (from TimerFacet)
     #[handler("timer_fired", cast)]
@@ -433,7 +434,7 @@ async fn main() -> Result<()> {
     info!("  - TimerFacet: register_once, register_periodic, cancel");
     info!("  - Timer fires message to actor.handle_message()");
     info!("  - RequestContext: Explicit tenant/namespace (no internal())");
-    info!("  - SDK annotations: #[actor], #[plexspaces_handlers], #[handler]");
+    info!("  - SDK annotations: #[gen_server_actor], #[plexspaces_handlers], #[handler]");
     println!();
     info!("Use Cases:");
     info!("  - Session idle timeout (disconnect after inactivity)");

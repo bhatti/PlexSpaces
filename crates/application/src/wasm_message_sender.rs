@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -1053,9 +1053,13 @@ mod tests {
             .register_actor_registry(actor_registry.clone())
             .await;
 
-        let sender_id =
-            ActorId::new("leader", "gen_server", "heat-diffusion-rust", "test-node-8091")
-                .expect("sender actor id");
+        let sender_id = ActorId::new(
+            "leader",
+            "gen_server",
+            "heat-diffusion-rust",
+            "test-node-8091",
+        )
+        .expect("sender actor id");
         let sender_ctx = plexspaces_core::RequestContext::new_without_auth(
             "tenant-a".to_string(),
             "heat-diffusion-rust".to_string(),

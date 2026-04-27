@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Integration tests for host.ts (TupleSpace list-in/list-out API).
 
 import { describe, it } from 'node:test';

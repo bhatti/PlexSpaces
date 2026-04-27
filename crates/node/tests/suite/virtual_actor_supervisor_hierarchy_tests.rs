@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -644,8 +644,13 @@ async fn test_application_deployment_with_eager_virtual_actors() {
 
         // Wait for actor to be registered (with longer timeout for WASM deployment)
         // namespace = application_id per ApplicationServiceImpl.deploy_application (line 376)
-        let actor_id = ActorId::new("eager-worker-1", "test_wasm_actor", "eager-app-001", node_id)
-            .expect("actor id must be valid");
+        let actor_id = ActorId::new(
+            "eager-worker-1",
+            "test_wasm_actor",
+            "eager-app-001",
+            node_id,
+        )
+        .expect("actor id must be valid");
         let registered =
             wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(10)).await;
         assert!(

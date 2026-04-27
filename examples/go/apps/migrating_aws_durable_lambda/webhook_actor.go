@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // AWS Durable Lambda → PlexSpaces: Serverless webhook processor (Go WASM)
 //
 // Exactly-once with deduplication: idempotency_key in payload; first request

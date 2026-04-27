@@ -5,7 +5,7 @@
 name = "matrix_vector_mpi"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 description = "HPC-style matrix-vector multiplication using MPI collective operations"
 
 [lib]

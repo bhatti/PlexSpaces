@@ -263,7 +263,7 @@ ctx.step_with_retry(retry_policy, || process_payment(order.clone())).await?;
 npm install @temporalio/workflow @temporalio/activity
 
 # For PlexSpaces example
-cargo build --release
+cargo build
 ```
 
 ### Run PlexSpaces Example
@@ -271,15 +271,18 @@ cargo build --release
 Builds use the **workspace shared target** (`.cargo/config.toml` → `target-dir = "../../../../target"`), not a per-example `target/`.
 
 ```bash
-# Run the example (from this dir or repo root: cargo run -p temporal-comparison --release)
-cargo run --release
+# Run the example
+cd /Users/shahzadbhatti/workspace/myspaces/examples/rust/embedded/migrating_temporal
+cargo run
 
 # Run tests
-cargo test
+./scripts/test.sh
 
 # Run benchmarks
 ./scripts/benchmark.sh
 ```
+
+`cargo run` starts the embedded comparison example by default.
 
 ---
 

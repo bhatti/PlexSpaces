@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Native Dapr reference: background job processing with State Store and Workflow.
 //
 // This file is for comparison only — it is not built. It illustrates how the

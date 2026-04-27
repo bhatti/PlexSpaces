@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Tests for virtual actor suspension/passivation and reactivation
 
 use async_trait::async_trait;

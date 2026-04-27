@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Reference: Temporal TypeScript workflow (order fulfillment)
 //
 // This is a REFERENCE ONLY showing how Temporal workflows look in TypeScript.

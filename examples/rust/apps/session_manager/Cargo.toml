@@ -9,7 +9,7 @@
 name = "session-manager-wasm"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 publish = false
 description = "Session idle + heartbeat WASM actor (send_after + metrics)"
 

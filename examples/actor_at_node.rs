@@ -158,7 +158,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .get_actor_service()
         .await
         .ok_or("ActorService not available")?;
-    actor_service.send(&req_ctx, &counter1_ref.id(), msg3).await?;
+    actor_service
+        .send(&req_ctx, &counter1_ref.id(), msg3)
+        .await?;
     println!(
         "   ✅ Sent 'get' to {} via ActorService.send()",
         counter1_ref.id()

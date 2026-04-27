@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Compete for the leader lock. No deploy — use after deploy.sh.
 # Both terminals use the same lock; one becomes leader and renews every 5s until killed.
 # Usage: ./compete.sh <term1|term2> [HTTP_PORT]

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Test Job Processing - Distributed task processing with TupleSpace
 
 set -euo pipefail

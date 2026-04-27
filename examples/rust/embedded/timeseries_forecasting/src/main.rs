@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Time-Series Forecasting Example - SDK Annotations Demo
@@ -7,7 +7,6 @@
 // using PlexSpaces SDK annotations, inspired by Ray's time-series example.
 //
 // ## SDK Annotations Used
-// - `#[actor]` - marks struct as an actor
 // - `#[gen_server_actor]` - generates GenServer behavior (request-reply)
 // - `#[plexspaces_handlers(gen_server)]` - generates handler dispatch
 // - `#[handler("op")]` - request-reply handlers
@@ -19,12 +18,11 @@
 // - Online model serving
 
 use plexspaces_sdk::{
-    actor, gen_server_actor, plexspaces_handlers, handler,
-    ActorContext, BehaviorError, Message, RequestContext, spawn_actor,
+    gen_server_actor, plexspaces_handlers,
+    ActorContext, BehaviorError, Message, RequestContext, spawn,
 };
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, Level};
@@ -563,65 +561,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // Data Loader
-    let _data_loader_ref = spawn_actor(
+    let _data_loader_ref = spawn(
         &ctx,
         service_locator.clone(),
         "data-loader",
         "ml-pipeline",
         DataLoaderActor::new(),
-        vec![],
     )
     .await
     .map_err(|e| format!("Failed to spawn data loader: {}", e))?;
     info!("  ✓ DataLoaderActor spawned (GenServer)");
 
     // Preprocessor
-    let _preprocessor_ref = spawn_actor(
+    let _preprocessor_ref = spawn(
         &ctx,
         service_locator.clone(),
         "preprocessor",
         "ml-pipeline",
         PreprocessorActor::new(10), // window_size = 10
-        vec![],
     )
     .await
     .map_err(|e| format!("Failed to spawn preprocessor: {}", e))?;
     info!("  ✓ PreprocessorActor spawned (GenServer)");
 
     // Trainer
-    let _trainer_ref = spawn_actor(
+    let _trainer_ref = spawn(
         &ctx,
         service_locator.clone(),
         "trainer",
         "ml-pipeline",
         TrainerActor::new(0.001, 500), // learning_rate, epochs
-        vec![],
     )
     .await
     .map_err(|e| format!("Failed to spawn trainer: {}", e))?;
     info!("  ✓ TrainerActor spawned (GenServer)");
 
     // Validator
-    let _validator_ref = spawn_actor(
+    let _validator_ref = spawn(
         &ctx,
         service_locator.clone(),
         "validator",
         "ml-pipeline",
         ValidatorActor::new(),
-        vec![],
     )
     .await
     .map_err(|e| format!("Failed to spawn validator: {}", e))?;
     info!("  ✓ ValidatorActor spawned (GenServer)");
 
     // Server
-    let _server_ref = spawn_actor(
+    let _server_ref = spawn(
         &ctx,
         service_locator.clone(),
         "server",
         "ml-pipeline",
         ServerActor::new(),
-        vec![],
     )
     .await
     .map_err(|e| format!("Failed to spawn server: {}", e))?;
@@ -690,7 +683,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     info!("Shutting down...");
-    node_arc.shutdown(Duration::from_secs(5)).await?;
+    node.shutdown(Duration::from_secs(5)).await?;
 
     Ok(())
 }

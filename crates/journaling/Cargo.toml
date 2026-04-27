@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
 # This file is part of PlexSpaces.
@@ -20,7 +20,7 @@
 name = "plexspaces-journaling"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 description = "Durable execution and event sourcing for PlexSpaces actors (RESTATE-inspired)"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 

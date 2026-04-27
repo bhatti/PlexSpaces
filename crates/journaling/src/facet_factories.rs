@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -466,7 +466,11 @@ mod tests {
         let facet = factory.create(config).await;
         #[cfg(feature = "locks")]
         {
-            assert!(facet.is_ok(), "factory.create failed: {:?}", facet.err().map(|e| e.to_string()));
+            assert!(
+                facet.is_ok(),
+                "factory.create failed: {:?}",
+                facet.err().map(|e| e.to_string())
+            );
             let facet = facet.unwrap();
             assert_eq!(facet.facet_type(), "timer");
         }

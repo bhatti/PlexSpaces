@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -2170,15 +2170,17 @@ impl WasmInstance {
                 processed_result
             }
             ComponentBindings::SimpleActor(simple_bindings) => {
-                tracing::debug!(
-                    actor_id = %self.actor_id,
-                    message_id = %message_id,
-                    from_actor = %from_string,
-                    msg_type = %message_type_string,
-                    payload_len = payload.len(),
-                    payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
-                    "actor-world handle() call"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        from_actor = %from_string,
+                        msg_type = %message_type_string,
+                        payload_len = payload.len(),
+                        payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
+                        "actor-world handle() call"
+                    );
+                }
 
                 let result = simple_bindings
                     .plexspaces_actor_actor()

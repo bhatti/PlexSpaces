@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -2541,9 +2541,7 @@ message GetActorStatesRequest {
   };
 
   // List of canonical actor IDs to check
-  repeated string actor_ids = 1 [
-    (google.api.field_behavior) = REQUIRED
-  ];
+  repeated string actor_ids = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Response for batch actor state check — uses existing ActorState enum
@@ -3836,9 +3834,7 @@ message ActorHealth {
 // - ActorFactory.spawn_actor() accepts ActorSpawnSpec
 message ActorSpawnSpec {
   // Instance name + behavior class (namespace and tenant added in fields below).
-  plexspaces.common.v1.ActorIdentity identity = 1 [
-    (google.api.field_behavior) = REQUIRED
-  ];
+  plexspaces.common.v1.ActorIdentity identity = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Role of the actor within its application (e.g. "worker", "leader").
   // Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).

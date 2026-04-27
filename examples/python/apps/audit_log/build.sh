@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Build Audit Log WASM actor using PlexSpaces Python SDK
 set -euo pipefail
 

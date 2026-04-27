@@ -74,4 +74,4 @@ Optional port: `./test.sh 8094` if your HTTP gateway uses a different port.
 
 ## License
 
-LGPL-2.1-or-later
+AGPL-3.0-or-later

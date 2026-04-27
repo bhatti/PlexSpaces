@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Player Session Manager - Orleans-style Virtual Actor with Annotations
@@ -514,7 +514,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let actor_factory = node.service_locator().get_actor_factory().await
         .ok_or("Actor factory not available")?;
-    actor_factory.stop_actor(&ctx, &virtual_player.id().to_string()).await?;
+    actor_factory.stop_actor(&ctx, virtual_player.id()).await?;
     println!("  ✓ Actor terminated");
     println!("  ⚠️  State is LOST (no durability facet)");
     println!();
@@ -550,7 +550,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("  ✅ VERIFIED: State was LOST (as expected for non-durable actor)");
     }
     
-    actor_factory.stop_actor(&ctx, &virtual_player2.id().to_string()).await?;
+    actor_factory.stop_actor(&ctx, virtual_player2.id()).await?;
     println!();
 
     // =========================================================================
@@ -623,7 +623,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Terminate actor
     println!("Step B.5: Terminate actor (state is PERSISTED)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    actor_factory.stop_actor(&ctx, &durable_player.id().to_string()).await?;
+    actor_factory.stop_actor(&ctx, durable_player.id()).await?;
     println!("  ✓ Actor terminated");
     println!("  ✅ State is PERSISTED (durability facet journals all changes)");
     println!();
@@ -652,7 +652,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!();
     println!("4. TENANT ISOLATION:");
     println!("   • RequestContext carries tenant_id (from JWT) and namespace");
-    println!("   • ActorFactory enforces tenant/namespace match on all operations");
+    println!("   • Typed ActorId values are used for lifecycle operations");
     println!();
 
     // Graceful shutdown

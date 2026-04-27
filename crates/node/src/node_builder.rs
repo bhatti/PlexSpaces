@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -262,7 +262,10 @@ impl NodeBuilder {
     ///     .build_started()
     ///     .await;
     /// ```
-    pub fn with_shared_db_connection_string(mut self, connection_string: impl Into<String>) -> Self {
+    pub fn with_shared_db_connection_string(
+        mut self,
+        connection_string: impl Into<String>,
+    ) -> Self {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
         use plexspaces_proto::storage::v1::SharedDbConfig;
         let connection_string = normalize_shared_db_connection_string(connection_string.into());

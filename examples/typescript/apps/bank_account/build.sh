@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Build TypeScript bank_account: compile to JS (for verification) and optionally to WASM (javy).
 # Runtime currently expects WIT components (Python componentize-py); Javy WASM is not yet loadable.
 # Verification: run ./test.sh (uses compiled JS in Node, no server).

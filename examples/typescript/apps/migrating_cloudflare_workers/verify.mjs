@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // In-process verification of guild_chat_actor (no server needed).
 // Imports compiled JS and exercises ChatRoom + RateLimiter via ActorRouter.
 

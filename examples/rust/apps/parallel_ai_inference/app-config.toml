@@ -1,0 +1,49 @@
+name = "rust-parallel-ai-inference"
+version = "1.0.0"
+namespace = "rust-parallel-ai-inference"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "inference_worker"
+actor_type = "parallel_ai_inference_wasm"
+role = "inference_worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "inference_worker", model_type = "small" }
+
+[[supervisor.children]]
+name = "benchmark"
+actor_type = "parallel_ai_inference_wasm"
+role = "benchmark"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+args = { role = "benchmark" }
+
+[[supervisor.children]]
+name = "orchestrator"
+actor_type = "parallel_ai_inference_wasm"
+role = "orchestrator"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+args = { role = "orchestrator" }
+
+[[supervisor.children]]
+name = "metrics_event"
+actor_type = "parallel_ai_inference_wasm"
+role = "metrics_event"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+args = { role = "metrics_event" }
+
+[[supervisor.children]]
+name = "circuit_breaker"
+actor_type = "parallel_ai_inference_wasm"
+role = "circuit_breaker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+args = { role = "circuit_breaker", threshold = "3" }

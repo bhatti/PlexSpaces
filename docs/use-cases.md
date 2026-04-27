@@ -62,7 +62,7 @@ Production AI agent systems with stateful, fault-tolerant, and multi-tenant exec
 - **MCP Tool Calling**: Actors as Model Context Protocol (MCP) tool servers — tool discovery (`tools/list`), validated execution (`tools/call`), JSON-RPC 2.0 gateway with tenant isolation
 - **Multi-Agent A2A Collaboration**: Orchestrator decomposes tasks, discovers specialist agents by capability, delegates via message passing, coordinates results via TupleSpace
 - **LLM Orchestration**: Prompt chaining, routing (classify → dispatch), reflection loops (generate → judge → refine), LLM-as-Judge quality gates, and Evol-Instruct prompt mutation
-- **Parallel Inference**: Shard-group scatter-gather, elastic pool checkout/checkin, MPI collectives (broadcast, reduce, allreduce, barrier) for distributed model serving and training
+- **Parallel Inference**: Shard-group scatter-gather, elastic pool checkout/checkin, MPI collectives (broadcast, reduce, allreduce, barrier) for distributed model serving and training. Strong scaling benchmarks find the optimal shard count for a fixed workload; weak scaling benchmarks verify that adding capacity handles proportionally larger problems (ideal `Eff% ≈ 100%` at all shard counts)
 - **Resource-Aware Inference**: Label-based model routing (GPU/memory tier), per-tenant budget enforcement, cost-aware tier selection with GenFSM budget state machine
 - **Circuit Breakers**: GenFSM-based resilience for LLM call failures — closed/open/half-open with automatic recovery via `send_after`
 
@@ -240,7 +240,7 @@ Low-latency real-time applications:
 |----------|---------------------|---------------------|
 | AI Agents / MCP | LangChain, AutoGen, standalone MCP servers | Stateful agents, durable workflows, multi-tenancy, MPI collectives, polyglot — all in one framework |
 | LLM Orchestration | LangGraph, Temporal | Four behavior types (GenServer/GenEvent/GenFSM/Workflow) composable via config; per-stage checkpointing |
-| Parallel Inference | Ray, Triton | Native MPI collectives, shard-group scatter-gather, elastic pool — ~50μs WASM cold start vs ~100ms Ray |
+| Parallel Inference | Ray, Triton | Native MPI collectives, shard-group scatter-gather (strong + weak scaling), elastic pool — ~50μs WASM cold start vs ~100ms Ray |
 | Distributed Training | Horovod, PyTorch DDP | Ring AllReduce native, parameter server built-in, no separate training cluster |
 | Workflows | Temporal, AWS Step Functions | Unified with actors, better integration |
 | Stateful Services | Redis, Memcached | Automatic persistence, fault tolerance |

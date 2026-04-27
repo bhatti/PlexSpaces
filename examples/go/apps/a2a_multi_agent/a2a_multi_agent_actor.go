@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // A2A Multi-Agent Collaboration (Go WASM)
 //
 // Demonstrates Agent-to-Agent (A2A) communication and multi-agent collaboration:

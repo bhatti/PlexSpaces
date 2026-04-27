@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -199,10 +199,8 @@ impl SpecApplication {
                 ))
             })?;
 
-            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = service_locator
-                .get_actor_factory()
-                .await
-                .ok_or_else(|| {
+            let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> =
+                service_locator.get_actor_factory().await.ok_or_else(|| {
                     ApplicationError::StartupFailed(
                         "ActorFactory not available from ServiceLocator".to_string(),
                     )
@@ -261,10 +259,7 @@ impl SpecApplication {
 
             if is_supervisor_child {
                 // Spawn the supervisor actor first
-                match actor_factory
-                    .spawn_actor(&ctx, &spawn_spec, facets)
-                    .await
-                {
+                match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,
@@ -310,10 +305,7 @@ impl SpecApplication {
                 }
             } else {
                 // Regular worker - spawn normally
-                match actor_factory
-                    .spawn_actor(&ctx, &spawn_spec, facets)
-                    .await
-                {
+                match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,

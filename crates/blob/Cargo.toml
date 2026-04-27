@@ -2,7 +2,7 @@
 name = "plexspaces-blob"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 description = "S3-compatible blob storage service for PlexSpaces framework"
 repository = "https://github.com/plexobject/plexspaces"

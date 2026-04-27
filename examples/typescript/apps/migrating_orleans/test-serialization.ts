@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Minimal test to reproduce WASM recursion issue
 // This test can be run standalone to quickly iterate on serialization fixes
 

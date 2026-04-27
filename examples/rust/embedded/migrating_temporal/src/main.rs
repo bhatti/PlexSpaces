@@ -1,5 +1,8 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Comparison: Temporal Durable Workflows
+//
+// This is the package default run target, so `cargo run` starts the comparison
+// example without needing `--bin temporal-comparison`.
 
 use plexspaces_behavior::Workflow;
 use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Tests for ServiceHttpClient (outbound HTTP service-link client).
 // Uses a mock httpFetch to avoid WIT virtual imports.
 

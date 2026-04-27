@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Resilient outbound HTTP client for PlexSpaces [`RuntimeConfig::service_links`](plexspaces_proto::node::v1::RuntimeConfig).
 //!

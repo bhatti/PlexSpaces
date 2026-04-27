@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Real-Time Stream Processor - Clickstream Analytics Example
@@ -593,7 +593,7 @@ async fn main() -> Result<()> {
         metrics_tracker.increment_message();
         
         if i < 3 || i == num_processors - 1 {
-            println!("  ✓ Spawned {}", processor_id);
+            println!("  ✓ Spawned {}", processors.last().expect("processor just pushed").id());
         }
     }
     
@@ -605,8 +605,15 @@ async fn main() -> Result<()> {
 
     // Create supervisor for demonstrating failure/restart
     // In production, all processors would be supervised
+    let supervisor_id = ActorId::new(
+        "processor-pool-supervisor",
+        "supervisor",
+        ctx.namespace(),
+        node_id,
+    )
+    .map_err(|e| anyhow::anyhow!("invalid supervisor actor id: {}", e))?;
     let (supervisor, mut event_rx) = Supervisor::new(
-        "processor-pool-supervisor".to_string(),
+        supervisor_id.to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,

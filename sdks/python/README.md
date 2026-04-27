@@ -416,4 +416,4 @@ plexspaces-py build chat_room.py -v
 
 ## License
 
-LGPL-2.1-or-later
+AGPL-3.0-or-later

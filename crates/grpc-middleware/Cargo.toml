@@ -1,10 +1,10 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 [package]
 name = "plexspaces-grpc-middleware"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 description = "Production-ready gRPC middleware for PlexSpaces with metrics, auth, rate limiting, and tracing"
 
 [lib]

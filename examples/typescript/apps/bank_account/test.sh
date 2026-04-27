@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Bank Account (TypeScript WASM): build, deploy, HTTP /ask flow.
 # Expects a node already listening (from repo root: ./scripts/server.sh).
 #

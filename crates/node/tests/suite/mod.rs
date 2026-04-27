@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Consolidated test suite for plexspaces-node crate
@@ -34,8 +34,8 @@ pub mod supervisor_tree_spawning_tests;
 pub mod system_service_test;
 pub mod tuplespace_service_test;
 pub mod virtual_actor_comprehensive_tests;
-pub mod virtual_actor_named_definition_tests;
 pub mod virtual_actor_get_or_activate_tests;
+pub mod virtual_actor_named_definition_tests;
 pub mod virtual_actor_supervisor_hierarchy_tests;
 pub mod virtual_actor_suspension_tests;
 pub mod wasm_app_facet_toml_integration;

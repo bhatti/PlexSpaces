@@ -6,7 +6,7 @@
 name = "migrating-merlin-wasm"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 publish = false
 description = "Merlin parameter sweep WASM actor (pool + tuple space; fallback: process group)"
 

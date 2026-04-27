@@ -14,7 +14,7 @@ cargo run
 
 ## What It Demonstrates
 
-1. **SDK Annotations**: `#[actor]`, `#[plexspaces_handlers]`, `#[handler]` for clean actor definitions
+1. **SDK Annotations**: `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]` for clean actor definitions
 2. **TimerFacet attachment**: Attach timer capability to actors via `spawn_with_facets`
 3. **One-shot timers**: `register_once(name, delay)` - fire once after delay
 4. **Periodic timers**: `register_periodic(name, interval)` - fire repeatedly
@@ -37,12 +37,12 @@ cargo run
 
 ```rust
 use plexspaces_sdk::{
-    actor, plexspaces_handlers, handler,
+    gen_server_actor, plexspaces_handlers, handler,
     ActorContext, BehaviorError, Message, spawn_with_facets, TimerFacet,
 };
 
-// Step 1: Annotate struct with #[actor(facets = ["timer"])]
-#[actor(facets = ["timer"])]
+// Step 1: Annotate struct with #[gen_server_actor(...)]
+#[gen_server_actor(name = "session_actor", facets = ["timer"])]
 struct SessionActor {
     user_id: String,
     is_active: bool,
@@ -50,8 +50,8 @@ struct SessionActor {
     timer_fire_count: u32,
 }
 
-// Step 2: Annotate impl with #[plexspaces_handlers(custom)]
-#[plexspaces_handlers(custom)]
+// Step 2: Annotate impl with #[plexspaces_handlers]
+#[plexspaces_handlers]
 impl SessionActor {
     #[handler("timer_fired", cast)]  // fire-and-forget
     async fn handle_timer_fired(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> {
@@ -75,16 +75,16 @@ use plexspaces_node::NodeBuilder;
 use plexspaces_core::ActorId;
 
 // Create TimerFacet
-let timer_facet = Arc::new(TimerFacet::new(json!({}), 50));
+let timer_facet = Box::new(TimerFacet::new(json!({}), 50, service_locator.clone()));
 
-// Spawn with SDK helper (like Python @actor(facets=["timer"]))
+// Spawn with SDK helper and attach the timer facet
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    &actor_id,
+    "session-user-123".to_string(),
     "sessions",
     SessionActor::new("user-123"),
-    vec![Box::new((*timer_facet).clone())],
+    vec![timer_facet],
 ).await?;
 ```
 
@@ -264,8 +264,8 @@ For timer workloads, coordination overhead includes actor spawning and timer reg
 
 | Annotation | Description |
 |------------|-------------|
-| `#[actor(facets = ["timer"])]` | Marks struct as actor with facets (documentation) |
-| `#[plexspaces_handlers(custom)]` | Generates Actor impl with dispatch |
+| `#[gen_server_actor(name = "session_actor", facets = ["timer"])]` | Declares the runtime actor type and attached facets |
+| `#[plexspaces_handlers]` | Generates Actor impl with dispatch |
 | `#[handler("op", cast)]` | Fire-and-forget handler (no reply) |
 | `spawn_with_facets(..., facets)` | Spawn actor with facets attached |
 

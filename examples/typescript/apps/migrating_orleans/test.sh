@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # E2E test: Deploy WASM app and run batch prediction operations with metrics
 
 set -euo pipefail

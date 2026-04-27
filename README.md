@@ -4,7 +4,7 @@
 
 **A unified distributed actor framework for building scalable, fault-tolerant systems**
 
-[![License: LGPL v2.1](https://img.shields.io/badge/License-LGPL%20v2.1-blue.svg)](https://www.gnu.org/licenses/lgpl-2.1)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/plexobject/plexspaces)
 [![API Docs](https://img.shields.io/badge/API-Swagger-green.svg)](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/bhatti/tspaces/main/docs/openapi.json)
@@ -439,7 +439,7 @@ Supported backends: SQLite, PostgreSQL, Redis, DynamoDB, MinIO/S3/GCP/Azure (blo
 
 ## License
 
-PlexSpaces is licensed under the [GNU Lesser General Public License v2.1](LICENSE).
+PlexSpaces is licensed under the [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0).
 
 ## Acknowledgments
 

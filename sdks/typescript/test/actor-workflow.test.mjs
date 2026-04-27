@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Contract tests for Workflow routing (workflow_run, workflow_signal:name, workflow_query:name).
 // The real implementation is in src/actor.ts handle(); this test documents and verifies the
 // routing contract without loading the SDK (which has WIT virtual imports).

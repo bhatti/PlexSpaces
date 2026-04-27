@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -934,9 +934,13 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
 
         // Build ActorId directly from spec identity + local node_id
-        let actor_id =
-            plexspaces_core::ActorId::new(actor_name.as_ref(), actor_type, &namespace, local_node_id)
-                .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
+        let actor_id = plexspaces_core::ActorId::new(
+            actor_name.as_ref(),
+            actor_type,
+            &namespace,
+            local_node_id,
+        )
+        .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
 
         // Derive init payload from spec (deterministic; no stale state)
         let initial_state = plexspaces_core::wasm_init_payload(spec, &actor_id);
@@ -996,9 +1000,10 @@ impl ActorFactory for ActorFactoryImpl {
 
         // Apply ActorConfig if present (wraps actor with a config-carrying context)
         if let Some(cfg) = spec.config.clone() {
-            use plexspaces_core::ActorContext;
             use crate::TestServiceLocatorStub;
-            let sl: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+            use plexspaces_core::ActorContext;
+            let sl: Arc<dyn plexspaces_core::ServiceLocator> =
+                Arc::new(TestServiceLocatorStub::new());
             let ctx_with_cfg = Arc::new(ActorContext::new(
                 local_node_id.to_string(),
                 ctx.tenant_id().to_string(),
@@ -1332,13 +1337,15 @@ impl ActorFactoryImpl {
                                 f.get_config()
                             };
                             if let serde_json::Value::Object(map) = json_cfg {
-                                map.into_iter().map(|(k, v)| {
-                                    let s = match v {
-                                        serde_json::Value::String(s) => s,
-                                        other => other.to_string(),
-                                    };
-                                    (k, s)
-                                }).collect()
+                                map.into_iter()
+                                    .map(|(k, v)| {
+                                        let s = match v {
+                                            serde_json::Value::String(s) => s,
+                                            other => other.to_string(),
+                                        };
+                                        (k, s)
+                                    })
+                                    .collect()
                             } else {
                                 std::collections::HashMap::new()
                             }
@@ -1408,8 +1415,7 @@ impl ActorFactoryImpl {
                 use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
                 let lifecycle_facet_update =
                     virtual_actor_facet_to_lifecycle_facet(virtual_facet_for_reg);
-                let facet_box_update =
-                    Arc::new(tokio::sync::RwLock::new(lifecycle_facet_update));
+                let facet_box_update = Arc::new(tokio::sync::RwLock::new(lifecycle_facet_update));
                 // Build a minimal spec whose empty fields will be filled in by the merge
                 // logic inside register(), which falls back to the existing instance spec
                 // then the type-level spec.

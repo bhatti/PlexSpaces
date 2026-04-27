@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Order fulfillment workflow — Rust WASM (Temporal-style run / signal / query).
 // SDK macros + WIT: same pattern as data_parallel_worker (gen_server_actor(wasm), plexspaces_handlers(wasm)).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -123,7 +123,10 @@ impl ActorBuilder {
     /// let builder = ActorBuilder::from_spec(Box::new(MyBehavior), spec);
     /// let actor = builder.build().await?;
     /// ```
-    pub fn from_spec(behavior: Box<dyn Actor>, spec: &plexspaces_proto::actor::v1::ActorSpawnSpec) -> Self {
+    pub fn from_spec(
+        behavior: Box<dyn Actor>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
+    ) -> Self {
         let mut builder = Self::new(behavior);
         if let Some(ref identity) = spec.identity {
             if !identity.name.is_empty() {

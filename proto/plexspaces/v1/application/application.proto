@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -273,9 +273,7 @@ message ChildSpec {
   // Role of this child within the application (e.g. "worker", "leader", "supervisor").
   // Maps 1:1 to the TOML `role` field in [[supervisor.children]].
   // Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-  string role = 2 [
-    (buf.validate.field).string = {max_len: 128}
-  ];
+  string role = 2 [(buf.validate.field).string = {max_len: 128}];
 
   // Arguments to pass to start function
   map<string, string> args = 3;

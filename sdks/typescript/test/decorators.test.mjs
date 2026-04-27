@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

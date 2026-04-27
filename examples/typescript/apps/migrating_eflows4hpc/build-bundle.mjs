@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Bundle ensemble_actor.ts + @plexspaces/sdk for jco componentize.
 
 import * as esbuild from "esbuild";

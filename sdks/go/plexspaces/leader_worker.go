@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 PlexSpaces Contributors
 //
 // Leader-worker client for multi-node: same API surface as Rust/Python/TypeScript SDKs.

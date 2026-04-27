@@ -1,11 +1,11 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 
 [package]
 name = "plexspaces-workflow"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 description = "Simple, durable workflow orchestration for PlexSpaces"
 repository = "https://github.com/bhatti/plexspaces"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]

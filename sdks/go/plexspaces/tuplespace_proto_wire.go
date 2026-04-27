@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 PlexSpaces Contributors
 //
 // Protobuf wire encoding/decoding for plexspaces.tuplespace.v1 WriteRequest, ReadRequest,

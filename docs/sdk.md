@@ -1030,12 +1030,25 @@ host surface through the actor-world WIT world:
 - `bulk-update-shard-group`
 - `map-shard-group`
 - `scatter-gather`
+- `broadcast-shard-group`
+- `reduce-shard-group`
+- `all-reduce-shard-group`
+- `barrier-shard-group`
+- `spawn-actors`
 - `application-metrics-add`
 - `application-get-status`
+- `http-fetch`
 
 These WASM-facing SDK wrappers are transport decorators only. They encode/decode the generated
 protobuf request and response models and delegate to the underlying framework `ActorService` /
 application-manager implementations through the WIT host boundary.
+
+**Batching for efficiency**: Because each `scatter-gather` call is one gRPC round-trip shared across
+all shards, processing multiple logical work items per call amortises coordination overhead. Pass a
+`batch_size` field in your scatter-gather payload so each shard processes `N` items per message.
+This is the primary lever for improving the granularity ratio (`Gran = compute_time / coord_time`).
+See [Scaling Benchmarks](detailed-design.md#scaling-benchmarks-and-parallel-efficiency) for
+details on Gran, Eff%, and the strong vs. weak scaling model.
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
 

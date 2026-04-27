@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -510,10 +510,7 @@ pub async fn stop_actor_http_request(
     actor_target: String,
     actor_service: Arc<ActorServiceImpl>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        effective_tenant_id,
-        namespace,
-    );
+    let ctx = plexspaces_core::RequestContext::new_without_auth(effective_tenant_id, namespace);
     let canonical_id = actor_service
         .canonical_actor_id_from_client_target(&ctx, &actor_target)
         .await

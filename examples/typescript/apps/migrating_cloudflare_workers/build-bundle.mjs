@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Bundle guild_chat_actor.ts + @plexspaces/sdk into one ESM file for jco componentize (no Node APIs in output).
 
 import * as esbuild from "esbuild";

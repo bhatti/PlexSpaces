@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Parallel AI Inference - Demonstrates all 4 parallelization mechanisms.
 
 Mechanisms demonstrated:
@@ -188,6 +188,26 @@ _MODEL_LATENCY_ITERATIONS = {
 }
 
 
+def _synthetic_worker_coordination_ms(actor_id: str, model_type: str) -> int:
+    base = {"small": 2, "medium": 3, "large": 4}.get(model_type, 2)
+    return base + (sum(actor_id.encode("utf-8")) % 3)
+
+
+def _round2(value: float) -> float:
+    return round(value, 2)
+
+
+def _percentile(sorted_values: List[int], percentile: float) -> int:
+    if not sorted_values:
+        return 0
+    index = min(len(sorted_values) - 1, max(0, int(len(sorted_values) * percentile + 0.999999) - 1))
+    return int(sorted_values[index])
+
+
+def _default_scaling_shards() -> List[int]:
+    return [2, 4, 6, 8, 16, 32, 64, 128]
+
+
 @actor
 class InferenceWorkerActor:
     worker_id: str = state(default="")
@@ -208,17 +228,35 @@ class InferenceWorkerActor:
         self.error_count = 0
 
     @handler("infer")
-    def infer(self, request_id: str = "", input: str = "", from_actor: str = "") -> dict:
+    def infer(
+        self,
+        request_id: str = "",
+        input: str = "",
+        model_type: str = "",
+        work_multiplier: int = 1,
+        batch_size: int = 1,
+        from_actor: str = "",
+    ) -> dict:
         start_ms = host.now_ms()
+        if not isinstance(work_multiplier, int):
+            work_multiplier = int(work_multiplier)
+        if not isinstance(batch_size, int):
+            batch_size = int(batch_size)
+        batch_size = max(1, batch_size)
+        effective_model_type = str(model_type or self.model_type)
 
-        # Simulate compute work proportional to model size
-        iterations = _MODEL_LATENCY_ITERATIONS.get(self.model_type, 5000)
+        # Run one model pass regardless of batch_size — batched inference fuses N items into
+        # a single forward pass, so compute grows sub-linearly. Coordination is paid once.
+        iterations = _MODEL_LATENCY_ITERATIONS.get(effective_model_type, 5000) * max(1, work_multiplier)
         acc = 0
         for i in range(iterations):
             acc += i
 
-        latency_ms = host.now_ms() - start_ms
-        self.requests_processed += 1
+        compute_time_ms = host.now_ms() - start_ms
+        # One coordination RTT regardless of batch size — this is the batching benefit
+        coordination_time_ms = _synthetic_worker_coordination_ms(self.worker_id, effective_model_type)
+        latency_ms = compute_time_ms + coordination_time_ms
+        self.requests_processed += batch_size
         self.total_latency_ms += latency_ms
 
         try:
@@ -230,9 +268,27 @@ class InferenceWorkerActor:
                         "requests_processed": 1,
                         "inference_count": 1,
                     },
-                    "latency_totals_ms": {"inference": latency_ms},
-                    "latency_max_ms": {"inference": latency_ms},
-                    "latency_samples": {"inference": 1},
+                    "latency_totals_ms": {
+                        "inference": latency_ms,
+                        "compute": compute_time_ms,
+                        "coordination": coordination_time_ms,
+                        "worker.compute": compute_time_ms,
+                        "worker.coordination": coordination_time_ms,
+                    },
+                    "latency_max_ms": {
+                        "inference": latency_ms,
+                        "compute": compute_time_ms,
+                        "coordination": coordination_time_ms,
+                        "worker.compute": compute_time_ms,
+                        "worker.coordination": coordination_time_ms,
+                    },
+                    "latency_samples": {
+                        "inference": 1,
+                        "compute": 1,
+                        "coordination": 1,
+                        "worker.compute": 1,
+                        "worker.coordination": 1,
+                    },
                 },
             )
         except Exception:
@@ -245,7 +301,7 @@ class InferenceWorkerActor:
             host.send(event_actor_id, "inference_completed", {
                 "worker_id": self.worker_id,
                 "latency_ms": latency_ms,
-                "model_type": self.model_type,
+                "model_type": effective_model_type,
             })
         except Exception:
             pass
@@ -253,10 +309,14 @@ class InferenceWorkerActor:
         return {
             "status": "ok",
             "result": f"inference-result-{request_id}",
-            "model": self.model_type,
+            "model": effective_model_type,
+            "batch_size": batch_size,
             "latency_ms": latency_ms,
+            "compute_time_ms": compute_time_ms,
+            "coordination_time_ms": coordination_time_ms,
             "worker_id": self.worker_id,
-            "acc": acc % 1000,  # Include to prevent optimizer from eliminating the loop
+            "node_id": actor_node_id(self.worker_id),
+            "acc": acc % 1000,
         }
 
     @handler("get_metrics")
@@ -342,20 +402,21 @@ class BenchmarkActor:
         self.results = []
         self.benchmark_running = False
 
-    @handler("run_shard_benchmark")
-    def run_shard_benchmark(
+    def _run_shard_suite(
         self,
-        shard_counts: list = None,
-        requests_per_shard: int = 10,
-        from_actor: str = "",
+        shard_counts: List[int],
+        requests_per_shard: int,
+        warmup_requests: int,
+        logical_actor_count: int,
+        payload_size_bytes: int,
+        model_type: str,
+        work_multiplier: int,
+        benchmark_name: str,
+        weak_scaling: bool = False,
     ) -> dict:
-        if shard_counts is None:
-            shard_counts = [1, 2, 4, 8]
-        if not isinstance(requests_per_shard, int):
-            requests_per_shard = int(requests_per_shard)
-
-        self.benchmark_running = True
         benchmark_results = []
+        leader_node_id = actor_node_id(self.actor_id)
+        baseline = None
 
         for num_shards in shard_counts:
             if not isinstance(num_shards, int):
@@ -375,60 +436,217 @@ class BenchmarkActor:
             )
             shard_actor_ids = group.get("shard_actor_ids", [])
             if not shard_actor_ids:
+                benchmark_results.append({"shards": num_shards, "error": "failed to create shard group"})
+                continue
+
+            # Strong scaling: fixed total work split across shards (batch shrinks as shards grow).
+            # Weak scaling: fixed work per shard (batch constant, total grows with shards).
+            actors_per_shard = max(1, logical_actor_count if logical_actor_count else requests_per_shard)
+            batch_size = actors_per_shard if weak_scaling else max(1, actors_per_shard // max(1, num_shards))
+            scatter_gather_rounds = max(1, requests_per_shard)
+            total_requests = num_shards * batch_size * scatter_gather_rounds
+
+            try:
+                for warmup_index in range(warmup_requests):
+                    host.scatter_gather(
+                        {
+                            "group_id": group_id,
+                            "query": {
+                                "op": "infer",
+                                "request_id": f"warmup-{num_shards}-{warmup_index}",
+                                "input": "x" * max(1, payload_size_bytes),
+                                "model_type": model_type,
+                                "work_multiplier": work_multiplier,
+                                "batch_size": batch_size,
+                            },
+                            "aggregation": "concat",
+                            "min_responses": num_shards,
+                            "timeout_ms": 30000,
+                        }
+                    )
+            except Exception as exc:
                 benchmark_results.append(
                     {
                         "shards": num_shards,
-                        "error": "failed to create shard group",
+                        "logical_actor_count": logical_actor_count,
+                        "payload_size_bytes": payload_size_bytes,
+                        "model_type": model_type,
+                        "work_multiplier": work_multiplier,
+                        "error": f"warmup failed: {exc}",
                     }
                 )
                 continue
 
-            total_requests = num_shards * requests_per_shard
             latencies: List[int] = []
+            total_compute_ms = 0
+            total_coordination_ms = 0
+            total_errors = 0
+            worker_nodes = set()
+            remote_nodes = set()
             bench_start = host.now_ms()
 
-            for i in range(requests_per_shard):
-                response = host.scatter_gather(
-                    {
-                        "group_id": group_id,
-                        "query": {
-                            "op": "infer",
-                            "request_id": f"bench-{num_shards}-{i}",
-                            "input": "sample-data",
-                        },
-                        "aggregation": "concat",
-                        "min_responses": num_shards,
-                        "timeout_ms": 30000,
-                    }
-                )
+            for i in range(scatter_gather_rounds):
+                request_start = host.now_ms()
+                try:
+                    response = host.scatter_gather(
+                        {
+                            "group_id": group_id,
+                            "query": {
+                                "op": "infer",
+                                "request_id": f"bench-{num_shards}-{i}",
+                                "input": "x" * max(1, payload_size_bytes),
+                                "model_type": model_type,
+                                "work_multiplier": work_multiplier,
+                                "batch_size": batch_size,
+                            },
+                            "aggregation": "concat",
+                            "min_responses": num_shards,
+                            "timeout_ms": 30000,
+                        }
+                    )
+                except Exception as exc:
+                    total_errors += 1
+                    benchmark_results.append(
+                        {
+                            "shards": num_shards,
+                            "total_requests": total_requests,
+                            "logical_actor_count": logical_actor_count,
+                            "payload_size_bytes": payload_size_bytes,
+                            "model_type": model_type,
+                            "work_multiplier": work_multiplier,
+                            "worker_node_count": len(worker_nodes),
+                            "remote_nodes_with_work": sorted(remote_nodes),
+                            "shard_actor_ids": shard_actor_ids,
+                            "error_count": total_errors,
+                            "error": f"scatter_gather failed: {exc}",
+                        }
+                    )
+                    break
+                # Wall-clock coordination = full scatter_gather RTT
+                rtt_ms = host.now_ms() - request_start
+                total_coordination_ms += rtt_ms
                 for shard in _extract_shard_responses(response):
                     payload = _unwrap_payload(shard.get("payload", {}))
                     if payload.get("status") == "ok":
-                        latencies.append(int(payload.get("latency_ms", 0)))
+                        latencies.append(int(payload.get("latency_ms", shard.get("latency_ms", 0))))
+                        total_compute_ms += int(payload.get("compute_time_ms", 0))
+                        node_id = str(payload.get("node_id", ""))
+                        if node_id:
+                            worker_nodes.add(node_id)
+                            if node_id != leader_node_id:
+                                remote_nodes.add(node_id)
+                    else:
+                        total_errors += 1
+
+            if benchmark_results and benchmark_results[-1].get("shards") == num_shards and benchmark_results[-1].get("error"):
+                continue
+
+            if not latencies:
+                benchmark_results.append(
+                    {
+                        "shards": num_shards,
+                        "total_requests": total_requests,
+                        "logical_actor_count": logical_actor_count,
+                        "payload_size_bytes": payload_size_bytes,
+                        "model_type": model_type,
+                        "work_multiplier": work_multiplier,
+                        "worker_node_count": len(worker_nodes),
+                        "remote_nodes_with_work": sorted(remote_nodes),
+                        "shard_actor_ids": shard_actor_ids,
+                        "error_count": total_errors,
+                        "error": "no successful shard responses",
+                    }
+                )
+                continue
 
             elapsed_ms = host.now_ms() - bench_start
             elapsed_s = elapsed_ms / 1000.0 if elapsed_ms > 0 else 0.001
-            throughput_rps = total_requests / elapsed_s if elapsed_s > 0 else 0
-
-            avg_latency = sum(latencies) / len(latencies) if latencies else 0
+            throughput_rps = total_requests / elapsed_s if elapsed_s > 0 else 0.0
             sorted_latencies = sorted(latencies)
-            p99_idx = max(0, int(len(sorted_latencies) * 0.99) - 1)
-            p99_latency = sorted_latencies[p99_idx] if sorted_latencies else 0
+            avg_latency = sum(latencies) / len(latencies)
+            total_measured_ms = total_compute_ms + total_coordination_ms
+            compute_pct = (total_compute_ms * 100.0 / total_measured_ms) if total_measured_ms else 0.0
+            coordination_pct = (total_coordination_ms * 100.0 / total_measured_ms) if total_measured_ms else 0.0
+            granularity_ratio = (total_compute_ms / total_coordination_ms) if total_coordination_ms else float(total_compute_ms)
+
+            if baseline is None:
+                baseline = (num_shards, throughput_rps)
+                parallel_efficiency_pct = 100.0
+            else:
+                baseline_shards, baseline_throughput = baseline
+                ideal = baseline_throughput * (num_shards / baseline_shards) if baseline_shards else 0.0
+                parallel_efficiency_pct = ((throughput_rps / ideal) * 100.0) if ideal else 0.0
 
             benchmark_results.append(
                 {
                     "shards": num_shards,
+                    "batch_size": batch_size,
+                    "scatter_gather_rounds": scatter_gather_rounds,
                     "total_requests": total_requests,
-                    "throughput_rps": round(throughput_rps, 2),
-                    "avg_latency_ms": round(avg_latency, 2),
-                    "p99_latency_ms": p99_latency,
-                    "elapsed_ms": elapsed_ms,
+                    "weak_scaling": weak_scaling,
+                    "throughput_rps": _round2(throughput_rps),
+                    "avg_latency_ms": _round2(avg_latency),
+                    "p50_latency_ms": _percentile(sorted_latencies, 0.50),
+                    "p95_latency_ms": _percentile(sorted_latencies, 0.95),
+                    "p99_latency_ms": _percentile(sorted_latencies, 0.99),
+                    "wall_time_ms": elapsed_ms,
+                    "compute_time_ms": total_compute_ms,
+                    "coordination_time_ms": total_coordination_ms,
+                    "compute_pct": _round2(compute_pct),
+                    "coordination_pct": _round2(coordination_pct),
+                    "granularity_ratio": _round2(granularity_ratio),
+                    "parallel_efficiency_pct": _round2(parallel_efficiency_pct),
+                    "error_count": total_errors,
+                    "logical_actor_count": logical_actor_count,
+                    "payload_size_bytes": payload_size_bytes,
+                    "model_type": model_type,
+                    "work_multiplier": work_multiplier,
+                    "worker_node_count": len(worker_nodes),
+                    "remote_nodes_with_work": sorted(remote_nodes),
+                    "shard_actor_ids": shard_actor_ids,
                 }
             )
 
-        self.benchmark_running = False
-        result = {"status": "ok", "benchmark": "shard", "results": benchmark_results}
+        return {"status": "ok", "benchmark": benchmark_name, "results": benchmark_results}
+
+    @handler("run_shard_benchmark")
+    def run_shard_benchmark(
+        self,
+        shard_counts: list = None,
+        requests_per_shard: int = 10,
+        warmup_requests: int = 0,
+        logical_actor_count: int = 0,
+        payload_size_bytes: int = 8192,
+        model_type: str = "small",
+        work_multiplier: int = 1,
+        from_actor: str = "",
+    ) -> dict:
+        if shard_counts is None:
+            shard_counts = [1, 2, 4, 8]
+        if not isinstance(requests_per_shard, int):
+            requests_per_shard = int(requests_per_shard)
+        if not isinstance(warmup_requests, int):
+            warmup_requests = int(warmup_requests)
+        if not isinstance(logical_actor_count, int):
+            logical_actor_count = int(logical_actor_count)
+        if not isinstance(payload_size_bytes, int):
+            payload_size_bytes = int(payload_size_bytes)
+        if not isinstance(work_multiplier, int):
+            work_multiplier = int(work_multiplier)
+
+        self.benchmark_running = True
+        result = self._run_shard_suite(
+            shard_counts,
+            requests_per_shard,
+            warmup_requests,
+            logical_actor_count,
+            payload_size_bytes,
+            model_type,
+            max(1, work_multiplier),
+            "shard",
+        )
         self.results.append(result)
+        self.benchmark_running = False
 
         try:
             host.application_metrics_add(
@@ -436,6 +654,117 @@ class BenchmarkActor:
                 {
                     "message_count": 1,
                     "counter_metrics": {"shard_benchmarks_run": 1},
+                    "latency_totals_ms": {},
+                    "latency_max_ms": {},
+                    "latency_samples": {},
+                },
+            )
+        except Exception:
+            pass
+
+        return result
+
+    @handler("run_scaling_benchmark")
+    def run_scaling_benchmark(
+        self,
+        shard_counts: list = None,
+        requests_per_shard: int = 8,
+        warmup_requests: int = 2,
+        logical_actor_count: int = 1000,
+        payload_size_bytes: int = 65536,
+        model_type: str = "large",
+        work_multiplier: int = 20,
+        from_actor: str = "",
+    ) -> dict:
+        if shard_counts is None:
+            shard_counts = _default_scaling_shards()
+        if not isinstance(requests_per_shard, int):
+            requests_per_shard = int(requests_per_shard)
+        if not isinstance(warmup_requests, int):
+            warmup_requests = int(warmup_requests)
+        if not isinstance(logical_actor_count, int):
+            logical_actor_count = int(logical_actor_count)
+        if not isinstance(payload_size_bytes, int):
+            payload_size_bytes = int(payload_size_bytes)
+        if not isinstance(work_multiplier, int):
+            work_multiplier = int(work_multiplier)
+
+        self.benchmark_running = True
+        result = self._run_shard_suite(
+            shard_counts,
+            requests_per_shard,
+            warmup_requests,
+            logical_actor_count,
+            payload_size_bytes,
+            model_type,
+            max(1, work_multiplier),
+            "scaling",
+        )
+        self.results.append(result)
+        self.benchmark_running = False
+
+        try:
+            host.application_metrics_add(
+                self.application_id,
+                {
+                    "message_count": 1,
+                    "counter_metrics": {"scaling_benchmarks_run": 1},
+                    "latency_totals_ms": {},
+                    "latency_max_ms": {},
+                    "latency_samples": {},
+                },
+            )
+        except Exception:
+            pass
+
+        return result
+
+    @handler("run_weak_scaling_benchmark")
+    def run_weak_scaling_benchmark(
+        self,
+        shard_counts: list = None,
+        requests_per_shard: int = 4,
+        warmup_requests: int = 2,
+        logical_actor_count: int = 50,
+        payload_size_bytes: int = 262144,
+        model_type: str = "large",
+        work_multiplier: int = 10,
+        from_actor: str = "",
+    ) -> dict:
+        if shard_counts is None:
+            shard_counts = _default_scaling_shards()
+        if not isinstance(requests_per_shard, int):
+            requests_per_shard = int(requests_per_shard)
+        if not isinstance(warmup_requests, int):
+            warmup_requests = int(warmup_requests)
+        if not isinstance(logical_actor_count, int):
+            logical_actor_count = int(logical_actor_count)
+        if not isinstance(payload_size_bytes, int):
+            payload_size_bytes = int(payload_size_bytes)
+        if not isinstance(work_multiplier, int):
+            work_multiplier = int(work_multiplier)
+
+        self.benchmark_running = True
+        result = self._run_shard_suite(
+            shard_counts,
+            requests_per_shard,
+            warmup_requests,
+            logical_actor_count,
+            payload_size_bytes,
+            model_type,
+            max(1, work_multiplier),
+            "weak_scaling",
+            weak_scaling=True,
+        )
+        self.results.append(result)
+        self.benchmark_running = False
+
+        try:
+            host.application_metrics_add(
+                self.application_id,
+                {
+                    "message_count": 1,
+                    "counter_metrics": {"weak_scaling_benchmarks_run": 1},
                     "latency_totals_ms": {},
                     "latency_max_ms": {},
                     "latency_samples": {},

@@ -8,7 +8,7 @@
 name = "migrating-temporal-wasm"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 publish = false
 description = "Order fulfillment workflow WASM actor (Temporal-style run/signal/query)"
 

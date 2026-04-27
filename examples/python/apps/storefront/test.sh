@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Test Storefront API actor (store config + cart + checkout rate limit via host KV)
 # Shows what data is stored and retrieved; optional SQLite verification.
 

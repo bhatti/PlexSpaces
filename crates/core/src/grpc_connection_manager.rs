@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -20,13 +20,16 @@
 //!
 //! ## Purpose
 //! Manages gRPC client connections to remote nodes with connection pooling.
-//! Each service (ActorService, TupleSpaceService, etc.) has its own connection pool.
+//! Each service type has its own pool per node, bounded by `pool_size`.
 //!
 //! ## Design
-//! - Connection pooling per service type and node
-//! - Configurable pool size (default: 2, from NodeConfig)
-//! - Reuses connections for efficiency
-//! - Stores default tenant-id and namespace for internal operations
+//! - Channels are lazy-connected (no TCP until first RPC call).
+//! - Tonic `Channel` is cheaply cloneable; all clones share the same HTTP/2 connection,
+//!   so concurrent scatter-gather bursts never open extra file descriptors.
+//! - The pool grows up to `pool_size` distinct channels per (ServiceType, node_id).
+//!   Round-robin checkout spreads HTTP/2 stream load across the pool.
+//! - File-descriptor usage is strictly bounded: at most
+//!   `pool_size × num_service_types × num_nodes` TCP connections system-wide.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,199 +59,160 @@ pub enum ServiceType {
     NodeService,
 }
 
-/// Connection pool for a specific service type and node
+/// Connection pool for a specific service type and node.
+///
+/// Each entry is a lazy-connected tonic `Channel`. Cloning a `Channel` is free and
+/// multiplexes over the same HTTP/2 connection — no new TCP socket or FD is opened.
+/// The pool grows to `pool_size` on demand; callers always receive a clone.
 struct ServiceConnectionPool {
-    /// Pool of connections (FIFO queue)
-    connections: Vec<Channel>,
-    /// Maximum pool size
+    channels: Vec<Channel>,
     pool_size: usize,
-    /// Service type
-    service_type: ServiceType,
-    /// Node address
     node_address: String,
 }
 
 impl ServiceConnectionPool {
-    fn new(service_type: ServiceType, node_address: String, pool_size: usize) -> Self {
+    fn new(node_address: String, pool_size: usize) -> Self {
         Self {
-            connections: Vec::with_capacity(pool_size),
-            pool_size,
-            service_type,
+            channels: Vec::with_capacity(pool_size.max(1)),
+            pool_size: pool_size.max(1),
             node_address,
         }
     }
 
-    /// Get a connection from the pool, or create a new one if pool is empty
-    async fn get_connection(&mut self) -> Result<Channel, tonic::transport::Error> {
-        // Try to reuse connection from pool
-        while let Some(channel) = self.connections.pop() {
-            // Check if connection is still valid by trying to get its state
-            // If channel is closed, it will fail when we try to use it, so we just try to reuse it
-            // The actual validity check happens when the channel is used
-            return Ok(channel);
+    /// Return a clone of a pooled channel, adding a new lazy channel if pool has room.
+    fn get(&mut self) -> Result<Channel, tonic::transport::Error> {
+        if self.channels.len() < self.pool_size {
+            let channel = Endpoint::from_shared(self.node_address.clone())?.connect_lazy();
+            self.channels.push(channel);
         }
-
-        // Pool is empty, create new connection
-        let endpoint = Endpoint::from_shared(self.node_address.clone())?;
-        endpoint.connect().await
-    }
-
-    /// Return a connection to the pool (if pool is not full)
-    fn return_connection(&mut self, channel: Channel) {
-        if self.connections.len() < self.pool_size {
-            self.connections.push(channel);
-        }
+        self.channels.rotate_left(1);
+        Ok(self.channels[self.channels.len() - 1].clone())
     }
 }
 
-/// gRPC Connection Manager with connection pooling
+/// gRPC Connection Manager with bounded lazy connection pooling.
 pub struct GrpcConnectionManager {
-    /// Connection pools: (service_type, node_id) -> ServiceConnectionPool
     pools: Arc<RwLock<HashMap<(ServiceType, String), ServiceConnectionPool>>>,
-    /// Connection pool size (from NodeConfig, default: 2)
     pool_size: usize,
 }
 
 impl GrpcConnectionManager {
-    /// Create a new connection manager
+    /// Create a new connection manager.
     ///
-    /// ## Arguments
-    /// * `pool_size` - Connection pool size per service (default: 2)
-    ///
-    /// NOTE: default_tenant_id and default_namespace have been removed.
-    /// Tenant comes from auth (JWT/mTLS); namespace from application/actor.
+    /// `pool_size` sets the maximum number of distinct TCP connections per
+    /// (ServiceType, node_id) pair. Defaults to 2. Must be ≥ 1.
     pub fn new(pool_size: Option<u32>) -> Self {
         Self {
             pools: Arc::new(RwLock::new(HashMap::new())),
-            pool_size: pool_size.unwrap_or(2) as usize,
+            pool_size: pool_size.unwrap_or(2).max(1) as usize,
         }
     }
 
-    /// Get a connection for a specific service type and node
+    /// Get a channel for the given service type and node.
     ///
-    /// ## Arguments
-    /// * `service_type` - Type of service (ActorService, TupleSpaceService, etc.)
-    /// * `node_id` - Node ID (used to lookup address via ObjectRegistry)
-    /// * `node_address` - gRPC address of the node (e.g., "http://localhost:8000")
-    ///
-    /// ## Returns
-    /// Channel ready for use, or error if connection failed
+    /// Returns a clone of a pooled lazy channel. The clone shares the underlying
+    /// HTTP/2 connection — no new TCP socket is opened per call.
     pub async fn get_connection(
         &self,
         service_type: ServiceType,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        let key = (service_type.clone(), node_id.to_string());
-
+        let key = (service_type, node_id.to_string());
         let mut pools = self.pools.write().await;
-        let pool = pools.entry(key.clone()).or_insert_with(|| {
-            ServiceConnectionPool::new(service_type, node_address.to_string(), self.pool_size)
-        });
-
-        pool.get_connection().await
+        let pool = pools
+            .entry(key)
+            .or_insert_with(|| ServiceConnectionPool::new(node_address.to_string(), self.pool_size));
+        if pool.node_address != node_address {
+            *pool = ServiceConnectionPool::new(node_address.to_string(), self.pool_size);
+        }
+        pool.get()
     }
 
-    /// Get a connection for ActorService (convenience method)
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node ID
-    /// * `node_address` - gRPC address of the node
-    ///
-    /// ## Returns
-    /// Channel ready for use, or error if connection failed
     pub async fn get_actor_service_connection(
         &self,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ActorService, node_id, node_address)
-            .await
+        self.get_connection(ServiceType::ActorService, node_id, node_address).await
     }
 
-    /// Get a connection for ApplicationService (convenience method)
     pub async fn get_application_service_connection(
         &self,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ApplicationService, node_id, node_address)
-            .await
+        self.get_connection(ServiceType::ApplicationService, node_id, node_address).await
     }
 
-    /// Get a connection for TupleSpaceService (convenience method)
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node ID
-    /// * `node_address` - gRPC address of the node
-    ///
-    /// ## Returns
-    /// Channel ready for use, or error if connection failed
     pub async fn get_tuplespace_service_connection(
         &self,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::TupleSpaceService, node_id, node_address)
-            .await
+        self.get_connection(ServiceType::TupleSpaceService, node_id, node_address).await
     }
 
-    /// Get a connection for ProcessGroupService (convenience method)
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node ID
-    /// * `node_address` - gRPC address of the node
-    ///
-    /// ## Returns
-    /// Channel ready for use, or error if connection failed
     pub async fn get_process_group_service_connection(
         &self,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ProcessGroupService, node_id, node_address)
-            .await
+        self.get_connection(ServiceType::ProcessGroupService, node_id, node_address).await
     }
 
-    /// Get a connection for NodeService (convenience method)
-    ///
-    /// ## Arguments
-    /// * `node_id` - Node ID
-    /// * `node_address` - gRPC address of the node
-    ///
-    /// ## Returns
-    /// Channel ready for use, or error if connection failed
     pub async fn get_node_service_connection(
         &self,
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::NodeService, node_id, node_address)
-            .await
+        self.get_connection(ServiceType::NodeService, node_id, node_address).await
     }
 
-    /// Return a connection to the pool
-    ///
-    /// ## Arguments
-    /// * `service_type` - Type of service
-    /// * `node_id` - Node ID
-    /// * `channel` - Channel to return to pool
-    pub async fn return_connection(
-        &self,
-        service_type: ServiceType,
-        node_id: &str,
-        channel: Channel,
-    ) {
-        let key = (service_type, node_id.to_string());
-        let mut pools = self.pools.write().await;
-        if let Some(pool) = pools.get_mut(&key) {
-            pool.return_connection(channel);
-        }
-    }
-
-    /// Shutdown all connection pools
     pub async fn shutdown(&self) {
-        let mut pools = self.pools.write().await;
-        pools.clear();
+        self.pools.write().await.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn updates_pool_address_when_node_endpoint_changes() {
+        let manager = GrpcConnectionManager::new(Some(2));
+
+        {
+            let mut pools = manager.pools.write().await;
+            pools.insert(
+                (ServiceType::ActorService, "node-a".to_string()),
+                ServiceConnectionPool::new("http://0.0.0.0:8093".to_string(), 2),
+            );
+        }
+
+        let _ = manager
+            .get_connection(ServiceType::ActorService, "node-a", "http://localhost:8093")
+            .await;
+
+        let pools = manager.pools.read().await;
+        let pool = pools
+            .get(&(ServiceType::ActorService, "node-a".to_string()))
+            .expect("pool should exist");
+        assert_eq!(pool.node_address, "http://localhost:8093");
+    }
+
+    #[tokio::test]
+    async fn pool_grows_to_pool_size_and_rotates() {
+        let manager = GrpcConnectionManager::new(Some(2));
+        for _ in 0..4 {
+            let _ = manager
+                .get_connection(ServiceType::ActorService, "node-b", "http://localhost:8093")
+                .await;
+        }
+        let pools = manager.pools.read().await;
+        let pool = pools
+            .get(&(ServiceType::ActorService, "node-b".to_string()))
+            .expect("pool should exist");
+        assert_eq!(pool.channels.len(), 2, "pool must not exceed pool_size");
     }
 }

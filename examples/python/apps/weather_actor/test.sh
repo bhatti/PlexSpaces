@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Weather Actor (Python WASM): get_weather, cache_stats, clear_cache.
 # Usage:
 #   ./test.sh [HTTP_PORT]     # contract tests + full example run

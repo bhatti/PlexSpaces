@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -389,10 +389,16 @@ impl ActorRegistry {
         let manager = self.virtual_actor_manager.read().await.clone();
         if let Some(manager) = manager {
             if let Some(metadata) = manager.get_metadata(actor_id).await {
-                return Some((metadata.tenant_id().to_string(), metadata.namespace().to_string()));
+                return Some((
+                    metadata.tenant_id().to_string(),
+                    metadata.namespace().to_string(),
+                ));
             }
             if let Some(metadata) = manager.get_virtual_actor_type(actor_id.actor_type()).await {
-                return Some((metadata.tenant_id().to_string(), metadata.namespace().to_string()));
+                return Some((
+                    metadata.tenant_id().to_string(),
+                    metadata.namespace().to_string(),
+                ));
             }
         }
 

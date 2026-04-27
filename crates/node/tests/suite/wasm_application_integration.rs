@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -33,6 +33,7 @@ use plexspaces_core::{
 };
 use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeId};
+use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, AskReplyRequest,
 };
@@ -41,7 +42,6 @@ use plexspaces_proto::application::v1::{
     DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest, RestartPolicy,
     ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
-use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::{ActorIdentity, Facet, Metadata};
 use plexspaces_proto::v1::journaling::Checkpoint;
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -1948,14 +1948,23 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
     .await;
     assert_eq!(incremented["count"], serde_json::json!(7));
 
-    let session_id_str = initial_status["self_id"].as_str().map(str::to_string)
+    let session_id_str = initial_status["self_id"]
+        .as_str()
+        .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new("session-1", "abstractions_wasm", app_id, node.id().as_str())
-                .unwrap().to_string()
+            plexspaces_core::ActorId::new(
+                "session-1",
+                "abstractions_wasm",
+                app_id,
+                node.id().as_str(),
+            )
+            .unwrap()
+            .to_string()
         });
     let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+    let stop_ctx =
+        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2014,37 +2023,35 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
             seconds: 60,
             nanos: 0,
         }),
-        children: vec![
-            ChildSpec {
-                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
-                    name: "ephemeral".to_string(),
-                    actor_type: "abstractions_wasm".to_string(),
-                }),
+        children: vec![ChildSpec {
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "ephemeral".to_string(),
+                actor_type: "abstractions_wasm".to_string(),
+            }),
 
-                role: "worker".to_string(),
-                args: HashMap::from([
-                    ("role".to_string(), "ephemeral".to_string()),
-                    ("initial_count".to_string(), "5".to_string()),
+            role: "worker".to_string(),
+            args: HashMap::from([
+                ("role".to_string(), "ephemeral".to_string()),
+                ("initial_count".to_string(), "5".to_string()),
+            ]),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 5,
+                nanos: 0,
+            }),
+            facets: vec![Facet {
+                r#type: "virtual_actor".to_string(),
+                config: HashMap::from([
+                    ("idle_timeout".to_string(), "10m".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
                 ]),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: Some(ProstDuration {
-                    seconds: 5,
-                    nanos: 0,
-                }),
-                facets: vec![Facet {
-                    r#type: "virtual_actor".to_string(),
-                    config: HashMap::from([
-                        ("idle_timeout".to_string(), "10m".to_string()),
-                        ("activation_strategy".to_string(), "lazy".to_string()),
-                    ]),
-                    priority: 0,
-                    state: HashMap::new(),
-                    metadata: None,
-                }],
-                behavior_kind: Some("GenServer".to_string()),
-                ..Default::default()
-            },
-        ],
+                priority: 0,
+                state: HashMap::new(),
+                metadata: None,
+            }],
+            behavior_kind: Some("GenServer".to_string()),
+            ..Default::default()
+        }],
     };
 
     let app_spec = ApplicationSpec {
@@ -2104,14 +2111,23 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
     .await;
     assert_eq!(incremented["count"], serde_json::json!(7));
 
-    let session_id_str = initial_status["self_id"].as_str().map(str::to_string)
+    let session_id_str = initial_status["self_id"]
+        .as_str()
+        .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new("session-1", "abstractions_wasm", app_id, node.id().as_str())
-                .unwrap().to_string()
+            plexspaces_core::ActorId::new(
+                "session-1",
+                "abstractions_wasm",
+                app_id,
+                node.id().as_str(),
+            )
+            .unwrap()
+            .to_string()
         });
     let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+    let stop_ctx =
+        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2169,37 +2185,35 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
             seconds: 60,
             nanos: 0,
         }),
-        children: vec![
-            ChildSpec {
-                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
-                    name: "ephemeral".to_string(),
-                    actor_type: "abstractions_wasm".to_string(),
-                }),
+        children: vec![ChildSpec {
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "ephemeral".to_string(),
+                actor_type: "abstractions_wasm".to_string(),
+            }),
 
-                role: "worker".to_string(),
-                args: HashMap::from([
-                    ("role".to_string(), "ephemeral".to_string()),
-                    ("initial_count".to_string(), "5".to_string()),
+            role: "worker".to_string(),
+            args: HashMap::from([
+                ("role".to_string(), "ephemeral".to_string()),
+                ("initial_count".to_string(), "5".to_string()),
+            ]),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 5,
+                nanos: 0,
+            }),
+            facets: vec![Facet {
+                r#type: "virtual_actor".to_string(),
+                config: HashMap::from([
+                    ("idle_timeout".to_string(), "10m".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
                 ]),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: Some(ProstDuration {
-                    seconds: 5,
-                    nanos: 0,
-                }),
-                facets: vec![Facet {
-                    r#type: "virtual_actor".to_string(),
-                    config: HashMap::from([
-                        ("idle_timeout".to_string(), "10m".to_string()),
-                        ("activation_strategy".to_string(), "lazy".to_string()),
-                    ]),
-                    priority: 0,
-                    state: HashMap::new(),
-                    metadata: None,
-                }],
-                behavior_kind: Some("GenServer".to_string()),
-                ..Default::default()
-            },
-        ],
+                priority: 0,
+                state: HashMap::new(),
+                metadata: None,
+            }],
+            behavior_kind: Some("GenServer".to_string()),
+            ..Default::default()
+        }],
     };
 
     let app_spec = ApplicationSpec {
@@ -2259,14 +2273,23 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
     .await;
     assert_eq!(incremented["count"], serde_json::json!(7));
 
-    let session_id_str = initial_status["self_id"].as_str().map(str::to_string)
+    let session_id_str = initial_status["self_id"]
+        .as_str()
+        .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new("session-1", "abstractions_wasm", app_id, node.id().as_str())
-                .unwrap().to_string()
+            plexspaces_core::ActorId::new(
+                "session-1",
+                "abstractions_wasm",
+                app_id,
+                node.id().as_str(),
+            )
+            .unwrap()
+            .to_string()
         });
     let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+    let stop_ctx =
+        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2362,7 +2385,8 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         .to_string();
     let durable_actor_id = plexspaces_core::ActorId::from_canonical(&durable_self_id)
         .expect("durable self_id must be a valid canonical actor ID");
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+    let stop_ctx =
+        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2434,7 +2458,10 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         )
         .await;
         if ephemeral_reactivated["count"] == serde_json::json!(5) {
-            assert_eq!(ephemeral_reactivated["role"], serde_json::json!("ephemeral"));
+            assert_eq!(
+                ephemeral_reactivated["role"],
+                serde_json::json!("ephemeral")
+            );
             break;
         }
         assert!(
@@ -2487,33 +2514,50 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
 
     // Step 1: verify initial count=5 from definition args
     let initial = actor_ask_json(
-        &actor_service, tenant_id, app_id,
+        &actor_service,
+        tenant_id,
+        app_id,
         "ephemeral:session-1",
         serde_json::json!({ "op": "status" }),
-    ).await;
-    assert_eq!(initial["count"], serde_json::json!(5), "initial count must be 5 from definition args");
+    )
+    .await;
+    assert_eq!(
+        initial["count"],
+        serde_json::json!(5),
+        "initial count must be 5 from definition args"
+    );
     assert_eq!(initial["role"], serde_json::json!("ephemeral"));
 
     // Step 2: increment by 2 → count=7
     let inc = actor_ask_json(
-        &actor_service, tenant_id, app_id,
+        &actor_service,
+        tenant_id,
+        app_id,
         "ephemeral:session-1",
         serde_json::json!({ "op": "increment", "amount": 2 }),
-    ).await;
+    )
+    .await;
     assert_eq!(inc["count"], serde_json::json!(7));
 
     // Step 3: stop actor directly via ActorFactory (mirrors controller.stop_actor in test.sh)
-    let session_id_str = initial["self_id"].as_str().map(str::to_string)
+    let session_id_str = initial["self_id"]
+        .as_str()
+        .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new("session-1", "abstractions_wasm", app_id, node.id().as_str())
-                .unwrap().to_string()
+            plexspaces_core::ActorId::new(
+                "session-1",
+                "abstractions_wasm",
+                app_id,
+                node.id().as_str(),
+            )
+            .unwrap()
+            .to_string()
         });
     let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
     // Use empty tenant_id to match how the TOML config deploys (tenant_id = "")
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(
-        String::new(), app_id.to_string()
-    );
+    let stop_ctx =
+        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2527,10 +2571,13 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let reply = actor_ask_json(
-            &actor_service, tenant_id, app_id,
+            &actor_service,
+            tenant_id,
+            app_id,
             "ephemeral:session-1",
             serde_json::json!({ "op": "status" }),
-        ).await;
+        )
+        .await;
         if reply["count"] == serde_json::json!(5) {
             assert_eq!(reply["role"], serde_json::json!("ephemeral"));
             break;

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Deploy leader election app for BOTH competitors (term1 and term2).
 # Run once before using compete.sh from two terminals.
 # Usage: ./deploy.sh [HTTP_PORT]

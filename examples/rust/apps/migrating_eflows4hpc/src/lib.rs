@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // EFlows4HPC → PlexSpaces: HPC ensemble coordinator + workers (Rust WASM).
 // SDK + WIT: `host::ts_*`, `host::pg_*`, `host::now_ms`, `host::log`, `host::application_metrics_add`.

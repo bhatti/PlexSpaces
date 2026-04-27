@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """MCP Tool Server — Model Context Protocol style tool calling via PlexSpaces actors.
 
 Demonstrates:

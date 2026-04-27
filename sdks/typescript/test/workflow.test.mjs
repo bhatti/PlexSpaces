@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Unit tests for workflow fault-tolerance: withRetry (Step Functions / Durable Functions style).
 
 import { describe, it } from 'node:test';

@@ -2,7 +2,7 @@
 name = "realtime-stream-processor"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL-2.1-or-later"
+license = "AGPL-3.0-or-later"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 description = "Real-Time Stream Processor - Clickstream Analytics with Supervision Trees"
 

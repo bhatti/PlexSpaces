@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Subscription Billing Example - Timer vs Reminder Facets
@@ -21,8 +21,8 @@
 // - "Reminder" implies durable (persisted)
 //
 // ## SDK Annotations Used
-// - `#[actor(facets = ["timer", "reminder"])]` - both facets
-// - `#[plexspaces_handlers(custom)]` - generates Actor impl
+// - `#[gen_server_actor(name = "subscription_actor", facets = ["timer", "reminder"])]` - both facets
+// - `#[plexspaces_handlers]` - generates GenServer dispatch
 // - `#[handler("timer_fired", cast)]` - handle transient timer events
 // - `#[handler("reminder_fired", cast)]` - handle durable reminder events
 //
@@ -34,8 +34,8 @@ use plexspaces_journaling::{ReminderFacet, ReminderRegistration, SqliteJournalSt
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
 use plexspaces_proto::prost_types;
 use plexspaces_sdk::{
-    actor, plexspaces_handlers, spawn_with_facets, ActorContext, ActorId, BehaviorError, Message,
-    RequestContext,
+    gen_server_actor, plexspaces_handlers, spawn_with_facets, ActorContext, ActorId,
+    BehaviorError, Message, RequestContext,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -46,6 +46,7 @@ use anyhow::Result;
 
 // Required for macro-generated code
 extern crate plexspaces_core;
+extern crate plexspaces_behavior;
 
 // =============================================================================
 // Domain Types
@@ -101,7 +102,7 @@ impl SubscriptionPlan {
 /// ## Design Pattern (Orleans Model)
 /// - **Timer** = transient, fast, no persistence overhead
 /// - **Reminder** = durable, requires storage, survives crashes
-#[actor(facets = ["timer", "reminder"])]
+#[gen_server_actor(name = "subscription_actor", facets = ["timer", "reminder"])]
 struct SubscriptionActor {
     user_id: String,
     email: String,
@@ -133,7 +134,7 @@ impl SubscriptionActor {
 }
 
 /// Handler implementations for both timer and reminder events.
-#[plexspaces_handlers(custom)]
+#[plexspaces_handlers]
 impl SubscriptionActor {
     /// Handle TRANSIENT timer events (from TimerFacet)
     ///
@@ -365,7 +366,7 @@ async fn main() -> Result<()> {
             if let Some(reminder_facet) = reminder_facet_guard.as_any().downcast_ref::<ReminderFacet>() {
                 // Monthly billing reminder (durable)
                 let billing_registration = ReminderRegistration {
-                    actor_id: actor_id.clone(),
+                    actor_id: actor_id.to_string(),
                     reminder_name: "monthly_billing".to_string(),
                     interval: Some(prost_types::Duration {
                         seconds: billing_interval_secs as i64,
@@ -383,7 +384,7 @@ async fn main() -> Result<()> {
                 // Trial warning reminder (for trial subscriptions only)
                 if i % 3 == 0 {
                     let trial_warning_registration = ReminderRegistration {
-                        actor_id: actor_id.clone(),
+                        actor_id: actor_id.to_string(),
                         reminder_name: "trial_warning".to_string(),
                         interval: Some(prost_types::Duration {
                             seconds: trial_warning_delay_secs as i64,

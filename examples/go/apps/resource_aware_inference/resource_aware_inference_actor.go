@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Resource-Aware Inference (Go WASM)
 //
 // Demonstrates Resource-Based Affinity (Pattern 4) and Resource-Aware

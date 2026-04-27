@@ -151,4 +151,4 @@ WIT TypeScript types are generated automatically as part of the SDK build proces
 
 ## License
 
-LGPL-2.1-or-later
+AGPL-3.0-or-later

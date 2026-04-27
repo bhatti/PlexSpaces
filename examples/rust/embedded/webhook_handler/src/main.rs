@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -27,6 +27,11 @@
 //! - **POST** /api/v1/actors/{namespace}/webhook_handler — deliver a webhook
 //! - **GET**  /api/v1/actors/{namespace}/webhook_handler?action=list — list recent deliveries
 //!
+//! This embedded example disables auth at node startup so the local HTTP
+//! self-test can exercise the gateway without external JWT or mTLS setup.
+//! When auth is disabled, the HTTP gateway derives tenant context from the
+//! `x-tenant-id` header, so this example sends that header explicitly.
+//!
 //! ## Before (manual boilerplate)
 //! ```ignore
 //! impl ActorTrait for WebhookHandler { fn behavior_type()...; fn handle_message()... }
@@ -46,11 +51,10 @@
 //! ```
 
 use plexspaces_sdk::{
-    gen_server_actor, plexspaces_handlers, handler,
+    gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, Message, NodeBuilder, RequestContext,
-    spawn_actor, json, Value,
+    spawn, json, Value,
 };
-use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -174,13 +178,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   POST = deliver webhook, GET ?action=list = list recent deliveries");
 
     std::env::set_var("BLOB_ENABLED", "false");
-    let jwt_secret = std::env::var("PLEXSPACES_JWT_SECRET")
-        .unwrap_or_else(|_| "webhook-handler-example-secret".to_string());
-    std::env::set_var("PLEXSPACES_JWT_SECRET", &jwt_secret);
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
 
     let node_arc = NodeBuilder::new("webhook-handler-node")
         .with_listen_addr(format!("0.0.0.0:{}", GRPC_PORT))
         .with_in_memory_backends()
+        .with_auth_disabled()
         .build_started()
         .await;
 
@@ -190,13 +193,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_locator = node_arc.service_locator();
     let ctx = RequestContext::new_without_auth(TENANT_ID.to_string(), NAMESPACE.to_string());
 
-    let actor_ref = spawn_actor(
+    let actor_ref = spawn(
         &ctx,
         service_locator.clone(),
         "webhook-handler-1".to_string(),
         NAMESPACE,
         WebhookHandlerActor::new(),
-        vec![],
     )
     .await
     .map_err(|e| format!("spawn: {}", e))?;
@@ -213,13 +215,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_base, NAMESPACE
     );
 
-    let jwt = make_jwt(TENANT_ID, &jwt_secret)?;
     let client = reqwest::Client::new();
 
     info!("📥 GET list (initial, should be empty)");
     let list0 = client
         .get(&url_list)
-        .header("Authorization", format!("Bearer {}", jwt))
+        .header("x-tenant-id", TENANT_ID)
         .send()
         .await?;
     let list0_status = list0.status();
@@ -243,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let body1 = json!({ "action": "deliver", "type": "github.push", "repo": "acme/backend", "commits": 3 });
     let post1 = client
         .post(format!("{}/ask", &url_deliver))
-        .header("Authorization", format!("Bearer {}", jwt))
+        .header("x-tenant-id", TENANT_ID)
         .json(&body1)
         .send()
         .await?;
@@ -267,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let body2 = json!({ "action": "deliver", "type": "stripe.payment", "amount_cents": 9999 });
     let _post2 = client
         .post(format!("{}/ask", &url_deliver))
-        .header("Authorization", format!("Bearer {}", jwt))
+        .header("x-tenant-id", TENANT_ID)
         .json(&body2)
         .send()
         .await?;
@@ -277,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("📥 GET list (should show 2 deliveries)");
     let list2 = client
         .get(&url_list)
-        .header("Authorization", format!("Bearer {}", jwt))
+        .header("x-tenant-id", TENANT_ID)
         .send()
         .await?;
     if !list2.status().is_success() {

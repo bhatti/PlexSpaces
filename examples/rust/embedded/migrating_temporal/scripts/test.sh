@@ -23,8 +23,8 @@ NC='\033[0m'
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 1: Building example..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-BUILD_OUTPUT=$(cargo build --release --features sqlite-backend 2>&1 | tee /tmp/temporal_build.log) || BUILD_EXIT=$?
-if echo "$BUILD_OUTPUT" | grep -q "Finished.*release.*target(s)" && ([ -z "${BUILD_EXIT:-}" ] || [ "$BUILD_EXIT" -eq 0 ]); then
+BUILD_OUTPUT=$(cargo build --features sqlite-backend 2>&1 | tee /tmp/temporal_build.log) || BUILD_EXIT=$?
+if echo "$BUILD_OUTPUT" | grep -q "Finished.*dev.*target(s)" && ([ -z "${BUILD_EXIT:-}" ] || [ "$BUILD_EXIT" -eq 0 ]); then
     if echo "$BUILD_OUTPUT" | grep -q "error\["; then
         echo -e "${RED}❌ Build failed (compilation errors)${NC}"
         exit 1
@@ -73,7 +73,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 4: Running example..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if timeout 60 cargo run --release --features sqlite-backend 2>&1 | tee /tmp/temporal_output.log; then
+if timeout 60 cargo run --features sqlite-backend 2>&1 | tee /tmp/temporal_output.log; then
     echo -e "${GREEN}✅ Example executed successfully${NC}"
 else
     echo -e "${RED}❌ Example execution failed${NC}"

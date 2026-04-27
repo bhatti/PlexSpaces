@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -40,7 +40,8 @@ use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocato
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
+    SupervisorSpec,
 };
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;

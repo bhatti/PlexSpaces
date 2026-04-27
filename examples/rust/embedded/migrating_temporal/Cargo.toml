@@ -1,30 +1,31 @@
-# Temporal comparison - embedded example (Node + WorkflowBehavior + DurabilityFacet)
-# Part of workspace so workspace = true deps resolve.
+[workspace]
 
 [package]
 name = "temporal-comparison"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
 publish = false
+license = "AGPL-3.0-or-later"
+default-run = "temporal-comparison"
 description = "Temporal-style durable workflow comparison (embedded)"
 
 [dependencies]
-plexspaces-core.workspace = true
-plexspaces-actor.workspace = true
-plexspaces-behavior.workspace = true
-plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }
-plexspaces-sdk.workspace = true
-plexspaces-node.workspace = true
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-ulid.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-async-trait.workspace = true
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-journaling = { path = "../../../../crates/journaling", features = ["sqlite-backend"] }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-node = { path = "../../../../crates/node" }
+tokio = { version = "1.44", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ulid = { version = "1.1", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+async-trait = "0.1"
 
 [[bin]]
-name = "temporal_comparison"
+name = "temporal-comparison"
 path = "src/main.rs"
 
 [features]

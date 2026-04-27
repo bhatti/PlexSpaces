@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Test Bank Account - Full Durability Test with Server Restart
 # 
 # This test verifies that account balances survive server restart:

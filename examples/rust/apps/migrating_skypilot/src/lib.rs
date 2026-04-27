@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // SkyPilot → PlexSpaces: multi-cloud ML orchestration (Rust WASM).
 // SDK: `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` + `host::application_metrics_add`

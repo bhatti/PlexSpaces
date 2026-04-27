@@ -637,4 +637,4 @@ Granularity Analysis:
 
 ## License
 
-LGPL-2.1-or-later
+AGPL-3.0-or-later

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -690,7 +690,9 @@ impl WasmApplication {
                 labels: std::collections::HashMap::new(),
                 config: None,
             };
-            let _ = plexspaces_core::register_virtual_actor_definition(&service_locator, spawn_spec).await;
+            let _ =
+                plexspaces_core::register_virtual_actor_definition(&service_locator, spawn_spec)
+                    .await;
         }
 
         for (behavior_class, behavior_spawn_specs) in spawn_specs_by_behavior_class {
@@ -2590,8 +2592,8 @@ mod tests {
 
         // Create ApplicationSpec with supervisor tree
         use plexspaces_proto::application::v1::{
-            ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy,
-            SupervisionStrategy, SupervisorSpec,
+            ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy, SupervisionStrategy,
+            SupervisorSpec,
         };
         use plexspaces_proto::common::v1::ActorIdentity;
         use prost_types::Duration;
@@ -2874,7 +2876,6 @@ mod tests {
         // 4. Only crashed actor should restart (one-for-one)
         // 5. Other actors should continue running
     }
-
 
     #[test]
     fn test_wasm_config_for_child_spec_enables_durability_from_facets() {

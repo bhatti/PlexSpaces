@@ -1962,6 +1962,74 @@ pub type ParallelResult = (u32, String, Duration, bool, String, Option<Message>)
 
 **See Also**: [Go mpi_collectives example](../examples/go/apps/mpi_collectives/README.md), [SDK: Collective APIs](sdk.md#collective--parallel-shard-group-apis)
 
+## Scaling Benchmarks and Parallel Efficiency
+
+When evaluating how well a ShardGroup scales, two complementary modes expose different properties of the system.
+
+### Strong Scaling
+
+**Definition**: Fixed total work is divided among an increasing number of shards. Each additional shard receives a smaller slice of the problem.
+
+- `batch_size = total_logical_actors / shard_count` (shrinks as shards grow)
+- One scatter-gather round-trip per benchmark round, regardless of shard count
+- Expected behaviour: throughput rises initially as parallelism increases, then falls as coordination overhead dominates (Amdahl's law)
+- Use case: finding the optimal shard count for a given workload
+
+### Weak Scaling
+
+**Definition**: Each shard always processes the same amount of work; total problem size grows proportionally with shard count.
+
+- `batch_size = actors_per_shard` (constant at every shard count)
+- Expected behaviour: throughput stays flat and `Eff% ≈ 100` if the system scales without coordination penalty
+- Use case: verifying that adding capacity handles proportionally larger problems
+
+**Key distinction**: Strong scaling measures coordination overhead for the same problem. Weak scaling measures whether the system handles a proportionally larger problem without slowdown.
+
+### Benchmark Metrics
+
+| Metric | Formula | Goal |
+|--------|---------|------|
+| `Req/s` | `total_requests / wall_time_s` | Higher is better |
+| `Wall ms` | End-to-end elapsed time | Lower is better |
+| `p50/p95/p99` | Per-request latency percentiles | Lower tail = more predictable |
+| `Compute ms` | Time spent in worker computation | Represents useful work |
+| `Coord ms` | Wall time − compute time | Represents framework overhead (gRPC RTTs, scheduling) |
+| `Comp%` | `compute / (compute + coord) × 100` | Higher = less coordination waste |
+| `Gran` | `compute / coord` (granularity ratio) | >1.0: compute dominates; <1.0: coordination dominates |
+| `Eff%` | `actual_rps / ideal_linear_rps × 100` | 100% = perfect linear scaling; baseline = smallest shard count |
+
+**Granularity ratio** (`Gran`): The most important single diagnostic. A ratio below 1.0 means each scatter-gather RTT spends more time in framework overhead than in the actor work itself — increase `batch_size` (more logical actors per shard per round-trip) or increase compute intensity.
+
+**Batching to improve Gran**: Because each ScatterGather call is one gRPC RTT shared across all shards, processing `N` logical work items in a single call amortises the coordination cost by a factor of `N`. In the parallel AI inference examples the benchmark sends `batch_size` logical actor IDs per shard message; the worker runs one model pass and reports `batch_size` items processed. This models real batched inference where multiple inputs are fused into a single forward pass.
+
+### WASM Benchmark Ops (parallel_ai_inference)
+
+The `parallel_ai_inference` WASM application (Rust and Python) exposes a `benchmark` actor with these ops:
+
+| Op | Description |
+|----|-------------|
+| `run_shard_benchmark` | Quick sanity benchmark over small shard counts |
+| `run_scaling_benchmark` | **Strong scaling**: fixed total `logical_actor_count` divided among `shard_counts`; `batch_size` shrinks per shard |
+| `run_weak_scaling_benchmark` | **Weak scaling**: fixed `logical_actor_count` per shard; `batch_size` constant; total problem grows |
+| `run_collective_benchmark` | Exercises MPI-style collectives (broadcast, barrier, reduce, allreduce) |
+| `get_results` | Returns all stored benchmark results |
+
+**run_scaling_benchmark request fields**:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `shard_counts` | `[int]` | `[2,4,8,16,32]` | Shard counts to benchmark |
+| `requests_per_shard` | `int` | `4` | Rounds (scatter-gather RTTs) per shard count |
+| `warmup_requests` | `int` | `2` | Warmup rounds (excluded from stats) |
+| `logical_actor_count` | `int` | `200` | Total logical work items (divided by shard_count for strong scaling) |
+| `payload_size_bytes` | `int` | `262144` | Bytes per request (simulates model input size) |
+| `model_type` | `string` | `"large"` | Computation intensity: `"small"`, `"medium"`, `"large"` |
+| `work_multiplier` | `int` | `10` | Scales compute iterations |
+
+**run_weak_scaling_benchmark** uses the same fields; `logical_actor_count` is interpreted as actors *per shard* so the total problem grows with `shard_count`.
+
+**See Also**: [Python parallel AI inference](../examples/python/apps/parallel_ai_inference/README.md), [Rust parallel AI inference](../examples/rust/apps/parallel_ai_inference/README.md)
+
 ## Workflows
 
 ### Workflow Definition

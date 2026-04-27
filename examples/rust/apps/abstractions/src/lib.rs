@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_app {

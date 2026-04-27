@@ -1,12 +1,12 @@
 #!/bin/bash
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
-# Script to add LGPL license headers to all Rust and Proto files
+# Script to add GNU AFFERO GENERAL PUBLIC LICENSE
 
 set -e
 
-RUST_LICENSE='// SPDX-License-Identifier: LGPL-2.1-or-later
+RUST_LICENSE='// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
@@ -26,7 +26,7 @@ RUST_LICENSE='// SPDX-License-Identifier: LGPL-2.1-or-later
 
 '
 
-PROTO_LICENSE='// SPDX-License-Identifier: LGPL-2.1-or-later
+PROTO_LICENSE='// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.

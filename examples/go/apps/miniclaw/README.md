@@ -1,10 +1,10 @@
 # MiniClaw — Mini Agent Framework on PlexSpaces
 
 MiniClaw demonstrates how PlexSpaces actor primitives power an agentic AI framework
-inspired by OpenClaw, NanoClaw, and MicroClaw. It implements 8 actors covering the
+inspired by OpenClaw, NanoClaw, and MicroClaw. It implements 10 actors covering the
 core abstractions of any production agent system: LLM routing, tool execution, the
 agent loop, session management, multi-agent orchestration, scoped memory, audit
-trails, and lifecycle state machines.
+trails, lifecycle state machines, a durable task queue, and a health monitor.
 
 ## Architecture
 
@@ -14,15 +14,17 @@ graph TB
 
     subgraph GenServer["GenServer Actors (request-reply)"]
         Agent["AgentActor\nCore loop · KV session history"]
-        LLM["LLMRouterActor\nPrompt cache · Circuit breaker"]
+        LLM["LLMRouterActor\nPhantom token · Prompt cache · Circuit breaker"]
         Tools["ToolRegistryActor\nSchema registry · Built-in execution"]
         Memory["MemoryActor\nKV + TupleSpace · Scoped recall"]
         Session["SessionManagerActor\nKV lifecycle · channel+user index"]
+        TaskQ["TaskQueueActor\nKV-backed queue · enqueue/dequeue/ack/nack"]
+        Health["HealthMonitorActor\nSendAfter polling · PG health snapshots"]
     end
 
     subgraph Other["Other Behaviors"]
         Orch["OrchestratorActor\n(WorkflowActor)\nDurable · Checkpointed · TupleSpace results"]
-        Audit["AuditEventActor\n(GenEvent)\nFire-and-forget · Append-only TS log"]
+        Audit["AuditEventActor\n(GenEvent)\nFire-and-forget · Watermark · Two-cursor poll"]
         FSM["AgentStateFSM\n(GenFSM)\nidle→processing→tool_executing→responding"]
     end
 
@@ -34,6 +36,8 @@ graph TB
         PG5["svc:session_manager"]
         PG6["svc:audit"]
         PG7["svc:agent_fsm"]
+        PG8["svc:task_queue"]
+        PG9["svc:health_monitor"]
     end
 
     User -->|Ask: chat| Agent
@@ -42,7 +46,9 @@ graph TB
     User -->|Ask: store/recall| Memory
     User -->|Ask: register/list/execute| Tools
     User -->|Ask: stats / reset_circuit| LLM
-    User -->|Ask: query_events / get_stats| Audit
+    User -->|Ask: query_events / poll_events / get_stats| Audit
+    User -->|Ask: enqueue / dequeue / ack / nack| TaskQ
+    User -->|Ask: get_health / get_stats| Health
 
     Agent -->|Ask: chat_completion| LLM
     Agent -->|Ask: list_tools / execute_tool| Tools
@@ -55,9 +61,12 @@ graph TB
     Orch -->|Ask: chat via svc:agent PG| Agent
     Orch -->|TS.Write: orch_result checkpoints| Orch
 
-    LLM -->|KVGet/KVPut: llm_cache| LLM
+    LLM -->|KVGet/KVPut: llm_cache, cred:token| LLM
     LLM -->|SendAfter 30s: timer_tick| LLM
     Memory -->|KVPut/TS.Write: mem:scope:id:key| Memory
+    Health -->|SendAfter: poll_tick| Health
+    Health -->|PG.Members: serviceGroups| Health
+    Health -->|TS.Write: health_snapshot| Health
 
     Agent -.->|joins| PG1
     LLM -.->|joins| PG2
@@ -66,6 +75,8 @@ graph TB
     Session -.->|joins| PG5
     Audit -.->|joins| PG6
     FSM -.->|joins| PG7
+    TaskQ -.->|joins| PG8
+    Health -.->|joins| PG9
 
     style User fill:#E65100,color:#fff,stroke:#BF360C,stroke-width:3px
     style Agent fill:#1565C0,color:#fff,stroke:#0D47A1,stroke-width:2px
@@ -73,19 +84,14 @@ graph TB
     style Tools fill:#2E7D32,color:#fff,stroke:#1B5E20,stroke-width:2px
     style Memory fill:#00838F,color:#fff,stroke:#006064,stroke-width:2px
     style Session fill:#283593,color:#fff,stroke:#1A237E,stroke-width:2px
+    style TaskQ fill:#4E342E,color:#fff,stroke:#3E2723,stroke-width:2px
+    style Health fill:#558B2F,color:#fff,stroke:#33691E,stroke-width:2px
     style Orch fill:#1565C0,color:#fff,stroke:#0D47A1,stroke-width:2px
     style Audit fill:#AD1457,color:#fff,stroke:#880E4F,stroke-width:2px
     style FSM fill:#4E342E,color:#fff,stroke:#3E2723,stroke-width:2px
     style GenServer fill:#0D1B2A,color:#90CAF9,stroke:#1565C0,stroke-width:2px
     style Other fill:#0D1B2A,color:#CE93D8,stroke:#6A1B9A,stroke-width:2px
     style PG fill:#1A2F1A,color:#A5D6A7,stroke:#2E7D32,stroke-width:1px,stroke-dasharray:4 3
-    style PG1 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG2 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG3 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG4 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG5 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG6 fill:#1B5E20,color:#fff,stroke:#2E7D32
-    style PG7 fill:#1B5E20,color:#fff,stroke:#2E7D32
 ```
 
 <details>
@@ -94,7 +100,7 @@ graph TB
 ```
 User (HTTP API)
     │
-    ├─Ask──→ AgentActor ──Ask──→ LLMRouterActor (chat_completion)
+    ├─Ask──→ AgentActor ──Ask──→ LLMRouterActor (chat_completion, phantom token resolved here)
     │              │                     │
     │              │              ←── response (tool_use or end_turn)
     │              │
@@ -104,7 +110,7 @@ User (HTTP API)
     │              │              │
     │              │              ←── tool output
     │              │
-    │              ├──Send─→ AuditEventActor (fire-and-forget)
+    │              ├──Send─→ AuditEventActor (fire-and-forget, watermark+cursor)
     │              ├──Send─→ AgentStateFSM  (state transitions)
     │              │
     │              ←── final response to user
@@ -113,8 +119,10 @@ User (HTTP API)
     ├──Ask──→ MemoryActor         (store/recall/list)
     ├──Ask──→ OrchestratorActor   (workflow_run → delegates to AgentActor)
     ├──Ask──→ ToolRegistryActor   (register/list/execute tools)
-    ├──Ask──→ LLMRouterActor      (stats, reset_circuit)
-    └──Ask──→ AuditEventActor     (query_events, stats)
+    ├──Ask──→ LLMRouterActor      (register_credential, stats, reset_circuit)
+    ├──Ask──→ AuditEventActor     (query_events, poll_events, stats)
+    ├──Ask──→ TaskQueueActor      (enqueue, dequeue, ack, nack, get_stats)
+    └──Ask──→ HealthMonitorActor  (get_health, get_stats)
 ```
 </details>
 
@@ -122,27 +130,83 @@ User (HTTP API)
 
 | Actor | Behavior | Purpose | PlexSpaces Primitives |
 |-------|----------|---------|----------------------|
-| `LLMRouterActor` | GenServer | Simulated LLM with prompt caching and circuit breaker | KV (cache), PG (svc:llm_router), SendAfter (timer recovery) |
+| `LLMRouterActor` | GenServer | Simulated LLM with phantom-token credential proxy, prompt caching, and circuit breaker | KV (cache, credentials), PG (svc:llm_router), SendAfter (timer recovery) |
 | `ToolRegistryActor` | GenServer | Tool registration and built-in execution (calculator, weather, memory, web search) | KV (tool defs + tool_names index), PG (svc:tool_registry) |
 | `AgentActor` | GenServer | Core agent loop: message → LLM → tool_use → execute → repeat | Ask (LLM + tools), Send (FSM + audit), KV (session history), PG (svc:agent) |
 | `SessionManagerActor` | GenServer | Session lifecycle with channel+user mapping | KV (session metadata), PG (svc:session_manager) |
 | `OrchestratorActor` | WorkflowActor | Durable multi-agent task decomposition and delegation | Ask (agents), TupleSpace (result coordination), PG (svc:agent) |
 | `MemoryActor` | GenServer | Scoped memory (global/agent/session) | KV (persistent), TupleSpace (queryable), PG (svc:memory) |
-| `AuditEventActor` | GenEvent | Fire-and-forget audit trail | TupleSpace (audit log), PG (svc:audit) |
+| `AuditEventActor` | GenEvent | Fire-and-forget audit trail with monotonic watermark and two-cursor polling | TupleSpace (audit log), KV (per-seq entries + cursors), PG (svc:audit) |
 | `AgentStateFSM` | GenFSM | Agent processing lifecycle state machine | PG (svc:agent_fsm) |
+| `TaskQueueActor` | GenServer | Durable task queue backed by KV — no external broker | KV (queue:pending:seq), PG (svc:task_queue) |
+| `HealthMonitorActor` | GenServer | Periodic PG membership polling; writes health snapshots | SendAfter (poll interval), PG.Members (all service groups), TupleSpace (snapshots), PG (svc:health_monitor) |
 
-## Key Patterns Demonstrated
+## NanoClaw Patterns Demonstrated
 
-1. **Agent loop** — `AgentActor.chat()` implements the agentic message → LLM → tool → repeat cycle
-2. **Tool calling** — `ToolRegistryActor` dispatches to built-in handlers; memory_search delegates via PG
-3. **Circuit breaker** — `LLMRouterActor` opens after 3 consecutive failures; auto-recovers via timer
-4. **Prompt caching** — LLM responses cached in KV by message hash; hit ratio tracked
-5. **Multi-agent orchestration** — `OrchestratorActor.Run()` decomposes tasks and delegates via PG discovery
-6. **Session persistence** — conversation history stored in KV per session_id; compacted when over limit
-7. **Scoped memory** — `MemoryActor` namespaces by scope (global/agent/session) via KV + TupleSpace
-8. **Capability discovery** — all actors join PGs on init; clients call `pgFirst()` for location-transparent routing
-9. **Audit trail** — every actor fires events to `AuditEventActor` via `host.Send()` (fire-and-forget)
-10. **FSM lifecycle** — `AgentStateFSM` enforces valid state transitions: idle→processing→tool_executing→responding→idle
+### Pattern 1 — Phantom Token / Credential Proxy
+
+Callers never see real API keys. They supply an opaque phantom token; `LLMRouterActor` resolves it to the real credential internally and discards the resolved key before any response leaves the actor.
+
+```go
+// Register a credential — token is the only handle callers get
+actor.Handle("", "register_credential",
+    `{"op":"register_credential","phantom_token":"tok_abc","api_key":"sk-real-key"}`)
+
+// Callers supply only the token; the real key never appears in payloads
+actor.Handle("", "chat_completion",
+    `{"op":"chat_completion","phantom_token":"tok_abc","messages":[...]}`)
+```
+
+### Pattern 3 — Two-Cursor / Watermark Audit Polling
+
+`AuditEventActor` assigns a monotonically increasing `Watermark` to every event. Each consumer tracks its own cursor in KV. `poll_events` returns everything from `(cursor+1)` to `Watermark` and advances the cursor atomically — no events are missed, no duplicates, no shared offset.
+
+```go
+// Consumer polls from its last-seen cursor
+actor.Handle("", "poll_events",
+    `{"op":"poll_events","consumer_id":"compliance-agent","limit":50}`)
+// → {"events": [...], "cursor": 42, "watermark": 42}
+```
+
+### Pattern 4 — KV as Message Queue (TaskQueueActor)
+
+Tasks are stored under `queue:pending:<seq>` in KV. No external broker required. Producers call `enqueue`; consumers call `dequeue` (marks tasks `in_flight`), then `ack` (deletes + advances head) or `nack` (resets to `pending` for redelivery).
+
+```go
+actor.Handle("", "enqueue", `{"op":"enqueue","task_type":"summarize","payload":{"doc":"..."}}`
+// → {"status":"ok","seq":1}
+actor.Handle("", "dequeue", `{"op":"dequeue","limit":1}`)
+// → {"tasks":[{"seq":1,"status":"in_flight",...}],"count":1}
+actor.Handle("", "ack", `{"op":"ack","seq":1}`)
+```
+
+### Pattern 5 — Polling Over Events (HealthMonitorActor)
+
+`HealthMonitorActor` never subscribes to PG change events. Instead it calls `SendAfter` at the end of every `poll_tick` to schedule the next poll. Simple polling eliminates subscription races and is correct when sub-second latency is not required.
+
+```go
+// Each tick reschedules the next one — no external scheduler, no event subscription
+func (h *HealthMonitorActor) doPoll() string {
+    for _, grp := range serviceGroups {
+        members, _ := host.PG().Members(grp)
+        h.GroupHealth[grp] = len(members)
+    }
+    _ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+    return marshal(map[string]any{"status": "ok", "poll_count": h.PollCount})
+}
+```
+
+## Additional Key Patterns
+
+5. **Agent loop** — `AgentActor.chat()` implements the agentic message → LLM → tool → repeat cycle
+6. **Tool calling** — `ToolRegistryActor` dispatches to built-in handlers; memory_search delegates via PG
+7. **Circuit breaker** — `LLMRouterActor` opens after 3 consecutive failures; auto-recovers via timer
+8. **Prompt caching** — LLM responses cached in KV by message hash; hit ratio tracked
+9. **Multi-agent orchestration** — `OrchestratorActor.Run()` decomposes tasks and delegates via PG discovery
+10. **Session persistence** — conversation history stored in KV per session_id; compacted when over limit
+11. **Scoped memory** — `MemoryActor` namespaces by scope (global/agent/session) via KV + TupleSpace
+12. **Capability discovery** — all actors join PGs on init; clients call `pgFirst()` for location-transparent routing
+13. **FSM lifecycle** — `AgentStateFSM` enforces valid state transitions: idle→processing→tool_executing→responding→idle
 
 ## PlexSpaces Primitives
 
@@ -150,11 +214,10 @@ User (HTTP API)
 |-----------|---------------------|
 | `host.Ask()` | Request-reply: agent→LLM, agent→tools, orchestrator→agent |
 | `host.Send()` | Fire-and-forget: all actors→audit, agent→FSM state updates |
-| `host.SendAfter()` | Delayed timer: LLMRouter circuit recovery check every 30s |
-| `host.KVGet/KVPut/KVDelete()` | LLM prompt cache, tool registry, sessions, memory |
-| `host.KVList()` | Enumerate tool names via prefix |
-| `host.TS().Write/ReadAll()` | Agent info, orchestration results, audit events, memory tuples |
-| `host.PG().Join/Members()` | Service discovery: every actor joins a named PG on init |
+| `host.SendAfter()` | Delayed timer: LLMRouter circuit recovery (30s), HealthMonitor poll ticks |
+| `host.KVGet/KVPut/KVDelete()` | LLM prompt cache, credentials, tool registry, sessions, memory, task queue |
+| `host.TS().Write/ReadAll()` | Agent info, orchestration results, audit events, memory tuples, health snapshots |
+| `host.PG().Join/Members()` | Service discovery: every actor joins a named PG on init; HealthMonitor polls all PGs |
 | `BaseActor` | JSON state serialization for durable checkpointing |
 | `WorkflowActor` | Durable `Run()`/`Signal()`/`Query()` for OrchestratorActor |
 
@@ -206,7 +269,8 @@ go test ./...
 
 | Op | Payload | Response |
 |----|---------|----------|
-| `chat_completion` | `{messages: [...], tools: [...], simulate_failure?: bool}` | `{response: {stop_reason, content, tool_calls}, model, usage, cached}` |
+| `register_credential` | `{phantom_token, api_key}` | `{status: "ok", phantom_token}` |
+| `chat_completion` | `{messages: [...], tools: [...], phantom_token?: string, simulate_failure?: bool}` | `{response: {stop_reason, content, tool_calls}, model, usage, cached}` |
 | `reset_circuit` | `{}` | `{status: "ok", circuit_open: false}` |
 | `get_stats` | `{}` | `{request_count, total_tokens, cache_hits, circuit_open, consecutive_failures, model}` |
 
@@ -259,9 +323,10 @@ go test ./...
 
 | Op | Payload | Response |
 |----|---------|----------|
-| `log_event` | `{event_type, detail}` | `{ok: true}` |
+| `log_event` | `{event_type, detail}` | `{ok: true, seq}` |
 | `query_events` | `{event_type?, limit?}` | `{events: [...], count}` |
-| `get_stats` | `{}` | `{events_logged, last_event_type}` |
+| `poll_events` | `{consumer_id, limit?}` | `{events: [...], count, cursor, watermark}` |
+| `get_stats` | `{}` | `{events_logged, last_event_type, watermark}` |
 
 ### AgentStateFSM
 
@@ -280,6 +345,28 @@ any → error
 error → idle
 ```
 
+### TaskQueueActor
+
+| Op | Payload | Response |
+|----|---------|----------|
+| `enqueue` | `{task_type?, payload?}` | `{status: "ok", seq}` |
+| `dequeue` | `{limit?}` | `{tasks: [...], count}` — tasks marked `in_flight` |
+| `ack` | `{seq}` | `{status: "ok", seq}` — deletes task, increments Completed |
+| `nack` | `{seq}` | `{status: "ok", seq}` — resets task to `pending`, increments Failed |
+| `get_stats` | `{}` | `{enqueued, completed, failed, depth}` |
+
+### HealthMonitorActor
+
+| Op | Payload | Response |
+|----|---------|----------|
+| `poll_tick` | `{}` | `{status: "ok", poll_count}` — internal; also called by SendAfter |
+| `get_health` | `{}` | `{group_health, healthy, degraded: [...], last_poll_ms}` |
+| `get_stats` | `{}` | `{poll_count, last_poll_ms, group_health}` |
+
+**Monitored process groups:**
+`svc:llm_router`, `svc:tool_registry`, `svc:agent`, `svc:session_manager`,
+`svc:memory`, `svc:audit`, `svc:agent_fsm`, `svc:task_queue`
+
 ## Process Groups
 
 | PG Name | Joined By | Used By |
@@ -291,6 +378,8 @@ error → idle
 | `svc:memory` | MemoryActor | ToolRegistryActor (memory_search) |
 | `svc:audit` | AuditEventActor | All actors (fireAudit helper) |
 | `svc:agent_fsm` | AgentStateFSM | AgentActor |
+| `svc:task_queue` | TaskQueueActor | OrchestratorActor (optional enqueue) |
+| `svc:health_monitor` | HealthMonitorActor | HealthMonitorActor itself polls all other PGs |
 
 ## References
 

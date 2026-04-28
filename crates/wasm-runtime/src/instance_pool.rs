@@ -153,6 +153,7 @@ impl InstancePool {
             None, // OutboundHttpClient not available at pool level
             self.config.durability_enabled,
             None, // global_reinstantiation_semaphore - pool not tied to runtime
+            None, // shared_timer_pool - pool instances don't track timers
         )
         .await
     }

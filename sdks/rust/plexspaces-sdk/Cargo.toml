@@ -14,7 +14,7 @@ plexspaces-sdk-macros = { path = "../plexspaces-sdk-macros" }
 plexspaces-core = { path = "../../../crates/core", optional = true }
 plexspaces-actor = { path = "../../../crates/actor", optional = true }
 plexspaces-node = { path = "../../../crates/node", optional = true }
-plexspaces-proto = { path = "../../../crates/proto", optional = true }
+plexspaces-proto = { path = "../../../crates/proto", default-features = false }
 plexspaces-facet = { path = "../../../crates/facet", optional = true }
 plexspaces-behavior = { path = "../../../crates/behavior", optional = true }
 plexspaces-journaling = { path = "../../../crates/journaling", optional = true }
@@ -47,7 +47,7 @@ native = [
     "dep:plexspaces-facet",
     "dep:plexspaces-journaling",
     "dep:plexspaces-node",
-    "dep:plexspaces-proto",
+    "plexspaces-proto/grpc",
     "dep:plexspaces-workflow",
     "dep:prost-types",
     "dep:tokio",

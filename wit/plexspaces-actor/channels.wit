@@ -1,139 +1,171 @@
-// PlexSpaces Actor Interface - Channels (Queues & Topics)
+// PlexSpaces Actor Interface - Channels
 //
-// Message channels for pub/sub and work distribution patterns.
-// Queues provide load-balanced delivery, Topics provide broadcast.
+// Channel abstraction for both queue (work distribution) and pub/sub (broadcast) patterns.
+// Consistent with proto/plexspaces/v1/channel/channel.proto terminology.
+//
+// ## Design
+// A "channel" is the unified concept — the same API serves:
+//   - Queue semantics: send → one consumer receives (channel-send / channel-receive)
+//   - Pub/sub semantics: publish → all subscribers receive (channel-publish / subscribe)
+//
+// Provider selection (InMemory, SQLite, Redis, Kafka, NATS, …) is a runtime concern
+// resolved by the host via ServiceLocator; WASM actors use this interface without
+// knowing which provider is active.
+//
+// ## Context parameter
+// `ctx` is a JSON-encoded string carrying optional tenant/namespace override and auth
+// headers (e.g. `{"tenant_id":"t1","namespace":"app","headers":{}}`).  An empty string
+// is valid — the host infers tenant context from the calling actor's identity.
+// Using a plain `string` (not the `context` record) ensures canonical ABI
+// compatibility with all polyglot SDKs (Go/TinyGo, Python, TypeScript).
 
 interface channels {
-    use types.{payload, message-id, duration-ms, actor-error, context};
+    use types.{payload, message-id, duration-ms, actor-error};
 
-    /// Queue message with metadata
-    record queue-message {
-        /// Unique message ID
+    /// Message received from a channel
+    record channel-message {
+        /// Unique message ID (ULID)
         id: message-id,
-        /// Message type for routing
+        /// Message type for routing / filtering
         msg-type: string,
         /// Message payload
         payload: payload,
-        /// Timestamp when enqueued
+        /// Unix timestamp (milliseconds) when the message was enqueued
         timestamp: u64,
-        /// Delivery attempt count
+        /// Number of delivery attempts (1 = first delivery)
         delivery-count: u32,
-        /// Custom headers
+        /// Custom metadata headers
         headers: list<tuple<string, string>>,
     }
 
-    /// Send message to queue
-    ///
-    /// Message is delivered to ONE consumer (load-balanced).
-    /// If no consumers are available, message is queued.
+    // -------------------------------------------------------------------------
+    // Queue operations (point-to-point, load-balanced to one consumer)
+    // -------------------------------------------------------------------------
+
+    /// Send a message to a channel (queue semantics — one consumer receives it).
     ///
     /// # Arguments
-    /// - `queue-name`: Name of the queue
-    /// - `msg-type`: Message type for routing/filtering
-    /// - `payload`: Message payload
+    /// - `ctx`:          JSON context string (tenant / namespace override; empty = actor default)
+    /// - `channel-name`: Target channel name
+    /// - `msg-type`:     Message type for routing / filtering
+    /// - `payload`:      Message body
     ///
     /// # Returns
-    /// - `ok(message-id)`: Message enqueued
-    /// - `err`: Send failed
-    ///
-    /// # Example
-    /// ```rust
-    /// channels::send_to_queue("orders", "order.created", order_bytes)?;
-    /// ```
-    send-to-queue: func(ctx: context, queue-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+    /// `ok(message-id)` on success; the ID can be used with `channel-ack` / `channel-nack`.
+    channel-send: func(
+        ctx: string,
+        channel-name: string,
+        msg-type: string,
+        payload: payload
+    ) -> result<message-id, actor-error>;
 
-    /// Send with options
+    /// Send with extended options.
     ///
     /// # Arguments
-    /// - `queue-name`: Queue name
-    /// - `msg-type`: Message type
-    /// - `payload`: Message payload
-    /// - `delay-ms`: Delay before message becomes visible
-    /// - `ttl-ms`: Time-to-live (0 = infinite)
-    /// - `headers`: Custom headers
-    send-to-queue-with-options: func(
-        ctx: context,
-        queue-name: string,
+    /// - `delay-ms`:  Delay before the message becomes visible (0 = immediate)
+    /// - `ttl-ms`:    Time-to-live in milliseconds (0 = no expiry)
+    /// - `headers`:   Additional metadata headers as JSON object string
+    channel-send-with-options: func(
+        ctx: string,
+        channel-name: string,
         msg-type: string,
         payload: payload,
         delay-ms: duration-ms,
         ttl-ms: duration-ms,
-        headers: list<tuple<string, string>>
+        headers: string
     ) -> result<message-id, actor-error>;
 
-    /// Receive message from queue
+    /// Receive one message from a channel (blocking until available or timeout).
     ///
-    /// Blocks until message available or timeout expires.
-    /// Message is "leased" - must be acked or nacked.
+    /// The returned message is "leased" — it will be redelivered if not acked within
+    /// the visibility timeout. Call `channel-ack` after successful processing.
     ///
     /// # Arguments
-    /// - `queue-name`: Queue name
-    /// - `timeout-ms`: Maximum time to wait (0 = poll, return immediately)
+    /// - `timeout-ms`: Maximum wait time (0 = non-blocking poll, return immediately)
     ///
     /// # Returns
-    /// - `ok(some(message))`: Message received
-    /// - `ok(none)`: No message available (timeout)
-    /// - `err`: Receive failed
-    receive-from-queue: func(ctx: context, queue-name: string, timeout-ms: duration-ms) -> result<option<queue-message>, actor-error>;
+    /// `ok(some(message))` on receipt; `ok(none)` on timeout / empty channel.
+    channel-receive: func(
+        ctx: string,
+        channel-name: string,
+        timeout-ms: duration-ms
+    ) -> result<option<channel-message>, actor-error>;
 
-    /// Acknowledge message processing
-    ///
-    /// Removes message from queue permanently.
-    /// Must be called after successful processing.
-    ack: func(ctx: context, queue-name: string, message-id: message-id) -> result<_, actor-error>;
+    // -------------------------------------------------------------------------
+    // Pub/sub operations (broadcast — all subscribers receive)
+    // -------------------------------------------------------------------------
 
-    /// Negative acknowledge (reject message)
-    ///
-    /// Returns message to queue for redelivery.
-    /// Use when processing fails but message should be retried.
-    ///
-    /// # Arguments
-    /// - `queue-name`: Queue name
-    /// - `message-id`: Message to reject
-    /// - `requeue`: If true, message goes back to queue. If false, goes to DLQ.
-    nack: func(ctx: context, queue-name: string, message-id: message-id, requeue: bool) -> result<_, actor-error>;
-
-    /// Publish message to topic
-    ///
-    /// Message is delivered to ALL subscribers (broadcast).
-    ///
-    /// # Arguments
-    /// - `topic-name`: Topic name
-    /// - `msg-type`: Message type for filtering
-    /// - `payload`: Message payload
+    /// Publish a message to a channel (pub/sub semantics — all subscribers receive it).
     ///
     /// # Returns
-    /// - `ok(message-id)`: Message published
-    /// - `err`: Publish failed
-    publish-to-topic: func(ctx: context, topic-name: string, msg-type: string, payload: payload) -> result<message-id, actor-error>;
+    /// `ok(message-id)` on success.
+    channel-publish: func(
+        ctx: string,
+        channel-name: string,
+        msg-type: string,
+        payload: payload
+    ) -> result<message-id, actor-error>;
 
-    /// Subscribe to topic
-    ///
-    /// Creates subscription that receives all messages published to topic.
-    /// Each subscriber gets its own copy of messages.
+    /// Subscribe to a channel (pub/sub — each subscriber gets every published message).
     ///
     /// # Arguments
-    /// - `topic-name`: Topic to subscribe to
-    /// - `filter`: Optional message type filter (e.g., "order.*")
+    /// - `filter`: Message-type filter pattern (e.g. "order.*"); empty string = all messages
     ///
     /// # Returns
-    /// Subscription ID for unsubscribe
-    subscribe-to-topic: func(ctx: context, topic-name: string, filter: option<string>) -> result<u64, actor-error>;
+    /// Subscription ID (string ULID) used with `channel-unsubscribe`.
+    channel-subscribe: func(
+        ctx: string,
+        channel-name: string,
+        filter: string
+    ) -> result<string, actor-error>;
 
-    /// Unsubscribe from topic
-    unsubscribe-from-topic: func(subscription-id: u64) -> result<_, actor-error>;
+    /// Unsubscribe from a channel.
+    channel-unsubscribe: func(subscription-id: string) -> result<_, actor-error>;
 
-    /// Create queue (if not exists)
+    // -------------------------------------------------------------------------
+    // Acknowledgement (for at-least-once delivery)
+    // -------------------------------------------------------------------------
+
+    /// Acknowledge successful message processing.
+    ///
+    /// Permanently removes the message from the channel (no redelivery).
+    /// Must be called after `channel-receive` when processing succeeds.
+    channel-ack: func(
+        ctx: string,
+        channel-name: string,
+        message-id: message-id
+    ) -> result<_, actor-error>;
+
+    /// Negative-acknowledge (reject) a message.
     ///
     /// # Arguments
-    /// - `queue-name`: Queue name
-    /// - `max-size`: Maximum queue size (0 = unlimited)
-    /// - `message-ttl-ms`: Default TTL for messages (0 = infinite)
-    create-queue: func(ctx: context, queue-name: string, max-size: u32, message-ttl-ms: duration-ms) -> result<_, actor-error>;
+    /// - `requeue`: `true` = return to channel for retry; `false` = send to dead-letter channel
+    channel-nack: func(
+        ctx: string,
+        channel-name: string,
+        message-id: message-id,
+        requeue: bool
+    ) -> result<_, actor-error>;
 
-    /// Delete queue
-    delete-queue: func(ctx: context, queue-name: string) -> result<_, actor-error>;
+    // -------------------------------------------------------------------------
+    // Channel lifecycle
+    // -------------------------------------------------------------------------
 
-    /// Get queue depth (number of messages)
-    queue-depth: func(ctx: context, queue-name: string) -> result<u64, actor-error>;
+    /// Create a channel if it does not exist.
+    ///
+    /// # Arguments
+    /// - `max-size`:        Capacity limit (0 = unbounded)
+    /// - `message-ttl-ms`:  Default TTL for messages (0 = no expiry)
+    channel-create: func(
+        ctx: string,
+        channel-name: string,
+        max-size: u32,
+        message-ttl-ms: duration-ms
+    ) -> result<_, actor-error>;
+
+    /// Delete a channel and all its pending messages.
+    channel-delete: func(ctx: string, channel-name: string) -> result<_, actor-error>;
+
+    /// Return the number of pending (unacked) messages in a channel.
+    channel-depth: func(ctx: string, channel-name: string) -> result<u64, actor-error>;
 }

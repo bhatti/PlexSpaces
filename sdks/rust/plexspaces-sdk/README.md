@@ -556,6 +556,50 @@ let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
 - [Data Parallel Worker](../examples/rust/apps/data_parallel_worker) - WASM leader/worker, scatter/gather over shard group
 - [Bank Account](../examples/rust/apps/bank_account) - Durable actor with storage
 
+## Tier 1 WASM Actor Helpers (`simple_actor`)
+
+For **deployable Rust WASM actors** (`sdks/rust/plexspaces-sdk/src/simple_actor.rs`), the following helpers wrap the WIT `host::*` functions. They compile for WASM targets without requiring the `native` feature flag.
+
+```rust
+use plexspaces_sdk::simple_actor::{
+    pg_first, kv_get_json, kv_put_json, incr_counter, incr_counters, EventLog,
+};
+use serde::{Deserialize, Serialize};
+
+// ── Process Groups ──────────────────────────────────────────────────────────
+// First member of a process group (error if empty)
+let router: String = pg_first("svc:llm_router")?;
+
+// ── KV JSON helpers ─────────────────────────────────────────────────────────
+#[derive(Serialize, Deserialize)]
+struct Task { seq: u32, kind: String }
+
+kv_put_json("task:1", &Task { seq: 1, kind: "summarize".into() })?;
+let task: Option<Task> = kv_get_json("task:1")?;
+
+// ── Metrics helpers ─────────────────────────────────────────────────────────
+// Errors are logged as warnings and never propagate
+incr_counter("my-app", "tasks_processed");
+incr_counters("my-app", &[("cache_hits", 5u64), ("cache_misses", 2u64)]);
+
+// ── EventLog ────────────────────────────────────────────────────────────────
+// Monotonic append-only log backed by KV. Derive Serialize/Deserialize so the
+// watermark survives actor restarts via get_state / set_state.
+#[derive(Serialize, Deserialize, Default)]
+struct MyState {
+    audit_log: EventLog,
+}
+
+// Append — rolls back watermark on KV failure
+let seq: i64 = state.audit_log.append("audit:", &entry)?;
+
+// Poll — returns (events, new_cursor); idempotent per consumer
+let (events, cursor): (Vec<serde_json::Value>, i64) =
+    state.audit_log.poll("audit:", "consumer-1", 20)?;
+```
+
+`EventLog` is defined in `simple_actor.rs` alongside the `ActorWorldApp` trait and `export_actor_world_app!` macro. See [docs/sdk.md](../../../docs/sdk.md#tier-1-wasm-actor-helpers-simple_actor) for the full cross-language comparison.
+
 ## Design Philosophy
 
 The SDK design follows Erlang/OTP principles and industry best practices:

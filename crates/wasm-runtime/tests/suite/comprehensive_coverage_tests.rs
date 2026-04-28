@@ -272,6 +272,7 @@ async fn test_handle_request_error() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -337,6 +338,7 @@ async fn test_handle_event_error() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -425,6 +427,7 @@ async fn test_channel_host_function_error_handling() {
         None,  // outbound_http_client
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
+        None,  // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");

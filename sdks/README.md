@@ -8,8 +8,24 @@ Language SDKs for building PlexSpaces actors with minimal boilerplate.
 |----------|--------|---------------|
 | **Python** | ✅ Available | [sdks/python/README.md](python/README.md) |
 | **TypeScript** | ✅ Available | [sdks/typescript/README.md](typescript/README.md) |
-| **Rust** | ✅ Available | [sdks/rust/plexspaces-sdk/README.md](rust/plexspaces-sdk/README.md) (workspace crate; native + annotations) |
+| **Rust** | ✅ Available | [sdks/rust/plexspaces-sdk/README.md](rust/plexspaces-sdk/README.md) (workspace crate; native + WASM) |
 | **Go** | ✅ Available | [sdks/go/README.md](go/README.md) |
+
+## Cross-SDK Tier 1 Helpers
+
+All four SDKs expose the same ergonomics helpers over the WIT host functions:
+
+| Helper | Python | TypeScript | Go | Rust WASM |
+|--------|--------|------------|----|-----------|
+| First group member | `host.process_groups.first(g)` | `host.processGroups.first(g)` | `host.PG().First(g)` | `pg_first(g)` |
+| KV read JSON | `host.kv_get_json(key)` | `host.kvGetJson<T>(key)` | `host.KVGetJSON(key, &v)` | `kv_get_json(key)` |
+| KV write JSON | `host.kv_put_json(key, v)` | `host.kvPutJson(key, v)` | `host.KVPutJSON(key, v)` | `kv_put_json(key, &v)` |
+| Increment one counter | `host.incr_counter(app, name)` | `host.incrCounter(app, name)` | `b.IncrCounter(host, name)` | `incr_counter(app, name)` |
+| Increment N counters | `host.incr_counters(app, {…})` | `host.incrCounters(app, {…})` | `b.IncrCounters(host, map)` | `incr_counters(app, &[…])` |
+| EventLog append | `log.append(host, prefix, e)` | `log.append(host, prefix, e)` | `log.Append(host, prefix, e)` | `log.append(prefix, &e)` |
+| EventLog poll | `log.poll(host, prefix, id)` | `log.poll(host, prefix, id)` | `log.Poll(host, prefix, id, n)` | `log.poll(prefix, id, n)` |
+
+See [docs/sdk.md](../docs/sdk.md#cross-sdk-consistency-tier-1-ergonomics-helpers) for full documentation and examples.
 
 ## Proto code generation
 

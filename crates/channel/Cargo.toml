@@ -81,6 +81,8 @@ sqs-backend = [
     "base64",
 ]
 process-group-backend = ["plexspaces-core"]
+# Enable ChannelServiceImpl which implements plexspaces_core::ChannelService on top of Channel trait
+channel-service = ["plexspaces-core"]
 test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests
 

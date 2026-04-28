@@ -261,6 +261,7 @@ async fn test_send_to_queue_host_function() {
         None,  // outbound_http_client
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
+        None,  // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -320,6 +321,7 @@ async fn test_publish_to_topic_host_function() {
         None,  // outbound_http_client
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
+        None,  // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -376,6 +378,7 @@ async fn test_send_to_queue_without_channel_service() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");

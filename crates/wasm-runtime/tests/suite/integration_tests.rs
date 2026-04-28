@@ -136,6 +136,7 @@ async fn test_genserver_handle_request() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -199,6 +200,7 @@ async fn test_genevent_handle_event() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -262,6 +264,7 @@ async fn test_genfsm_handle_transition() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -324,6 +327,7 @@ async fn test_fallback_to_handle_message() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -399,6 +403,7 @@ async fn test_channel_send_to_queue() {
         None,                  // outbound_http_client
         false,                 // durability_enabled
         None,                  // global_reinstantiation_semaphore
+        None,                  // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -456,6 +461,7 @@ async fn test_channel_publish_to_topic() {
         None,                  // outbound_http_client
         false,                 // durability_enabled
         None,                  // global_reinstantiation_semaphore
+        None,                  // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");
@@ -515,6 +521,7 @@ async fn test_channel_service_optional() {
         None,           // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
+        None,           // shared_timer_pool
     )
     .await
     .expect("Failed to create instance");

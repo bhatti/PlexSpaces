@@ -87,9 +87,6 @@ pub struct SimpleHostImpl {
     pub lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
     /// Blob service for object storage
     pub blob_service: Option<Arc<BlobService>>,
-    /// Pending send-after timer handles for cleanup on actor stop.
-    /// Keyed by timer-id, values are JoinHandles that can be joined/aborted.
-    pub pending_timers: Arc<tokio::sync::RwLock<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 #[cfg(feature = "component-model")]
@@ -108,7 +105,6 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
-            pending_timers: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -125,7 +121,6 @@ impl SimpleHostImpl {
             tuplespace_provider,
             lock_manager,
             blob_service,
-            pending_timers: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
@@ -920,7 +915,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
 
     /// Send a message to self after a delay.
     /// Spawns a tracked background task that delivers the message after delay_ms.
-    /// Returns a timer-id for observability. The JoinHandle is stored in pending_timers
+    /// Returns a timer-id for observability. The JoinHandle is stored in host_functions.timer_handles
     /// so it can be joined/aborted when the actor stops (cleanup via drop or explicit stop).
     async fn send_after(
         &mut self,
@@ -943,8 +938,6 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
                 .unwrap_or(0)
         );
         let timer_id_for_task = timer_id.clone();
-        let timer_id_for_cleanup = timer_id.clone();
-        let pending_timers = self.pending_timers.clone();
         let payload_bytes = payload.clone();
 
         tracing::debug!(
@@ -953,7 +946,10 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             "send_after: scheduling delayed message"
         );
 
-        // Spawn tracked background task
+        // Spawn tracked background task.
+        // The handle is stored in host_functions.timer_handles (shared across re-instantiations)
+        // so undeploy can bulk-cancel all pending timers for this actor.
+        let timer_handles = self.host_functions.timer_handles.clone();
         let handle = tokio::task::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             if let Err(e) = host_functions
@@ -971,15 +967,12 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
                     "send_after: message delivered"
                 );
             }
-            // Self-cleanup: remove from pending_timers after delivery
-            pending_timers.write().await.remove(&timer_id_for_cleanup);
         });
 
-        // Store JoinHandle for cleanup on actor stop
-        self.pending_timers
-            .write()
-            .await
-            .insert(timer_id.clone(), handle);
+        if let Ok(mut handles) = timer_handles.lock() {
+            handles.push(handle);
+        }
+
         Ok(timer_id)
     }
 
@@ -1385,6 +1378,176 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             headers: response.headers.into_iter().collect(),
             body: response.body,
         }))
+    }
+}
+
+/// Channels host implementation for `actor-world` WASM actors.
+///
+/// Delegates to the same `HostFunctions` service gateway used by `ChannelsImpl` in
+/// `component_host.rs`. This keeps `actor-world` (Go/TinyGo/Python) on equal footing
+/// with native-actor components for channel operations.
+#[cfg(feature = "component-model")]
+#[async_trait::async_trait]
+impl plexspaces::actor::channels::Host for SimpleHostImpl {
+    async fn channel_send(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        msg_type: String,
+        payload: plexspaces::actor::types::Payload,
+    ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone()).increment(1);
+        match self.host_functions.send_to_queue(&channel_name, &msg_type, payload).await {
+            Ok(message_id) => Ok(message_id),
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_channel_send_errors_total", "channel" => channel_name.clone()).increment(1);
+                Err(format!("internal: {}", e))
+            }
+        }
+    }
+
+    async fn channel_send_with_options(
+        &mut self,
+        ctx: String,
+        channel_name: String,
+        msg_type: String,
+        payload: plexspaces::actor::types::Payload,
+        _delay_ms: u64,
+        _ttl_ms: u64,
+        _headers: String,
+    ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
+        self.channel_send(ctx, channel_name, msg_type, payload).await
+    }
+
+    async fn channel_receive(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        timeout_ms: u64,
+    ) -> Result<Option<plexspaces::actor::channels::ChannelMessage>, plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_receive_total", "channel" => channel_name.clone()).increment(1);
+        match self.host_functions.receive_from_queue(&channel_name, timeout_ms).await {
+            Ok(Some((msg_type, payload))) => {
+                let message_id = ulid::Ulid::new().to_string();
+                Ok(Some(plexspaces::actor::channels::ChannelMessage {
+                    id: message_id,
+                    msg_type,
+                    payload,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                    delivery_count: 1,
+                    headers: vec![],
+                }))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_channel_receive_errors_total", "channel" => channel_name.clone()).increment(1);
+                Err(format!("internal: {}", e))
+            }
+        }
+    }
+
+    async fn channel_ack(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        message_id: plexspaces::actor::types::MessageId,
+    ) -> Result<(), plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone()).increment(1);
+        tracing::debug!(channel = %channel_name, message_id = %message_id, "channel_ack (actor-world)");
+        Ok(())
+    }
+
+    async fn channel_nack(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        message_id: plexspaces::actor::types::MessageId,
+        requeue: bool,
+    ) -> Result<(), plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_nack_total",
+            "channel" => channel_name.clone(),
+            "requeue" => requeue.to_string()
+        ).increment(1);
+        tracing::debug!(channel = %channel_name, message_id = %message_id, requeue, "channel_nack (actor-world)");
+        Ok(())
+    }
+
+    async fn channel_publish(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        msg_type: String,
+        payload: plexspaces::actor::types::Payload,
+    ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_publish_total", "channel" => channel_name.clone()).increment(1);
+        match self.host_functions.publish_to_topic(&channel_name, &msg_type, payload).await {
+            Ok(message_id) => Ok(message_id),
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_channel_publish_errors_total", "channel" => channel_name.clone()).increment(1);
+                Err(format!("internal: {}", e))
+            }
+        }
+    }
+
+    async fn channel_subscribe(
+        &mut self,
+        _ctx: String,
+        channel_name: String,
+        _filter: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_subscribe_total", "channel" => channel_name.clone()).increment(1);
+        let channel_service = self.host_functions.channel_service().ok_or_else(|| {
+            "internal: ChannelService not configured".to_string()
+        })?;
+        match channel_service.subscribe_to_topic(&channel_name).await {
+            Ok(_stream) => {
+                let subscription_id = ulid::Ulid::new().to_string();
+                tracing::debug!(channel = %channel_name, subscription_id = %subscription_id, "channel_subscribe (actor-world)");
+                Ok(subscription_id)
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_channel_subscribe_errors_total", "channel" => channel_name.clone()).increment(1);
+                Err(format!("internal: channel_subscribe failed: {}", e))
+            }
+        }
+    }
+
+    async fn channel_unsubscribe(
+        &mut self,
+        subscription_id: String,
+    ) -> Result<(), plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_channel_unsubscribe_total").increment(1);
+        tracing::debug!(subscription_id = %subscription_id, "channel_unsubscribe (actor-world)");
+        Ok(())
+    }
+
+    async fn channel_create(
+        &mut self,
+        _ctx: String,
+        _channel_name: String,
+        _max_size: u32,
+        _message_ttl_ms: u64,
+    ) -> Result<(), plexspaces::actor::types::ActorError> {
+        Ok(())
+    }
+
+    async fn channel_delete(
+        &mut self,
+        _ctx: String,
+        _channel_name: String,
+    ) -> Result<(), plexspaces::actor::types::ActorError> {
+        Err("not-implemented: channel_delete is a node-level administrative operation".to_string())
+    }
+
+    async fn channel_depth(
+        &mut self,
+        _ctx: String,
+        _channel_name: String,
+    ) -> Result<u64, plexspaces::actor::types::ActorError> {
+        Ok(0)
     }
 }
 
@@ -2088,6 +2251,7 @@ mod tests {
             None,
             None,
             Some(Arc::new(MockOutboundHttpClient)),
+            None, // shared_timer_pool
         ));
         let mut host =
             SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);

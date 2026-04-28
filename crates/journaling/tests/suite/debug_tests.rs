@@ -60,7 +60,7 @@ mod sqlite_tests {
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
             println!("Iteration {}: before_method", i);
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
 
             let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
             println!(
@@ -70,7 +70,7 @@ mod sqlite_tests {
 
             let result = format!("counter = {}", i).into_bytes();
             println!("Iteration {}: after_method", i);
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
 
             let entries_after_after = storage.replay_from(actor_id, 0).await.unwrap();
             println!(
@@ -118,9 +118,9 @@ mod sqlite_tests {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
 
             storage.flush().await.unwrap();
 
@@ -157,9 +157,9 @@ mod sqlite_tests {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         let entries_before_flush = storage.replay_from(actor_id, 0).await.unwrap();
@@ -203,7 +203,7 @@ mod sqlite_tests {
         println!("Entries after attach: {}", entries_after_attach.len());
 
         println!("=== Step 2: before_method ===");
-        let before_result = facet.before_method("test", b"test").await;
+        let before_result = facet.before_method("test", b"test", &std::collections::HashMap::new()).await;
         println!("before_method returned: {:?}", before_result);
 
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
@@ -221,7 +221,7 @@ mod sqlite_tests {
         );
 
         println!("=== Step 4: after_method ===");
-        let after_result = facet.after_method("test", b"test", b"result").await;
+        let after_result = facet.after_method("test", b"test", b"result", &std::collections::HashMap::new()).await;
         println!("after_method returned: {:?}", after_result);
 
         let entries_after_after = storage.replay_from(actor_id, 0).await.unwrap();
@@ -259,9 +259,9 @@ mod sqlite_tests {
             .on_attach(actor_id, serde_json::json!({}))
             .await
             .unwrap();
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -299,7 +299,7 @@ mod sqlite_tests {
             .await
             .unwrap();
 
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
 
         let entries_before_flush = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries before flush: {}", entries_before_flush.len());
@@ -310,7 +310,7 @@ mod sqlite_tests {
         println!("Entries after flush: {}", entries_after_flush.len());
 
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -348,9 +348,9 @@ mod sqlite_tests {
             .on_attach(actor_id1, serde_json::json!({}))
             .await
             .unwrap();
-        facet1.before_method("test", b"test").await.unwrap();
+        facet1.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet1
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage1.flush().await.unwrap();
@@ -375,9 +375,9 @@ mod sqlite_tests {
             .on_attach(actor_id2, serde_json::json!({}))
             .await
             .unwrap();
-        facet2.before_method("test", b"test").await.unwrap();
+        facet2.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet2
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage2.flush().await.unwrap();
@@ -422,11 +422,11 @@ mod sqlite_tests {
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
             println!("  Message {}: before_method", i);
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
 
             let result = format!("counter = {}", i).into_bytes();
             println!("  Message {}: after_method", i);
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         println!("Flushing storage...");
@@ -556,11 +556,11 @@ mod sqlite_tests {
 
         for i in 1..=3 {
             facet1
-                .before_method("test", &format!("{}", i).into_bytes())
+                .before_method("test", &format!("{}", i).into_bytes(), &std::collections::HashMap::new())
                 .await
                 .unwrap();
             facet1
-                .after_method("test", &[], &format!("result-{}", i).into_bytes())
+                .after_method("test", &[], &format!("result-{}", i).into_bytes(), &std::collections::HashMap::new())
                 .await
                 .unwrap();
         }
@@ -579,7 +579,7 @@ mod sqlite_tests {
             .await
             .unwrap();
 
-        facet2.before_method("test", b"new").await.unwrap();
+        facet2.before_method("test", b"new", &std::collections::HashMap::new()).await.unwrap();
         storage.flush().await.unwrap();
 
         let entries2 = storage.replay_from(actor_id, 0).await.unwrap();
@@ -617,11 +617,11 @@ mod sqlite_tests {
                 .unwrap();
 
             facet
-                .before_method("test", &format!("cycle-{}", cycle).into_bytes())
+                .before_method("test", &format!("cycle-{}", cycle).into_bytes(), &std::collections::HashMap::new())
                 .await
                 .unwrap();
             facet
-                .after_method("test", &[], &format!("result-{}", cycle).into_bytes())
+                .after_method("test", &[], &format!("result-{}", cycle).into_bytes(), &std::collections::HashMap::new())
                 .await
                 .unwrap();
 
@@ -675,7 +675,7 @@ mod sqlite_tests {
         let payload = b"test".to_vec();
 
         println!("Calling before_method...");
-        let before_result = facet.before_method(method, &payload).await;
+        let before_result = facet.before_method(method, &payload, &std::collections::HashMap::new()).await;
         println!("before_method result: {:?}", before_result);
         assert!(before_result.is_ok(), "before_method should succeed");
 
@@ -687,7 +687,7 @@ mod sqlite_tests {
 
         println!("Calling after_method...");
         let result = b"result".to_vec();
-        let after_result = facet.after_method(method, &payload, &result).await;
+        let after_result = facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await;
         println!("after_method result: {:?}", after_result);
         assert!(after_result.is_ok(), "after_method should succeed");
 
@@ -736,9 +736,9 @@ mod sqlite_tests {
             .on_attach(actor_id1, serde_json::json!({}))
             .await
             .unwrap();
-        facet1.before_method("test", b"test").await.unwrap();
+        facet1.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet1
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage1.flush().await.unwrap();
@@ -767,9 +767,9 @@ mod sqlite_tests {
             .on_attach(actor_id2, serde_json::json!({}))
             .await
             .unwrap();
-        facet2.before_method("test", b"test").await.unwrap();
+        facet2.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet2
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage2.flush().await.unwrap();
@@ -808,7 +808,7 @@ mod sqlite_tests {
         let entries_after_attach = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after attach: {}", entries_after_attach.len());
 
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
 
         println!("=== After before_method ===");
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
@@ -821,7 +821,7 @@ mod sqlite_tests {
         }
 
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage.flush().await.unwrap();
@@ -889,9 +889,9 @@ mod sqlite_tests {
             .on_attach(actor_id2, serde_json::json!({}))
             .await
             .unwrap();
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage.flush().await.unwrap();
@@ -925,9 +925,9 @@ mod sqlite_tests {
             .on_attach(actor_id, serde_json::json!({}))
             .await
             .unwrap();
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage.flush().await.unwrap();
@@ -967,9 +967,9 @@ mod sqlite_tests {
             .await
             .unwrap();
 
-        facet.before_method("test", b"test").await.unwrap();
+        facet.before_method("test", b"test", &std::collections::HashMap::new()).await.unwrap();
         facet
-            .after_method("test", b"test", b"result")
+            .after_method("test", b"test", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
         storage.flush().await.unwrap();
@@ -1012,7 +1012,7 @@ mod sqlite_tests {
         println!("Existing entries: {}", existing_entries.len());
 
         println!("=== Step 2: before_method ===");
-        let before_result = facet.before_method("test", b"test").await;
+        let before_result = facet.before_method("test", b"test", &std::collections::HashMap::new()).await;
         println!("Before result: {:?}", before_result);
 
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
@@ -1022,7 +1022,7 @@ mod sqlite_tests {
         );
 
         println!("=== Step 3: after_method ===");
-        let after_result = facet.after_method("test", b"test", b"result").await;
+        let after_result = facet.after_method("test", b"test", b"result", &std::collections::HashMap::new()).await;
         println!("After result: {:?}", after_result);
 
         println!("=== Step 4: flush ===");

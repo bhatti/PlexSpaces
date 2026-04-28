@@ -15,7 +15,7 @@ plexspaces-core = { path = "../core" }
 plexspaces-proto = { workspace = true }
 plexspaces-actor = { path = "../actor" }
 plexspaces-wasm-runtime = { path = "../wasm-runtime" }
-plexspaces-channel = { workspace = true }
+plexspaces-channel = { workspace = true, features = ["channel-service"] }
 plexspaces-mailbox = { workspace = true }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-keyvalue = { workspace = true }

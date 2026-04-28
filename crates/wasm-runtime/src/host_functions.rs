@@ -24,6 +24,7 @@ use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::wasm::v1::HttpFetchRequest;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use plexspaces_blob::BlobService;
 
@@ -315,6 +316,9 @@ pub struct HostFunctions {
     /// Resilient outbound HTTP client for named service links (optional).
     /// Populated from RuntimeConfig.service_links via ServiceLocator.
     outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
+    /// Shared send_after timer handles for this actor across all re-instantiations.
+    /// Aborted en-masse on application undeploy so stale timers don't fire after cleanup.
+    pub timer_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 impl HostFunctions {
@@ -331,6 +335,17 @@ impl HostFunctions {
             blob_service: None,
             elastic_pool_service: None,
             outbound_http_client: None,
+            timer_handles: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Abort all pending send_after timers registered by this actor.
+    /// Called during application undeploy so timers don't fire after cleanup.
+    pub fn cancel_all_timers(&self) {
+        if let Ok(mut handles) = self.timer_handles.lock() {
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
         }
     }
 
@@ -347,6 +362,7 @@ impl HostFunctions {
             blob_service: None,
             elastic_pool_service: None,
             outbound_http_client: None,
+            timer_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -363,6 +379,7 @@ impl HostFunctions {
             blob_service: None,
             elastic_pool_service: None,
             outbound_http_client: None,
+            timer_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -382,6 +399,7 @@ impl HostFunctions {
             blob_service: None,
             elastic_pool_service: None,
             outbound_http_client: None,
+            timer_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -397,7 +415,10 @@ impl HostFunctions {
         blob_service: Option<Arc<BlobService>>,
         elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
         outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
+        shared_timer_pool: Option<Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Self {
+        let timer_handles = shared_timer_pool
+            .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
         Self {
             message_sender: sender,
             channel_service,
@@ -409,6 +430,7 @@ impl HostFunctions {
             blob_service,
             elastic_pool_service,
             outbound_http_client,
+            timer_handles,
         }
     }
 

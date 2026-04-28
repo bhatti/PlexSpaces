@@ -1302,6 +1302,7 @@ import {
   barrierShardGroup as hostBarrierShardGroup,
   spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
+  applicationGetMetrics as hostApplicationGetMetrics,
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch
 } from "plexspaces:actor/host@0.1.0";
@@ -1787,6 +1788,16 @@ var Host = class {
     } catch {
       return {};
     }
+  }
+  applicationGetMetrics(applicationId, nodeId) {
+    const result = safeCall(hostApplicationGetMetrics, applicationId, nodeId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return {};
+    return decodeApplicationMetrics(bytes);
   }
   applicationGetStatus(applicationId, nodeId) {
     const result = safeCall(hostApplicationGetStatus, applicationId, nodeId);

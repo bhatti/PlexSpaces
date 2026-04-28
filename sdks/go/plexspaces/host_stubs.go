@@ -20,23 +20,32 @@ import (
 
 // stubState holds test stub state for verification in tests.
 var stubState = struct {
-	mu         sync.Mutex
-	sent       []stubMessage
-	stopped    []string
-	groupSent  []stubGroupMessage
-	logs       []stubLog
-	kvStore    map[string]string
-	tupleStore [][]any
-	blobStore  map[string]string
-	pgMembers  map[string][]string
-	selfID     string
-	nowMs      uint64
-	useRealTime bool
+	mu                sync.Mutex
+	sent              []stubMessage
+	stopped           []string
+	groupSent         []stubGroupMessage
+	logs              []stubLog
+	kvStore           map[string]string
+	tupleStore        [][]any
+	blobStore         map[string]string
+	pgMembers         map[string][]string
+	channelQueues     map[string][]stubChannelMessage
+	channelTopics     map[string][]stubChannelMessage
+	channelAcked      map[string]bool   // msg ID → acked
+	channelNacked     map[string]bool   // msg ID → nacked
+	channelSubs       map[string]string // subscription ID → channel name
+	channelSubCounter int
+	selfID            string
+	nowMs             uint64
+	useRealTime       bool
 }{
-	kvStore:   make(map[string]string),
-	blobStore: make(map[string]string),
-	pgMembers: make(map[string][]string),
-	selfID:    "test-actor:test@test-node",
+	kvStore:       make(map[string]string),
+	blobStore:     make(map[string]string),
+	pgMembers:     make(map[string][]string),
+	channelAcked:  make(map[string]bool),
+	channelNacked: make(map[string]bool),
+	channelSubs:   make(map[string]string),
+	selfID:        "test-actor:test@test-node",
 }
 
 type stubMessage struct {
@@ -51,6 +60,10 @@ type stubLog struct {
 	Level, Message string
 }
 
+type stubChannelMessage struct {
+	id, msgType, payload string
+}
+
 // ResetStubs clears all stub state (call from test setup).
 func ResetStubs() {
 	stubState.mu.Lock()
@@ -63,6 +76,12 @@ func ResetStubs() {
 	stubState.tupleStore = nil
 	stubState.blobStore = make(map[string]string)
 	stubState.pgMembers = make(map[string][]string)
+	stubState.channelQueues = make(map[string][]stubChannelMessage)
+	stubState.channelTopics = make(map[string][]stubChannelMessage)
+	stubState.channelAcked = make(map[string]bool)
+	stubState.channelNacked = make(map[string]bool)
+	stubState.channelSubs = make(map[string]string)
+	stubState.channelSubCounter = 0
 	stubState.selfID = "test-actor:test@test-node"
 	stubState.nowMs = 0
 	stubState.useRealTime = false
@@ -463,4 +482,161 @@ func hostHTTPFetch(linkName, method, pathAndQuery string, requestWire []byte) st
 		"body":    "",
 	})
 	return string(out)
+}
+
+// ========================================================================
+// Channel (queue + pub/sub)
+// ========================================================================
+
+func hostChannelSend(ctx, channelName, msgType, payloadJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelQueues == nil {
+		stubState.channelQueues = make(map[string][]stubChannelMessage)
+	}
+	id := fmt.Sprintf("msg-%d", len(stubState.channelQueues[channelName])+1)
+	stubState.channelQueues[channelName] = append(stubState.channelQueues[channelName], stubChannelMessage{id, msgType, payloadJSON})
+	return id
+}
+
+func hostChannelSendWithOptions(ctx, channelName, msgType, payloadJSON string, delayMs, ttlMs uint64, headersJSON string) string {
+	return hostChannelSend(ctx, channelName, msgType, payloadJSON)
+}
+
+func hostChannelReceive(ctx, channelName string, timeoutMs uint64) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelQueues == nil {
+		return ""
+	}
+	msgs := stubState.channelQueues[channelName]
+	if len(msgs) == 0 {
+		return ""
+	}
+	msg := msgs[0]
+	stubState.channelQueues[channelName] = msgs[1:]
+	out, _ := json.Marshal(map[string]any{
+		"id":             msg.id,
+		"msg_type":       msg.msgType,
+		"payload":        msg.payload,
+		"timestamp":      0,
+		"delivery_count": 1,
+		"headers":        []any{},
+	})
+	return string(out)
+}
+
+func hostChannelPublish(ctx, channelName, msgType, payloadJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelTopics == nil {
+		stubState.channelTopics = make(map[string][]stubChannelMessage)
+	}
+	id := fmt.Sprintf("pub-%d", len(stubState.channelTopics[channelName])+1)
+	stubState.channelTopics[channelName] = append(stubState.channelTopics[channelName], stubChannelMessage{id, msgType, payloadJSON})
+	return id
+}
+
+func hostChannelSubscribe(ctx, channelName string, filter string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	stubState.channelSubCounter++
+	subID := fmt.Sprintf("sub-%d", stubState.channelSubCounter)
+	if stubState.channelSubs == nil {
+		stubState.channelSubs = make(map[string]string)
+	}
+	stubState.channelSubs[subID] = channelName
+	return subID
+}
+
+func hostChannelUnsubscribe(subscriptionID string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelSubs != nil {
+		delete(stubState.channelSubs, subscriptionID)
+	}
+	return ""
+}
+
+func hostChannelAck(ctx, channelName, messageID string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelAcked == nil {
+		stubState.channelAcked = make(map[string]bool)
+	}
+	stubState.channelAcked[messageID] = true
+	return ""
+}
+
+func hostChannelNack(ctx, channelName, messageID string, requeue bool) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelNacked == nil {
+		stubState.channelNacked = make(map[string]bool)
+	}
+	stubState.channelNacked[messageID] = true
+	return ""
+}
+
+// GetStubChannelAcked returns the set of message IDs that have been acked.
+func GetStubChannelAcked() map[string]bool {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	result := make(map[string]bool, len(stubState.channelAcked))
+	for k, v := range stubState.channelAcked {
+		result[k] = v
+	}
+	return result
+}
+
+// GetStubChannelNacked returns the set of message IDs that have been nacked.
+func GetStubChannelNacked() map[string]bool {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	result := make(map[string]bool, len(stubState.channelNacked))
+	for k, v := range stubState.channelNacked {
+		result[k] = v
+	}
+	return result
+}
+
+// GetStubChannelSubscriptions returns active subscription ID → channel name mappings.
+func GetStubChannelSubscriptions() map[string]string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	result := make(map[string]string, len(stubState.channelSubs))
+	for k, v := range stubState.channelSubs {
+		result[k] = v
+	}
+	return result
+}
+
+func hostChannelCreate(ctx, channelName string, maxSize uint32, messageTTLMs uint64) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelQueues == nil {
+		stubState.channelQueues = make(map[string][]stubChannelMessage)
+	}
+	if _, ok := stubState.channelQueues[channelName]; !ok {
+		stubState.channelQueues[channelName] = nil
+	}
+	return ""
+}
+
+func hostChannelDelete(ctx, channelName string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelQueues != nil {
+		delete(stubState.channelQueues, channelName)
+	}
+	return ""
+}
+
+func hostChannelDepth(ctx, channelName string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.channelQueues == nil {
+		return "0"
+	}
+	return fmt.Sprintf("%d", len(stubState.channelQueues[channelName]))
 }

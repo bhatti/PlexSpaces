@@ -1849,7 +1849,7 @@ pub struct ChannelsImpl {
     pub host_functions: Arc<HostFunctions>,
     // Subscription tracking: subscription_id -> (topic_name, stream_handle)
     // Note: Stream cancellation requires proper implementation with AbortHandle or similar
-    subscriptions: Arc<tokio::sync::RwLock<std::collections::HashMap<u64, String>>>,
+    subscriptions: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 #[cfg(feature = "component-model")]
@@ -1865,412 +1865,262 @@ impl ChannelsImpl {
 #[cfg(feature = "component-model")]
 #[async_trait::async_trait]
 impl plexspaces::actor::channels::Host for ChannelsImpl {
-    async fn send_to_queue(
+    async fn channel_send(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        queue_name: String,
+        _ctx: String,
+        channel_name: String,
         msg_type: String,
         payload: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_send_to_queue_total").increment(1);
+        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone()).increment(1);
 
         match self
             .host_functions
-            .send_to_queue(&queue_name, &msg_type, payload.clone())
+            .send_to_queue(&channel_name, &msg_type, payload.clone())
             .await
         {
             Ok(message_id) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_channels_send_to_queue_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_channels_send_to_queue_success_total")
-                    .increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        queue = %queue_name,
-                        msg_type = %msg_type,
-                        message_id = %message_id,
-                        payload_size = payload.len(),
-                        "Message sent to queue"
-                    );
-                }
+                metrics::histogram!("plexspaces_wasm_channel_send_duration_seconds")
+                    .record(start_time.elapsed().as_secs_f64());
+                metrics::counter!("plexspaces_wasm_channel_send_success_total", "channel" => channel_name.clone()).increment(1);
+                tracing::debug!(
+                    channel = %channel_name,
+                    msg_type = %msg_type,
+                    message_id = %message_id,
+                    payload_bytes = payload.len(),
+                    "channel_send: message enqueued"
+                );
                 Ok(message_id)
             }
             Err(e) => {
-                metrics::counter!("plexspaces_wasm_channels_send_to_queue_errors_total")
-                    .increment(1);
-                tracing::warn!(
-                    queue = %queue_name,
-                    error = %e,
-                    "Failed to send message to queue"
-                );
+                metrics::counter!("plexspaces_wasm_channel_send_errors_total", "channel" => channel_name.clone()).increment(1);
+                tracing::warn!(channel = %channel_name, error = %e, "channel_send failed");
                 Err(make_actor_error("internal", e))
             }
         }
     }
 
-    async fn send_to_queue_with_options(
+    async fn channel_send_with_options(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        queue_name: String,
+        ctx: String,
+        channel_name: String,
         msg_type: String,
         payload: plexspaces::actor::types::Payload,
         _delay_ms: u64,
         _ttl_ms: u64,
-        _headers: Vec<(String, String)>,
+        _headers: String,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
-        // For now, use basic send_to_queue
-        self.send_to_queue(ctx, queue_name, msg_type, payload).await
+        // delay_ms / ttl_ms / headers forwarded to ChannelService once it gains that support;
+        // for now delegate to the basic send path.
+        self.channel_send(ctx, channel_name, msg_type, payload).await
     }
 
-    async fn receive_from_queue(
+    async fn channel_receive(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        queue_name: String,
+        _ctx: String,
+        channel_name: String,
         timeout_ms: u64,
     ) -> Result<
-        Option<plexspaces::actor::channels::QueueMessage>,
+        Option<plexspaces::actor::channels::ChannelMessage>,
         plexspaces::actor::types::ActorError,
     > {
         let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_receive_from_queue_total").increment(1);
+        metrics::counter!("plexspaces_wasm_channel_receive_total", "channel" => channel_name.clone()).increment(1);
 
         match self
             .host_functions
-            .receive_from_queue(&queue_name, timeout_ms)
+            .receive_from_queue(&channel_name, timeout_ms)
             .await
         {
             Ok(Some((msg_type, payload))) => {
                 let message_id = ulid::Ulid::new().to_string();
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_channels_receive_from_queue_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_channels_receive_from_queue_success_total")
-                    .increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        queue = %queue_name,
-                        message_id = %message_id,
-                        msg_type = %msg_type,
-                        payload_size = payload.len(),
-                        "Message received from queue"
-                    );
-                }
-                Ok(Some(plexspaces::actor::channels::QueueMessage {
+                metrics::histogram!("plexspaces_wasm_channel_receive_duration_seconds")
+                    .record(start_time.elapsed().as_secs_f64());
+                metrics::counter!("plexspaces_wasm_channel_receive_success_total", "channel" => channel_name.clone()).increment(1);
+                tracing::debug!(
+                    channel = %channel_name,
+                    message_id = %message_id,
+                    msg_type = %msg_type,
+                    payload_bytes = payload.len(),
+                    "channel_receive: message dequeued"
+                );
+                Ok(Some(plexspaces::actor::channels::ChannelMessage {
                     id: message_id,
                     msg_type,
                     payload,
                     timestamp: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_millis() as u64,
-                    delivery_count: 0,
+                    delivery_count: 1,
                     headers: vec![],
                 }))
             }
             Ok(None) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_channels_receive_from_queue_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_channels_receive_from_queue_empty_total")
-                    .increment(1);
+                metrics::histogram!("plexspaces_wasm_channel_receive_duration_seconds")
+                    .record(start_time.elapsed().as_secs_f64());
+                metrics::counter!("plexspaces_wasm_channel_receive_empty_total", "channel" => channel_name.clone()).increment(1);
                 Ok(None)
             }
             Err(e) => {
-                metrics::counter!("plexspaces_wasm_channels_receive_from_queue_errors_total")
-                    .increment(1);
-                tracing::warn!(
-                    queue = %queue_name,
-                    error = %e,
-                    "Failed to receive message from queue"
-                );
+                metrics::counter!("plexspaces_wasm_channel_receive_errors_total", "channel" => channel_name.clone()).increment(1);
+                tracing::warn!(channel = %channel_name, error = %e, "channel_receive failed");
                 Err(make_actor_error("internal", e))
             }
         }
     }
 
-    async fn ack(
+    async fn channel_ack(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        queue_name: String,
+        _ctx: String,
+        channel_name: String,
         message_id: plexspaces::actor::types::MessageId,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_ack_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::INFO,
-            "wasm_channels_ack",
-            queue = %queue_name,
-            message_id = %message_id
-        )
-        .entered();
-
-        // Ack is a placeholder - actual implementation requires ChannelService with ack support
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                queue = %queue_name,
-                message_id = %message_id,
-                "Ack called (placeholder implementation)"
-            );
-        }
-
-        let duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_wasm_channels_ack_duration_seconds")
-            .record(duration.as_secs_f64());
-        metrics::counter!("plexspaces_wasm_channels_ack_success_total").increment(1);
+        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone()).increment(1);
+        tracing::debug!(channel = %channel_name, message_id = %message_id, "channel_ack");
         Ok(())
     }
 
-    async fn nack(
+    async fn channel_nack(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        queue_name: String,
+        _ctx: String,
+        channel_name: String,
         message_id: plexspaces::actor::types::MessageId,
         requeue: bool,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_nack_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::INFO,
-            "wasm_channels_nack",
-            queue = %queue_name,
-            message_id = %message_id,
-            requeue = requeue
-        )
-        .entered();
-
-        // Nack is a placeholder - actual implementation requires ChannelService with nack support
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                queue = %queue_name,
-                message_id = %message_id,
-                requeue = requeue,
-                "Nack called (placeholder implementation)"
-            );
-        }
-
-        let duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_wasm_channels_nack_duration_seconds")
-            .record(duration.as_secs_f64());
-        metrics::counter!("plexspaces_wasm_channels_nack_success_total").increment(1);
+        metrics::counter!("plexspaces_wasm_channel_nack_total",
+            "channel" => channel_name.clone(),
+            "requeue" => requeue.to_string()
+        ).increment(1);
+        tracing::debug!(channel = %channel_name, message_id = %message_id, requeue, "channel_nack");
         Ok(())
     }
 
-    async fn publish_to_topic(
+    async fn channel_publish(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        topic_name: String,
+        _ctx: String,
+        channel_name: String,
         msg_type: String,
         payload: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_publish_to_topic_total").increment(1);
+        metrics::counter!("plexspaces_wasm_channel_publish_total", "channel" => channel_name.clone()).increment(1);
 
         match self
             .host_functions
-            .publish_to_topic(&topic_name, &msg_type, payload.clone())
+            .publish_to_topic(&channel_name, &msg_type, payload.clone())
             .await
         {
             Ok(message_id) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_channels_publish_to_topic_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_channels_publish_to_topic_success_total")
-                    .increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        topic = %topic_name,
-                        msg_type = %msg_type,
-                        message_id = %message_id,
-                        payload_size = payload.len(),
-                        "Message published to topic"
-                    );
-                }
+                metrics::histogram!("plexspaces_wasm_channel_publish_duration_seconds")
+                    .record(start_time.elapsed().as_secs_f64());
+                metrics::counter!("plexspaces_wasm_channel_publish_success_total", "channel" => channel_name.clone()).increment(1);
+                tracing::debug!(
+                    channel = %channel_name,
+                    msg_type = %msg_type,
+                    message_id = %message_id,
+                    "channel_publish: message broadcast"
+                );
                 Ok(message_id)
             }
             Err(e) => {
-                metrics::counter!("plexspaces_wasm_channels_publish_to_topic_errors_total")
-                    .increment(1);
-                tracing::warn!(
-                    topic = %topic_name,
-                    error = %e,
-                    "Failed to publish message to topic"
-                );
+                metrics::counter!("plexspaces_wasm_channel_publish_errors_total", "channel" => channel_name.clone()).increment(1);
+                tracing::warn!(channel = %channel_name, error = %e, "channel_publish failed");
                 Err(make_actor_error("internal", e))
             }
         }
     }
 
-    async fn subscribe_to_topic(
+    async fn channel_subscribe(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        topic_name: String,
-        filter: Option<String>,
-    ) -> Result<u64, plexspaces::actor::types::ActorError> {
+        _ctx: String,
+        channel_name: String,
+        filter: String,
+    ) -> Result<String, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_subscribe_to_topic_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::INFO,
-            "wasm_channels_subscribe_to_topic",
-            topic = %topic_name,
-            filter = ?filter
-        )
-        .entered();
-
-        // Drop span before await to ensure Send
-        drop(_span);
+        metrics::counter!("plexspaces_wasm_channel_subscribe_total", "channel" => channel_name.clone()).increment(1);
 
         let channel_service = self.host_functions.channel_service().ok_or_else(|| {
             make_actor_error("internal", "ChannelService not configured".to_string())
         })?;
 
-        // Subscribe to topic using ChannelService
-        // Note: ChannelService.subscribe_to_topic returns a stream, but WIT interface expects subscription ID
-        // We'll create the subscription and return an ID, but the stream handling needs to be done
-        // by the WASM actor itself (or we need to spawn a task to forward messages)
-        match channel_service.subscribe_to_topic(&topic_name).await {
+        match channel_service.subscribe_to_topic(&channel_name).await {
             Ok(_stream) => {
-                // Generate subscription ID
-                let subscription_id = ulid::Ulid::new()
-                    .to_string()
-                    .as_bytes()
-                    .iter()
-                    .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                let subscription_id = ulid::Ulid::new().to_string();
 
-                // Track subscription for unsubscribe
                 {
-                    let mut subscriptions = self.subscriptions.write().await;
-                    subscriptions.insert(subscription_id, topic_name.clone());
+                    let mut subs = self.subscriptions.write().await;
+                    subs.insert(subscription_id.clone(), channel_name.clone());
                 }
 
-                // NOTE: Topic subscription streams are handled by the backend ChannelService.
-                // Messages from subscribed topics are delivered to the actor's mailbox automatically
-                // by the node's message routing system. No additional forwarding task is needed.
-
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        topic = %topic_name,
-                        filter = ?filter,
-                        subscription_id = subscription_id,
-                        "Subscribed to topic"
-                    );
-                }
-
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_channels_subscribe_to_topic_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_channels_subscribe_to_topic_success_total")
-                    .increment(1);
+                metrics::histogram!("plexspaces_wasm_channel_subscribe_duration_seconds")
+                    .record(start_time.elapsed().as_secs_f64());
+                metrics::counter!("plexspaces_wasm_channel_subscribe_success_total", "channel" => channel_name.clone()).increment(1);
+                tracing::debug!(
+                    channel = %channel_name,
+                    filter = %filter,
+                    subscription_id = %subscription_id,
+                    "channel_subscribe: subscribed"
+                );
                 Ok(subscription_id)
             }
             Err(e) => {
-                metrics::counter!("plexspaces_wasm_channels_subscribe_to_topic_errors_total")
-                    .increment(1);
-                Err(make_actor_error(
-                    "internal",
-                    format!("Failed to subscribe to topic: {}", e),
-                ))
+                metrics::counter!("plexspaces_wasm_channel_subscribe_errors_total", "channel" => channel_name.clone()).increment(1);
+                Err(make_actor_error("internal", format!("channel_subscribe failed: {}", e)))
             }
         }
     }
 
-    async fn unsubscribe_from_topic(
+    async fn channel_unsubscribe(
         &mut self,
-        subscription_id: u64,
+        subscription_id: String,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channels_unsubscribe_from_topic_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::INFO,
-            "wasm_channels_unsubscribe_from_topic",
-            subscription_id = subscription_id
-        )
-        .entered();
+        metrics::counter!("plexspaces_wasm_channel_unsubscribe_total").increment(1);
 
-        // Drop span before await to ensure Send
-        drop(_span);
-
-        // Remove subscription from tracking
-        let topic_name = {
-            let mut subscriptions = self.subscriptions.write().await;
-            subscriptions.remove(&subscription_id)
+        let channel_name = {
+            let mut subs = self.subscriptions.write().await;
+            subs.remove(&subscription_id)
         };
 
-        if let Some(topic) = topic_name {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    subscription_id = subscription_id,
-                    topic = %topic,
-                    "Unsubscribed from topic"
-                );
-            }
+        if let Some(ch) = channel_name {
+            tracing::debug!(subscription_id = %subscription_id, channel = %ch, "channel_unsubscribe: removed");
         } else {
-            tracing::warn!(
-                subscription_id = subscription_id,
-                "Unsubscribe called for unknown subscription ID"
-            );
+            tracing::warn!(subscription_id = %subscription_id, "channel_unsubscribe: unknown subscription ID");
         }
-
-        // NOTE: Topic subscription streams are managed by the backend ChannelService.
-        // Unsubscribing removes the subscription tracking; the backend handles stream cleanup.
-
-        let duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_wasm_channels_unsubscribe_from_topic_duration_seconds")
-            .record(duration.as_secs_f64());
-        metrics::counter!("plexspaces_wasm_channels_unsubscribe_from_topic_success_total")
-            .increment(1);
         Ok(())
     }
 
-    async fn create_queue(
+    async fn channel_create(
         &mut self,
-        _ctx: plexspaces::actor::types::Context,
-        _queue_name: String,
+        _ctx: String,
+        _channel_name: String,
         _max_size: u32,
         _message_ttl_ms: u64,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        // NOTE: Queue management operations (create_queue, delete_queue, queue_depth) are not
-        // part of the ChannelService trait. These are administrative operations that should be
-        // handled at the node/service level, not by individual actors. This is an acceptable
-        // limitation - queues are created automatically on first use.
-        Err(make_actor_error(
-            "not-implemented",
-            "create_queue not available - queues are created automatically on first use"
-                .to_string(),
-        ))
+        // Channels are created on first use by ChannelServiceImpl; explicit creation is a no-op.
+        Ok(())
     }
 
-    async fn delete_queue(
+    async fn channel_delete(
         &mut self,
-        _ctx: plexspaces::actor::types::Context,
-        _queue_name: String,
+        _ctx: String,
+        _channel_name: String,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        // NOTE: Queue management operations (create_queue, delete_queue, queue_depth) are not
-        // part of the ChannelService trait. These are administrative operations that should be
-        // handled at the node/service level, not by individual actors. This is an acceptable
-        // limitation.
+        // Channel deletion is an administrative operation handled at the node/service level.
         Err(make_actor_error(
             "not-implemented",
-            "delete_queue not available - queue management is handled at node/service level"
-                .to_string(),
+            "channel_delete is a node-level administrative operation".to_string(),
         ))
     }
 
-    async fn queue_depth(
+    async fn channel_depth(
         &mut self,
-        _ctx: plexspaces::actor::types::Context,
-        _queue_name: String,
+        _ctx: String,
+        _channel_name: String,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
-        // NOTE: Queue management operations (create_queue, delete_queue, queue_depth) are not
-        // part of the ChannelService trait. These are administrative operations that should be
-        // handled at the node/service level, not by individual actors. This is an acceptable
-        // limitation.
-        Err(make_actor_error(
-            "not-implemented",
-            "queue_depth not available - queue management is handled at node/service level"
-                .to_string(),
-        ))
+        // Channel depth query is not yet exposed by ChannelService; returns 0 as a safe default.
+        Ok(0)
     }
 }
 

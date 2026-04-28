@@ -441,4 +441,9 @@ enum BuiltInFacetType {
   // Virtual actor facet (Orleans-inspired)
   // Enables automatic activation/deactivation for always-addressable actors
   VIRTUAL_ACTOR = 12;
+
+  // Memoize facet — KV-backed result cache
+  // Intercepts handler calls: returns cached result on hit, computes and stores on miss.
+  // Config: key_prefix, ttl_seconds, max_entries, handler_names (see memoize_facet.proto)
+  MEMOIZE = 13;
 }

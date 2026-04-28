@@ -556,6 +556,7 @@ impl Facet for RegistryFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Intercept registry operations
         if method == "register_object"
@@ -670,6 +671,7 @@ mod tests {
             .before_method(
                 "register_object",
                 serde_json::to_vec(&register_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -693,6 +695,7 @@ mod tests {
             .before_method(
                 "lookup_object",
                 serde_json::to_vec(&lookup_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -727,6 +730,7 @@ mod tests {
             .before_method(
                 "register_object",
                 serde_json::to_vec(&register_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -740,6 +744,7 @@ mod tests {
             .before_method(
                 "unregister_object",
                 serde_json::to_vec(&unregister_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -763,6 +768,7 @@ mod tests {
             .before_method(
                 "lookup_object",
                 serde_json::to_vec(&lookup_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -797,6 +803,7 @@ mod tests {
                 .before_method(
                     "register_object",
                     serde_json::to_vec(&register_args).unwrap().as_slice(),
+                    &std::collections::HashMap::new(),
                 )
                 .await
                 .unwrap();
@@ -813,6 +820,7 @@ mod tests {
             .before_method(
                 "discover_objects",
                 serde_json::to_vec(&discover_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();

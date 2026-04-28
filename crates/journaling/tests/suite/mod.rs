@@ -19,6 +19,7 @@ pub mod replay_integration;
 pub mod replay_isolation;
 pub mod side_effect_caching;
 pub mod sqlite_persistence;
+pub mod memoize_facet_integration;
 pub mod timer_facet_distributed_locks;
 pub mod timer_facet_tests;
 pub mod truncation_tests;

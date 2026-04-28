@@ -18,6 +18,7 @@ package plexspaces
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -34,12 +35,14 @@ const errorPrefix = "ERROR:"
 //	myID := host.SelfID()
 type Host struct {
 	ts *TupleSpace
+	ch *Channel
 }
 
 // NewHost creates a new Host instance.
 func NewHost() *Host {
 	h := &Host{}
 	h.ts = &TupleSpace{host: h}
+	h.ch = &Channel{host: h}
 	return h
 }
 
@@ -240,6 +243,40 @@ func (h *Host) KVDelete(key string) string { return hostKVDelete(key) }
 // KVList lists keys with a prefix. Returns JSON array of keys.
 func (h *Host) KVList(prefix string) string { return hostKVList(prefix) }
 
+// KVGetJSON retrieves a value by key and JSON-unmarshals it into dest.
+// Returns (true, nil) on success, (false, nil) if the key does not exist,
+// or (false, err) if unmarshalling fails.
+//
+//	var task map[string]any
+//	found, err := host.KVGetJSON("queue:pending:1", &task)
+func (h *Host) KVGetJSON(key string, dest any) (bool, error) {
+	raw := h.KVGet(key)
+	if raw == "" {
+		return false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), dest); err != nil {
+		return false, fmt.Errorf("KVGetJSON(%q): %w", key, err)
+	}
+	return true, nil
+}
+
+// KVPutJSON marshals src to JSON and stores it under key.
+// Returns an error if marshalling fails or the KV write fails.
+//
+//	if err := host.KVPutJSON("queue:pending:1", task); err != nil {
+//	    host.Warn(fmt.Sprintf("KVPutJSON failed: %v", err))
+//	}
+func (h *Host) KVPutJSON(key string, src any) error {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return fmt.Errorf("KVPutJSON(%q): marshal: %w", key, err)
+	}
+	if result := h.KVPut(key, string(data)); isHostError(result) {
+		return fmt.Errorf("KVPutJSON(%q): %s", key, result)
+	}
+	return nil
+}
+
 // ========================================================================
 // TupleSpace (Linda-style coordination)
 // ========================================================================
@@ -308,6 +345,73 @@ func (h *Host) BlobDelete(blobID string) string { return hostBlobDelete(blobID) 
 func (h *Host) BlobList(prefix string) string { return hostBlobList(prefix) }
 
 // ========================================================================
+// EventLog — two-cursor watermark (embed in actor state)
+// ========================================================================
+
+// EventLog is a monotonic append-only log backed by KV.
+// Embed it in actor state (it serializes with the actor via JSON tags).
+// Each consumer tracks its own read cursor so they advance independently.
+//
+// Usage:
+//
+//	type MyActor struct {
+//	    plexspaces.BaseActor
+//	    Log plexspaces.EventLog `json:"log"`
+//	}
+//
+//	// append
+//	_ = a.Log.Append(h, "audit:", map[string]any{"action": "login"})
+//
+//	// poll
+//	events, newCursor, _ := a.Log.Poll(h, "audit:", "consumer-1", 20)
+type EventLog struct {
+	Watermark int64 `json:"watermark"`
+}
+
+// Append writes entry to KV at <prefix>seq:<watermark+1> and increments the watermark.
+// Returns the sequence number assigned.
+func (el *EventLog) Append(h *Host, prefix string, entry any) (int64, error) {
+	el.Watermark++
+	key := fmt.Sprintf("%sseq:%d", prefix, el.Watermark)
+	if err := h.KVPutJSON(key, entry); err != nil {
+		el.Watermark-- // roll back on failure
+		return 0, err
+	}
+	return el.Watermark, nil
+}
+
+// Poll reads up to limit events for consumerID starting after its stored cursor.
+// Returns the events, the new cursor value, and any error.
+// The caller is responsible for persisting updated actor state (which contains el.Watermark).
+func (el *EventLog) Poll(h *Host, prefix, consumerID string, limit int) ([]any, int64, error) {
+	cursorKey := prefix + "cursor:" + consumerID
+	var cursor int64
+	if raw := h.KVGet(cursorKey); raw != "" {
+		fmt.Sscanf(raw, "%d", &cursor)
+	}
+
+	var events []any
+	newCursor := cursor
+	for seq := cursor + 1; seq <= el.Watermark && len(events) < limit; seq++ {
+		key := fmt.Sprintf("%sseq:%d", prefix, seq)
+		var entry any
+		found, err := h.KVGetJSON(key, &entry)
+		if err != nil {
+			return events, newCursor, err
+		}
+		if found {
+			events = append(events, entry)
+			newCursor = seq
+		}
+	}
+
+	if newCursor != cursor {
+		h.KVPut(cursorKey, fmt.Sprintf("%d", newCursor))
+	}
+	return events, newCursor, nil
+}
+
+// ========================================================================
 // Process Groups
 // ========================================================================
 
@@ -348,6 +452,152 @@ func (pg *ProcessGroups) Broadcast(group, msgType string, payload any) error {
 	payloadJSON := marshalPayload(payload)
 	result := hostPGBroadcast(group, msgType, payloadJSON)
 	return checkError(result)
+}
+
+// First returns the first member of a named process group.
+// Returns an error if the group is empty or the PG call fails.
+// Use this for location-transparent service discovery.
+//
+//	agentID, err := host.PG().First("svc:agent")
+func (pg *ProcessGroups) First(group string) (string, error) {
+	members, err := pg.Members(group)
+	if err != nil {
+		return "", fmt.Errorf("pg.Members(%q): %w", group, err)
+	}
+	if len(members) == 0 {
+		return "", fmt.Errorf("no members in process group %q", group)
+	}
+	return members[0], nil
+}
+
+// ========================================================================
+// Channel (queue + pub/sub)
+// ========================================================================
+
+// Channel provides access to channel/queue operations (queue and pub/sub patterns).
+// Uses ctx as a JSON string encoding the tenant/namespace context.
+type Channel struct {
+	host *Host
+}
+
+// Ch returns the Channel sub-API.
+func (h *Host) Ch() *Channel { return h.ch }
+
+// Send sends a message to a channel (queue semantics — one consumer receives it).
+// Returns the message ID on success.
+func (ch *Channel) Send(ctx, channelName, msgType string, payload any) (string, error) {
+	payloadJSON := marshalPayload(payload)
+	ctxJSON := marshalPayload(ctx)
+	result := hostChannelSend(ctxJSON, channelName, msgType, payloadJSON)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+
+// SendWithOptions sends a message with delay, TTL, and custom headers.
+// delayMs: delay before message becomes visible (0 = immediate).
+// ttlMs: time-to-live (0 = no expiry).
+// headers: additional metadata key-value pairs.
+func (ch *Channel) SendWithOptions(ctx, channelName, msgType string, payload any, delayMs, ttlMs uint64, headers map[string]string) (string, error) {
+	payloadJSON := marshalPayload(payload)
+	ctxJSON := marshalPayload(ctx)
+	headersJSON := marshalPayload(headers)
+	result := hostChannelSendWithOptions(ctxJSON, channelName, msgType, payloadJSON, delayMs, ttlMs, headersJSON)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+
+// Receive receives one message from a channel (blocking up to timeoutMs).
+// Returns (message map, true) on receipt; (nil, false) on timeout/empty channel.
+// The message map contains: id, msg_type, payload, timestamp, delivery_count, headers.
+// Call Ack after successful processing to prevent redelivery.
+func (ch *Channel) Receive(ctx, channelName string, timeoutMs uint64) (map[string]any, bool, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostChannelReceive(ctxJSON, channelName, timeoutMs)
+	if isHostError(result) {
+		return nil, false, &HostError{result}
+	}
+	if result == "" {
+		return nil, false, nil
+	}
+	var msg map[string]any
+	if err := json.Unmarshal([]byte(result), &msg); err != nil {
+		return nil, false, fmt.Errorf("channel receive decode: %w", err)
+	}
+	return msg, true, nil
+}
+
+// Publish publishes a message to a channel (pub/sub — all subscribers receive it).
+// Returns the message ID on success.
+func (ch *Channel) Publish(ctx, channelName, msgType string, payload any) (string, error) {
+	payloadJSON := marshalPayload(payload)
+	ctxJSON := marshalPayload(ctx)
+	result := hostChannelPublish(ctxJSON, channelName, msgType, payloadJSON)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+
+// Subscribe subscribes to a channel (pub/sub pattern).
+// filter: optional message-type filter (empty string = all messages).
+// Returns a subscription ID for use with Unsubscribe.
+func (ch *Channel) Subscribe(ctx, channelName, filter string) (string, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostChannelSubscribe(ctxJSON, channelName, filter)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+
+// Unsubscribe cancels a subscription by its ID.
+func (ch *Channel) Unsubscribe(subscriptionID string) error {
+	return checkError(hostChannelUnsubscribe(subscriptionID))
+}
+
+// Ack acknowledges successful message processing (prevents redelivery).
+func (ch *Channel) Ack(ctx, channelName, messageID string) error {
+	ctxJSON := marshalPayload(ctx)
+	return checkError(hostChannelAck(ctxJSON, channelName, messageID))
+}
+
+// Nack negative-acknowledges a message.
+// requeue=true returns the message to the channel for retry; false sends it to the dead-letter channel.
+func (ch *Channel) Nack(ctx, channelName, messageID string, requeue bool) error {
+	ctxJSON := marshalPayload(ctx)
+	return checkError(hostChannelNack(ctxJSON, channelName, messageID, requeue))
+}
+
+// Create creates a channel if it does not exist.
+// maxSize: capacity limit (0 = unbounded).
+// messageTTLMs: default TTL for messages (0 = no expiry).
+func (ch *Channel) Create(ctx, channelName string, maxSize uint32, messageTTLMs uint64) error {
+	ctxJSON := marshalPayload(ctx)
+	return checkError(hostChannelCreate(ctxJSON, channelName, maxSize, messageTTLMs))
+}
+
+// Delete deletes a channel and all its pending messages.
+func (ch *Channel) Delete(ctx, channelName string) error {
+	ctxJSON := marshalPayload(ctx)
+	return checkError(hostChannelDelete(ctxJSON, channelName))
+}
+
+// Depth returns the number of pending (unacked) messages in a channel.
+func (ch *Channel) Depth(ctx, channelName string) (uint64, error) {
+	ctxJSON := marshalPayload(ctx)
+	result := hostChannelDepth(ctxJSON, channelName)
+	if isHostError(result) {
+		return 0, &HostError{result}
+	}
+	var depth uint64
+	if _, err := fmt.Sscanf(result, "%d", &depth); err != nil {
+		return 0, fmt.Errorf("channel depth: malformed response %q: %w", result, err)
+	}
+	return depth, nil
 }
 
 // ========================================================================

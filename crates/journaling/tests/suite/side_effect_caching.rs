@@ -244,8 +244,8 @@ mod sqlite_tests {
         // Process a message to trigger journaling
         let method = "process";
         let payload = b"test".to_vec();
-        facet.before_method(method, &payload).await.unwrap();
-        facet.after_method(method, &payload, b"ok").await.unwrap();
+        facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+        facet.after_method(method, &payload, b"ok", &std::collections::HashMap::new()).await.unwrap();
 
         storage.flush().await.unwrap();
 
@@ -287,9 +287,9 @@ mod sqlite_tests {
         // by checking that we can process a new message without errors
         let method = "process2";
         let payload = b"test2".to_vec();
-        new_facet.before_method(method, &payload).await.unwrap();
+        new_facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
         new_facet
-            .after_method(method, &payload, b"ok2")
+            .after_method(method, &payload, b"ok2", &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -374,8 +374,8 @@ mod sqlite_tests {
         // Process a message to trigger journaling
         let method = "process";
         let payload = b"test".to_vec();
-        facet.before_method(method, &payload).await.unwrap();
-        facet.after_method(method, &payload, b"ok").await.unwrap();
+        facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+        facet.after_method(method, &payload, b"ok", &std::collections::HashMap::new()).await.unwrap();
 
         storage.flush().await.unwrap();
 
@@ -415,9 +415,9 @@ mod sqlite_tests {
         // Verify that we can process a new message without errors
         let method = "process2";
         let payload = b"test2".to_vec();
-        new_facet.before_method(method, &payload).await.unwrap();
+        new_facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
         new_facet
-            .after_method(method, &payload, b"ok2")
+            .after_method(method, &payload, b"ok2", &std::collections::HashMap::new())
             .await
             .unwrap();
 

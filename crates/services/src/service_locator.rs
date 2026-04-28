@@ -2131,8 +2131,8 @@ async fn initialize_services_impl(
         ProcessGroupFacetFactory, RegistryFacetFactory,
     };
     use plexspaces_journaling::facet_factories::{
-        DurabilityFacetFactory, EventSourcingFacetFactory, ReminderFacetFactory, TimerFacetFactory,
-        VirtualActorFacetFactory,
+        DurabilityFacetFactory, EventSourcingFacetFactory, MemoizeFacetFactory,
+        ReminderFacetFactory, TimerFacetFactory, VirtualActorFacetFactory,
     };
     use std::sync::Arc as StdArc;
     let service_locator_for_factories: Arc<dyn plexspaces_core::ServiceLocator> =
@@ -2185,6 +2185,10 @@ async fn initialize_services_impl(
         service_locator_for_factories.clone(),
     ));
     facet_registry.register("event_sourcing".to_string(), event_sourcing_factory);
+    let memoize_factory = StdArc::new(MemoizeFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
+    facet_registry.register("memoize".to_string(), memoize_factory);
 
     let facet_registry = Arc::new(facet_registry);
     let facet_registry_wrapper = Arc::new(FacetRegistryServiceWrapper::new(facet_registry.clone()));

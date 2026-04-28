@@ -124,6 +124,8 @@ Buckets: 0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0
 
 ### Channel operations
 
+The `plexspaces-channel` crate is the **source of truth** for channel metrics. All backends (InMemory, SQLite, NATS, SQS, …) emit via the crate's `observability` helpers. The WASM runtime and SDKs are thin wrappers — they do not duplicate these metrics.
+
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `plexspaces_channel_ack_total` | counter | `channel`, `backend` | Acknowledged messages |
@@ -142,6 +144,8 @@ R.E.D. variants (emitted via `RecordChannelMetrics` RPC):
 | `plexspaces_channel_operation_duration_seconds` | histogram | `namespace`, `operation`, `backend` | Channel operation latency |
 | `plexspaces_channel_delivery_attempts_total` | counter | `namespace`, `operation`, `backend`, `delivery_count` | Delivery attempts |
 | `plexspaces_channel_operation_reason_total` | counter | `namespace`, `operation`, `backend`, `reason` | Operation reasons |
+
+**WASM host-call boundary** — the WASM runtime emits a separate, thin layer of counter/histogram metrics (`plexspaces_wasm_channel_*` with `channel` label) solely to measure the cost of crossing the host–guest boundary. These are supplementary to the crate metrics above; they are not a replacement and do not duplicate business logic counters.
 
 ### gRPC server
 

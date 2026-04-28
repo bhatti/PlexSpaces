@@ -587,6 +587,7 @@ impl WasmRuntime {
             self.global_reinstantiation_semaphore.clone(),
             #[cfg(not(feature = "component-model"))]
             None,
+            config.shared_timer_pool,
         )
         .await
     }
@@ -836,6 +837,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             self.global_reinstantiation_semaphore.clone(),
             #[cfg(not(feature = "component-model"))]
             None,
+            wasm_config.shared_timer_pool,
         )
         .await?;
 

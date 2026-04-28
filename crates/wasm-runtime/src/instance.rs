@@ -251,6 +251,7 @@ impl WasmInstance {
         outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
         durability_enabled: bool,
         global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
+        shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> WasmResult<Self> {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_instance_creation_attempts_total").increment(1);
@@ -274,6 +275,7 @@ impl WasmInstance {
             blob_service,
             elastic_pool_service,
             outbound_http_client,
+            shared_timer_pool,
         );
 
         // Store host_functions in Arc for sharing between traditional and component contexts
@@ -2707,6 +2709,18 @@ impl WasmInstance {
     ///
     /// ## Errors
     /// Returns error if shutdown fails
+    /// Returns the shared HostFunctions for this instance.
+    /// Used by callers that need to cancel timers on undeploy.
+    pub async fn host_functions(&self) -> Arc<crate::host_functions::HostFunctions> {
+        self.store.read().await.data().host_functions.clone()
+    }
+
+    /// Abort all pending send_after timers for this actor instance.
+    /// Called during application undeploy so queued timers do not fire after cleanup.
+    pub async fn cancel_pending_timers(&self) {
+        self.host_functions().await.cancel_all_timers();
+    }
+
     pub async fn shutdown(&self) -> WasmResult<()> {
         let mut store = self.store.write().await;
 

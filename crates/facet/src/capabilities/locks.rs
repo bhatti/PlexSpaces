@@ -502,6 +502,7 @@ impl Facet for LockFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Intercept lock operations
         if method == "acquire_lock"
@@ -645,6 +646,7 @@ mod tests {
             .before_method(
                 "acquire_lock",
                 serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -676,6 +678,7 @@ mod tests {
                 serde_json::to_vec(&release_args_with_version)
                     .unwrap()
                     .as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -709,6 +712,7 @@ mod tests {
             .before_method(
                 "try_acquire_lock",
                 serde_json::to_vec(&try_acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -727,6 +731,7 @@ mod tests {
             .before_method(
                 "try_acquire_lock",
                 serde_json::to_vec(&try_acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -755,6 +760,7 @@ mod tests {
             .before_method(
                 "get_lock",
                 serde_json::to_vec(&get_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -779,6 +785,7 @@ mod tests {
             .before_method(
                 "acquire_lock",
                 serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -787,6 +794,7 @@ mod tests {
             .before_method(
                 "get_lock",
                 serde_json::to_vec(&get_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -827,6 +835,7 @@ mod tests {
             .before_method(
                 "acquire_lock",
                 serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -849,6 +858,7 @@ mod tests {
             .before_method(
                 "renew_lock",
                 serde_json::to_vec(&renew_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -887,6 +897,7 @@ mod tests {
             .before_method(
                 "renew_lock",
                 serde_json::to_vec(&renew_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await;
 
@@ -912,6 +923,7 @@ mod tests {
             .before_method(
                 "acquire_lock",
                 serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -928,6 +940,7 @@ mod tests {
             .before_method(
                 "release_lock",
                 serde_json::to_vec(&release_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await;
 
@@ -943,7 +956,7 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send non-lock message
-        let result = facet.before_method("other_message", b"{}").await.unwrap();
+        let result = facet.before_method("other_message", b"{}", &std::collections::HashMap::new()).await.unwrap();
 
         // ASSERT: Should continue (not short-circuit)
         match result {
@@ -962,7 +975,7 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send invalid JSON
-        let result = facet.before_method("acquire_lock", b"invalid json").await;
+        let result = facet.before_method("acquire_lock", b"invalid json", &std::collections::HashMap::new()).await;
 
         // ASSERT: Should return error
         assert!(result.is_err());
@@ -999,6 +1012,7 @@ mod tests {
             .before_method(
                 "acquire_lock",
                 serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();

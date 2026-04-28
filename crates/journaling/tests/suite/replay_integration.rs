@@ -201,9 +201,9 @@ mod sqlite_integration_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -275,9 +275,9 @@ mod sqlite_integration_tests {
         for i in 1..=100 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
 
             // Trigger checkpoint at message 50
             if i == 50 {
@@ -405,7 +405,7 @@ mod sqlite_integration_tests {
         assert!(result.is_ok(), "Should succeed with empty journal");
 
         // Should be able to process messages
-        let result = facet.before_method("test", &[]).await;
+        let result = facet.before_method("test", &[], &std::collections::HashMap::new()).await;
         assert!(result.is_ok(), "Should be able to process messages");
     }
 
@@ -621,9 +621,9 @@ mod sqlite_integration_tests {
         for i in 1..=10 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -719,9 +719,9 @@ mod sqlite_integration_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();

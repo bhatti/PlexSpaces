@@ -326,6 +326,7 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
         &self,
         _method_name: &str,
         _args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Event sourcing doesn't intercept before_method
         // Events are logged in after_method when state changes
@@ -337,6 +338,7 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
         method_name: &str,
         _args: &[u8],
         result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Check if event logging is enabled
         if !self.config.event_log_enabled {
@@ -579,7 +581,7 @@ mod tests {
 
         // Call after_method (should log event)
         let result = facet
-            .after_method("increment", &[], b"{\"new_value\": 5}")
+            .after_method("increment", &[], b"{\"new_value\": 5}", &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -606,7 +608,7 @@ mod tests {
 
         // Call after_method (should not log event)
         let result = facet
-            .after_method("increment", &[], b"{\"new_value\": 5}")
+            .after_method("increment", &[], b"{\"new_value\": 5}", &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -625,7 +627,7 @@ mod tests {
         let facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
 
         // Calling after_method without attach should fail
-        let result = facet.after_method("test", &[], &[]).await;
+        let result = facet.after_method("test", &[], &[], &std::collections::HashMap::new()).await;
         assert!(result.is_err());
     }
 

@@ -1,0 +1,137 @@
+name = "py-miniclaw"
+version = "1.0.0"
+namespace = "py-miniclaw"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "llm_router"
+actor_type = "miniclaw_wasm"
+role = "llm_router"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "llm_router", model = "miniclaw-simulated-v1" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "tool_registry"
+actor_type = "miniclaw_wasm"
+role = "tool_registry"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "tool_registry" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "agent"
+actor_type = "miniclaw_wasm"
+role = "agent"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "agent", agent_name = "general-assistant", system_prompt = "You are a helpful AI assistant with access to tools." }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 3 } }
+]
+
+[[supervisor.children]]
+name = "session_manager"
+actor_type = "miniclaw_wasm"
+role = "session_manager"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "session_manager" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "orchestrator"
+actor_type = "miniclaw_wasm"
+role = "orchestrator"
+restart = "permanent"
+shutdown_timeout_seconds = 60
+behavior_kind = "Workflow"
+args = { role = "orchestrator" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "memory"
+actor_type = "miniclaw_wasm"
+role = "memory"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "memory" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "audit_event"
+actor_type = "miniclaw_wasm"
+role = "audit_event"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+args = { role = "audit_event" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "agent_fsm"
+actor_type = "miniclaw_wasm"
+role = "agent_fsm"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+args = { role = "agent_fsm" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]
+
+[[supervisor.children]]
+name = "task_queue"
+actor_type = "miniclaw_wasm"
+role = "task_queue"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "task_queue" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]
+
+[[supervisor.children]]
+name = "health_monitor"
+actor_type = "miniclaw_wasm"
+role = "health_monitor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenServer"
+args = { role = "health_monitor", poll_interval_ms = "5000" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "eager" } }
+]

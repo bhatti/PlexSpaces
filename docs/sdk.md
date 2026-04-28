@@ -75,7 +75,177 @@ All language SDKs expose the same semantics for TupleSpace and process groups so
 | TypeScript | `host.processGroups.broadcast(group, "tasks_ready", { ensembleId: "e1", numTasks: 10 })` |
 | Go | `host.PG().Broadcast(group, "tasks_ready", map[string]any{"ensemble_id": "e1", "num_tasks": 10})` |
 
-**Rust**: Native (embedded) actors use `ActorContext::get_tuplespace()` and process group services from the node; WASM Rust actors would use the same WIT host interface and can implement a small `ts`-style helper for parity.
+**Rust**: Native (embedded) actors use `ActorContext::get_tuplespace()` and process group services from the node; WASM Rust actors use the same WIT host interface via `simple_actor::pg_first`.
+
+### Cross-SDK consistency: Tier 1 Ergonomics Helpers
+
+All language SDKs expose the following convenience helpers so that common patterns — finding a service actor, reading/writing structured KV data, and recording metrics — require no boilerplate.
+
+#### `PG.First` / `pg_first` / `processGroups.first` / `first`
+
+Return the first member of a named process group, or an error/null/None when the group is empty.
+
+| Language | API |
+|----------|-----|
+| Python | `host.process_groups.first("svc:llm_router")` → `str \| None` |
+| Python (strict) | `host.process_groups.first_or_raise("svc:llm_router")` → `str` or raises `RuntimeError` |
+| TypeScript | `host.processGroups.first("svc:llm_router")` → `string \| null` |
+| TypeScript (strict) | `host.processGroups.firstOrThrow("svc:llm_router")` → `string` |
+| Go | `host.PG().First("svc:llm_router")` → `(string, error)` |
+| Rust WASM | `pg_first("svc:llm_router")` → `Result<String, String>` |
+
+```python
+# Python — route to the first available LLM router
+router_id = host.process_groups.first_or_raise("svc:llm_router")
+host.send(router_id, "route", json.dumps({"prompt": prompt}))
+```
+
+#### `KVGetJSON` / `kv_get_json` / `kvGetJson`
+
+Retrieve a key from the KV store and deserialize it from JSON. Returns `None`/`null`/`Ok(None)` when the key is missing or the stored value is corrupt JSON.
+
+| Language | API |
+|----------|-----|
+| Python | `host.kv_get_json(key)` → `Any \| None` |
+| TypeScript | `host.kvGetJson<T>(key)` → `T \| null` |
+| Go | `host.KVGetJSON(key, &dest)` → `(bool, error)` |
+| Rust WASM | `kv_get_json::<T>(key)` → `Result<Option<T>, String>` |
+
+#### `KVPutJSON` / `kv_put_json` / `kvPutJson`
+
+Serialize a value to JSON and store it under `key`. Raises/throws/returns an error on write failure.
+
+| Language | API |
+|----------|-----|
+| Python | `host.kv_put_json(key, value)` |
+| TypeScript | `host.kvPutJson(key, value)` |
+| Go | `host.KVPutJSON(key, value)` → `error` |
+| Rust WASM | `kv_put_json(key, &value)` → `Result<(), String>` |
+
+```go
+// Go — store and retrieve a typed task record
+type Task struct { Seq int `json:"seq"`; Kind string `json:"kind"` }
+host.KVPutJSON("task:pending:1", Task{Seq: 1, Kind: "summarize"})
+var t Task
+ok, _ := host.KVGetJSON("task:pending:1", &t)
+```
+
+#### `IncrCounter` / `incr_counter` / `incrCounter`
+
+Increment a single named application metric counter by 1. Errors are swallowed (metrics must not crash actors).
+
+| Language | API |
+|----------|-----|
+| Python | `host.incr_counter(application_id, name)` |
+| TypeScript | `host.incrCounter(applicationId, name)` |
+| Go | `b.IncrCounter(host, name)` (on `*BaseActor`) |
+| Rust WASM | `incr_counter(application_id, name)` |
+
+#### `IncrCounters` / `incr_counters` / `incrCounters`
+
+Increment one or more named counters in a single host call. `message_count` is set to the number of distinct counter names.
+
+| Language | API |
+|----------|-----|
+| Python | `host.incr_counters(application_id, {"cache_hits": 5, "cache_misses": 2})` |
+| TypeScript | `host.incrCounters(applicationId, { cacheHits: 5, cacheMisses: 2 })` |
+| Go | `b.IncrCounters(host, map[string]int{"cache_hits": 5, "cache_misses": 2})` |
+| Rust WASM | `incr_counters(application_id, &[("cache_hits", 5), ("cache_misses", 2)])` |
+
+### Cross-SDK consistency: Channel
+
+`Channel` is the host-provided queue and pub/sub primitive. It exposes two patterns over the same named channel:
+
+- **Queue (point-to-point)** — `Send` / `Receive` / `Ack` / `Nack`. One consumer receives each message; unacked messages are redelivered.
+- **Pub/sub (fan-out)** — `Publish` / `Subscribe` / `Unsubscribe`. All active subscribers receive each message.
+
+The `ctx` parameter is a JSON string that carries the tenant/namespace context for isolation.
+
+| Operation | Python | Go |
+|-----------|--------|----|
+| Enqueue | `host.channel.send(ctx, name, msg_type, payload)` → `str` | `host.Ch().Send(ctx, name, msgType, payload)` → `(string, error)` |
+| Dequeue | `host.channel.receive(ctx, name, timeout_ms)` → `dict \| None` | `host.Ch().Receive(ctx, name, timeoutMs)` → `(map, bool, error)` |
+| Ack | `host.channel.ack(ctx, name, msg_id)` | `host.Ch().Ack(ctx, name, msgID)` |
+| Nack | `host.channel.nack(ctx, name, msg_id, requeue)` | `host.Ch().Nack(ctx, name, msgID, requeue)` |
+| Publish | `host.channel.publish(ctx, name, msg_type, payload)` → `str` | `host.Ch().Publish(ctx, name, msgType, payload)` → `(string, error)` |
+| Subscribe | `host.channel.subscribe(ctx, name, filter)` → `str` | `host.Ch().Subscribe(ctx, name, filter)` → `(string, error)` |
+| Unsubscribe | `host.channel.unsubscribe(subscription_id)` | `host.Ch().Unsubscribe(subscriptionID)` |
+| Depth | `host.channel.depth(ctx, name)` → `int` | `host.Ch().Depth(ctx, name)` → `(uint64, error)` |
+
+```go
+// Go — task queue producer / consumer pattern
+ctx := `{"tenant_id":"t1","namespace":"app"}`
+
+// Producer: enqueue a task
+msgID, err := host.Ch().Send(ctx, "tasks:analyze", "analyze", map[string]any{
+    "doc_id": "d42",
+    "model":  "summarizer",
+})
+
+// Consumer: dequeue, process, ack
+msg, ok, err := host.Ch().Receive(ctx, "tasks:analyze", 5000)
+if ok {
+    // process msg["payload"] …
+    _ = host.Ch().Ack(ctx, "tasks:analyze", msg["id"].(string))
+}
+```
+
+```python
+# Python — pub/sub fan-out to multiple subscribers
+ctx = '{"tenant_id":"t1","namespace":"app"}'
+host.channel.publish(ctx, "events:agent", "agent_chat", {"session": sid})
+```
+
+Channels are auto-created on first use; explicit `Create` is only needed to set capacity or TTL limits.
+
+### Cross-SDK consistency: EventLog
+
+`EventLog` is a monotonic, append-only, two-cursor log backed by the KV store. Embed it in actor state (it holds only a `watermark` integer) so it survives restarts. Multiple independent consumers each track their own read cursor in KV under `<prefix>cursor:<consumer_id>`.
+
+**Append** — increments `watermark`, writes the entry as JSON to `<prefix>seq:<watermark>`. Rolls back `watermark` on KV write failure.
+
+**Poll** — reads entries from `(cursor+1)..watermark` for a named consumer up to `limit`, then persists the new cursor. Returns `(events, new_cursor)`. Idempotent: a second call with the same consumer returns nothing new.
+
+| Language | Embed | Append | Poll |
+|----------|-------|--------|------|
+| Python | `self.log = EventLog()` | `seq = self.log.append(host, "audit:", entry)` | `events, cur = self.log.poll(host, "audit:", "c1", limit=20)` |
+| TypeScript | `log = new EventLog()` | `seq = this.log.append(host, "audit:", entry)` | `[events, cur] = this.log.poll(host, "audit:", "c1", 20)` |
+| Go | `Log EventLog` (in state struct) | `seq, err := s.Log.Append(host, "audit:", entry)` | `events, cur, err := s.Log.Poll(host, "audit:", "c1", 20)` |
+| Rust WASM | `log: EventLog` (in state struct, derive Serialize) | `let seq = state.log.append("audit:", &entry)?;` | `let (events, cur) = state.log.poll("audit:", "consumer-1", 20)?;` |
+
+```python
+# Python — audit log with two independent consumers
+from plexspaces.host import EventLog
+
+class MyActor:
+    log: EventLog = state(default_factory=EventLog)
+
+    @handler("record")
+    def record(self, event: dict) -> dict:
+        seq = self.log.append(host, "audit:", event)
+        return {"seq": seq}
+
+    @handler("poll_audit")
+    def poll_audit(self, consumer_id: str) -> dict:
+        events, cursor = self.log.poll(host, "audit:", consumer_id, limit=50)
+        return {"events": events, "cursor": cursor}
+```
+
+```rust
+// Rust WASM — EventLog embedded in actor state
+use plexspaces_sdk::simple_actor::{EventLog, kv_put_json, kv_get_json};
+
+#[derive(Serialize, Deserialize, Default)]
+struct MyState {
+    log: EventLog,
+}
+
+// append
+let seq = state.log.append("audit:", &entry)?;
+
+// poll (returns all new events since last call for this consumer)
+let (events, new_cursor) = state.log.poll::<serde_json::Value>("audit:", "consumer-1", 20)?;
+```
 
 ## Python SDK
 
@@ -326,11 +496,33 @@ class ChatRoom:
 | `host.blob_download(path)` | Download blob bytes. |
 | `host.blob_delete(path)` | Delete blob. Returns success/error from the actor-world result. |
 | `host.blob_list(prefix)` | List blob ids by prefix. |
+| **Key-Value JSON helpers** | |
+| `host.kv_get_json(key)` | Deserialize a JSON value from KV. Returns `None` if missing or corrupt. |
+| `host.kv_put_json(key, value)` | Serialize a value to JSON and store it. Raises on write failure. |
+| **Metrics helpers** | |
+| `host.incr_counter(application_id, name)` | Increment a named counter by 1. Errors are swallowed. |
+| `host.incr_counters(application_id, counters)` | Increment multiple counters: `{"cache_hits": 5, "cache_misses": 2}`. Errors are swallowed. |
 | **Process Groups** | |
 | `host.process_groups.join(group)` | Join a process group (uses self actor ID) |
 | `host.process_groups.leave(group)` | Leave a process group |
 | `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members; `msg_type` is used for routing so payload can be data-only. |
 | `host.process_groups.members(group)` | Get group member IDs |
+| `host.process_groups.first(group)` | Return the first member of the group, or `None` if empty. |
+| `host.process_groups.first_or_raise(group)` | Return the first member; raise `RuntimeError` if empty. |
+| **EventLog** | |
+| `EventLog()` | Monotonic append-only log backed by KV. Embed in actor state. |
+| `log.append(host, prefix, entry)` | Append JSON entry; returns sequence number. Rolls back on KV failure. |
+| `log.poll(host, prefix, consumer_id, limit)` | Return up to `limit` new events for a consumer; advances the consumer cursor. |
+| **Channel (queue + pub/sub)** | |
+| `host.channel.send(ctx, name, msg_type, payload)` | Enqueue (queue semantics). Returns message ID string. |
+| `host.channel.send_with_options(ctx, name, msg_type, payload, delay_ms, ttl_ms, headers)` | Enqueue with delay, TTL, and custom headers. |
+| `host.channel.receive(ctx, name, timeout_ms)` | Dequeue one message. Returns `dict` or `None` on timeout. |
+| `host.channel.ack(ctx, name, msg_id)` | Acknowledge successful processing; prevents redelivery. |
+| `host.channel.nack(ctx, name, msg_id, requeue)` | Negative-acknowledge; `requeue=True` retries, `False` dead-letters. |
+| `host.channel.publish(ctx, name, msg_type, payload)` | Publish (pub/sub — all subscribers). Returns message ID. |
+| `host.channel.subscribe(ctx, name, filter)` | Subscribe; empty filter matches all. Returns subscription ID. |
+| `host.channel.unsubscribe(subscription_id)` | Cancel a subscription. |
+| `host.channel.depth(ctx, name)` | Return count of pending (unacked) messages. |
 | **Elastic pool** | |
 | `host.pool_checkout(pool_name, timeout_ms)` (Python) / `host.PoolCheckout` (Go) / `host.poolCheckout` (TS) | Checkout an actor from a named pool. Returns the shared `ActorHandle` protobuf model. |
 | `host.pool_checkin(pool_name, actor_id, checkout_id, healthy)` | Checkin an actor to the pool. Use values from the handle returned by checkout. |
@@ -746,6 +938,20 @@ Both forms document valid states and the initial state for observability and too
 
 **Host Functions**: The TypeScript SDK uses WIT virtual imports for host functions. jco componentize wires up `plexspaces:actor/host@0.1.0` imports at build time. The SDK uses generated protobuf models for shared contracts and keeps actor-world encoding at the decorator layer. See [TypeScript SDK README](../sdks/typescript/README.md#host-functions) for details.
 
+**Tier 1 helpers** — convenience wrappers available on the `host` singleton:
+
+| Helper | API | Notes |
+|--------|-----|-------|
+| `host.kvGetJson<T>(key)` | `→ T \| null` | Returns `null` if missing or corrupt JSON |
+| `host.kvPutJson(key, value)` | `→ void` (throws on error) | Serializes to JSON and stores |
+| `host.incrCounter(appId, name)` | `→ void` | Increments one counter by 1; errors swallowed |
+| `host.incrCounters(appId, counters)` | `→ void` | Increments multiple counters; errors swallowed |
+| `host.processGroups.first(group)` | `→ string \| null` | First member of the group |
+| `host.processGroups.firstOrThrow(group)` | `→ string` | Throws if the group is empty |
+| `new EventLog(watermark?)` | — | Embed in actor state (serializable) |
+| `log.append(host, prefix, entry)` | `→ number` | Sequence number; rolls back on KV failure |
+| `log.poll(host, prefix, consumerId, limit?)` | `→ [events, cursor]` | Advances consumer cursor in KV |
+
 **Serialization**: The actor-world boundary is protobuf-first. SDK decorators marshal generated protobuf messages to bytes and unmarshal replies so application code stays typed while the runtime stays aligned with the shared host contract.
 
 Observability (metrics, tracing) for WASM actors is provided by the PlexSpaces runtime; the TypeScript SDK does not add its own. See [sdks/typescript/README.md](../sdks/typescript/README.md) and [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
@@ -853,6 +1059,49 @@ hand-written operation matching in each module.
 | `spawn_with_facets(ctx, sl, id, ns, actor, facets)` | Spawn actor with explicit facets |
 | `spawn_with_storage(ctx, sl, id, ns, actor, storage)` | Spawn durable actor with storage backend |
 | `create_facets(&["timer", "durability"], &config)` | Create facet instances from names (convenience helper) |
+
+### Tier 1 WASM Actor Helpers (`simple_actor`)
+
+The following free functions and types are available in `plexspaces_sdk::simple_actor` for deployable Rust WASM actors. They wrap the WIT `host::*` functions with ergonomic Rust types. None of these require the `native` feature flag — they compile for WASM targets.
+
+| API | Description |
+|-----|-------------|
+| `pg_first(group)` | `→ Result<String, String>` — first member of the process group |
+| `kv_get_json::<T>(key)` | `→ Result<Option<T>, String>` — deserialize JSON from KV; `None` if missing |
+| `kv_put_json(key, &value)` | `→ Result<(), String>` — serialize to JSON and store |
+| `incr_counter(app_id, name)` | `→ ()` — increment one counter by 1; errors are logged and swallowed |
+| `incr_counters(app_id, &[("name", delta)])` | `→ ()` — increment multiple counters; errors are logged and swallowed |
+| `EventLog { watermark: i64 }` | Monotonic append-only log backed by KV. Derive `Serialize`/`Deserialize`. |
+| `log.append(prefix, &entry)` | `→ Result<i64, String>` — append JSON entry; rolls back watermark on failure |
+| `log.poll::<T>(prefix, consumer_id, limit)` | `→ Result<(Vec<T>, i64), String>` — return new events for a consumer |
+
+```rust
+// Rust WASM — Tier 1 helpers in a deployable actor
+use plexspaces_sdk::simple_actor::{
+    pg_first, kv_get_json, kv_put_json, incr_counter, incr_counters, EventLog,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Default)]
+struct MyState {
+    audit_log: EventLog,
+}
+
+// Route to the first available LLM router
+let router = pg_first("svc:llm_router")?;
+
+// Store and retrieve a typed record
+kv_put_json("task:1", &Task { seq: 1, kind: "summarize".into() })?;
+let task: Option<Task> = kv_get_json("task:1")?;
+
+// Record metrics (never panics)
+incr_counter("my-app", "tasks_processed");
+incr_counters("my-app", &[("cache_hits", 5), ("cache_misses", 2)]);
+
+// Append to an audit log and poll events
+let seq = state.audit_log.append("audit:", &entry)?;
+let (events, cursor) = state.audit_log.poll::<serde_json::Value>("audit:", "consumer-1", 20)?;
+```
 
 **Note**: For examples and production code, prefer using `Node` or SDK spawn helpers instead of calling `ActorFactory` directly. The SDK helpers delegate to the framework-owned actor spawn path and return canonical typed refs without exposing mailbox or registry internals to application code.
 
@@ -1628,6 +1877,8 @@ Access PlexSpaces capabilities via the `Host` singleton:
 | `host.NowMs()` | Current timestamp (ms) |
 | **Key-Value Storage** | |
 | `host.KVGet(key)` / `host.KVPut(key, value)` / `host.KVDelete(key)` / `host.KVList(prefix)` | Key-value operations |
+| `host.KVGetJSON(key, &dest)` | Deserialize a JSON value from KV. Returns `(bool, error)` — false when missing. |
+| `host.KVPutJSON(key, value)` | Serialize a value to JSON and store it. Returns `error`. |
 | **TupleSpace** | |
 | `host.TSWrite(tupleJSON)` / `host.TSRead(patternJSON)` / `host.TSTake(patternJSON)` / `host.TSReadAll(patternJSON)` | Linda-style coordination |
 | **Distributed Locks** | |
@@ -1636,6 +1887,26 @@ Access PlexSpaces capabilities via the `Host` singleton:
 | `host.BlobUpload(id, data, contentType)` / `host.BlobDownload(id)` / `host.BlobDelete(id)` / `host.BlobList(prefix)` | S3-compatible storage |
 | **Process Groups** | |
 | `host.PG().Join(group)` / `host.PG().Leave(group)` / `host.PG().Members(group)` / `host.PG().Broadcast(group, msgType, payload)` | Distributed pub/sub |
+| `host.PG().First(group)` | Return the first member of the group, or error if empty. |
+| **Metrics helpers** | |
+| `b.IncrCounter(host, name)` | Increment a named counter by 1 (on `*BaseActor`). Errors are swallowed. |
+| `b.IncrCounters(host, counters)` | Increment multiple counters: `map[string]int{"cache_hits": 5}`. Errors are swallowed. |
+| **EventLog** | |
+| `EventLog{}` | Embed in actor state struct. Holds only `Watermark int64`. |
+| `log.Append(host, prefix, entry)` | Append JSON entry; returns sequence number. Rolls back on KV failure. |
+| `log.Poll(host, prefix, consumerID, limit)` | Return up to `limit` new events for a consumer; advances the consumer cursor. |
+| **Channel (queue + pub/sub)** | |
+| `host.Ch().Send(ctx, name, msgType, payload)` | Enqueue a message (queue semantics — one consumer receives it). Returns message ID. |
+| `host.Ch().SendWithOptions(ctx, name, msgType, payload, delayMs, ttlMs, headers)` | Enqueue with delay, TTL, and custom headers. |
+| `host.Ch().Receive(ctx, name, timeoutMs)` | Dequeue one message (blocks up to `timeoutMs`). Returns `(msg, ok, err)`. |
+| `host.Ch().Ack(ctx, name, msgID)` | Acknowledge successful processing; prevents redelivery. |
+| `host.Ch().Nack(ctx, name, msgID, requeue)` | Negative-acknowledge; `requeue=true` retries, `false` dead-letters. |
+| `host.Ch().Publish(ctx, name, msgType, payload)` | Publish (pub/sub — all subscribers receive it). Returns message ID. |
+| `host.Ch().Subscribe(ctx, name, filter)` | Subscribe; `filter` is a message-type pattern (empty = all). Returns subscription ID. |
+| `host.Ch().Unsubscribe(subscriptionID)` | Cancel a subscription. |
+| `host.Ch().Create(ctx, name, maxSize, ttlMs)` | Create a channel (no-op if already exists). |
+| `host.Ch().Delete(ctx, name)` | Delete a channel and all pending messages. |
+| `host.Ch().Depth(ctx, name)` | Return number of pending (unacked) messages. |
 
 ### WASM Component Model Architecture
 

@@ -61,9 +61,9 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -142,9 +142,9 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -166,9 +166,9 @@ mod sqlite_tests {
         for i in 6..=10 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -236,9 +236,9 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -295,9 +295,9 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -318,9 +318,9 @@ mod sqlite_tests {
         for i in 6..=10 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -400,9 +400,9 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload).await.unwrap();
+            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result).await.unwrap();
+            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
         }
 
         storage.flush().await.unwrap();

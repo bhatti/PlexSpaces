@@ -454,6 +454,7 @@ impl Facet for ProcessGroupFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Intercept process group operations
         if method == "create_group"
@@ -599,6 +600,7 @@ mod tests {
             .before_method(
                 "create_group",
                 serde_json::to_vec(&create_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -623,6 +625,7 @@ mod tests {
             .before_method(
                 "join_group",
                 serde_json::to_vec(&join_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -643,6 +646,7 @@ mod tests {
             .before_method(
                 "get_members",
                 serde_json::to_vec(&get_members_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -674,6 +678,7 @@ mod tests {
                 serde_json::to_vec(&serde_json::json!("test-group-2"))
                     .unwrap()
                     .as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -688,6 +693,7 @@ mod tests {
                 }))
                 .unwrap()
                 .as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();
@@ -703,6 +709,7 @@ mod tests {
             .before_method(
                 "publish_to_group",
                 serde_json::to_vec(&publish_args).unwrap().as_slice(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();

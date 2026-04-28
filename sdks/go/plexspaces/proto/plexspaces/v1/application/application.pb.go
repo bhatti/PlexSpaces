@@ -946,7 +946,7 @@ type ChildSpec struct {
 	// Instance name + behavior class (canonical ActorId is derived at deploy time).
 	ActorIdentity *v1.ActorIdentity `protobuf:"bytes,1,opt,name=actor_identity,json=actorIdentity,proto3" json:"actor_identity,omitempty"`
 	// Role of this child within the application (e.g. "worker", "leader", "supervisor").
-	// Maps 1:1 to the TOML `type` field in [[supervisor.children]].
+	// Maps 1:1 to the TOML `role` field in [[supervisor.children]].
 	// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
 	Role string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	// Arguments to pass to start function

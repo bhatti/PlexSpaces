@@ -770,3 +770,292 @@ func TestExtractLocation(t *testing.T) {
 		}
 	}
 }
+
+// ── LLMRouterActor phantom-token tests ───────────────────────────────────────
+
+func TestLLMRouterRegisterCredential(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newLLMRouterActor()
+	initActor(actor, "llm_router:test@node")
+
+	raw := actor.Handle("caller", "register_credential", `{"op":"register_credential","phantom_token":"tok-abc","api_key":"sk-real-key-123"}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Fatalf("register_credential: expected status=ok got %v", resp)
+	}
+	if resp["phantom_token"] != "tok-abc" {
+		t.Errorf("expected phantom_token=tok-abc got %v", resp["phantom_token"])
+	}
+	// Real key must NOT appear in the response.
+	raw2, _ := json.Marshal(resp)
+	if strings.Contains(string(raw2), "sk-real-key-123") {
+		t.Error("real API key must not appear in register_credential response")
+	}
+}
+
+func TestLLMRouterPhantomTokenChatCompletion(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newLLMRouterActor()
+	initActor(actor, "llm_router:test@node")
+
+	actor.Handle("caller", "register_credential", `{"op":"register_credential","phantom_token":"tok-xyz","api_key":"sk-secret"}`)
+
+	raw := actor.Handle("caller", "chat_completion", `{"op":"chat_completion","phantom_token":"tok-xyz","messages":[{"role":"user","content":"hello"}],"tools":[]}`)
+	resp := parseResp(t, raw)
+	assertOK(t, resp, "phantom token chat_completion")
+	if resp["status"] != "ok" {
+		t.Errorf("expected status=ok got %v", resp)
+	}
+}
+
+func TestLLMRouterUnknownPhantomTokenProceeds(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newLLMRouterActor()
+	initActor(actor, "llm_router:test@node")
+
+	// Unregistered token: router warns but does not fail (anonymous/simulated LLM).
+	raw := actor.Handle("caller", "chat_completion", `{"op":"chat_completion","phantom_token":"tok-unknown","messages":[{"role":"user","content":"hello"}],"tools":[]}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Errorf("expected graceful proceed for unknown token, got %v", resp)
+	}
+}
+
+// ── AuditEventActor two-cursor tests ─────────────────────────────────────────
+
+func TestAuditWatermarkIncrements(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newAuditEventActor()
+	initActor(actor, "audit_event:test@node")
+
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"a","detail":"first"}`)
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"b","detail":"second"}`)
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"c","detail":"third"}`)
+
+	if actor.Watermark != 3 {
+		t.Errorf("expected Watermark=3 got %d", actor.Watermark)
+	}
+}
+
+func TestAuditPollEventsFromStart(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newAuditEventActor()
+	initActor(actor, "audit_event:test@node")
+
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"login","detail":"user-1"}`)
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"tool_call","detail":"calculator"}`)
+
+	raw := actor.Handle("caller", "poll_events", `{"op":"poll_events","consumer_id":"svc-a","limit":10}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Fatalf("poll_events: expected status=ok got %v", resp)
+	}
+	count, _ := resp["count"].(float64)
+	if count != 2 {
+		t.Errorf("expected count=2 got %v", count)
+	}
+	cursor, _ := resp["cursor"].(float64)
+	if cursor != 2 {
+		t.Errorf("expected cursor=2 after consuming 2 events, got %v", cursor)
+	}
+}
+
+func TestAuditPollEventsCursorAdvances(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newAuditEventActor()
+	initActor(actor, "audit_event:test@node")
+
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"e1","detail":""}`)
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"e2","detail":""}`)
+
+	// First poll: consumer gets both events.
+	actor.Handle("caller", "poll_events", `{"op":"poll_events","consumer_id":"c1","limit":10}`)
+
+	// Third event arrives.
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"e3","detail":""}`)
+
+	// Second poll: cursor is at 2, should only return event 3.
+	raw := actor.Handle("caller", "poll_events", `{"op":"poll_events","consumer_id":"c1","limit":10}`)
+	resp := parseResp(t, raw)
+	count, _ := resp["count"].(float64)
+	if count != 1 {
+		t.Errorf("expected count=1 on second poll, got %v", count)
+	}
+	cursor, _ := resp["cursor"].(float64)
+	if cursor != 3 {
+		t.Errorf("expected cursor=3 after second poll, got %v", cursor)
+	}
+}
+
+func TestAuditGetStatsIncludesWatermark(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newAuditEventActor()
+	initActor(actor, "audit_event:test@node")
+
+	actor.Handle("caller", "log_event", `{"op":"log_event","event_type":"x","detail":""}`)
+
+	raw := actor.Handle("caller", "get_stats", `{"op":"get_stats"}`)
+	resp := parseResp(t, raw)
+	wm, _ := resp["watermark"].(float64)
+	if wm != 1 {
+		t.Errorf("expected watermark=1 in stats got %v", wm)
+	}
+}
+
+// ── TaskQueueActor tests ──────────────────────────────────────────────────────
+
+func TestTaskQueueEnqueueDequeueAck(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newTaskQueueActor()
+	initActor(actor, "task_queue:test@node")
+
+	// Enqueue two tasks; each returns a msg_id.
+	r1 := parseResp(t, actor.Handle("caller", "enqueue", `{"op":"enqueue","task_type":"summarize","payload":{"text":"hello"}}`))
+	if r1["status"] != "ok" {
+		t.Fatalf("enqueue: expected status=ok got %v", r1)
+	}
+	if r1["msg_id"] == nil {
+		t.Fatalf("enqueue: expected msg_id in response got %v", r1)
+	}
+	actor.Handle("caller", "enqueue", `{"op":"enqueue","task_type":"translate","payload":{"text":"world"}}`)
+
+	if actor.Enqueued != 2 {
+		t.Errorf("expected Enqueued=2 got %d", actor.Enqueued)
+	}
+
+	// Dequeue one task; the channel returns the raw message envelope.
+	dr := parseResp(t, actor.Handle("caller", "dequeue", `{"op":"dequeue","limit":1}`))
+	if dr["status"] != "ok" {
+		t.Fatalf("dequeue: expected status=ok got %v", dr)
+	}
+	tasks, _ := dr["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 dequeued task got %d", len(tasks))
+	}
+	msg, _ := tasks[0].(map[string]any)
+	msgID, _ := msg["id"].(string)
+	if msgID == "" {
+		t.Fatalf("expected message id in dequeued task, got %v", msg)
+	}
+
+	// Ack by msg_id.
+	ackPayload, _ := json.Marshal(map[string]any{"op": "ack", "msg_id": msgID})
+	ar := parseResp(t, actor.Handle("caller", "ack", string(ackPayload)))
+	if ar["status"] != "ok" {
+		t.Errorf("ack: expected status=ok got %v", ar)
+	}
+	if actor.Completed != 1 {
+		t.Errorf("expected Completed=1 got %d", actor.Completed)
+	}
+}
+
+func TestTaskQueueNack(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newTaskQueueActor()
+	initActor(actor, "task_queue:test@node")
+
+	actor.Handle("caller", "enqueue", `{"op":"enqueue","task_type":"analyze","payload":{}}`)
+
+	// Dequeue then nack with requeue=true.
+	dr := parseResp(t, actor.Handle("caller", "dequeue", `{"op":"dequeue","limit":1}`))
+	tasks, _ := dr["tasks"].([]any)
+	if len(tasks) == 0 {
+		t.Fatal("expected 1 task to dequeue")
+	}
+	msg, _ := tasks[0].(map[string]any)
+	msgID, _ := msg["id"].(string)
+	nackPayload, _ := json.Marshal(map[string]any{"op": "nack", "msg_id": msgID, "requeue": true})
+	nr := parseResp(t, actor.Handle("caller", "nack", string(nackPayload)))
+	if nr["status"] != "ok" {
+		t.Errorf("nack: expected status=ok got %v", nr)
+	}
+	if actor.Failed != 1 {
+		t.Errorf("expected Failed=1 got %d", actor.Failed)
+	}
+}
+
+func TestTaskQueueGetStats(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newTaskQueueActor()
+	initActor(actor, "task_queue:test@node")
+
+	actor.Handle("caller", "enqueue", `{"op":"enqueue","task_type":"x","payload":{}}`)
+	actor.Handle("caller", "enqueue", `{"op":"enqueue","task_type":"y","payload":{}}`)
+
+	raw := actor.Handle("caller", "get_stats", `{"op":"get_stats"}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Errorf("get_stats: expected status=ok got %v", resp)
+	}
+	enqueued, _ := resp["enqueued"].(float64)
+	if enqueued != 2 {
+		t.Errorf("expected enqueued=2 got %v", enqueued)
+	}
+	depth, _ := resp["depth"].(float64)
+	if depth != 2 {
+		t.Errorf("expected depth=2 got %v", depth)
+	}
+}
+
+// ── HealthMonitorActor tests ──────────────────────────────────────────────────
+
+func TestHealthMonitorInit(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newHealthMonitorActor()
+	result := actor.Init(`{"actor_id":"health_monitor:test@node","args":{"poll_interval_ms":"2000"}}`)
+	if result != "" {
+		t.Errorf("Init: expected empty string got %q", result)
+	}
+	if actor.PollInterval != 2000 {
+		t.Errorf("expected PollInterval=2000 got %d", actor.PollInterval)
+	}
+}
+
+func TestHealthMonitorPollTick(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newHealthMonitorActor()
+	actor.Init(`{"actor_id":"health_monitor:test@node","args":{}}`)
+
+	raw := actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Errorf("poll_tick: expected status=ok got %v", resp)
+	}
+	if actor.PollCount != 1 {
+		t.Errorf("expected PollCount=1 got %d", actor.PollCount)
+	}
+}
+
+func TestHealthMonitorGetHealth(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newHealthMonitorActor()
+	actor.Init(`{"actor_id":"health_monitor:test@node","args":{}}`)
+	actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
+
+	raw := actor.Handle("caller", "get_health", `{"op":"get_health"}`)
+	resp := parseResp(t, raw)
+	if resp["status"] != "ok" {
+		t.Errorf("get_health: expected status=ok got %v", resp)
+	}
+	if _, ok := resp["group_health"]; !ok {
+		t.Error("expected group_health field in get_health response")
+	}
+	if _, ok := resp["degraded"]; !ok {
+		t.Error("expected degraded field in get_health response")
+	}
+}
+
+func TestHealthMonitorGetStats(t *testing.T) {
+	plexspaces.ResetStubs()
+	actor := newHealthMonitorActor()
+	actor.Init(`{"actor_id":"health_monitor:test@node","args":{}}`)
+	actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
+	actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
+
+	raw := actor.Handle("caller", "get_stats", `{"op":"get_stats"}`)
+	resp := parseResp(t, raw)
+	pc, _ := resp["poll_count"].(float64)
+	if pc != 2 {
+		t.Errorf("expected poll_count=2 got %v", pc)
+	}
+}

@@ -1353,3 +1353,422 @@ func TestActorRouterEchoActorInit(t *testing.T) {
 		t.Errorf("expected state to contain 'initialized', got %q", state)
 	}
 }
+
+// ========================================================================
+// EventLog
+// ========================================================================
+
+func TestEventLogAppendAndPoll(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	var el EventLog
+
+	seq, err := el.Append(h, "audit:", map[string]any{"action": "login"})
+	if err != nil || seq != 1 {
+		t.Fatalf("Append: seq=%d err=%v", seq, err)
+	}
+	seq, err = el.Append(h, "audit:", map[string]any{"action": "logout"})
+	if err != nil || seq != 2 {
+		t.Fatalf("Append: seq=%d err=%v", seq, err)
+	}
+
+	events, cursor, err := el.Poll(h, "audit:", "consumer-1", 10)
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(events) != 2 || cursor != 2 {
+		t.Errorf("expected 2 events cursor=2, got %d cursor=%d", len(events), cursor)
+	}
+}
+
+func TestEventLogPollIdempotent(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	var el EventLog
+	_, _ = el.Append(h, "ev:", map[string]any{"x": 1})
+
+	events, cursor, _ := el.Poll(h, "ev:", "c1", 10)
+	if len(events) != 1 || cursor != 1 {
+		t.Fatalf("first poll: events=%d cursor=%d", len(events), cursor)
+	}
+	// second poll: cursor is now at watermark, returns nothing new
+	events, cursor, _ = el.Poll(h, "ev:", "c1", 10)
+	if len(events) != 0 {
+		t.Errorf("second poll should return 0 events, got %d", len(events))
+	}
+	if cursor != 1 {
+		t.Errorf("cursor should remain 1, got %d", cursor)
+	}
+}
+
+func TestEventLogTwoIndependentConsumers(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	var el EventLog
+	for i := 0; i < 3; i++ {
+		_, _ = el.Append(h, "ev:", map[string]any{"i": i})
+	}
+
+	evA, curA, _ := el.Poll(h, "ev:", "consumer-A", 10)
+	evB, curB, _ := el.Poll(h, "ev:", "consumer-B", 2)
+	if len(evA) != 3 || curA != 3 {
+		t.Errorf("consumer-A: events=%d cursor=%d", len(evA), curA)
+	}
+	if len(evB) != 2 || curB != 2 {
+		t.Errorf("consumer-B: events=%d cursor=%d", len(evB), curB)
+	}
+}
+
+func TestEventLogAppendRollsBackOnError(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	var el EventLog
+	// chan is unmarshalable — Append should fail and Watermark should stay 0
+	err := func() error {
+		_, e := el.Append(h, "ev:", make(chan int))
+		return e
+	}()
+	if err == nil {
+		t.Fatal("expected error for unmarshalable value")
+	}
+	if el.Watermark != 0 {
+		t.Errorf("watermark should be rolled back to 0, got %d", el.Watermark)
+	}
+}
+
+// ========================================================================
+// PG.First
+// ========================================================================
+
+func TestPGFirstReturnsMember(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	_ = h.PG().Join("svc:test")
+	id, err := h.PG().First("svc:test")
+	if err != nil {
+		t.Fatalf("expected member, got error: %v", err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty actor ID")
+	}
+}
+
+func TestPGFirstErrorWhenEmpty(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	_, err := h.PG().First("svc:empty")
+	if err == nil {
+		t.Fatal("expected error for empty process group")
+	}
+}
+
+// ========================================================================
+// KVGetJSON / KVPutJSON
+// ========================================================================
+
+func TestKVPutAndGetJSONRoundTrip(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	type task struct {
+		Seq  int    `json:"seq"`
+		Type string `json:"task_type"`
+	}
+	original := task{Seq: 42, Type: "summarize"}
+	if err := h.KVPutJSON("test:task:42", original); err != nil {
+		t.Fatalf("KVPutJSON: %v", err)
+	}
+
+	var restored task
+	found, err := h.KVGetJSON("test:task:42", &restored)
+	if err != nil {
+		t.Fatalf("KVGetJSON: %v", err)
+	}
+	if !found {
+		t.Fatal("KVGetJSON: key not found after put")
+	}
+	if restored.Seq != 42 || restored.Type != "summarize" {
+		t.Errorf("round-trip mismatch: got %+v", restored)
+	}
+}
+
+func TestKVGetJSONMissingKey(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	var dest map[string]any
+	found, err := h.KVGetJSON("nonexistent:key", &dest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for missing key")
+	}
+}
+
+func TestKVGetJSONBadJSON(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	_ = h.KVPut("bad:json", "not-json{")
+	var dest map[string]any
+	found, err := h.KVGetJSON("bad:json", &dest)
+	if err == nil {
+		t.Fatal("expected unmarshal error for bad JSON")
+	}
+	if found {
+		t.Fatal("found should be false on unmarshal error")
+	}
+}
+
+func TestKVPutJSONMarshalError(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	ch := make(chan int)
+	err := h.KVPutJSON("bad:val", ch)
+	if err == nil {
+		t.Fatal("expected marshal error for un-marshalable value")
+	}
+}
+
+// ========================================================================
+// BaseActor.IncrCounter / IncrCounters
+// ========================================================================
+
+func TestIncrCounterNoError(t *testing.T) {
+	ResetStubs()
+	a := &BaseActor{}
+	a.SetRuntimeMetadata("counter_test:test@node")
+	h := NewHost()
+	a.IncrCounter(h, "my_op")
+}
+
+func TestIncrCountersMultiple(t *testing.T) {
+	ResetStubs()
+	a := &BaseActor{}
+	a.SetRuntimeMetadata("counter_test:test@node")
+	h := NewHost()
+	a.IncrCounters(h, map[string]int{
+		"cache_hits":   5,
+		"cache_misses": 2,
+	})
+}
+
+// ========================================================================
+// Composed: PG.First + KVPutJSON/GetJSON
+// ========================================================================
+
+func TestComposedPGFirstAndKVJSON(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	_ = h.PG().Join("svc:llm_router")
+
+	routerID, err := h.PG().First("svc:llm_router")
+	if err != nil {
+		t.Fatalf("PG.First: %v", err)
+	}
+
+	entry := map[string]any{"router_id": routerID, "model": "miniclaw-v1"}
+	if err := h.KVPutJSON("routers:first", entry); err != nil {
+		t.Fatalf("KVPutJSON: %v", err)
+	}
+
+	var restored map[string]any
+	found, err := h.KVGetJSON("routers:first", &restored)
+	if err != nil || !found {
+		t.Fatalf("KVGetJSON after compose: found=%v err=%v", found, err)
+	}
+	data, _ := json.Marshal(restored)
+	if string(data) == "" {
+		t.Fatal("empty restored entry")
+	}
+}
+
+// ── Channel tests ────────────────────────────────────────────────────────────
+
+func TestChannelSendReceive(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msgID, err := h.Ch().Send("", "tasks:work", "process", map[string]any{"doc": "d1"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if msgID == "" {
+		t.Fatal("Send: expected non-empty message ID")
+	}
+
+	msg, ok, err := h.Ch().Receive("", "tasks:work", 0)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if !ok {
+		t.Fatal("Receive: expected message, got empty")
+	}
+	if msg["id"] != msgID {
+		t.Errorf("Receive: expected id=%s got %v", msgID, msg["id"])
+	}
+}
+
+func TestChannelReceiveEmptyReturnsNotOk(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msg, ok, err := h.Ch().Receive("", "empty:channel", 0)
+	if err != nil {
+		t.Fatalf("Receive on empty: unexpected error: %v", err)
+	}
+	if ok || msg != nil {
+		t.Fatalf("Receive on empty: expected (nil, false) got (%v, %v)", msg, ok)
+	}
+}
+
+func TestChannelAckTracked(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msgID, _ := h.Ch().Send("", "q", "x", nil)
+	msg, _, _ := h.Ch().Receive("", "q", 0)
+	id := msg["id"].(string)
+
+	if err := h.Ch().Ack("", "q", id); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+	acked := GetStubChannelAcked()
+	if !acked[msgID] {
+		t.Errorf("expected %s to be acked, got %v", msgID, acked)
+	}
+}
+
+func TestChannelNackTracked(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msgID, _ := h.Ch().Send("", "q", "x", nil)
+	msg, _, _ := h.Ch().Receive("", "q", 0)
+	id := msg["id"].(string)
+
+	if err := h.Ch().Nack("", "q", id, false); err != nil {
+		t.Fatalf("Nack: %v", err)
+	}
+	nacked := GetStubChannelNacked()
+	if !nacked[msgID] {
+		t.Errorf("expected %s to be nacked, got %v", msgID, nacked)
+	}
+}
+
+func TestChannelSubscribeUnsubscribe(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	subID, err := h.Ch().Subscribe("", "events:login", "")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if subID == "" {
+		t.Fatal("Subscribe: expected non-empty subscription ID")
+	}
+
+	subs := GetStubChannelSubscriptions()
+	if subs[subID] != "events:login" {
+		t.Errorf("expected sub %s → events:login, got %v", subID, subs)
+	}
+
+	if err := h.Ch().Unsubscribe(subID); err != nil {
+		t.Fatalf("Unsubscribe: %v", err)
+	}
+	subs = GetStubChannelSubscriptions()
+	if _, exists := subs[subID]; exists {
+		t.Errorf("expected sub %s to be removed after Unsubscribe", subID)
+	}
+}
+
+func TestChannelSubscribeUniqueIDs(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	id1, _ := h.Ch().Subscribe("", "events:a", "")
+	id2, _ := h.Ch().Subscribe("", "events:b", "")
+	if id1 == id2 {
+		t.Errorf("expected unique subscription IDs, got identical: %s", id1)
+	}
+}
+
+func TestChannelPublish(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msgID, err := h.Ch().Publish("", "events:login", "user_login", map[string]any{"user": "alice"})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if msgID == "" {
+		t.Fatal("Publish: expected non-empty message ID")
+	}
+}
+
+func TestChannelDepth(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	h.Ch().Send("", "tasks:depth", "t", nil)
+	h.Ch().Send("", "tasks:depth", "t", nil)
+
+	depth, err := h.Ch().Depth("", "tasks:depth")
+	if err != nil {
+		t.Fatalf("Depth: %v", err)
+	}
+	if depth != 2 {
+		t.Errorf("expected depth=2 got %d", depth)
+	}
+}
+
+func TestChannelDepthAfterReceive(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	h.Ch().Send("", "tasks:dr", "t", nil)
+	h.Ch().Send("", "tasks:dr", "t", nil)
+	h.Ch().Receive("", "tasks:dr", 0)
+
+	depth, err := h.Ch().Depth("", "tasks:dr")
+	if err != nil {
+		t.Fatalf("Depth after receive: %v", err)
+	}
+	if depth != 1 {
+		t.Errorf("expected depth=1 after receive, got %d", depth)
+	}
+}
+
+func TestChannelCreateDelete(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	if err := h.Ch().Create("", "managed:q", 100, 60000); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	h.Ch().Send("", "managed:q", "x", nil)
+
+	if err := h.Ch().Delete("", "managed:q"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	depth, _ := h.Ch().Depth("", "managed:q")
+	if depth != 0 {
+		t.Errorf("expected depth=0 after delete, got %d", depth)
+	}
+}
+
+func TestChannelSendWithOptions(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+
+	msgID, err := h.Ch().SendWithOptions("", "delayed:q", "work", map[string]any{"n": 1}, 500, 30000, map[string]string{"x-priority": "high"})
+	if err != nil {
+		t.Fatalf("SendWithOptions: %v", err)
+	}
+	if msgID == "" {
+		t.Fatal("SendWithOptions: expected non-empty message ID")
+	}
+	depth, _ := h.Ch().Depth("", "delayed:q")
+	if depth != 1 {
+		t.Errorf("expected depth=1 after SendWithOptions, got %d", depth)
+	}
+}

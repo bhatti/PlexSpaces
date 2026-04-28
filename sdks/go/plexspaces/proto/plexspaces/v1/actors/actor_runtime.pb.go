@@ -4902,7 +4902,7 @@ type SpawnActorRequest struct {
 	// Use case: data-parallel workloads, shard groups, worker pools.
 	InstancesCount uint32 `protobuf:"varint,8,opt,name=instances_count,json=instancesCount,proto3" json:"instances_count,omitempty"`
 	// Role of the actor within its application (e.g. "worker", "leader").
-	// Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+	// Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
 	// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
 	// If empty, falls back to actor_id.name() for dispatch.
 	Role          string `protobuf:"bytes,9,opt,name=role,proto3" json:"role,omitempty"`
@@ -8620,7 +8620,7 @@ type ActorSpawnSpec struct {
 	// Instance name + behavior class (namespace and tenant added in fields below).
 	Identity *v1.ActorIdentity `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
 	// Role of the actor within its application (e.g. "worker", "leader").
-	// Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+	// Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
 	// Used by BehaviorRegistry to dispatch the correct spec when multiple children
 	// share the same actor_type (behavior class).
 	Role string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`

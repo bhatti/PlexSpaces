@@ -258,6 +258,61 @@ impl FacetFactory for ReminderFacetFactory {
     }
 }
 
+/// Factory for creating MemoizeFacet instances
+///
+/// ## Purpose
+/// Creates MemoizeFacet instances by getting KeyValueStore from ServiceLocator.
+/// MemoizeFacet caches handler results in KV storage, skipping actor execution on hits.
+pub struct MemoizeFacetFactory {
+    service_locator: Arc<dyn ServiceLocator>,
+}
+
+impl MemoizeFacetFactory {
+    /// Create a new MemoizeFacetFactory
+    ///
+    /// ## Arguments
+    /// * `service_locator` - ServiceLocator to get KeyValueStore from
+    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+        Self { service_locator }
+    }
+}
+
+#[async_trait]
+impl FacetFactory for MemoizeFacetFactory {
+    async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
+        use crate::memoize_facet::{MemoizeFacet, MEMOIZE_FACET_DEFAULT_PRIORITY};
+
+        let kv_store = self
+            .service_locator
+            .get_keyvalue_store()
+            .await
+            .ok_or_else(|| {
+                FacetError::InvalidConfig(
+                    "KeyValueStore not found in ServiceLocator. \
+                     Ensure KeyValueStore is registered during service initialization."
+                        .to_string(),
+                )
+            })?;
+
+        let priority = config
+            .get("priority")
+            .and_then(|v| v.as_i64())
+            .map(|p| p as i32)
+            .unwrap_or(MEMOIZE_FACET_DEFAULT_PRIORITY);
+
+        Ok(Box::new(MemoizeFacet::new(kv_store, config, priority)))
+    }
+
+    fn metadata(&self) -> FacetMetadata {
+        FacetMetadata {
+            facet_type: "memoize".to_string(),
+            attached_at: std::time::Instant::now(),
+            config: serde_json::Value::Null,
+            priority: crate::memoize_facet::MEMOIZE_FACET_DEFAULT_PRIORITY,
+        }
+    }
+}
+
 /// Factory for creating EventSourcingFacet instances
 ///
 /// ## Purpose
@@ -309,9 +364,51 @@ impl FacetFactory for EventSourcingFacetFactory {
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_core::{JournalStorage, LockManager};
+    use async_trait::async_trait;
+    use plexspaces_core::{JournalStorage, KeyValueStore, KeyValueStoreError, LockManager, RequestContext};
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_services::ServiceLocatorImpl;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    struct MemKv {
+        data: Mutex<HashMap<String, Vec<u8>>>,
+    }
+    impl MemKv {
+        fn new() -> Arc<Self> {
+            Arc::new(Self { data: Mutex::new(HashMap::new()) })
+        }
+    }
+    #[async_trait]
+    impl KeyValueStore for MemKv {
+        async fn get(&self, _: &RequestContext, key: &str) -> Result<Option<Vec<u8>>, KeyValueStoreError> {
+            Ok(self.data.lock().unwrap().get(key).cloned())
+        }
+        async fn put(&self, _: &RequestContext, key: &str, value: Vec<u8>) -> Result<(), KeyValueStoreError> {
+            self.data.lock().unwrap().insert(key.to_string(), value); Ok(())
+        }
+        async fn put_with_ttl(&self, _: &RequestContext, key: &str, value: Vec<u8>, _: std::time::Duration) -> Result<(), KeyValueStoreError> {
+            self.data.lock().unwrap().insert(key.to_string(), value); Ok(())
+        }
+        async fn delete(&self, _: &RequestContext, key: &str) -> Result<(), KeyValueStoreError> {
+            self.data.lock().unwrap().remove(key); Ok(())
+        }
+        async fn exists(&self, _: &RequestContext, key: &str) -> Result<bool, KeyValueStoreError> {
+            Ok(self.data.lock().unwrap().contains_key(key))
+        }
+        async fn list_keys(&self, _: &RequestContext, prefix: &str) -> Result<Vec<String>, KeyValueStoreError> {
+            Ok(self.data.lock().unwrap().keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+        }
+        async fn cas(&self, _: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> Result<bool, KeyValueStoreError> {
+            let mut data = self.data.lock().unwrap();
+            if data.get(key).cloned() == expected { data.insert(key.to_string(), new_value); Ok(true) } else { Ok(false) }
+        }
+        async fn increment(&self, _: &RequestContext, key: &str, delta: i64) -> Result<i64, KeyValueStoreError> {
+            let mut data = self.data.lock().unwrap();
+            let v: i64 = data.get(key).and_then(|b| std::str::from_utf8(b).ok()).and_then(|s| s.parse().ok()).unwrap_or(0) + delta;
+            data.insert(key.to_string(), v.to_string().into_bytes()); Ok(v)
+        }
+    }
 
     /// Helper to create a test ServiceLocator with JournalStorage
     async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
@@ -366,6 +463,10 @@ mod tests {
 
         let actor_service: Arc<dyn ActorService> = Arc::new(MockActorService);
         service_locator.register_actor_service(actor_service).await;
+
+        // Register KeyValueStore for MemoizeFacetFactory
+        let kv_store: Arc<dyn KeyValueStore> = MemKv::new();
+        service_locator.register_keyvalue_store(kv_store).await;
 
         service_locator
     }
@@ -637,12 +738,68 @@ mod tests {
         );
 
         // Test ReminderFacetFactory uses default priority
-        let factory = ReminderFacetFactory::new(service_locator);
+        let factory = ReminderFacetFactory::new(service_locator.clone());
         let config = serde_json::json!({});
         let facet = factory.create(config).await.unwrap();
         assert_eq!(
             facet.get_priority(),
             crate::reminder_facet::REMINDER_FACET_DEFAULT_PRIORITY
         );
+
+        // Test MemoizeFacetFactory uses default priority
+        let factory = MemoizeFacetFactory::new(service_locator);
+        let config = serde_json::json!({});
+        let facet = factory.create(config).await.unwrap();
+        assert_eq!(
+            facet.get_priority(),
+            crate::memoize_facet::MEMOIZE_FACET_DEFAULT_PRIORITY
+        );
+    }
+
+    #[tokio::test]
+    async fn test_memoize_facet_factory() {
+        let service_locator = create_test_service_locator().await;
+        let factory = MemoizeFacetFactory::new(service_locator);
+
+        let config = serde_json::json!({
+            "ttl_seconds": 60,
+            "max_entries": 100,
+            "handler_names": ["compute"]
+        });
+
+        let facet = factory.create(config).await;
+        assert!(facet.is_ok());
+        let facet = facet.unwrap();
+        assert_eq!(facet.facet_type(), "memoize");
+
+        let metadata = factory.metadata();
+        assert_eq!(metadata.facet_type, "memoize");
+        assert_eq!(metadata.priority, crate::memoize_facet::MEMOIZE_FACET_DEFAULT_PRIORITY);
+    }
+
+    #[tokio::test]
+    async fn test_memoize_facet_factory_no_kv_store() {
+        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        let factory = MemoizeFacetFactory::new(service_locator);
+
+        let config = serde_json::json!({});
+        let result = factory.create(config).await;
+        assert!(result.is_err());
+        match result {
+            Err(FacetError::InvalidConfig(msg)) => {
+                assert!(msg.contains("KeyValueStore not found"));
+            }
+            _ => panic!("Expected InvalidConfig error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_memoize_facet_factory_custom_priority() {
+        let service_locator = create_test_service_locator().await;
+        let factory = MemoizeFacetFactory::new(service_locator);
+
+        let config = serde_json::json!({ "priority": 500 });
+        let facet = factory.create(config).await.unwrap();
+        assert_eq!(facet.get_priority(), 500);
     }
 }

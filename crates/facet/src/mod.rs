@@ -135,21 +135,29 @@ pub trait Facet: Send + Sync + Any {
     /// Called when facet is detached from an actor
     async fn on_detach(&mut self, actor_id: &str) -> Result<(), FacetError>;
 
-    /// Intercept a method call before it reaches the actor
+    /// Intercept a method call before it reaches the actor.
+    ///
+    /// `headers` carries the message headers map (same `headers` field from `Message`).
+    /// Facets can read `headers["memo_key"]` for an explicit cache key, `correlation_id`
+    /// for idempotency tracking, or any other routing metadata.
     async fn before_method(
         &self,
         _method: &str,
         _args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         Ok(InterceptResult::Continue)
     }
 
-    /// Intercept a method call after the actor processes it
+    /// Intercept a method call after the actor processes it.
+    ///
+    /// `headers` is the same headers map passed to `before_method`.
     async fn after_method(
         &self,
         _method: &str,
         _args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         Ok(InterceptResult::Continue)
     }
@@ -405,16 +413,14 @@ impl FacetContainer {
         let mut config = facet.get_config();
         let priority = facet.get_priority();
 
-        // For RegistryFacet, merge tenant_id/namespace from API request if provided
-        // This allows RegistryFacet to use API-provided tenant_id/namespace instead of defaults
-        if facet_type == "registry" {
-            if let Some(config_obj) = config.as_object_mut() {
-                if let Some(tid) = tenant_id {
-                    config_obj.insert("_tenant_id".to_string(), serde_json::Value::String(tid));
-                }
-                if let Some(ns) = namespace {
-                    config_obj.insert("_namespace".to_string(), serde_json::Value::String(ns));
-                }
+        // Inject tenant_id/namespace into every facet's config so they can build
+        // a properly-scoped RequestContext without hard-coding actor_id as tenant.
+        if let Some(config_obj) = config.as_object_mut() {
+            if let Some(tid) = tenant_id {
+                config_obj.insert("_tenant_id".to_string(), serde_json::Value::String(tid));
+            }
+            if let Some(ns) = namespace {
+                config_obj.insert("_namespace".to_string(), serde_json::Value::String(ns));
             }
         }
 
@@ -566,6 +572,7 @@ impl FacetContainer {
         &self,
         method: &str,
         args: &[u8],
+        headers: &std::collections::HashMap<String, String>,
     ) -> Result<BeforeInterceptOutcome, FacetError> {
         let span =
             tracing::span!(tracing::Level::TRACE, "facet.intercept_before", method = %method);
@@ -584,7 +591,7 @@ impl FacetContainer {
         for facet in &self.facets {
             let facet = facet.read().await;
             let facet_type = facet.facet_type();
-            match facet.before_method(method, &current_args).await? {
+            match facet.before_method(method, &current_args, headers).await? {
                 InterceptResult::Continue => {
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!(method = %method, facet_type = %facet_type, "FacetContainer: Facet continued (no interception)");
@@ -623,6 +630,7 @@ impl FacetContainer {
         method: &str,
         args: &[u8],
         result: &[u8],
+        headers: &std::collections::HashMap<String, String>,
     ) -> Result<Vec<u8>, FacetError> {
         let span = tracing::span!(tracing::Level::TRACE, "facet.intercept_after", method = %method);
         let _enter = span.enter();
@@ -636,7 +644,7 @@ impl FacetContainer {
         // Run in reverse order for after interceptors
         for facet in self.facets.iter().rev() {
             let facet = facet.read().await;
-            match facet.after_method(method, args, &current_result).await? {
+            match facet.after_method(method, args, &current_result, headers).await? {
                 InterceptResult::Continue => {}
                 InterceptResult::ReplaceResult(new_result) => {
                     current_result = new_result;
@@ -955,6 +963,7 @@ impl Facet for LoggingFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
@@ -972,6 +981,7 @@ impl Facet for LoggingFacet {
         method: &str,
         _args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         tracing::debug!(
             level = %self.level,
@@ -1047,6 +1057,7 @@ impl Facet for CachingFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Create cache key
         let key = format!("{}:{}", method, hex::encode(args));
@@ -1067,6 +1078,7 @@ impl Facet for CachingFacet {
         method: &str,
         args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Cache the result
         let _key = format!("{}:{}", method, hex::encode(args));
@@ -1156,6 +1168,7 @@ impl Facet for MetricsFacet {
         &self,
         _method: &str,
         _args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Start timing (would need to store start time somewhere)
         Ok(InterceptResult::Continue)
@@ -1166,6 +1179,7 @@ impl Facet for MetricsFacet {
         method: &str,
         _args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Update metrics (would need mutable self)
         tracing::trace!(method = %method, "Recording metrics");
@@ -1209,7 +1223,7 @@ mod tests {
         // Test interception
         let args = b"test args";
         let outcome = container
-            .intercept_before("test_method", args)
+            .intercept_before("test_method", args, &std::collections::HashMap::new())
             .await
             .unwrap();
         match outcome {

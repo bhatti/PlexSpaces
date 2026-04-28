@@ -553,3 +553,95 @@ func hostHTTPFetch(linkName, method, pathAndQuery string, requestWire []byte) st
 	rawHostHTTPFetch(linkName, method, pathAndQuery, p, l, unsafe.Pointer(&retArea))
 	return readResultString(unsafe.Pointer(&retArea))
 }
+
+// ========================================================================
+// Channel (queue + pub/sub)
+// ========================================================================
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-send
+func rawHostChannelSend(ctx, channelName, msgType, payloadJSON string, retptr unsafe.Pointer)
+
+func hostChannelSend(ctx, channelName, msgType, payloadJSON string) string {
+	rawHostChannelSend(ctx, channelName, msgType, payloadJSON, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-send-with-options
+func rawHostChannelSendWithOptions(ctx, channelName, msgType, payloadJSON string, delayMs, ttlMs uint64, headersJSON string, retptr unsafe.Pointer)
+
+func hostChannelSendWithOptions(ctx, channelName, msgType, payloadJSON string, delayMs, ttlMs uint64, headersJSON string) string {
+	rawHostChannelSendWithOptions(ctx, channelName, msgType, payloadJSON, delayMs, ttlMs, headersJSON, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-receive
+func rawHostChannelReceive(ctx, channelName string, timeoutMs uint64, retptr unsafe.Pointer)
+
+func hostChannelReceive(ctx, channelName string, timeoutMs uint64) string {
+	rawHostChannelReceive(ctx, channelName, timeoutMs, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-publish
+func rawHostChannelPublish(ctx, channelName, msgType, payloadJSON string, retptr unsafe.Pointer)
+
+func hostChannelPublish(ctx, channelName, msgType, payloadJSON string) string {
+	rawHostChannelPublish(ctx, channelName, msgType, payloadJSON, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-subscribe
+func rawHostChannelSubscribe(ctx, channelName, filter string, retptr unsafe.Pointer)
+
+func hostChannelSubscribe(ctx, channelName string, filter string) string {
+	rawHostChannelSubscribe(ctx, channelName, filter, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-unsubscribe
+func rawHostChannelUnsubscribe(subscriptionID string, retptr unsafe.Pointer)
+
+func hostChannelUnsubscribe(subscriptionID string) string {
+	rawHostChannelUnsubscribe(subscriptionID, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-ack
+func rawHostChannelAck(ctx, channelName, messageID string, retptr unsafe.Pointer)
+
+func hostChannelAck(ctx, channelName, messageID string) string {
+	rawHostChannelAck(ctx, channelName, messageID, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-nack
+func rawHostChannelNack(ctx, channelName, messageID string, requeue bool, retptr unsafe.Pointer)
+
+func hostChannelNack(ctx, channelName, messageID string, requeue bool) string {
+	rawHostChannelNack(ctx, channelName, messageID, requeue, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-create
+func rawHostChannelCreate(ctx, channelName string, maxSize uint32, messageTTLMs uint64, retptr unsafe.Pointer)
+
+func hostChannelCreate(ctx, channelName string, maxSize uint32, messageTTLMs uint64) string {
+	rawHostChannelCreate(ctx, channelName, maxSize, messageTTLMs, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-delete
+func rawHostChannelDelete(ctx, channelName string, retptr unsafe.Pointer)
+
+func hostChannelDelete(ctx, channelName string) string {
+	rawHostChannelDelete(ctx, channelName, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/channels@0.1.0 channel-depth
+func rawHostChannelDepth(ctx, channelName string, retptr unsafe.Pointer)
+
+func hostChannelDepth(ctx, channelName string) string {
+	rawHostChannelDepth(ctx, channelName, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}

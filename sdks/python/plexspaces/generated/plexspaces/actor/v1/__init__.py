@@ -1212,7 +1212,7 @@ class SpawnActorRequest(betterproto.Message):
     role: str = betterproto.string_field(9)
     """
     Role of the actor within its application (e.g. "worker", "leader").
-     Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+     Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
      Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
      If empty, falls back to actor_id.name() for dispatch.
     """
@@ -2358,7 +2358,7 @@ class ActorSpawnSpec(betterproto.Message):
     role: str = betterproto.string_field(2)
     """
     Role of the actor within its application (e.g. "worker", "leader").
-     Maps 1:1 to ChildSpec.role (TOML `type` field in [[supervisor.children]]).
+     Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
      Used by BehaviorRegistry to dispatch the correct spec when multiple children
      share the same actor_type (behavior class).
     """

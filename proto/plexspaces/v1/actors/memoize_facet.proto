@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 PlexSpaces Contributors
+//
+// MemoizeFacetConfig — configuration for the KV-backed result-cache facet.
+//
+// ## Purpose
+// The memoize facet intercepts actor handler calls and caches their return
+// values in KV storage. On a cache hit the handler is skipped entirely,
+// returning the stored result immediately. On a miss the handler runs
+// normally and the result is written to KV before being returned.
+//
+// ## Architecture Context
+// The memoize facet sits in the interceptor chain at priority 700 (between
+// metrics at 800-899 and domain logic at 100-500). It is stateless from the
+// actor's perspective — the actor struct does not change; only KV is used.
+//
+// This decouples caching from business logic: attach the facet in
+// app-config.toml and remove it without touching actor code.
+//
+// ## Config keys (map<string,string> in FacetAttachment.config)
+//   key_prefix       — KV namespace. Default: "memo:<actor_id>:"
+//   ttl_seconds      — Entry lifetime. "0" or absent = no eviction.
+//   max_entries      — Capacity cap. "0" or absent = unlimited.
+//   handler_names    — Comma-separated list of handler names to intercept.
+//                      Absent or empty = intercept all handlers.
+//
+// ## Example app-config.toml
+// ```toml
+// [[supervisor.children]]
+// name = "llm_router"
+// facets = [
+//   { type = "memoize", priority = 700, config = {
+//     key_prefix = "llm_cache:", ttl_seconds = "3600",
+//     handler_names = "chat_completion"
+//   }}
+// ]
+// ```
+
+syntax = "proto3";
+
+package plexspaces.facets.v1;
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/facets;plexspaces_facets_v1";
+
+// MemoizeFacetConfig is the structured configuration for the memoize facet.
+// At runtime this is stored in FacetAttachment.config (google.protobuf.Struct),
+// so field names here double as the canonical config key names.
+message MemoizeFacetConfig {
+  // KV key prefix used to namespace cached entries.
+  // Defaults to "memo:<actor_id>:" when empty, ensuring per-actor isolation.
+  string key_prefix = 1;
+
+  // Time-to-live for each cached entry in seconds.
+  // 0 means entries persist until explicitly deleted or the KV is cleared.
+  uint32 ttl_seconds = 2;
+
+  // Maximum number of entries to keep in cache.
+  // When the limit is reached the oldest entry (by insertion order) is evicted.
+  // 0 means unlimited.
+  uint32 max_entries = 3;
+
+  // Subset of handler names this facet intercepts.
+  // When empty the facet applies to every handler on the actor.
+  // Example: ["chat_completion", "summarize"]
+  repeated string handler_names = 4;
+}
+
+// MemoizeFacetStats is returned by the facet's get_stats operation and
+// is also written to ApplicationMetrics counter_metrics on each request.
+message MemoizeFacetStats {
+  // Total cache hits (handler skipped, cached result returned).
+  uint64 hits = 1;
+
+  // Total cache misses (handler executed, result stored).
+  uint64 misses = 2;
+
+  // Total entries currently in the cache.
+  uint64 current_entries = 3;
+
+  // Total evictions caused by ttl_seconds or max_entries enforcement.
+  uint64 evictions = 4;
+}

@@ -139,8 +139,8 @@ The compose file includes:
 # Build from source
 docker build -t plexobject/plexspaces:latest .
 
-# Build with specific features (e.g., dashboard, firecracker)
-docker build --build-arg FEATURES="dashboard,firecracker" -t plexobject/plexspaces:latest .
+# Build with Firecracker enabled in addition to the default dashboard support
+docker build --build-arg ENABLE_FIRECRACKER=1 -t plexobject/plexspaces:latest .
 
 # Build with version tag
 docker build -t plexobject/plexspaces:v0.1.0 .
@@ -1515,8 +1515,8 @@ docker rm plexspaces-node
 # Build latest image
 docker build -t plexobject/plexspaces:latest .
 
-# Build with specific features (e.g., dashboard, firecracker)
-docker build --build-arg FEATURES="dashboard,firecracker" -t plexobject/plexspaces:latest .
+# Build with Firecracker enabled in addition to the default dashboard support
+docker build --build-arg ENABLE_FIRECRACKER=1 -t plexobject/plexspaces:latest .
 
 # Build with version tag
 docker build -t plexobject/plexspaces:v0.1.0 .
@@ -1530,17 +1530,17 @@ docker build -t plexobject/plexspaces:latest \
 #### Build Options
 
 ```bash
-# Build with all features (default: dashboard,firecracker)
+# Build default image (dashboard enabled, firecracker disabled)
 docker build -t plexobject/plexspaces:latest .
 
-# Build with specific features only
+# Build with extra plexspaces-cli features
 docker build \
-  --build-arg FEATURES="dashboard" \
+  --build-arg FEATURES="some-cli-feature" \
   -t plexobject/plexspaces:latest .
 
-# Build with no features (default features only)
+# Build with Firecracker enabled
 docker build \
-  --build-arg FEATURES="" \
+  --build-arg ENABLE_FIRECRACKER=1 \
   -t plexobject/plexspaces:latest .
 
 # Build without cache (force rebuild)
@@ -1550,7 +1550,7 @@ docker build --no-cache -t plexobject/plexspaces:latest .
 docker build --progress=plain -t plexobject/plexspaces:latest .
 ```
 
-**Note**: By default, the Dockerfile builds with **ALL features** (`dashboard,firecracker`) for a production-ready image. To build with only default features, set `FEATURES=""`.
+**Note**: By default, the Dockerfile builds with `plexspaces-node/dashboard` enabled and Firecracker disabled. Set `ENABLE_FIRECRACKER=1` to include both `plexspaces-cli/firecracker` and `plexspaces-node/firecracker`.
 
 #### Verify Build
 
@@ -1642,11 +1642,11 @@ chmod +x scripts/publish-docker.sh
 # Publish latest only
 ./scripts/publish-docker.sh latest
 
-# Publish with all features (default: dashboard,firecracker)
+# Publish default image (dashboard enabled, firecracker disabled)
 ./scripts/publish-docker.sh v0.1.0
 
-# Publish with specific features only
-./scripts/publish-docker.sh v0.1.0 "dashboard"
+# Publish with Firecracker enabled
+./scripts/publish-docker.sh v0.1.0 "" 1
 ```
 
 The script will:

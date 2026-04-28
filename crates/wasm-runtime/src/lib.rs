@@ -289,7 +289,7 @@ pub mod wasm_runtime_helpers {
 }
 
 /// WASM actor configuration combining limits and capabilities
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WasmConfig {
     /// Resource limits (memory, fuel, CPU time)
     pub limits: ResourceLimits,
@@ -321,6 +321,11 @@ pub struct WasmConfig {
     /// re-instantiating at once. Default: 8 (stays under Wasmtime's limit with headroom).
     /// Only used when `enable_pooling` is true.
     pub max_concurrent_instantiations: Option<u32>,
+
+    /// Shared pool of send_after timer handles for the entire application.
+    /// When set, all timers spawned by any actor in this application register here.
+    /// On undeploy, the application calls cancel_all() on this pool to abort all pending timers.
+    pub shared_timer_pool: Option<std::sync::Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
 }
 
 impl Default for WasmConfig {
@@ -341,6 +346,7 @@ impl Default for WasmConfig {
             durability_enabled: false,              // Off by default for performance
             use_instance_pool: true, // On by default; used when deploy-path integration is done
             max_concurrent_instantiations: Some(7), // Default: 7 permits (leaves headroom under Wasmtime's limit of 10)
+            shared_timer_pool: None,
         }
     }
 }
@@ -366,6 +372,7 @@ impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
             } else {
                 default.max_concurrent_instantiations
             },
+            shared_timer_pool: None,
         }
     }
 }

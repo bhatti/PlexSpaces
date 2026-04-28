@@ -7,8 +7,7 @@
 //!
 //! Bridges WASM host function calls to the actor framework.
 //! Implements [`plexspaces_wasm_runtime::MessageSender`] using:
-//! - ActorService for tell (fire-and-forget) operations
-//! - ActorRegistry for ask (request-reply) via registered ActorRef
+//! - ActorRegistry for tell and ask so passivated virtual actors are reactivated
 //! - ActorFactory for stop_actor with tenant isolation
 //!
 //! Actor IDs follow the canonical `{name}//{actor_type}::{namespace}@{node_id}` format (e.g.,
@@ -249,11 +248,10 @@ impl MessageSender for ActorServiceMessageSender {
         message_type: &str,
         message: &[u8],
     ) -> Result<(), String> {
-        trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
+        use plexspaces_core::ActorId;
+        use plexspaces_core::ActorRegistry;
 
-        let ctx = self
-            .request_context_from_registered_sender_actor(from)
-            .await?;
+        trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
@@ -264,12 +262,20 @@ impl MessageSender for ActorServiceMessageSender {
             ..Default::default()
         };
 
-        self.actor_service
-            .send(&ctx, to, msg)
+        // Route through ActorRegistry so virtual actors are reactivated if passivated.
+        // This is the canonical tell path — do NOT use actor_service.send() directly here,
+        // as that bypasses virtual actor activation owned by the registry.
+        let registry: Arc<ActorRegistry> = self
+            .service_locator
+            .actor_registry()
             .await
-            .map_err(|e| e.to_string())?;
-
-        Ok(())
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let to_id = ActorId::from_canonical(to)
+            .map_err(|e| format!("Invalid canonical actor ID '{to}': {e}"))?;
+        registry
+            .tell(&to_id, msg)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     #[instrument(skip(self, payload), fields(from = %from, to = %to, msg_type = %message_type))]
@@ -296,12 +302,25 @@ impl MessageSender for ActorServiceMessageSender {
             recipient_id = %to,
             msg_type = %message_type,
             timeout_ms = timeout_ms,
-            "WASM ask: sending request via ActorService"
+            "WASM ask: sending request via ActorRegistry"
         );
 
+        // Route through ActorRegistry::ask so virtual actors are reactivated if passivated.
+        // The registry owns virtual actor activation — do NOT bypass it via actor_service.
         let ctx = self
             .request_context_from_registered_sender_actor(from)
             .await?;
+
+        use plexspaces_core::ActorId;
+        use plexspaces_core::ActorRegistry;
+
+        let registry: Arc<ActorRegistry> = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+        let to_id = ActorId::from_canonical(to)
+            .map_err(|e| format!("Invalid canonical actor ID '{to}': {e}"))?;
 
         let msg = Message {
             id: request_id.clone(),
@@ -312,11 +331,7 @@ impl MessageSender for ActorServiceMessageSender {
             ..Default::default()
         };
 
-        match self
-            .actor_service
-            .send_and_wait(&ctx, to, msg, Some(timeout))
-            .await
-        {
+        match registry.ask(&ctx, &to_id, msg, timeout).await {
             Ok(reply) => {
                 debug!(
                     request_id = %request_id,
@@ -793,6 +808,7 @@ mod tests {
 
     struct RecordingActorService {
         reply_payload: Vec<u8>,
+        sent_messages: Arc<tokio::sync::Mutex<Vec<(String, String)>>>,
     }
 
     struct NoopObjectRegistry;
@@ -964,34 +980,24 @@ mod tests {
         async fn send(
             &self,
             _ctx: &plexspaces_core::RequestContext,
-            _actor_id: &str,
-            _message: Message,
+            actor_id: &str,
+            message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            Err("not needed for this test".into())
+            let mut sent = self.sent_messages.lock().await;
+            sent.push((actor_id.to_string(), message.message_type.clone()));
+            Ok("ok".to_string())
         }
 
         async fn send_and_wait(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_core::RequestContext,
             actor_id: &str,
-            message: Message,
+            _message: Message,
             _timeout: Option<std::time::Duration>,
         ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-            assert_eq!(ctx.tenant_id(), "tenant-a");
-            assert_eq!(ctx.namespace(), "heat-diffusion-rust");
-            assert_eq!(
-                actor_id,
-                "heat-diffusion-1//worker::heat-diffusion-rust@test-node-8093"
-            );
-            assert_eq!(
-                message.sender_id,
-                "leader//gen_server::heat-diffusion-rust@test-node-8091"
-            );
-            assert_eq!(message.message_type, "init");
             Ok(Message {
                 id: "res-1".to_string(),
                 sender_id: actor_id.to_string(),
-                receiver_id: message.sender_id,
                 payload: self.reply_payload.clone(),
                 ..Default::default()
             })
@@ -1038,63 +1044,47 @@ mod tests {
         );
     }
 
+    /// send_message must route through ActorRegistry::tell so that passivated virtual
+    /// actors are reactivated. The sender does NOT need to be registered in the registry
+    /// (send_after fires from a background task when the actor may be passivated).
     #[tokio::test]
-    async fn ask_routes_via_actor_service_for_remote_actor_ids() {
+    async fn send_message_routes_via_registry_without_requiring_registered_sender() {
+        let sent = Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let actor_service = Arc::new(RecordingActorService {
-            reply_payload: br#"{"status":"ok"}"#.to_vec(),
+            reply_payload: vec![],
+            sent_messages: sent.clone(),
         });
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(NoopObjectRegistry);
+        // ActorRegistry with local node test-node-8091. The target is on test-node-8093
+        // (remote), so tell routes through actor_service.send.
         let actor_registry = Arc::new(ActorRegistry::new(
             object_registry,
             "test-node-8091".to_string(),
         ));
+        actor_registry
+            .set_actor_service(actor_service.clone())
+            .await;
         service_locator
             .register_actor_registry(actor_registry.clone())
             .await;
 
-        let sender_id = ActorId::new(
-            "leader",
-            "gen_server",
-            "heat-diffusion-rust",
-            "test-node-8091",
+        let wasm_sender = ActorServiceMessageSender::new(actor_service, service_locator);
+
+        // from actor is NOT registered — simulates a passivated virtual actor sending via
+        // send_after. Previously this would fail with "Registered sender actor scope not found".
+        let result = plexspaces_wasm_runtime::MessageSender::send_message(
+            &wasm_sender,
+            "health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091",
+            "worker//miniclaw_wasm::go-miniclaw@test-node-8093",
+            "tick",
+            b"{}",
         )
-        .expect("sender actor id");
-        let sender_ctx = plexspaces_core::RequestContext::new_without_auth(
-            "tenant-a".to_string(),
-            "heat-diffusion-rust".to_string(),
-        );
-        let sender_ref: Arc<dyn plexspaces_core::MessageSender> =
-            Arc::new(TestFrameworkSender::new(
-                sender_id.clone(),
-                sender_ctx.tenant_id().to_string(),
-                sender_ctx.namespace().to_string(),
-            ));
-        actor_registry
-            .register_actor(
-                &sender_ctx,
-                sender_id.clone(),
-                sender_ref,
-                "gen_server".to_string(),
-                None,
-                None,
-                None,
-            )
-            .await;
+        .await;
 
-        let sender = ActorServiceMessageSender::new(actor_service, service_locator);
-
-        let reply = plexspaces_wasm_runtime::MessageSender::ask(
-            &sender,
-            &sender_id.to_string(),
-            "heat-diffusion-1//worker::heat-diffusion-rust@test-node-8093",
-            "init",
-            br#"{"region":0}"#.to_vec(),
-            2500,
-        )
-        .await
-        .expect("remote ask should route via ActorService");
-
-        assert_eq!(reply, br#"{"status":"ok"}"#.to_vec());
+        assert!(result.is_ok(), "send_message failed: {:?}", result);
+        let msgs = sent.lock().await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].1, "tick");
     }
 }

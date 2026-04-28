@@ -360,7 +360,9 @@ impl ProcessGroupRegistry {
         let group_key = Self::group_key(tenant_id, group_name);
         if self.storage.get(ctx, &group_key).await?.is_none() {
             metrics::counter!("plexspaces_process_groups_join_errors_total", "error" => "group_not_found").increment(1);
-            warn!("Group not found: {}", group_name);
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                debug!("Group not found (will auto-create): {}", group_name);
+            }
             return Err(ProcessGroupError::GroupNotFound(group_name.to_string()));
         }
 

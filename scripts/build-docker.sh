@@ -5,28 +5,33 @@
 # Docker build and push script
 #
 # Usage:
-#   ./scripts/build-docker.sh [tag] [registry]
+#   ./scripts/build-docker.sh [tag] [registry] [features] [enable_firecracker]
 #
 # Examples:
 #   ./scripts/build-docker.sh latest
 #   ./scripts/build-docker.sh v0.1.0 docker.io/plexspaces
 #   ./scripts/build-docker.sh latest ghcr.io/plexspaces/plexspaces
+#   ./scripts/build-docker.sh latest plexspaces "" 1
 
 set -euo pipefail
 
 TAG="${1:-latest}"
 REGISTRY="${2:-plexspaces}"
-# Note: FEATURES arg is for plexspaces-cli features (firecracker)
-# plexspaces-node features (dashboard, firecracker) are always enabled in Dockerfile
-FEATURES="${3:-firecracker}"  # Default: build with all features
+# Optional extra plexspaces-cli features; dashboard is always enabled in Dockerfile.
+FEATURES="${3:-}"
+# Firecracker support is opt-in for both CLI and node.
+ENABLE_FIRECRACKER="${4:-0}"
 IMAGE_NAME="${REGISTRY}:${TAG}"
 
 echo "🐳 Building Docker image: ${IMAGE_NAME}"
-echo "📦 Features: ${FEATURES} (plexspaces-cli)"
-echo "📦 All features enabled: plexspaces-cli/firecracker, plexspaces-node/dashboard, plexspaces-node/firecracker"
+echo "📦 Dashboard: enabled"
+echo "📦 Extra CLI features: ${FEATURES:-<none>}"
+echo "📦 Firecracker: ${ENABLE_FIRECRACKER}"
 
-# Build image with all features by default
-docker build --build-arg FEATURES="${FEATURES}" -t "${IMAGE_NAME}" .
+docker build \
+  --build-arg FEATURES="${FEATURES}" \
+  --build-arg ENABLE_FIRECRACKER="${ENABLE_FIRECRACKER}" \
+  -t "${IMAGE_NAME}" .
 
 echo "✅ Build complete!"
 echo ""
@@ -40,4 +45,3 @@ else
     echo "   docker tag ${IMAGE_NAME} <registry>/plexspaces:${TAG}"
     echo "   docker push <registry>/plexspaces:${TAG}"
 fi
-

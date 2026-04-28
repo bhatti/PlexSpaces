@@ -451,7 +451,7 @@ class ChildSpec(betterproto.Message):
     role: str = betterproto.string_field(2)
     """
     Role of this child within the application (e.g. "worker", "leader", "supervisor").
-     Maps 1:1 to the TOML `type` field in [[supervisor.children]].
+     Maps 1:1 to the TOML `role` field in [[supervisor.children]].
      Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
     """
 

@@ -322,6 +322,9 @@ pub struct WasmApplication {
     tenant_id: Arc<RwLock<String>>,
     /// Namespace from API request (for actor spawning)
     namespace: Arc<RwLock<String>>,
+    /// Shared send_after timer pool for all actors in this application.
+    /// All timers across all actor instances register here so undeploy can bulk-cancel them.
+    shared_timer_pool: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 impl WasmApplication {
@@ -352,6 +355,7 @@ impl WasmApplication {
             spec,
             spawned_actor_ids: Arc::new(RwLock::new(Vec::new())),
             last_stopped_actor_ids: Arc::new(RwLock::new(Vec::new())),
+            shared_timer_pool: Arc::new(std::sync::Mutex::new(Vec::new())),
             node: Arc::new(RwLock::new(None)),
             tenant_id: Arc::new(RwLock::new(String::new())),
             namespace: Arc::new(RwLock::new(String::new())),
@@ -420,6 +424,7 @@ impl WasmApplication {
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         actor_id: &str,
         init_payload: &[u8],
+        shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Result<Arc<WasmInstance>, ApplicationError> {
         // Get ServiceLocator from node
         let service_locator = node
@@ -484,6 +489,7 @@ impl WasmApplication {
         // Derive WasmConfig from spec.facets — durability enabled when spec carries a durability facet.
         let wasm_config = plexspaces_wasm_runtime::WasmConfig {
             durability_enabled: spec.facets.iter().any(|f| f.r#type == "durability"),
+            shared_timer_pool,
             ..Default::default()
         };
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(wasm_config);
@@ -630,6 +636,8 @@ impl WasmApplication {
         // Namespace is required so spawned actors get canonical ActorIds scoped to the app.
         let namespace = self.namespace.read().await.clone();
 
+        let shared_timer_pool = self.shared_timer_pool.clone();
+
         // Convert each ChildSpec to an ActorSpawnSpec so the BehaviorRegistry closure
         // captures a single, self-contained spawn spec rather than raw ChildSpec entries.
         let mut spawn_specs_by_behavior_class: std::collections::HashMap<
@@ -700,6 +708,7 @@ impl WasmApplication {
             let module_hash_clone = module_hash.clone();
             let runtime_clone = runtime.clone();
             let behavior_spawn_specs_clone = behavior_spawn_specs.clone();
+            let shared_timer_pool_clone = shared_timer_pool.clone();
 
             // Register async behavior constructor (factory key == behavior class == ActorId.actor_type segment).
             let behavior_class_for_error = behavior_class.clone();
@@ -711,6 +720,7 @@ impl WasmApplication {
                     let node_ref = node_clone.clone();
                     let name_for_error = behavior_class_for_error.clone();
                     let initial_state = initial_state.to_vec();
+                    let timer_pool = shared_timer_pool_clone.clone();
 
                     Box::pin(async move {
                         // Dispatch to the right spec by matching declaration_name from the payload.
@@ -781,6 +791,7 @@ impl WasmApplication {
                             rt,
                             &actor_id,
                             &initial_state,
+                            Some(timer_pool),
                         )
                         .await
                         .map_err(|e| {
@@ -908,6 +919,7 @@ impl WasmApplication {
             self.runtime.clone(),
             final_tenant_id,
             final_namespace,
+            Some(self.shared_timer_pool.clone()),
         )
         .await
         {
@@ -1111,6 +1123,7 @@ impl WasmApplication {
                         self.runtime.clone(),
                         final_tenant_id.clone(),
                         final_namespace.clone(),
+                        Some(self.shared_timer_pool.clone()),
                     )?;
 
                     // Add child to supervisor
@@ -1230,6 +1243,7 @@ impl WasmApplication {
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         tenant_id: String,
         namespace: String,
+        shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Result<ActorChildSpec, ApplicationError> {
         let node_id = node.id().to_string();
         let identity = crate::child_spec_util::require_child_identity(proto_child_spec)?;
@@ -1262,6 +1276,7 @@ impl WasmApplication {
             let tenant_id = tenant_id_clone.clone();
             let namespace = namespace_clone.clone();
             let actor_id = actor_id_string_clone.clone();
+            let timer_pool = shared_timer_pool.clone();
 
             Box::pin(async move {
                 // Use unified helper that builds Actor with all services
@@ -1273,6 +1288,7 @@ impl WasmApplication {
                     runtime,
                     tenant_id,
                     namespace,
+                    timer_pool,
                 )
                 .await
                 .map_err(|e| ActorError::BehaviorError(format!("Factory failed: {}", e)))?;
@@ -1350,6 +1366,7 @@ impl WasmApplication {
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         tenant_id: String,
         namespace: String,
+        shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Result<(plexspaces_actor::Actor, plexspaces_core::ActorRef), ApplicationError> {
         use plexspaces_core::Actor as CoreActor;
 
@@ -1396,6 +1413,7 @@ impl WasmApplication {
             runtime,
             actor_id,
             &init_payload,
+            shared_timer_pool,
         )
         .await?;
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
@@ -1579,6 +1597,7 @@ impl WasmApplication {
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         tenant_id: String,
         namespace: String,
+        shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Result<String, ApplicationError> {
         let identity = crate::child_spec_util::require_child_identity(child_spec)?;
         let behavior_class = identity.actor_type.as_str();
@@ -1594,6 +1613,7 @@ impl WasmApplication {
             runtime,
             tenant_id.clone(),
             namespace.clone(),
+            shared_timer_pool,
         )
         .await?;
 
@@ -2108,6 +2128,23 @@ impl Application for WasmApplication {
     }
 
     async fn cleanup_for_undeploy(&mut self) -> Result<(), ApplicationError> {
+        // Cancel all pending send_after timers before stopping actors.
+        // Timers must be cancelled on undeploy (not on passivation) to prevent
+        // "Actor not found" warnings after the application is fully torn down.
+        if let Ok(mut handles) = self.shared_timer_pool.lock() {
+            let count = handles.len();
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
+            if count > 0 {
+                tracing::debug!(
+                    application = %self.name,
+                    cancelled_timers = count,
+                    "Cancelled pending send_after timers on undeploy"
+                );
+            }
+        }
+
         let node = {
             let node_opt = self.node.read().await;
             node_opt

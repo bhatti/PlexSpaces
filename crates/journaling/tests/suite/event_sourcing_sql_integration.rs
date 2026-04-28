@@ -273,6 +273,7 @@ mod sqlite_tests {
                     "increment",
                     &[],
                     &format!("{{\"new_value\": {}}}", i).into_bytes(),
+                    &std::collections::HashMap::new(),
                 )
                 .await
                 .unwrap();

@@ -50,33 +50,38 @@ COPY wit/ ./wit/
 RUN mkdir -p ./config
 COPY release.yaml ./config/release.yaml
 
-# Build arguments for features
-# Default: Build with ALL features enabled
-# - plexspaces-cli: firecracker feature
-# - plexspaces-node: dashboard and firecracker features (via package/feature syntax)
-# Can override with --build-arg FEATURES="" to build with default features only
-ARG FEATURES="firecracker"
+# Build arguments for optional features
+# Dashboard is always enabled in the Docker image.
+# Firecracker support is opt-in because it increases build time and image complexity.
+# FEATURES adds extra plexspaces-cli features; ENABLE_FIRECRACKER=1 turns on both
+# plexspaces-cli/firecracker and plexspaces-node/firecracker.
+ARG FEATURES=""
+ARG ENABLE_FIRECRACKER="0"
 
 # Build the plexspaces CLI binary (includes node start command)
 # Use BuildKit cache mounts for Cargo registry, git cache, and target directory
 # This dramatically speeds up rebuilds by caching dependencies and incremental compilation
 # Docker will cache this layer unless source code or dependencies changed
-# By default, builds with ALL features (dashboard, firecracker) for production-ready image
+# By default, builds with dashboard enabled and firecracker disabled.
 # Cache-busting: Force rebuild by touching a file (increment version to bust cache)
-# Version: 2026-02-09-v1.0 (updated to build with all features by default)
-RUN echo "Build cache version: 2026-02-09-v1.0" > /tmp/build_version.txt && cat /tmp/build_version.txt
+# Version: 2026-02-09-v1.1 (dashboard default, firecracker opt-in)
+RUN echo "Build cache version: 2026-02-09-v1.1" > /tmp/build_version.txt && cat /tmp/build_version.txt
 
-# Build with ALL features enabled:
-# - plexspaces-cli/firecracker: Enables Firecracker support in CLI
-# - plexspaces-node/dashboard: Enables dashboard UI
-# - plexspaces-node/firecracker: Enables Firecracker VM support in node
+# Build with dashboard enabled by default.
+# Optional:
+# - FEATURES: extra plexspaces-cli features
+# - ENABLE_FIRECRACKER=1: enables firecracker in both CLI and node
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release -p plexspaces-cli \
-        --features "${FEATURES}" \
-        --features "plexspaces-node/dashboard" \
-        --features "plexspaces-node/firecracker" && \
+    feature_args="--features plexspaces-node/dashboard"; \
+    if [ -n "${FEATURES}" ]; then \
+        feature_args="${feature_args} --features ${FEATURES}"; \
+    fi; \
+    if [ "${ENABLE_FIRECRACKER}" = "1" ]; then \
+        feature_args="${feature_args} --features firecracker --features plexspaces-node/firecracker"; \
+    fi; \
+    cargo build --release -p plexspaces-cli ${feature_args} && \
     cp /app/target/release/plexspaces /tmp/plexspaces
 
 # Stage 2: Runtime

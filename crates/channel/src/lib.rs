@@ -211,6 +211,14 @@ mod sqs_backend;
 #[cfg(feature = "process-group-backend")]
 mod process_group_backend;
 
+// ChannelServiceImpl — bridges ChannelService trait to Channel backends
+// Enabled when plexspaces-core is available (via process-group-backend or channel-service feature)
+#[cfg(any(feature = "channel-service", feature = "process-group-backend", test))]
+pub mod channel_service;
+
+#[cfg(any(feature = "channel-service", feature = "process-group-backend", test))]
+pub use channel_service::ChannelServiceImpl;
+
 // Mock backend for testing
 // Available when test-utils feature is enabled (required for integration tests)
 #[cfg(feature = "test-utils")]

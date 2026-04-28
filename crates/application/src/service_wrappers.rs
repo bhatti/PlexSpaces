@@ -40,8 +40,6 @@ use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
 
-use futures::StreamExt;
-
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
 /// Wrapper that adapts TupleSpace to TupleSpaceProvider trait
@@ -96,61 +94,25 @@ impl TupleSpaceProvider for TupleSpaceProviderWrapper {
 /// ## Design
 /// This wrapper manages a registry of channels by name, creating them on-demand
 /// if they don't exist. For production use, Node should provide a channel registry.
+/// Channel service backed by `ChannelServiceImpl` from `plexspaces-channel`.
+///
+/// Delegates all operations to `ChannelServiceImpl` which creates InMemory channels
+/// on demand, supports pre-registration, and handles proper timeout semantics.
 pub struct ChannelServiceWrapper {
-    // For now, we'll use a simple in-memory channel registry
-    // In production, Node should provide a proper channel manager
-    channels: Arc<
-        tokio::sync::RwLock<
-            std::collections::HashMap<String, Arc<dyn plexspaces_channel::Channel>>,
-        >,
-    >,
+    inner: plexspaces_channel::ChannelServiceImpl,
 }
 
 impl ChannelServiceWrapper {
-    /// Create a new wrapper with empty channel registry
+    /// Create a new wrapper backed by the default InMemory provider.
     pub fn new() -> Self {
         Self {
-            channels: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            inner: plexspaces_channel::ChannelServiceImpl::new(),
         }
     }
 
-    /// Get or create a channel by name (public for use by TaskRouter)
-    ///
-    /// ## Note
-    /// This method creates channels directly. In the future, this should use
-    /// ServiceLocator::create_default_channel() to respect channel_provider configuration.
-    pub async fn get_or_create_channel(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
-    {
-        let mut channels = self.channels.write().await;
-
-        if let Some(channel) = channels.get(name) {
-            return Ok(channel.clone());
-        }
-
-        // Create a new in-memory channel (default)
-        // TODO: Use ServiceLocator::create_default_channel() when ServiceLocator is available
-        use plexspaces_proto::channel::v1::{
-            ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
-        };
-        let config = ChannelConfig {
-            name: name.to_string(),
-            provider: ChannelProvider::ChannelProviderInMemory as i32,
-            capacity: 1000, // Default capacity
-            delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
-            ..Default::default()
-        };
-
-        let channel_result = plexspaces_channel::InMemoryChannel::new(config).await;
-        let channel = Arc::new(
-            channel_result.map_err(|e| format!("Failed to create channel {}: {}", name, e))?,
-        );
-
-        channels.insert(name.to_string(), channel.clone());
-        Ok(channel)
+    /// Create with a custom `ChannelServiceImpl` (e.g. SQLite-backed for durability).
+    pub fn with_impl(inner: plexspaces_channel::ChannelServiceImpl) -> Self {
+        Self { inner }
     }
 }
 
@@ -173,22 +135,7 @@ impl ChannelService for ChannelServiceWrapper {
         queue_name: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let channel = self.get_or_create_channel(queue_name).await?;
-
-        // Message is already proto Message (unified type) - set channel name
-        let mut channel_msg = message.clone();
-        channel_msg.channel = queue_name.to_string();
-        if channel_msg.timestamp.is_none() {
-            channel_msg.timestamp = Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-            });
-        }
-
-        channel
-            .send(channel_msg)
-            .await
-            .map_err(|e| format!("Failed to send to queue {}: {}", queue_name, e).into())
+        self.inner.send_to_queue(queue_name, message).await
     }
 
     async fn publish_to_topic(
@@ -196,38 +143,14 @@ impl ChannelService for ChannelServiceWrapper {
         topic_name: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let channel = self.get_or_create_channel(topic_name).await?;
-
-        // Message is already proto Message (unified type) - set channel name
-        let mut channel_msg = message.clone();
-        channel_msg.channel = topic_name.to_string();
-        if channel_msg.timestamp.is_none() {
-            channel_msg.timestamp = Some(prost_types::Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-            });
-        }
-
-        channel
-            .publish(channel_msg)
-            .await
-            .map(|_| message.id.clone())
-            .map_err(|e| format!("Failed to publish to topic {}: {}", topic_name, e).into())
+        self.inner.publish_to_topic(topic_name, message).await
     }
 
     async fn subscribe_to_topic(
         &self,
         topic_name: &str,
     ) -> Result<BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
-        let channel = self.get_or_create_channel(topic_name).await?;
-
-        // Channel already returns proto Message stream - return directly
-        let stream = channel
-            .subscribe(None)
-            .await
-            .map_err(|e| format!("Failed to subscribe to topic {}: {}", topic_name, e))?;
-
-        Ok(stream)
+        self.inner.subscribe_to_topic(topic_name).await
     }
 
     async fn receive_from_queue(
@@ -235,72 +158,7 @@ impl ChannelService for ChannelServiceWrapper {
         queue_name: &str,
         timeout: Option<std::time::Duration>,
     ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
-        let channel = self.get_or_create_channel(queue_name).await?;
-
-        // Use try_receive for non-blocking, or receive with timeout
-        let messages = if timeout.is_some() {
-            // For timeout, we'd need to implement timeout logic
-            // For now, use try_receive
-            channel
-                .try_receive(1)
-                .await
-                .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
-        } else {
-            // Blocking receive
-            channel
-                .receive(1)
-                .await
-                .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
-        };
-
-        // Channel already returns proto Message - return first message directly
-        Ok(messages.into_iter().next())
-    }
-}
-
-/// Stub ChannelService implementation (for testing/backward compatibility)
-///
-/// TODO: Remove once ChannelServiceWrapper is fully integrated
-pub struct StubChannelService;
-
-#[async_trait]
-impl ChannelService for StubChannelService {
-    async fn send_to_queue(
-        &self,
-        _queue_name: &str,
-        _message: Message,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err(
-            "StubChannelService: send_to_queue not implemented. Use real ChannelServiceWrapper."
-                .into(),
-        )
-    }
-
-    async fn publish_to_topic(
-        &self,
-        _topic_name: &str,
-        _message: Message,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err(
-            "StubChannelService: publish_to_topic not implemented. Use real ChannelServiceWrapper."
-                .into(),
-        )
-    }
-
-    async fn subscribe_to_topic(
-        &self,
-        _topic_name: &str,
-    ) -> Result<BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
-        use futures::stream;
-        Ok(Box::pin(stream::empty()))
-    }
-
-    async fn receive_from_queue(
-        &self,
-        _queue_name: &str,
-        _timeout: Option<Duration>,
-    ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubChannelService: receive_from_queue not implemented. Use real ChannelServiceWrapper.".into())
+        self.inner.receive_from_queue(queue_name, timeout).await
     }
 }
 

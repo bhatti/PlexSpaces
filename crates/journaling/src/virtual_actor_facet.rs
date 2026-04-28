@@ -460,6 +460,7 @@ impl Facet for VirtualActorFacet {
         &self,
         _method: &str,
         _args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Mark as accessed (updates last_accessed timestamp)
         self.mark_accessed().await;
@@ -475,6 +476,7 @@ impl Facet for VirtualActorFacet {
         _method: &str,
         _args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Mark as accessed after method completes
         self.mark_accessed().await;

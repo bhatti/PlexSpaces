@@ -27,5 +27,6 @@ world plexspaces-actor {
 /// Polyglot deployable actor world used by Rust/Python/Go/TypeScript SDKs.
 world actor-world {
     import host;
+    import channels;
     export actor;
 }

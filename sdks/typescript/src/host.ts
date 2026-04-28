@@ -217,6 +217,21 @@ export class ProcessGroups {
       throw new Error(result);
     }
   }
+
+  /** Return the first member of a process group, or null if empty. */
+  first(group: string): string | null {
+    const members = this.members(group);
+    return members.length > 0 ? members[0] : null;
+  }
+
+  /** Return the first member of a process group, throwing if empty. */
+  firstOrThrow(group: string): string {
+    const members = this.members(group);
+    if (members.length === 0) {
+      throw new Error(`no members in process group '${group}'`);
+    }
+    return members[0];
+  }
 }
 
 /**
@@ -408,6 +423,39 @@ export class Host {
   kvList(prefix: string): string {
     if (typeof hostKvList !== 'function') return '[]';
     try { return JSON.stringify(hostKvList(prefix)); } catch (e) { return `ERROR:${e}`; }
+  }
+
+  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
+  kvGetJson<T = unknown>(key: string): T | null {
+    const raw = this.kvGet(key);
+    if (!raw || raw.startsWith('ERROR:')) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+
+  /** Serialize value to JSON and store under key. Throws on write failure. */
+  kvPutJson(key: string, value: unknown): void {
+    const serialized = JSON.stringify(value);
+    const result = this.kvPut(key, serialized);
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(`kvPutJson(${key}): ${result}`);
+    }
+  }
+
+  /** Increment a single named application metric counter by 1. Errors are swallowed. */
+  incrCounter(applicationId: string, name: string): void {
+    this.incrCounters(applicationId, { [name]: 1 });
+  }
+
+  /** Increment one or more named application metric counters. Errors are swallowed. */
+  incrCounters(applicationId: string, counters: Record<string, number>): void {
+    try {
+      this.applicationMetricsAdd(applicationId, {
+        message_count: Object.keys(counters).length,
+        counter_metrics: counters,
+      });
+    } catch (e) {
+      this.warn(`incrCounters: metrics update failed: ${e}`);
+    }
   }
 
   // ========================================================================
@@ -651,6 +699,65 @@ export class Host {
     } catch {
       return decodeHttpFetchResponseWire(bytes);
     }
+  }
+}
+
+/**
+ * Two-cursor monotonic append-only log backed by KV.
+ *
+ * Embed in actor state (serialize with `JSON.stringify`). Each consumer
+ * tracks its own read cursor so they advance independently.
+ *
+ * @example
+ * ```typescript
+ * const log = new EventLog();
+ * const seq = log.append(host, 'audit:', { action: 'login' });
+ * const [events, newCursor] = log.poll(host, 'audit:', 'consumer-1', 20);
+ * ```
+ */
+export class EventLog {
+  watermark: number = 0;
+
+  constructor(watermark = 0) {
+    this.watermark = watermark;
+  }
+
+  /** Append an entry to the log. Returns the assigned sequence number. */
+  append(h: Host, prefix: string, entry: unknown): number {
+    this.watermark++;
+    const key = `${prefix}seq:${this.watermark}`;
+    try {
+      h.kvPutJson(key, entry);
+    } catch (e) {
+      this.watermark--;
+      throw new Error(`EventLog.append: ${e}`);
+    }
+    return this.watermark;
+  }
+
+  /**
+   * Return up to `limit` events for `consumerId` that arrived after its last cursor.
+   * Returns `[events, newCursor]`. The new cursor is persisted in KV.
+   */
+  poll(h: Host, prefix: string, consumerId: string, limit = 100): [unknown[], number] {
+    const cursorKey = `${prefix}cursor:${consumerId}`;
+    const rawCursor = h.kvGet(cursorKey);
+    const cursor = rawCursor ? parseInt(rawCursor, 10) || 0 : 0;
+
+    const events: unknown[] = [];
+    let newCursor = cursor;
+    for (let seq = cursor + 1; seq <= this.watermark && events.length < limit; seq++) {
+      const entry = h.kvGetJson(`${prefix}seq:${seq}`);
+      if (entry !== null) {
+        events.push(entry);
+        newCursor = seq;
+      }
+    }
+
+    if (newCursor !== cursor) {
+      h.kvPut(cursorKey, String(newCursor));
+    }
+    return [events, newCursor];
   }
 }
 

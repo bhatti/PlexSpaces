@@ -74,6 +74,13 @@ except ImportError:
     # Not in WASM environment, will use mock
     _host_init_attempted = True
 
+_channels_impl = None
+try:
+    from wit_world.imports import channels as _wit_channels_eager
+    _channels_impl = _wit_channels_eager
+except ImportError:
+    pass
+
 
 def _to_payload_bytes(data: str) -> bytes:
     """Encode a JSON/string payload to bytes for WIT payload (list<u8>) parameters.
@@ -112,12 +119,12 @@ def _get_host():
     global _host_impl, _host_init_attempted
     if _host_impl is not None:
         return _host_impl
-    
+
     # Eager import already attempted - return mock if not in WASM
     if _host_init_attempted:
         _host_impl = _MockHost()
         return _host_impl
-    
+
     # Fallback (should not reach here in WASM)
     try:
         from wit_world.imports import host as wit_host
@@ -126,6 +133,14 @@ def _get_host():
     except ImportError:
         _host_impl = _MockHost()
         return _host_impl
+
+
+def _get_channels():
+    """Get the channels WIT import (real or mock fallback to _get_host())."""
+    global _channels_impl
+    if _channels_impl is not None:
+        return _channels_impl
+    return _get_host()
 
 
 class _MockHost:
@@ -140,6 +155,12 @@ class _MockHost:
         self._group_messages: List[Dict[str, str]] = []
         self._self_id = "mock-actor"
         self.ts = _TupleSpaceHelper(self)
+        self._channel_queues: Dict[str, List[Dict[str, Any]]] = {}
+        self._channel_topics: Dict[str, List[Dict[str, Any]]] = {}
+        self._channel_acked: Dict[str, bool] = {}
+        self._channel_nacked: Dict[str, bool] = {}
+        self._channel_subs: Dict[str, str] = {}
+        self._channel_sub_counter: int = 0
 
     def _matches_tuple(self, tuple_value: List[Any], pattern: List[Any]) -> bool:
         if len(tuple_value) != len(pattern):
@@ -518,6 +539,71 @@ class _MockHost:
             "body": "",
         })
 
+    # ========================================================================
+    # Channel (queue + pub/sub) mock
+    # ========================================================================
+
+    def channel_send(self, ctx: str, channel_name: str, msg_type: str, payload_json: str) -> str:
+        queue = self._channel_queues.setdefault(channel_name, [])
+        msg_id = f"msg-{len(queue) + 1}"
+        queue.append({"id": msg_id, "msg_type": msg_type, "payload": payload_json})
+        return msg_id
+
+    def channel_send_with_options(
+        self, ctx: str, channel_name: str, msg_type: str, payload_json: str,
+        delay_ms: int, ttl_ms: int, headers_json: str
+    ) -> str:
+        return self.channel_send(ctx, channel_name, msg_type, payload_json)
+
+    def channel_receive(self, ctx: str, channel_name: str, timeout_ms: int) -> str:
+        queue = self._channel_queues.get(channel_name, [])
+        if not queue:
+            return ""
+        msg = queue.pop(0)
+        return json.dumps({
+            "id": msg["id"],
+            "msg_type": msg["msg_type"],
+            "payload": msg["payload"],
+            "timestamp": 0,
+            "delivery_count": 1,
+            "headers": [],
+        })
+
+    def channel_publish(self, ctx: str, channel_name: str, msg_type: str, payload_json: str) -> str:
+        topic = self._channel_topics.setdefault(channel_name, [])
+        msg_id = f"pub-{len(topic) + 1}"
+        topic.append({"id": msg_id, "msg_type": msg_type, "payload": payload_json})
+        return msg_id
+
+    def channel_subscribe(self, ctx: str, channel_name: str, filter_str: str) -> str:
+        self._channel_sub_counter += 1
+        sub_id = f"sub-{self._channel_sub_counter}"
+        self._channel_subs[sub_id] = channel_name
+        return sub_id
+
+    def channel_unsubscribe(self, subscription_id: str) -> str:
+        self._channel_subs.pop(subscription_id, None)
+        return ""
+
+    def channel_ack(self, ctx: str, channel_name: str, message_id: str) -> str:
+        self._channel_acked[message_id] = True
+        return ""
+
+    def channel_nack(self, ctx: str, channel_name: str, message_id: str, requeue: bool) -> str:
+        self._channel_nacked[message_id] = True
+        return ""
+
+    def channel_create(self, ctx: str, channel_name: str, max_size: int, message_ttl_ms: int) -> str:
+        self._channel_queues.setdefault(channel_name, [])
+        return ""
+
+    def channel_delete(self, ctx: str, channel_name: str) -> str:
+        self._channel_queues.pop(channel_name, None)
+        return ""
+
+    def channel_depth(self, ctx: str, channel_name: str) -> str:
+        return str(len(self._channel_queues.get(channel_name, [])))
+
 
 class _TupleSpaceHelper:
     """
@@ -649,17 +735,270 @@ class ProcessGroups:
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
+    def first(self, group: str) -> Optional[str]:
+        """Return the first member of a process group, or None if empty."""
+        members = self.members(group)
+        return members[0] if members else None
+
+    def first_or_raise(self, group: str) -> str:
+        """Return the first member of a process group, raising if empty."""
+        members = self.members(group)
+        if not members:
+            raise RuntimeError(f"no members in process group {group!r}")
+        return members[0]
+
+
+class EventLog:
+    """
+    Two-cursor monotonic append-only log backed by KV.
+
+    Embed in actor state — it serializes via __dict__ / dataclass / attrs.
+    Each consumer tracks its own read cursor so they advance independently.
+
+    Example::
+
+        log = EventLog()
+
+        # append
+        seq = log.append(host, "audit:", {"action": "login"})
+
+        # poll (returns new events since last call for this consumer)
+        events, new_cursor = log.poll(host, "audit:", "consumer-1", limit=20)
+    """
+
+    def __init__(self, watermark: int = 0) -> None:
+        self.watermark: int = watermark
+
+    def append(self, h: "Host", prefix: str, entry: Any) -> int:
+        """Write entry to KV and advance the watermark. Returns the assigned sequence number."""
+        self.watermark += 1
+        key = f"{prefix}seq:{self.watermark}"
+        try:
+            h.kv_put_json(key, entry)
+        except Exception as e:
+            self.watermark -= 1
+            raise RuntimeError(f"EventLog.append: {e}") from e
+        return self.watermark
+
+    def poll(self, h: "Host", prefix: str, consumer_id: str, limit: int = 100):
+        """
+        Return up to *limit* events for *consumer_id* that arrived after its last cursor.
+
+        Returns ``(events, new_cursor)`` where events is a list of deserialized entries
+        and new_cursor is the last sequence number consumed.
+        The new cursor is persisted in KV so the next call resumes from where this left off.
+        """
+        cursor_key = f"{prefix}cursor:{consumer_id}"
+        raw_cursor = h.kv_get(cursor_key)
+        cursor = int(raw_cursor) if raw_cursor and raw_cursor.isdigit() else 0
+
+        events: list = []
+        new_cursor = cursor
+        seq = cursor + 1
+        while seq <= self.watermark and len(events) < limit:
+            entry = h.kv_get_json(f"{prefix}seq:{seq}")
+            if entry is not None:
+                events.append(entry)
+                new_cursor = seq
+            seq += 1
+
+        if new_cursor != cursor:
+            h.kv_put(cursor_key, str(new_cursor))
+        return events, new_cursor
+
+
+class Channel:
+    """
+    Channel host functions for queue and pub/sub messaging patterns.
+
+    Channels unify queue (one consumer) and pub/sub (all subscribers) under
+    a single API. The provider (InMemory, Redis, Kafka, etc.) is a runtime concern.
+
+    Example::
+
+        from plexspaces import host
+
+        # Queue (point-to-point)
+        msg_id = host.channel.send(ctx, "work-queue", "process", {"task": "data"})
+        msg, ok, err = host.channel.receive(ctx, "work-queue", timeout_ms=5000)
+        if ok:
+            host.channel.ack(ctx, "work-queue", msg["id"])
+
+        # Pub/sub (broadcast)
+        host.channel.publish(ctx, "events", "user_login", {"user": "alice"})
+    """
+
+    def send(
+        self,
+        ctx: Any,
+        channel_name: str,
+        msg_type: str,
+        payload: Any = None,
+    ) -> str:
+        """Send a message to a channel (queue semantics). Returns message ID."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        payload_json = json.dumps(payload) if payload is not None else "{}"
+        result = h.channel_send(ctx_json, channel_name, msg_type, _to_payload_bytes(payload_json))
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def send_with_options(
+        self,
+        ctx: Any,
+        channel_name: str,
+        msg_type: str,
+        payload: Any = None,
+        delay_ms: int = 0,
+        ttl_ms: int = 0,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Send with delay, TTL, and custom headers. Returns message ID."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        payload_json = json.dumps(payload) if payload is not None else "{}"
+        headers_json = json.dumps(headers or {})
+        result = h.channel_send_with_options(ctx_json, channel_name, msg_type, _to_payload_bytes(payload_json), delay_ms, ttl_ms, headers_json)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def receive(
+        self,
+        ctx: Any,
+        channel_name: str,
+        timeout_ms: int = 0,
+    ) -> tuple:
+        """
+        Receive one message from a channel.
+
+        Returns:
+            (message_dict, True, None) on receipt, or (None, False, None) on timeout/empty.
+            message_dict has keys: id, msg_type, payload, timestamp, delivery_count, headers.
+        """
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        raw = h.channel_receive(ctx_json, channel_name, timeout_ms)
+        if isinstance(raw, (bytes, bytearray)):
+            raw = _from_payload_bytes(raw)
+        if not raw:
+            return None, False, None
+        if raw.startswith("ERROR:"):
+            raise RuntimeError(raw)
+        try:
+            return json.loads(raw), True, None
+        except (json.JSONDecodeError, ValueError) as e:
+            raise RuntimeError(f"channel receive decode: {e}") from e
+
+    def publish(
+        self,
+        ctx: Any,
+        channel_name: str,
+        msg_type: str,
+        payload: Any = None,
+    ) -> str:
+        """Publish a message to a channel (pub/sub — all subscribers receive). Returns message ID."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        payload_json = json.dumps(payload) if payload is not None else "{}"
+        result = h.channel_publish(ctx_json, channel_name, msg_type, _to_payload_bytes(payload_json))
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def subscribe(self, ctx: Any, channel_name: str, filter_str: str = "") -> str:
+        """Subscribe to a channel (pub/sub). Returns a subscription ID."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_subscribe(ctx_json, channel_name, filter_str)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return result
+
+    def unsubscribe(self, subscription_id: str) -> None:
+        """Cancel a subscription by ID."""
+        h = _get_channels()
+        result = h.channel_unsubscribe(subscription_id)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def ack(self, ctx: Any, channel_name: str, message_id: str) -> None:
+        """Acknowledge successful processing (prevents redelivery)."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_ack(ctx_json, channel_name, message_id)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def nack(self, ctx: Any, channel_name: str, message_id: str, requeue: bool = True) -> None:
+        """Negative-acknowledge a message. requeue=True retries; False sends to dead-letter channel."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_nack(ctx_json, channel_name, message_id, requeue)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def create(self, ctx: Any, channel_name: str, max_size: int = 0, message_ttl_ms: int = 0) -> None:
+        """Create a channel if it does not exist. max_size=0 means unbounded."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_create(ctx_json, channel_name, max_size, message_ttl_ms)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def delete(self, ctx: Any, channel_name: str) -> None:
+        """Delete a channel and all pending messages."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_delete(ctx_json, channel_name)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def depth(self, ctx: Any, channel_name: str) -> int:
+        """Return the number of pending (unacked) messages in a channel."""
+        h = _get_channels()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        result = h.channel_depth(ctx_json, channel_name)
+        if isinstance(result, (bytes, bytearray)):
+            result = _from_payload_bytes(result)
+        if result and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            return int(result) if result else 0
+        except ValueError:
+            return 0
+
 
 class Host:
     """
     PlexSpaces host function interface.
-    
+
     Provides access to all host capabilities from within an actor.
     """
-    
+
     def __init__(self):
         self.process_groups = ProcessGroups()
         self.ts = _TupleSpaceHelper(self)
+        self.channel = Channel()
     
     def send(self, to: str, msg_type: str, payload: Optional[Union[str, Dict[str, Any], List[Any]]] = None) -> str:
         """
@@ -730,25 +1069,55 @@ class Host:
             Value string or empty string if not found
         """
         h = _get_host()
-        if hasattr(h, "kv_get"):
-            return _from_payload_bytes(h.kv_get(key))
-        return getattr(h, "kv-get", lambda k: "")(key)
+        return _from_payload_bytes(h.kv_get(key))
 
     def kv_put(self, key: str, value: str) -> str:
         """
         Key-value put (string-only).
-        
+
         Args:
             key: Key to store
             value: Value string
-        
+
         Returns:
             Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
-        if hasattr(h, "kv_put"):
-            return h.kv_put(key, _to_payload_bytes(value))
-        return getattr(h, "kv-put", lambda k, v: "")(key, value)
+        return h.kv_put(key, _to_payload_bytes(value))
+
+    def kv_get_json(self, key: str) -> Optional[Any]:
+        """Retrieve a JSON value by key. Returns deserialized object or None if not found."""
+        raw = self.kv_get(key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def kv_put_json(self, key: str, value: Any) -> None:
+        """Serialize value to JSON and store under key. Raises on serialization or write failure."""
+        try:
+            serialized = json.dumps(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"kv_put_json({key!r}): serialization failed: {e}") from e
+        result = self.kv_put(key, serialized)
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(f"kv_put_json({key!r}): {result}")
+
+    def incr_counter(self, application_id: str, name: str) -> None:
+        """Increment a single named application metric counter by 1."""
+        self.incr_counters(application_id, {name: 1})
+
+    def incr_counters(self, application_id: str, counters: Dict[str, int]) -> None:
+        """Increment one or more named application metric counters. Errors are logged, never raised."""
+        try:
+            self.application_metrics_add(application_id, {
+                "message_count": len(counters),
+                "counter_metrics": counters,
+            })
+        except Exception as e:
+            self.warn(f"incr_counters: metrics update failed: {e}")
 
     def ts_write(self, tuple_json: str) -> str:
         """
@@ -825,9 +1194,7 @@ class Host:
             Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
-        if hasattr(h, "kv_delete"):
-            return h.kv_delete(key)
-        return getattr(h, "kv-delete", lambda _: "")(key)
+        return h.kv_delete(key)
 
     def kv_list(self, prefix: str) -> str:
         """

@@ -1976,19 +1976,10 @@ impl Actor {
                 .await;
         }
 
-        // For RegistryFacet, store tenant_id/namespace from actor context
-        // This allows facets to use API-provided tenant_id/namespace instead of defaults
-        // We'll pass them through the attach call
-        let tenant_id_opt = if facet.facet_type() == "registry" {
-            Some(self.context.tenant_id.clone())
-        } else {
-            None
-        };
-        let namespace_opt = if facet.facet_type() == "registry" {
-            Some(self.context.namespace.clone())
-        } else {
-            None
-        };
+        // Always inject tenant_id/namespace into facet config so facets can build
+        // properly-scoped RequestContexts (tenant isolation requirement).
+        let tenant_id_opt = Some(self.context.tenant_id.clone());
+        let namespace_opt = Some(self.context.namespace.clone());
 
         let mut facets = self.facets.write().await;
         facets
@@ -2362,7 +2353,7 @@ impl Actor {
                 tracing::trace!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "Checking facets for interception");
             }
             facets_guard
-                .intercept_before(method_name.as_str(), &message.payload)
+                .intercept_before(method_name.as_str(), &message.payload, &message.headers)
                 .await
         }
         .map_err(|e| {
@@ -2476,6 +2467,7 @@ impl Actor {
                             &method_name,
                             &message.payload,
                             &[], // TODO: Serialize result
+                            &message.headers,
                         )
                         .await;
                 }

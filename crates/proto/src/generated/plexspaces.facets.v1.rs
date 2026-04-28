@@ -320,6 +320,10 @@ pub enum BuiltInFacetType {
     /// Virtual actor facet (Orleans-inspired)
     /// Enables automatic activation/deactivation for always-addressable actors
     VirtualActor = 12,
+    /// Memoize facet — KV-backed result cache
+    /// Intercepts handler calls: returns cached result on hit, computes and stores on miss.
+    /// Config: key_prefix, ttl_seconds, max_entries, handler_names (see memoize_facet.proto)
+    Memoize = 13,
 }
 impl BuiltInFacetType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -341,6 +345,7 @@ impl BuiltInFacetType {
             BuiltInFacetType::Transaction => "TRANSACTION",
             BuiltInFacetType::StatelessWorker => "STATELESS_WORKER",
             BuiltInFacetType::VirtualActor => "VIRTUAL_ACTOR",
+            BuiltInFacetType::Memoize => "MEMOIZE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -359,8 +364,52 @@ impl BuiltInFacetType {
             "TRANSACTION" => Some(Self::Transaction),
             "STATELESS_WORKER" => Some(Self::StatelessWorker),
             "VIRTUAL_ACTOR" => Some(Self::VirtualActor),
+            "MEMOIZE" => Some(Self::Memoize),
             _ => None,
         }
     }
+}
+/// MemoizeFacetConfig is the structured configuration for the memoize facet.
+/// At runtime this is stored in FacetAttachment.config (google.protobuf.Struct),
+/// so field names here double as the canonical config key names.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MemoizeFacetConfig {
+    /// KV key prefix used to namespace cached entries.
+    /// Defaults to "memo:<actor_id>:" when empty, ensuring per-actor isolation.
+    #[prost(string, tag="1")]
+    pub key_prefix: ::prost::alloc::string::String,
+    /// Time-to-live for each cached entry in seconds.
+    /// 0 means entries persist until explicitly deleted or the KV is cleared.
+    #[prost(uint32, tag="2")]
+    pub ttl_seconds: u32,
+    /// Maximum number of entries to keep in cache.
+    /// When the limit is reached the oldest entry (by insertion order) is evicted.
+    /// 0 means unlimited.
+    #[prost(uint32, tag="3")]
+    pub max_entries: u32,
+    /// Subset of handler names this facet intercepts.
+    /// When empty the facet applies to every handler on the actor.
+    /// Example: \["chat_completion", "summarize"\]
+    #[prost(string, repeated, tag="4")]
+    pub handler_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// MemoizeFacetStats is returned by the facet's get_stats operation and
+/// is also written to ApplicationMetrics counter_metrics on each request.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MemoizeFacetStats {
+    /// Total cache hits (handler skipped, cached result returned).
+    #[prost(uint64, tag="1")]
+    pub hits: u64,
+    /// Total cache misses (handler executed, result stored).
+    #[prost(uint64, tag="2")]
+    pub misses: u64,
+    /// Total entries currently in the cache.
+    #[prost(uint64, tag="3")]
+    pub current_entries: u64,
+    /// Total evictions caused by ttl_seconds or max_entries enforcement.
+    #[prost(uint64, tag="4")]
+    pub evictions: u64,
 }
 // @@protoc_insertion_point(module)

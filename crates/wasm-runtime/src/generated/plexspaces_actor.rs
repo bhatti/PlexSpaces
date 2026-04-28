@@ -3844,25 +3844,27 @@ pub mod plexspaces {
       pub type MessageId = super::super::super::plexspaces::actor::types::MessageId;
       pub type DurationMs = super::super::super::plexspaces::actor::types::DurationMs;
       pub type ActorError = super::super::super::plexspaces::actor::types::ActorError;
-      /// Queue message with metadata
+      /// Channel message with delivery metadata (queue and pub/sub).
       #[derive(Clone)]
-      pub struct QueueMessage {
-        /// Unique message ID
+      pub struct ChannelMessage {
+        /// Unique message ID (ULID)
         pub id: MessageId,
-        /// Message type for routing
+        /// Message type for routing / filtering
         pub msg_type: _rt::String,
         /// Message payload
         pub payload: Payload,
-        /// Timestamp when enqueued
+        /// Unix timestamp (milliseconds) when enqueued
         pub timestamp: u64,
-        /// Delivery attempt count
+        /// Delivery attempt count (1 = first delivery)
         pub delivery_count: u32,
-        /// Custom headers
+        /// Custom metadata headers
         pub headers: _rt::Vec::<(_rt::String,_rt::String,)>,
       }
-      impl ::core::fmt::Debug for QueueMessage {
+      /// Backward-compatible alias — use `ChannelMessage` in new code.
+      pub type QueueMessage = ChannelMessage;
+      impl ::core::fmt::Debug for ChannelMessage {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-          f.debug_struct("QueueMessage").field("id", &self.id).field("msg-type", &self.msg_type).field("payload", &self.payload).field("timestamp", &self.timestamp).field("delivery-count", &self.delivery_count).field("headers", &self.headers).finish()
+          f.debug_struct("ChannelMessage").field("id", &self.id).field("msg_type", &self.msg_type).field("payload", &self.payload).field("timestamp", &self.timestamp).field("delivery_count", &self.delivery_count).field("headers", &self.headers).finish()
         }
       }
       #[allow(unused_unsafe, clippy::all)]

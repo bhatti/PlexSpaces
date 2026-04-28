@@ -145,6 +145,44 @@ The SDK automatically handles logging via `host.log()` for error reporting and o
 
 **Note**: The SDK uses `host.log()` internally for error logging. For custom logging in your actors, you can import and use host functions directly using the virtual import pattern (future enhancement: SDK may provide helper methods).
 
+### Tier 1 Ergonomics Helpers
+
+Convenience wrappers on the `host` singleton and `EventLog` class.
+
+```typescript
+import { host, EventLog } from "@plexspaces/sdk";
+
+// Process Groups — first member
+const routerId: string | null = host.processGroups.first("svc:llm_router");
+const routerIdStrict: string = host.processGroups.firstOrThrow("svc:llm_router");
+
+// KV JSON helpers
+interface Task { seq: number; kind: string; }
+host.kvPutJson("task:1", { seq: 1, kind: "summarize" });
+const task: Task | null = host.kvGetJson<Task>("task:1");
+
+// Metrics (errors swallowed)
+host.incrCounter("my-app", "requests_processed");
+host.incrCounters("my-app", { cacheHits: 5, cacheMisses: 2 });
+
+// EventLog — embed in actor state
+class MyActor extends PlexSpacesActor<{ auditLog: EventLog }> {
+  getDefaultState() { return { auditLog: new EventLog() }; }
+
+  onRecord(payload: unknown) {
+    const seq = this.state.auditLog.append(host, "audit:", payload);
+    return { seq };
+  }
+
+  onPoll(payload: { consumerId: string; limit?: number }) {
+    const [events, cursor] = this.state.auditLog.poll(
+      host, "audit:", payload.consumerId, payload.limit ?? 50
+    );
+    return { events, cursor };
+  }
+}
+```
+
 ### Type Generation
 
 WIT TypeScript types are generated automatically as part of the SDK build process (`npm run build`). These types are optional and only used internally by the SDK for type checking. Client code doesn't need to generate or import these types - the SDK abstracts all WIT details away.

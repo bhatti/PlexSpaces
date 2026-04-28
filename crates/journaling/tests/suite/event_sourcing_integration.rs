@@ -43,6 +43,7 @@ async fn test_event_sourcing_full_workflow() {
                 "increment",
                 &[],
                 &format!("{{\"new_value\": {}}}", i).into_bytes(),
+                &std::collections::HashMap::new(),
             )
             .await
             .unwrap();

@@ -268,6 +268,7 @@ impl Facet for EventEmitterFacet {
         method: &str,
         _args: &[u8],
         _result: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Emit an event after method execution
         // This is where GenEventBehavior functionality is replicated
@@ -335,7 +336,7 @@ mod tests {
 
         // Trigger after_method which should emit event
         let result = facet
-            .after_method("event_test", b"args", b"result")
+            .after_method("event_test", b"args", b"result", &std::collections::HashMap::new())
             .await
             .unwrap();
 

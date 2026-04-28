@@ -34,6 +34,7 @@ package plexspaces
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -117,6 +118,32 @@ func (b *BaseActor) ActorID() string {
 // ApplicationID returns the actor namespace/application identifier derived from ActorID.
 func (b *BaseActor) ApplicationID() string {
 	return b.applicationID
+}
+
+// IncrCounter increments a single named application metric counter by 1.
+// Errors are logged as warnings and never propagate — metrics must not crash actors.
+//
+//	a.IncrCounter(host, "agent_chats")
+func (b *BaseActor) IncrCounter(h *Host, name string) {
+	b.IncrCounters(h, map[string]int{name: 1})
+}
+
+// IncrCounters increments one or more named application metric counters.
+// message_count is set to the number of distinct counter names.
+// Errors are logged as warnings and never propagate.
+//
+//	a.IncrCounters(host, map[string]int{"llm_completions": 1, "tokens_used": tokens})
+func (b *BaseActor) IncrCounters(h *Host, counters map[string]int) {
+	cm := make(map[string]any, len(counters))
+	for k, v := range counters {
+		cm[k] = v
+	}
+	if _, err := h.ApplicationMetricsAdd(b.ApplicationID(), map[string]any{
+		"message_count":   len(counters),
+		"counter_metrics": cm,
+	}); err != nil {
+		h.Warn(fmt.Sprintf("IncrCounters: metrics update failed: %v", err))
+	}
 }
 
 func normalizeRoleActorID(actorID string) string {

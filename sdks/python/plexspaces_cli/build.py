@@ -65,6 +65,82 @@ def find_wit_dir() -> str:
     )
 
 
+def _load_actor_module(actor_name: str, actor_path: Path):
+    """Load an actor module, supporting both single-file and multi-file package layouts.
+
+    When sibling .py files exist in the same directory the actor file is treated as
+    part of a package.  The parent directory is added to sys.path and the module is
+    imported via importlib with an explicit package name so that relative imports
+    (``from .helpers import …``) resolve correctly.
+    """
+    import importlib
+    import importlib.util
+    import types
+
+    actor_dir = actor_path.parent
+
+    # Detect multi-file package: any sibling .py file (other than the actor itself)
+    siblings = [p for p in actor_dir.glob("*.py") if p != actor_path]
+    if siblings:
+        # Install the parent directory as the package root so relative imports work.
+        if str(actor_dir) not in sys.path:
+            sys.path.insert(0, str(actor_dir))
+
+        # Register the package (the actor's stem is used as the package name).
+        pkg_name = actor_path.parent.name  # e.g. "miniclaw"
+        module_name = f"{pkg_name}.{actor_name}"
+
+        # Bootstrap the package object if it isn't already importable
+        if pkg_name not in sys.modules:
+            pkg_spec = importlib.util.spec_from_file_location(
+                pkg_name,
+                actor_dir / "__init__.py" if (actor_dir / "__init__.py").exists() else None,
+                submodule_search_locations=[str(actor_dir)],
+            )
+            if pkg_spec is not None and pkg_spec.loader is not None:
+                pkg = importlib.util.module_from_spec(pkg_spec)
+                sys.modules[pkg_name] = pkg
+                pkg_spec.loader.exec_module(pkg)
+            else:
+                # No __init__.py — create a namespace package
+                pkg = types.ModuleType(pkg_name)
+                pkg.__path__ = [str(actor_dir)]  # type: ignore[attr-defined]
+                pkg.__package__ = pkg_name
+                sys.modules[pkg_name] = pkg
+
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            actor_path,
+            submodule_search_locations=[],
+        )
+        module = importlib.util.module_from_spec(spec)
+        module.__package__ = pkg_name
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    else:
+        # Single-file actor — original simple path
+        spec = importlib.util.spec_from_file_location(actor_name, actor_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+    return module
+
+
+def _copy_py_flat(src: Path, dest: Path) -> None:
+    """Copy a Python file to dest, rewriting relative imports to absolute ones.
+
+    componentize-py runs in a flat temp directory with no package context, so
+    ``from .module import X`` must become ``from module import X``.
+    """
+    import re
+    text = src.read_text(encoding="utf-8")
+    # "from .foo import ..." → "from foo import ..."
+    text = re.sub(r'^from \.([\w]+)', r'from \1', text, flags=re.MULTILINE)
+    # "from . import foo" → "import foo"
+    text = re.sub(r'^from \. import ', r'import ', text, flags=re.MULTILINE)
+    dest.write_text(text, encoding="utf-8")
+
+
 def generate_wrapper(actor_file: Path, work_dir: Path) -> Path:
     """
     Generate the WIT interface wrapper for an actor file.
@@ -72,21 +148,22 @@ def generate_wrapper(actor_file: Path, work_dir: Path) -> Path:
     Supports multiple @actor classes in one file (Erlang-style ApplicationSpec).
     Returns path to the generated wrapper file.
     """
-    import importlib.util
-
-    # Copy actor file to work directory
+    # Copy actor file and all sibling .py files to work directory so componentize-py
+    # can find them at build time.  Relative imports are rewritten to absolute so they
+    # work in the flat temp directory where componentize-py runs.
     actor_name = actor_file.stem
-    shutil.copy(actor_file, work_dir / actor_file.name)
+    actor_dir = actor_file.parent
+    _copy_py_flat(actor_file, work_dir / actor_file.name)
+    for sibling in actor_dir.glob("*.py"):
+        if sibling != actor_file:
+            _copy_py_flat(sibling, work_dir / sibling.name)
 
     # Load the module to find @actor classes
-    spec = importlib.util.spec_from_file_location(actor_name, actor_file)
-    module = importlib.util.module_from_spec(spec)
-
     # Add plexspaces to path
     sdk_path = Path(__file__).parent.parent.parent
     sys.path.insert(0, str(sdk_path))
 
-    spec.loader.exec_module(module)
+    module = _load_actor_module(actor_name, actor_file)
 
     # Find ALL @actor classes
     actor_classes = []
@@ -165,22 +242,19 @@ def build_wasm(
         work_dir = Path(temp_dir)
         
         # Check if this is an SDK-style actor or legacy WIT-compatible
-        import importlib.util
         sdk_path = Path(__file__).parent.parent.parent
         sys.path.insert(0, str(sdk_path))
-        
-        spec = importlib.util.spec_from_file_location(actor_name, actor_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        
+
+        module = _load_actor_module(actor_name, actor_path)
+
         # Find @actor class(es)
         has_sdk_actor = any(
             isinstance(getattr(module, name), type) and hasattr(getattr(module, name), '_plexspaces_is_actor')
             for name in dir(module)
         )
-        
+
         if has_sdk_actor:
-            # Generate wrapper for SDK-style actor
+            # Generate wrapper for SDK-style actor (also copies sibling files)
             wrapper_path = generate_wrapper(actor_path, work_dir)
             build_module = wrapper_path.stem
         else:

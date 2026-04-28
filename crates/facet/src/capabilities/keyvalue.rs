@@ -452,6 +452,7 @@ impl Facet for KeyValueFacet {
         &self,
         method: &str,
         args: &[u8],
+        _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
         // Intercept KV operations
         if method.starts_with("kv_") {
@@ -514,7 +515,7 @@ mod tests {
         });
 
         let result = facet
-            .before_method("kv_set", serde_json::to_vec(&set_args).unwrap().as_slice())
+            .before_method("kv_set", serde_json::to_vec(&set_args).unwrap().as_slice(), &std::collections::HashMap::new())
             .await
             .unwrap();
 
@@ -523,7 +524,7 @@ mod tests {
         // Test get operation
         let get_args = serde_json::json!("test_key");
         let result = facet
-            .before_method("kv_get", serde_json::to_vec(&get_args).unwrap().as_slice())
+            .before_method("kv_get", serde_json::to_vec(&get_args).unwrap().as_slice(), &std::collections::HashMap::new())
             .await
             .unwrap();
 

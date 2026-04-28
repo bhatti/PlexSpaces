@@ -334,9 +334,13 @@ pub use timer_facet::{TimerError, TimerFacet};
 mod reminder_facet;
 pub use reminder_facet::{ReminderError, ReminderFacet, REMINDER_FACET_DEFAULT_PRIORITY};
 
+// Memoize facet
+mod memoize_facet;
+pub use memoize_facet::{MemoizeFacet, MEMOIZE_FACET_DEFAULT_PRIORITY};
+
 // Facet factories for journaling-related facets
 pub mod facet_factories;
 pub use facet_factories::{
-    DurabilityFacetFactory, EventSourcingFacetFactory, ReminderFacetFactory, TimerFacetFactory,
-    VirtualActorFacetFactory,
+    DurabilityFacetFactory, EventSourcingFacetFactory, MemoizeFacetFactory, ReminderFacetFactory,
+    TimerFacetFactory, VirtualActorFacetFactory,
 };

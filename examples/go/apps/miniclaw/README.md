@@ -254,14 +254,14 @@ func (h *HealthMonitorActor) doPoll() string {
 go test ./...
 
 # Run integration tests against a live node
-./test.sh 8092        # defaults to port 8092
+./test.sh 8091        # defaults to port 8091
 ```
 
 **Prerequisites:**
 - `tinygo` — `brew tap tinygo-org/tools && brew install tinygo`
 - `wasm-tools` — `cargo install wasm-tools`
 - `jco` — `npm install -g @bytecodealliance/jco`
-- A running PlexSpaces node: `cargo run --release -- --http-port 8092 --cluster-port 8091`
+- A running PlexSpaces node: `./scripts/server.sh 8091` (gRPC and HTTP share a single port)
 
 ## API Reference
 

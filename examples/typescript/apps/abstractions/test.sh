@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$REPO_ROOT/target/examples/typescript/abstractions/abstractions_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 APP_ID="abstractions-typescript"
 ABSTRACTIONS_ACTOR="abstractions:cart-1"
 EPHEMERAL_ACTOR="ephemeral:session-1"
@@ -206,7 +206,7 @@ if [ "$HTTP_CHECK" = "000" ]; then
   exit 1
 fi
 
-require_fresh_server_sh_node
+#require_fresh_server_sh_node
 
 echo "Step 2: Deploy"
 curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true

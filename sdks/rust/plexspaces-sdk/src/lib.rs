@@ -481,6 +481,7 @@ where
 ///     vec![Box::new(TimerFacet::new(json!({}), 50))],
 /// ).await?;
 /// ```
+
 #[cfg(feature = "native")]
 pub async fn spawn_with_facets<B>(
     ctx: &RequestContext,
@@ -513,6 +514,7 @@ where
                 role: String::new(),
                 namespace: namespace_str.clone(),
                 tenant_id: ctx.tenant_id().to_string(),
+                visibility: 0,
                 behavior_kind: actor_type,
                 args: std::collections::HashMap::new(),
                 facets: plexspaces_core::proto_facets_for_registration(Some(&facets), None),
@@ -605,6 +607,9 @@ pub async fn spawn_with_behavior_type(
     )
     .map_err(|e| format!("Failed to construct actor ID: {}", e))?;
 
+    let (role_from_init, args_from_init) =
+        plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+
     let spawn_spec = {
         use plexspaces_core::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
@@ -613,11 +618,12 @@ pub async fn spawn_with_behavior_type(
                 name: actor_id.name().to_string(),
                 actor_type: behavior_type.clone(),
             }),
-            role: String::new(),
+            role: role_from_init.unwrap_or_default(),
             namespace: ctx.namespace().to_string(),
             tenant_id: ctx.tenant_id().to_string(),
+            visibility: 0,
             behavior_kind: String::new(),
-            args: std::collections::HashMap::new(),
+            args: args_from_init,
             facets: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
@@ -1028,6 +1034,7 @@ mod tests {
     use async_trait::async_trait;
     use plexspaces_actor::{ActorRef, TestServiceLocatorStub};
     use plexspaces_core::{Message, MessageSender, ServiceLocator};
+    use plexspaces_proto::actor::v1::ActorVisibility;
     use plexspaces_journaling::SqliteJournalStorage;
     use std::sync::Arc;
 
@@ -1037,6 +1044,7 @@ mod tests {
     impl MessageSender for NonActorRefSender {
         async fn tell(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _message: Message,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
@@ -1056,6 +1064,7 @@ mod tests {
             "test",
             "remote-node",
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         let sender: Arc<dyn MessageSender> = Arc::new(actor_ref.clone());
 

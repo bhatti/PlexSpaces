@@ -177,6 +177,7 @@ fn named_def_spec(name: &str, actor_type: &str, initial_count: i64) -> ActorSpaw
         role: String::new(),
         namespace: NAMESPACE.to_string(),
         tenant_id: TENANT.to_string(),
+        visibility: 0,
         behavior_kind: "GenServer".to_string(),
         args: HashMap::from([("initial_count".to_string(), initial_count.to_string())]),
         facets: vec![Facet {
@@ -367,6 +368,7 @@ async fn test_named_definition_namespace_isolation() {
         role: String::new(),
         namespace: "ns-a".to_string(),
         tenant_id: TENANT.to_string(),
+        visibility: 0,
         behavior_kind: "GenServer".to_string(),
         args: HashMap::new(),
         facets: vec![Facet {
@@ -424,6 +426,7 @@ async fn test_durable_actor_instance_retained_after_stop() {
         role: String::new(),
         namespace: NAMESPACE.to_string(),
         tenant_id: TENANT.to_string(),
+        visibility: 0,
         behavior_kind: "GenServer".to_string(),
         args: HashMap::from([("initial_count".to_string(), "3".to_string())]),
         facets: vec![

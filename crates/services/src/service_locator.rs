@@ -114,7 +114,6 @@ pub fn register_fatal_error_channel(tx: tokio::sync::oneshot::Sender<String>) {
 /// process alive. This works even when called from within a spawned tokio task.
 fn fatal_exit(message: &str) -> ! {
     tracing::error!("{}", message);
-    eprintln!("{}", message);
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
 
@@ -1537,6 +1536,14 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         self.register_service(service).await;
     }
 
+    async fn facet_container_for_actor(
+        &self,
+        actor_id: &str,
+    ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
+        let wrapper = self.get_facet_manager().await?;
+        wrapper.facet_container_for_actor(actor_id).await
+    }
+
     async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
         self.facet_registry().await
     }
@@ -2278,9 +2285,10 @@ async fn initialize_services_impl(
         service_locator_impl.clone(),
         node_id_str.clone(),
     ));
-    // `ActorRegistry::tell` routes remote IDs through the embedded `ActorService` (e.g. `__DOWN__`
-    // to a supervisor on another node). Wire the same instance used by `ServiceLocator` so
-    // registry-initiated delivery works without requiring `Node::start()` (tests and early init).
+    // `ActorRegistry::tell` routes remote IDs through the embedded `ActorService`, forwarding the
+    // caller `RequestContext` on gRPC metadata (e.g. `__DOWN__` to a supervisor on another node).
+    // Wire the same instance used by `ServiceLocator` so registry-initiated delivery works
+    // without requiring `Node::start()` (tests and early init).
     actor_registry
         .set_actor_service(actor_service.clone())
         .await;

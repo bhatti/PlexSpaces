@@ -26,13 +26,13 @@ Five actors collaborate to decompose a high-level task into specialist sub-tasks
 ## Usage
 
 ```bash
-# Start a PlexSpaces node (HTTP gateway on 8092, gRPC on 8091)
+# Start a PlexSpaces node (gRPC and HTTP share port 8091)
 PLEXSPACES_JWT_SECRET=test cargo run -p plexspaces-cli -- start \
   --node-id test-node --listen-addr 0.0.0.0:8091
 
 # Build and test
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## Test Scenarios

@@ -95,8 +95,13 @@ let actor_ref = spawn_with_facets(
 use plexspaces_journaling::ReminderRegistration;
 use plexspaces_proto::prost_types;
 
-// Get facets from node
-let facets_arc = node.get_facets(actor_id).await?;
+use plexspaces_core::ServiceLocator;
+
+let facets_arc = node
+    .service_locator()
+    .facet_container_for_actor(actor_id.as_str())
+    .await
+    .ok_or_else(|| anyhow::anyhow!("Facets not found"))?;
 let facets_guard = facets_arc.read().await;
 
 // Register TimerFacet (transient heartbeat)

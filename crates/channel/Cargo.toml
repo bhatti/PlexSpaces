@@ -56,6 +56,7 @@ metrics = { workspace = true }
 
 # Optional: Process Group backend (for Erlang pg/pg2-style pub/sub)
 plexspaces-core = { path = "../core", optional = true }
+plexspaces-facet = { path = "../facet", optional = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
@@ -80,7 +81,7 @@ sqs-backend = [
     "plexspaces-common/test-helpers",
     "base64",
 ]
-process-group-backend = ["plexspaces-core"]
+process-group-backend = ["plexspaces-core", "dep:plexspaces-facet"]
 # Enable ChannelServiceImpl which implements plexspaces_core::ChannelService on top of Channel trait
 channel-service = ["plexspaces-core"]
 test-helpers = ["plexspaces-common/test-helpers"]

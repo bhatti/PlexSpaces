@@ -87,9 +87,9 @@ cargo test --lib
 ./build.sh
 
 # Run the full integration test (requires running PlexSpaces node)
-./test.sh                          # default: localhost:8092
-./test.sh 8092                     # single node
-./test.sh localhost:8092 localhost:8094  # two-node cluster
+./test.sh                          # default: localhost:8091
+./test.sh 8091                     # single node
+./test.sh localhost:8091 localhost:8094  # two-node cluster
 ```
 
 ## References

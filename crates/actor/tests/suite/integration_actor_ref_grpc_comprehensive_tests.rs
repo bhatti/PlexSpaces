@@ -8,6 +8,7 @@ use plexspaces_actor::ActorRef;
 use plexspaces_core::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, ServiceLocator,
 };
+use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
@@ -184,11 +185,13 @@ async fn test_remote_actor_ref_node_not_found() {
         "default", // namespace
         "unknown-node",
         service_locator,
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Send message should fail with node not found
     let message = create_test_message(b"test".to_vec());
-    let result = actor_ref.tell(message).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth("test".into(), "default".into());
+    let result = actor_ref.tell(&ctx, message).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.to_string().contains("Node not found") || err.to_string().contains("Failed"));
@@ -243,11 +246,12 @@ async fn test_remote_actor_ref_connection_failure() {
         "default", // namespace
         "remote-node",
         service_locator,
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Send message should fail with connection error
     let message = create_test_message(b"test".to_vec());
-    let result = actor_ref.tell(message).await;
+    let result = actor_ref.tell(&ctx, message).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -308,12 +312,13 @@ async fn test_remote_actor_ref_ask_timeout() {
         "default", // namespace
         "remote-node",
         service_locator,
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Ask should fail (connection or timeout)
     let message = create_test_message(b"test".to_vec());
     let result = actor_ref
-        .ask(message, std::time::Duration::from_millis(100))
+        .ask(&ctx, message, std::time::Duration::from_millis(100))
         .await;
     assert!(result.is_err());
 }
@@ -367,6 +372,7 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
         "default", // namespace
         "remote-node",
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
     let actor_ref2 = ActorRef::remote(
         test_actor_id("actor2", "remote-node", "default"),
@@ -374,13 +380,14 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
         "default", // namespace
         "remote-node",
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Both should use the same cached gRPC client from ServiceLocator
     // (Both will fail to connect, but should use same client)
     let message = create_test_message(b"test".to_vec());
-    let result1 = actor_ref1.tell(message.clone()).await;
-    let result2 = actor_ref2.tell(message).await;
+    let result1 = actor_ref1.tell(&ctx, message.clone()).await;
+    let result2 = actor_ref2.tell(&ctx, message).await;
 
     // Both should fail with same error type (connection failure)
     assert!(result1.is_err());

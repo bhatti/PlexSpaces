@@ -28,10 +28,10 @@
 //
 // Use Case: Subscription billing system with trial management, monthly billing, and health monitoring
 
-use plexspaces_core::JournalStorage;
+use plexspaces_core::{JournalStorage, ServiceLocator};
 use plexspaces_facet::Facet;
 use plexspaces_journaling::{ReminderFacet, ReminderRegistration, SqliteJournalStorage, TimerFacet};
-use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
+use plexspaces_node::{CoordinationComputeTracker, NodeBuilder};
 use plexspaces_proto::prost_types;
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, spawn_with_facets, ActorContext, ActorId,
@@ -345,7 +345,10 @@ async fn main() -> Result<()> {
 
     for (i, actor_id) in subscription_ids.iter().enumerate() {
         // Get facets from node
-        let facets_arc = node.get_facets(actor_id).await
+        let facets_arc = node
+            .service_locator()
+            .facet_container_for_actor(actor_id.as_str())
+            .await
             .ok_or_else(|| anyhow::anyhow!("Facets not found for actor {}", actor_id))?;
 
         let facets_guard = facets_arc.read().await;

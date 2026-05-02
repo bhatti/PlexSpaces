@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/miniclaw_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

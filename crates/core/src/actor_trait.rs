@@ -30,14 +30,14 @@
 //! ## Usage
 //! ```rust,ignore
 //! // Concrete actor sender implements MessageSender
-//! let regular_sender = ActorRef::local(actor_id, mailbox, service_locator);
-//! regular_sender.tell(message).await?; // Sends to mailbox
+//! let regular_sender = ActorRef::local(actor_id, mailbox, service_locator, visibility);
+//! regular_sender.tell(&ctx, message).await?; // Sends to mailbox
 //!
 //! // ActorRegistry handles local activation for virtual actors
-//! registry.tell(&actor_id, message).await?;
+//! registry.tell(&ctx, &actor_id, message).await?;
 //! ```
 
-use crate::ActorStateHandle;
+use crate::{ActorStateHandle, RequestContext};
 use async_trait::async_trait;
 use plexspaces_proto::common::v1::Message;
 use std::any::Any;
@@ -72,6 +72,7 @@ pub trait MessageSender: Send + Sync + Any {
     /// Local virtual activation is handled by `ActorRegistry` before this sender is called.
     ///
     /// ## Arguments
+    /// * `ctx` - Caller's [`RequestContext`] (JWT / gRPC metadata / HTTP boundary)
     /// * `message` - Message to send
     ///
     /// ## Returns
@@ -80,7 +81,11 @@ pub trait MessageSender: Send + Sync + Any {
     /// ## Behavior
     /// - **Regular actors**: `ActorRef::tell()` sends directly to the mailbox
     /// - **Virtual actors**: `ActorRegistry::tell()` activates if needed, then calls the sender
-    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn tell(
+        &self,
+        ctx: &RequestContext,
+        message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Send a message and wait for a reply (request-reply pattern)
     ///
@@ -89,6 +94,7 @@ pub trait MessageSender: Send + Sync + Any {
     /// to reply within the specified timeout.
     ///
     /// ## Arguments
+    /// * `ctx` - Caller's [`RequestContext`] for tenant/namespace and visibility checks
     /// * `message` - Message to send (must have sender_id set for reply routing)
     /// * `timeout` - Maximum time to wait for reply
     ///
@@ -100,6 +106,7 @@ pub trait MessageSender: Send + Sync + Any {
     /// with proper ask semantics (correlation-based reply routing).
     async fn ask(
         &self,
+        _ctx: &RequestContext,
         _message: Message,
         _timeout: std::time::Duration,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {

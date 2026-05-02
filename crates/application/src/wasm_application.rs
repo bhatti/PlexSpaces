@@ -659,6 +659,7 @@ impl WasmApplication {
                 role: child_spec.role.clone(),
                 namespace: namespace.clone(),
                 tenant_id: String::new(), // overridden at service layer
+                visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),
                 facets: child_spec.facets.clone(),
@@ -692,6 +693,7 @@ impl WasmApplication {
                 role: child_spec.role.clone(),
                 namespace: namespace.clone(),
                 tenant_id: String::new(),
+                visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),
                 facets: child_spec.facets.clone(),
@@ -1388,6 +1390,7 @@ impl WasmApplication {
             role: child_spec.role.clone(),
             namespace: namespace.clone(),
             tenant_id: tenant_id.clone(),
+            visibility: 0,
             behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
             args: child_spec.args.clone(),
             facets: child_spec.facets.clone(),
@@ -1533,6 +1536,7 @@ impl WasmApplication {
                 role: child_spec.role.clone(),
                 namespace: namespace_for_type,
                 tenant_id: String::new(),
+                visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),
                 facets: child_spec.facets.clone(),
@@ -1634,7 +1638,12 @@ impl WasmApplication {
 
         // Register in ActorRegistry
         if let Some(registry) = service_locator.actor_registry().await {
-            actor.register_started(&registry).await;
+            actor
+                .register_started(
+                    &registry,
+                    plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
+                )
+                .await;
         }
 
         Ok(actor_id.to_string())

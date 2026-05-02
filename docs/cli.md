@@ -95,7 +95,7 @@ plexspaces actor status --actor-id counter//counter::default@node1
 
 ### Application deployment
 
-Commands map to gRPC `ApplicationService` (see `proto/plexspaces/v1/application/application.proto`). The node listens on `--listen-addr` for gRPC; the HTTP gateway (when enabled) is typically the next port (for example `scripts/server.sh`: gRPC `8091`, HTTP `8092`).
+Commands map to gRPC `ApplicationService` (see `proto/plexspaces/v1/application/application.proto`). The node listens on `--listen-addr` for both gRPC and HTTP (single port, e.g. `scripts/server.sh`: port `8091`).
 
 #### Deploy application
 

@@ -24,7 +24,7 @@ CDC-style (change data capture) event stream: producers write events as tuples; 
 # In another terminal: build and test
 cd examples/python/apps/migrating_luats
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

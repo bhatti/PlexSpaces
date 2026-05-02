@@ -995,6 +995,14 @@ mod tests {
             None
         }
         async fn register_facet_manager(&self, _service: Arc<FacetManagerServiceWrapper>) {}
+
+        async fn facet_container_for_actor(
+            &self,
+            _actor_id: &str,
+        ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
+            None
+        }
+
         async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
             None
         }

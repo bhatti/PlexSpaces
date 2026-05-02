@@ -504,10 +504,12 @@ impl GenServer for DurableWorkflowProbeActor {
 }
 
 async fn ask_for_count(
+    ctx: &RequestContext,
     actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
     let reply = actor_ref
         .ask(
+            ctx,
             Message {
                 id: ulid::Ulid::new().to_string(),
                 payload: serde_json::to_vec(&CounterMessage::GetCount)?,
@@ -522,10 +524,12 @@ async fn ask_for_count(
 }
 
 async fn increment_count(
+    ctx: &RequestContext,
     actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
     let reply = actor_ref
         .ask(
+            ctx,
             Message {
                 id: ulid::Ulid::new().to_string(),
                 payload: serde_json::to_vec(&CounterMessage::Increment)?,
@@ -1414,12 +1418,10 @@ async fn test_virtual_actor_reactivation_type_registered_only() {
         true,
     )
     .await;
-    if let Err(e) = &response {
-        eprintln!("Activation failed: {}", e.message());
-    }
     assert!(
         response.is_ok(),
-        "Should activate virtual actor even if only type-registered"
+        "Should activate virtual actor even if only type-registered: {:?}",
+        response.as_ref().err().map(|s| s.message())
     );
 
     // Verify actor is now instance-registered
@@ -1447,6 +1449,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
     let actor_type = "counter-from-template";
     let namespace = "test-ns";
     let actor_id = canonical_actor_id("user-template", actor_type, namespace, "test-node");
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     virtual_actor_manager
         .register_virtual_actor_type(
@@ -1492,19 +1495,17 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         .lookup_actor(&actor_id)
         .await
         .unwrap();
-    let initial_count = ask_for_count(actor_ref.as_ref()).await.unwrap();
+    let initial_count = ask_for_count(&ctx, actor_ref.as_ref()).await.unwrap();
     assert_eq!(
         initial_count, 7,
         "behavior should be rebuilt from init_config_template on first activation"
     );
 
-    let incremented_count = increment_count(actor_ref.as_ref()).await.unwrap();
+    let incremented_count = increment_count(&ctx, actor_ref.as_ref()).await.unwrap();
     assert_eq!(
         incremented_count, 8,
         "live actor state should reflect mutations before explicit stop"
     );
-
-    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     service_locator
         .get_actor_factory()
@@ -1559,7 +1560,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         .lookup_actor(&actor_id)
         .await
         .unwrap();
-    let reactivated_count = ask_for_count(reactivated_ref.as_ref()).await.unwrap();
+    let reactivated_count = ask_for_count(&ctx, reactivated_ref.as_ref()).await.unwrap();
     assert_eq!(
         reactivated_count, 7,
         "non-durable reactivation should rebuild from init_config_template instead of leaked in-memory state"
@@ -1792,7 +1793,7 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
 
     let actor_ref = actor_registry.lookup_actor(&actor_id).await.unwrap();
-    let count = ask_for_count(actor_ref.as_ref()).await.unwrap();
+    let count = ask_for_count(&ctx, actor_ref.as_ref()).await.unwrap();
     assert_eq!(
         count, 3,
         "reactivation should rebuild from init_config_template"
@@ -2098,6 +2099,7 @@ async fn test_abstractions_example_runtime_send_primes_channel_definition_metada
                 role: instance_name.to_string(),
                 namespace: namespace.to_string(),
                 tenant_id: tenant_id.to_string(),
+                visibility: 0,
                 behavior_kind: "GenServer".to_string(),
                 args: std::collections::HashMap::from([(
                     "initial_count".to_string(),
@@ -2195,6 +2197,7 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
                 role: instance_name.to_string(),
                 namespace: namespace.to_string(),
                 tenant_id: tenant_id.to_string(),
+                visibility: 0,
                 behavior_kind: "GenServer".to_string(),
                 args: std::collections::HashMap::from([(
                     "initial_count".to_string(),
@@ -2378,7 +2381,7 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
     );
 
     let actor_ref = actor_registry.lookup_actor(&actor_id).await.unwrap();
-    let count = ask_for_count(actor_ref.as_ref()).await.unwrap();
+    let count = ask_for_count(&stop_ctx, actor_ref.as_ref()).await.unwrap();
     assert_eq!(count, 11);
 }
 

@@ -31,11 +31,9 @@ use plexspaces_application::{Application, ApplicationError, ApplicationManager, 
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_core::LinkProvider;
 use plexspaces_core::{
-    ActorId, ActorRegistry, ApplicationManager as ApplicationManagerTrait, ExitReason,
+    ActorId, ActorRegistry, ActorService, ApplicationManager as ApplicationManagerTrait, ExitReason,
     ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait,
-    VirtualActorManager,
 };
-use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
@@ -508,6 +506,7 @@ impl Node {
             role: String::new(),
             namespace: ctx.namespace().to_string(),
             tenant_id: ctx.tenant_id().to_string(),
+            visibility: 0,
             behavior_kind: String::new(),
             args: std::collections::HashMap::new(),
             facets: vec![],
@@ -542,182 +541,28 @@ impl Node {
         })
     }
 
-    // === Helper methods to access actor data via ActorRegistry ===
-    // Use ServiceLocator methods directly: service_locator.actor_registry().await,
-    // service_locator.get_facet_manager().await, service_locator.virtual_actor_manager().await
-
-    /// Get virtual actor manager from ServiceLocator or return error
-    ///
-    /// ## Returns
-    /// Arc<VirtualActorManager> if found, NodeError::ActorNotFound if not registered
-    async fn get_virtual_actor_manager(&self) -> Result<Arc<VirtualActorManager>, NodeError> {
-        self.service_locator
-            .virtual_actor_manager()
-            .await
-            .ok_or_else(|| {
-                NodeError::ConfigError(
-                    "VirtualActorManager not registered in ServiceLocator".to_string(),
-                )
-            })
+    fn map_actor_registry_error(e: plexspaces_core::ActorRegistryError) -> NodeError {
+        use plexspaces_core::ActorRegistryError;
+        match e {
+            ActorRegistryError::ActorNotFound(id) => NodeError::ActorNotFound(id),
+            ActorRegistryError::SendFailed(msg) => NodeError::NetworkError(msg),
+            ActorRegistryError::RegistrationFailed(msg) => NodeError::InvalidArgument(msg),
+            ActorRegistryError::LookupFailed(msg) => NodeError::InvalidArgument(msg),
+            ActorRegistryError::UnregistrationFailed(msg) => NodeError::InvalidArgument(msg),
+            ActorRegistryError::Timeout => NodeError::InvalidArgument("ActorRegistry timeout".into()),
+            ActorRegistryError::DependencyUnavailable(m) => NodeError::InvalidArgument(m),
+            ActorRegistryError::VisibilityDenied(m) => NodeError::InvalidArgument(m),
+            ActorRegistryError::LinkMonitorDenied(m) => NodeError::InvalidArgument(m),
+        }
     }
 
-    /// Get virtual actors map (delegates to ActorRegistry)
-    /// Get virtual actors (from VirtualActorManager - source of truth)
-    ///
-    /// ## Design
-    /// VirtualActorManager is the source of truth for virtual actor metadata.
-    /// ActorRegistry only tracks active instances and MessageSenders.
-    pub async fn virtual_actors(
-        &self,
-    ) -> Result<Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>, NodeError> {
-        use plexspaces_core::VirtualActorManager;
-
-        let manager: Arc<VirtualActorManager> = self
-            .service_locator()
-            .virtual_actor_manager()
-            .await
-            .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
-        // VirtualActorManager has its own registry - return that
-        Ok(manager.registry().virtual_actors().clone())
-    }
-
-    /// Get pending activations (from VirtualActorManager - source of truth)
-    pub async fn pending_activations(
-        &self,
-    ) -> Result<Arc<RwLock<HashMap<ActorId, Vec<Message>>>>, NodeError> {
-        use plexspaces_core::VirtualActorManager;
-
-        let manager: Arc<VirtualActorManager> = self
-            .service_locator()
-            .virtual_actor_manager()
-            .await
-            .ok_or_else(|| NodeError::ConfigError("VirtualActorManager not found".to_string()))?;
-        // VirtualActorManager has its own registry - return that
-        Ok(manager.registry().pending_activations().clone())
-    }
-
-    /// Get actor configs
-    pub async fn actor_configs(
-        &self,
-    ) -> Result<Arc<RwLock<HashMap<ActorId, plexspaces_proto::v1::actor::ActorConfig>>>, NodeError>
-    {
-        let registry = self.actor_registry().await?;
-        Ok(registry.actor_configs().clone())
-    }
-
-    /// Get registered actor IDs
-    pub async fn registered_actor_ids(
-        &self,
-    ) -> Result<std::collections::HashSet<ActorId>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.registered_actor_ids().await)
-    }
-
-    /// Get registered actor inventory entries with explicit scope.
-    pub async fn registered_actor_entries(
-        &self,
-    ) -> Result<Vec<(String, String, ActorId)>, NodeError> {
-        let registry = self.actor_registry().await?;
-        Ok(registry.registered_actor_entries().await)
-    }
-
-    // === Helper methods for VirtualActorFacet downcasting ===
+    // Actor registry, virtual actors, facets: use `service_locator().actor_registry().await`,
+    // `.virtual_actor_manager().await`, `.facet_manager().await` per [`plexspaces_core::ServiceLocator`].
 
     /// Get health reporter (for tests and advanced usage)
     pub async fn health_reporter(&self) -> Option<Arc<plexspaces_core::PlexSpacesHealthReporter>> {
         let guard = self.health_reporter.read().await;
         guard.clone()
-    }
-
-    /// Get facets container for facet access
-    ///
-    /// ## Purpose
-    /// Returns the facets container for accessing facets.
-    /// Used by FacetService to get facets from actors (normal and virtual).
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor ID
-    ///
-    /// ## Returns
-    /// Facets container or None if not found
-    pub async fn get_facets(
-        &self,
-        actor_id: &ActorId,
-    ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
-        if let Some(facet_manager_wrapper) = self.service_locator.get_facet_manager().await {
-            let facet_manager = facet_manager_wrapper.inner_clone();
-            facet_manager.get_facets(actor_id).await
-        } else {
-            None
-        }
-    }
-
-    /// Find an actor (local or remote)
-    /// Get virtual actor metadata (read-only access)
-    ///
-    /// ## Purpose
-    /// Provides read-only access to virtual actor metadata for gRPC services and observability.
-    ///
-    /// ## Returns
-    /// `Option<VirtualActorMetadata>` - Virtual actor metadata if actor is virtual, None otherwise
-    /// Get virtual actor metadata (delegates to VirtualActorManager)
-    pub async fn get_virtual_actor_metadata(
-        &self,
-        actor_id: &ActorId,
-    ) -> Option<VirtualActorMetadata> {
-        if let Ok(manager) = self.get_virtual_actor_manager().await {
-            manager.get_metadata(actor_id).await
-        } else {
-            None
-        }
-    }
-
-    /// Check if an actor is a virtual actor (delegates to VirtualActorManager)
-    pub async fn is_virtual_actor(&self, actor_id: &ActorId) -> bool {
-        if let Ok(manager) = self.get_virtual_actor_manager().await {
-            manager.is_virtual(actor_id).await
-        } else {
-            false
-        }
-    }
-
-    /// Get actor configuration (read-only access)
-    ///
-    /// ## Purpose
-    /// Provides read-only access to actor configuration for gRPC services and observability.
-    ///
-    /// ## Returns
-    /// `Option<ActorConfig>` - Actor configuration if available, None otherwise
-    pub async fn get_actor_config(
-        &self,
-        actor_id: &ActorId,
-    ) -> Option<plexspaces_proto::v1::actor::ActorConfig> {
-        if let Ok(actor_configs) = self.actor_configs().await {
-            actor_configs.read().await.get(actor_id).cloned()
-        } else {
-            None
-        }
-    }
-
-    /// Get pending message count for a virtual actor during activation
-    ///
-    /// ## Purpose
-    /// Returns the number of messages queued for an actor that is currently being activated.
-    ///
-    /// ## Returns
-    /// `u32` - Number of pending messages (0 if actor is not being activated or has no pending messages)
-    pub async fn get_pending_activation_count(&self, actor_id: &ActorId) -> u32 {
-        if let Some(manager) = self.service_locator.virtual_actor_manager().await {
-            let pending_activations = manager.registry().pending_activations();
-            pending_activations
-                .read()
-                .await
-                .get(actor_id)
-                .map(|messages| messages.len() as u32)
-                .unwrap_or(0)
-        } else {
-            0
-        }
     }
 
     /// Get node statistics
@@ -864,7 +709,11 @@ impl Node {
         let mut allocated_gpu_count = 0u32;
 
         // Get actor configs and sum up resource requirements
-        let actor_configs_arc = self.actor_configs().await.unwrap_or_default();
+        let actor_configs_arc = self
+            .actor_registry()
+            .await
+            .map(|r| r.actor_configs().clone())
+            .unwrap_or_else(|_| Arc::new(RwLock::new(HashMap::new())));
         let actor_configs = actor_configs_arc.read().await;
         for config in actor_configs.values() {
             if let Some(ref resource_reqs) = config.resource_requirements {
@@ -1055,115 +904,30 @@ impl Node {
         }
     }
 
-    /// Initialize blob service
-    /// Returns Arc<BlobService> on success, NodeError on failure (e.g. MinIO/S3 unreachable).
-    /// Caller (start()) treats failure as optional: node starts without blob storage on error.
+    /// Initialize blob service via [`plexspaces_blob::node_startup`] and store on this node.
+    ///
+    /// Returns `Arc<BlobService>` on success. Caller (`start`) treats failure as optional when
+    /// object storage is unavailable.
     async fn init_blob_service(&self) -> Result<Arc<plexspaces_blob::BlobService>, NodeError> {
-        use plexspaces_blob::repository::sql::SqlBlobRepository;
-        // Try to get blob config from ReleaseSpec or environment
         let blob_config = {
             let release_spec = self.release_spec.read().await;
-            if let Some(ref spec) = *release_spec {
-                if let Some(ref runtime) = spec.runtime {
-                    if let Some(ref blob) = runtime.blob {
-                        // Use blob config from ReleaseSpec
-                        blob.clone()
-                    } else {
-                        Self::default_blob_config()
-                    }
-                } else {
-                    Self::default_blob_config()
-                }
-            } else {
-                Self::default_blob_config()
-            }
+            plexspaces_blob::node_startup::blob_config_from_release_spec(release_spec.as_ref())
         };
-
-        // Get database URL from shared config (blob uses shared database for metadata)
         let db_url = self.get_shared_database_url().await;
-
-        // Use AnyPool with max_connections=1 for in-memory SQLite to ensure all operations
-        // use the same connection (critical for in-memory databases)
-        // Note: sqlx::any requires install_default_drivers() to be called before use
-        // This is called in start() before any database operations
-
-        use sqlx::any::AnyPoolOptions;
-
-        // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
-        let pool_options = if db_url.starts_with("sqlite:") {
-            AnyPoolOptions::new().max_connections(1)
-        } else {
-            AnyPoolOptions::new()
-        };
-
-        let any_pool = pool_options.connect(&db_url).await.map_err(|e| {
-            NodeError::ConfigError(format!("Failed to connect to database '{}': {}", db_url, e))
-        })?;
-
-        // Create repository with auto-applied migrations
-        let repository = Arc::new(SqlBlobRepository::new(any_pool).await.map_err(|e| {
-            NodeError::ConfigError(format!("Failed to create blob repository: {}", e))
-        })?);
-
-        // Create blob service
-        let service = plexspaces_blob::BlobService::new(blob_config, repository)
-            .await
-            .map_err(|e| {
-                NodeError::ConfigError(format!("Failed to initialize blob service: {}", e))
-            })?;
-
-        let service_arc = Arc::new(service);
-
-        // Register in service_locator (both as Service and as BlobServiceTrait)
-        self.service_locator
-            .register_service(service_arc.clone())
-            .await;
-        // Also register via BlobServiceTrait for type-safe access
-        let blob_service_trait: std::sync::Arc<dyn plexspaces_core::BlobServiceTrait> =
-            service_arc.clone();
-        self.service_locator
-            .register_blob_service(blob_service_trait)
-            .await;
-
-        // Store in Node
+        let locator: Arc<dyn plexspaces_core::ServiceLocator + Send + Sync> =
+            self.service_locator.clone();
+        let service_arc = plexspaces_blob::node_startup::create_and_register_blob_service(
+            locator,
+            &db_url,
+            blob_config,
+        )
+        .await
+        .map_err(|e| NodeError::ConfigError(e.to_string()))?;
         {
             let mut blob_service_guard = self.blob_service.write().await;
             *blob_service_guard = Some(service_arc.clone());
         }
         Ok(service_arc)
-    }
-
-    /// Default blob configuration from environment variables
-    fn default_blob_config() -> plexspaces_proto::storage::v1::BlobConfig {
-        use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
-        use std::env;
-
-        ProtoBlobConfig {
-            backend: env::var("BLOB_BACKEND").unwrap_or_else(|_| "minio".to_string()),
-            bucket: env::var("BLOB_BUCKET").unwrap_or_else(|_| "plexspaces".to_string()),
-            endpoint: env::var("BLOB_ENDPOINT")
-                .ok()
-                .unwrap_or_else(|| "http://localhost:9000".to_string()),
-            region: env::var("BLOB_REGION").ok().unwrap_or_default(),
-            access_key_id: env::var("BLOB_ACCESS_KEY_ID")
-                .or_else(|_| env::var("AWS_ACCESS_KEY_ID"))
-                .ok()
-                .unwrap_or_else(|| "minioadmin_user".to_string()),
-            secret_access_key: env::var("BLOB_SECRET_ACCESS_KEY")
-                .or_else(|_| env::var("AWS_SECRET_ACCESS_KEY"))
-                .ok()
-                .unwrap_or_else(|| "minioadmin_pass".to_string()),
-            use_ssl: env::var("BLOB_USE_SSL")
-                .unwrap_or_else(|_| "false".to_string())
-                .parse()
-                .unwrap_or(false),
-            prefix: env::var("BLOB_PREFIX").unwrap_or_else(|_| "/plexspaces".to_string()),
-            gcp_service_account_json: env::var("GCP_SERVICE_ACCOUNT_JSON")
-                .ok()
-                .unwrap_or_default(),
-            azure_account_name: env::var("AZURE_ACCOUNT_NAME").ok().unwrap_or_default(),
-            azure_account_key: env::var("AZURE_ACCOUNT_KEY").ok().unwrap_or_default(),
-        }
     }
 
     /// Start node services (heartbeat, discovery, etc.)
@@ -1197,7 +961,8 @@ impl Node {
         use plexspaces_proto::{ActorServiceServer, TupleSpaceServiceServer};
         use plexspaces_services::actor_service::ActorServiceImpl;
         use plexspaces_services::tuple_service::TupleSpaceServiceImpl;
-        use tonic::transport::Server;
+        use plexspaces_grpc_middleware::GrpcHttpServerBuilder;
+        use tonic_web;
 
         // Install sqlx::any default drivers before any database operations
         sqlx::any::install_default_drivers();
@@ -1277,21 +1042,17 @@ impl Node {
             }
         }
 
-        // Register RuntimeConfig and SecurityConfig in ServiceLocator
+        // Register RuntimeConfig and SecurityConfig in ServiceLocator (services crate)
         {
             let release_spec = self.release_spec.read().await;
             if let Some(ref spec) = *release_spec {
-                if let Some(ref runtime) = spec.runtime {
-                    self.service_locator
-                        .register_runtime_config(runtime.clone())
-                        .await;
-                }
-                if let Some(ref security) = spec.runtime.as_ref().and_then(|r| r.security.as_ref())
-                {
-                    self.service_locator
-                        .register_security_config((*security).clone())
-                        .await;
-                }
+                let locator: Arc<dyn plexspaces_core::ServiceLocator + Send + Sync> =
+                    self.service_locator.clone();
+                plexspaces_services::release_runtime_registration::register_runtime_and_security_from_release(
+                    locator,
+                    spec,
+                )
+                .await;
             }
         }
 
@@ -1509,6 +1270,10 @@ impl Node {
             .set_service_locator(
                 self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
             )
+            .await;
+
+        actor_registry
+            .set_local_listen_addr(format!("http://{}", self.config.listen_addr))
             .await;
 
         ActorRegistry::start_temporary_sender_cleanup(actor_registry.clone());
@@ -1976,69 +1741,69 @@ impl Node {
         // Note: For large WASM file uploads (>5MB), use HTTP multipart endpoint instead
         const GRPC_MAX_MESSAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
 
-        let server_builder = Server::builder()
-            .accept_http1(true) // Enable HTTP for gRPC-Web
-            .add_service(
+        let actor_service_for_http = actor_service.clone();
+        let server_builder = GrpcHttpServerBuilder::new(addr)
+            .grpc_service(tonic_web::enable(
                 ActorServiceServer::new(
                     plexspaces_services::actor_service::ActorServiceWrapper::from(actor_service),
                 )
                 .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                 .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 TupleSpaceServiceServer::new(tuplespace_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 SchedulingServiceServer::new(scheduling_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 WasmRuntimeServiceServer::new(wasm_runtime_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 ApplicationServiceServer::new(application_service.as_ref().clone())
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(standard_health_service) // Standard gRPC health service
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(standard_health_service))
+            .grpc_service(tonic_web::enable(
                 SystemServiceServer::new(system_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 MetricsServiceServer::new(metrics_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service(
+            ))
+            .grpc_service(tonic_web::enable(
                 ProcessGroupServiceServer::new(process_group_service)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
-            .add_service({
+            ))
+            .grpc_service(tonic_web::enable({
                 use crate::node_service_handler::NodeServiceHandler;
                 use plexspaces_proto::node::v1::node_service_server::NodeServiceServer;
                 NodeServiceServer::new(NodeServiceHandler(node_service.clone()))
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
-            });
+            }));
 
         // Add dashboard service if feature enabled
         #[cfg(feature = "dashboard")]
         let server_builder = {
             use plexspaces_proto::dashboard::v1::dashboard_service_server::DashboardServiceServer;
             if let Some(dashboard_svc) = dashboard_service_opt {
-                server_builder.add_service(
+                server_builder.grpc_service(tonic_web::enable(
                     DashboardServiceServer::new(dashboard_svc)
                         .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                         .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-                )
+                ))
             } else {
                 server_builder
             }
@@ -2048,11 +1813,11 @@ impl Node {
         let server_builder = if let Some(ref blob_svc) = blob_service {
             use plexspaces_blob::server::grpc::BlobServiceImpl;
             use plexspaces_proto::storage::v1::blob_service_server::BlobServiceServer;
-            server_builder.add_service(
+            server_builder.grpc_service(tonic_web::enable(
                 BlobServiceServer::new(BlobServiceImpl::new(blob_svc.clone()))
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
+            ))
         } else {
             server_builder
         };
@@ -2065,14 +1830,12 @@ impl Node {
                 self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
             )
             .await;
-            server_builder.add_service(
+            server_builder.grpc_service(tonic_web::enable(
                 ServiceLinkServiceServer::new(sls)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
-            )
+            ))
         };
-
-        let grpc_server = server_builder.serve(addr);
 
         // Connect to cluster_seed_nodes if configured (non-blocking; node is already listening)
         {
@@ -2098,998 +1861,44 @@ impl Node {
             });
         }
 
-        // Start HTTP gateway server for AskReply and SendMessage routes.
-        // Create a new ActorServiceImpl instance for HTTP gateway (shares same service locator)
-        //
-        // IMPORTANT: We bind the HTTP port BEFORE spawning the task to fail fast if port is in use
-        let http_port = if addr.port() == 0 {
-            0 // Use random port if gRPC is using random port
-        } else {
-            addr.port() + 1
+        // Build HTTP routes and assemble single-port gRPC+HTTP server
+        let (auth_disabled, jwt_secret) = plexspaces_grpc_middleware::http_jwt_auth_snapshot(
+            self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator + Send + Sync>,
+        )
+        .await;
+        let node_connectivity_for_http =
+            node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
+        let http_routes = crate::http_routes::all_http_routes(
+            actor_service_for_http.clone(),
+            self.service_locator.clone(),
+            node_connectivity_for_http,
+            auth_disabled,
+            jwt_secret.clone(),
+        );
+
+        #[cfg(feature = "dashboard")]
+        let http_routes = {
+            use plexspaces_dashboard::create_dashboard_router;
+            let dashboard_state = (
+                actor_service_for_http,
+                auth_disabled,
+                jwt_secret,
+                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>,
+                dashboard_service_for_http_opt,
+            );
+            http_routes.merge(create_dashboard_router().with_state(dashboard_state))
         };
-        let http_addr: std::net::SocketAddr = format!("{}:{}", addr.ip(), http_port)
-            .parse()
-            .unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap());
 
-        tracing::info!("🌐 Starting HTTP gateway server on http://{}", http_addr);
-        tracing::info!("📊 Dashboard available at http://{}/", http_addr);
+        let (listener, app) = server_builder
+            .http_routes(http_routes)
+            .build()
+            .await
+            .map_err(|e| NodeError::NetworkError(e.to_string()))?;
 
-        // Bind port BEFORE spawning task - fail fast if port is in use
-        let http_listener = tokio::net::TcpListener::bind(http_addr).await
-            .map_err(|e| NodeError::NetworkError(format!(
-                "Failed to bind HTTP gateway server to {}: {}. Another process may be using this port. \
-                Kill existing plexspaces processes with: pkill -9 -f 'plexspaces start'",
-                http_addr, e
-            )))?;
-
-        let http_gateway_handle = {
-            let service_locator_for_http = self.service_locator.clone();
-            let service_locator_for_deploy_handler = service_locator_for_http.clone();
-            let node_id_for_http = self.id.as_str().to_string();
-            let node_for_http = self.clone();
-            let application_manager_for_http = self.application_manager.clone();
-            let node_connectivity_for_http =
-                node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
-
-            tokio::spawn(async move {
-                use axum::{
-                    extract::{DefaultBodyLimit, Path, Query},
-                    http::StatusCode,
-                    response::Json,
-                    routing::{delete, get, post},
-                    Router,
-                };
-                use serde_json::Value;
-                use std::collections::HashMap;
-
-                // Create ActorServiceImpl for HTTP gateway
-                use plexspaces_services::actor_service::ActorServiceImpl as ActorServiceImplHttp;
-                let actor_service_http = Arc::new(ActorServiceImplHttp::new(
-                    service_locator_for_http.clone(),
-                    node_id_for_http.clone(),
-                ));
-
-                // Auth state for HTTP gateway: when auth enabled, tenant_id comes from JWT only (validated in middleware)
-                let auth_disabled = service_locator_for_http.is_auth_disabled().await;
-                let jwt_secret = service_locator_for_http
-                    .get_security_config()
-                    .await
-                    .and_then(|c| c.jwt)
-                    .and_then(|j| {
-                        if j.secret.is_empty() {
-                            None
-                        } else {
-                            Some(j.secret)
-                        }
-                    });
-                // Unified state so dashboard router can be merged (same state type required)
-                type HttpGatewayState = (
-                    Arc<plexspaces_services::actor_service::ActorServiceImpl>,
-                    bool,
-                    Option<String>,
-                    Arc<dyn plexspaces_core::ServiceLocator>,
-                    Option<Arc<plexspaces_services::dashboard_service::DashboardServiceImpl>>,
-                );
-                let gateway_state: HttpGatewayState = (
-                    actor_service_http.clone(),
-                    auth_disabled,
-                    jwt_secret.clone(),
-                    service_locator_for_http.clone(),
-                    dashboard_service_for_http_opt.clone(),
-                );
-
-                // HTTP handler for actor ask/tell routes (effective_tenant_id from JWT when auth enabled, else path/header)
-                async fn actor_http_request(
-                    effective_tenant_id: String,
-                    method: axum::http::Method,
-                    path: String,
-                    query: Option<Query<HashMap<String, String>>>,
-                    body: Option<axum::body::Bytes>,
-                    headers: axum::http::HeaderMap,
-                    actor_service: Arc<plexspaces_services::actor_service::ActorServiceImpl>,
-                ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-                    crate::http_gateway::actor_http_request(
-                        effective_tenant_id,
-                        method,
-                        path,
-                        query,
-                        body,
-                        headers,
-                        actor_service,
-                    )
-                    .await
-                }
-
-                /// Resolve tenant_id from JWT claims, with header fallback only for local testing.
-                fn effective_tenant_id_from_jwt_or_headers(
-                    jwt: &Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
-                    auth_disabled: bool,
-                    jwt_secret: Option<&str>,
-                    headers: &axum::http::HeaderMap,
-                ) -> String {
-                    if let Some(ref ext) = jwt {
-                        return ext.tenant_id.clone();
-                    }
-                    if !auth_disabled {
-                        if let Some(secret) = jwt_secret {
-                            let auth_header = headers
-                                .get("authorization")
-                                .and_then(|v| v.to_str().ok())
-                                .map(|s| s.to_string());
-                            if let Ok(claims) = crate::http_jwt::validate_bearer_token(
-                                secret,
-                                auth_header.as_deref(),
-                            ) {
-                                return claims.tenant_id;
-                            }
-                        }
-                    }
-                    if auth_disabled {
-                        return headers
-                            .get("x-tenant-id")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("")
-                            .to_string();
-                    }
-
-                    String::new()
-                }
-
-                // JWT auth middleware: when auth enabled, validate Bearer token and set Extension(JwtClaims)
-                async fn http_auth_middleware(
-                    axum::extract::State((_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<HttpGatewayState>,
-                    mut req: axum::extract::Request,
-                    next: axum::middleware::Next,
-                ) -> axum::response::Response {
-                    let path = req.uri().path().to_string();
-                    if !path.starts_with("/api/v1/actors") && !path.starts_with("/api/v1/dashboard")
-                    {
-                        return next.run(req).await;
-                    }
-                    if auth_disabled {
-                        return next.run(req).await;
-                    }
-                    let secret = match &jwt_secret {
-                        Some(s) => s.as_str(),
-                        None => {
-                            tracing::warn!(path = %path, "HTTP auth: JWT secret not configured (returning 503)");
-                            let body = serde_json::json!({
-                                "code": 503,
-                                "message": "Auth enabled but JWT secret not configured. Set PLEXSPACES_JWT_SECRET or security.jwt.secret. For local testing, set PLEXSPACES_DISABLE_AUTH=1."
-                            });
-                            return axum::response::Response::builder()
-                                .status(StatusCode::SERVICE_UNAVAILABLE)
-                                .header("content-type", "application/json")
-                                .body(axum::body::Body::from(
-                                    serde_json::to_string(&body).unwrap(),
-                                ))
-                                .unwrap();
-                        }
-                    };
-                    let auth_header = req
-                        .headers()
-                        .get("authorization")
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string());
-                    match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
-                        Ok(claims) => {
-                            crate::http_gateway::apply_jwt_claim_headers(
-                                req.headers_mut(),
-                                &claims,
-                            );
-                            req.extensions_mut().insert(claims);
-                            next.run(req).await
-                        }
-                        Err(e) => {
-                            let body = serde_json::json!({ "code": 401, "message": e });
-                            axum::response::Response::builder()
-                                .status(StatusCode::UNAUTHORIZED)
-                                .header("content-type", "application/json")
-                                .body(axum::body::Body::from(
-                                    serde_json::to_string(&body).unwrap(),
-                                ))
-                                .unwrap()
-                        }
-                    }
-                }
-
-                // Set body size limit to 100MB for WASM uploads (will be applied to specific route)
-                const MAX_BODY_SIZE: usize = 100 * 1024 * 1024; // 100MB
-
-                // Create Axum router for HTTP gateway routes (auth middleware runs first when auth enabled)
-                // Build as Router<HttpGatewayState>; call .with_state(gateway_state) once at the end to get Router<()> for serve
-                let app = Router::new()
-                    .layer(axum::middleware::from_fn_with_state(
-                        gateway_state.clone(),
-                        http_auth_middleware,
-                    ))
-                    .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
-                    .route(
-                        "/api/v1/actors/:namespace/:actor_type",
-                        get({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::GET,
-                                    path,
-                                    query,
-                                    None,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        })
-                        .post({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::POST,
-                                    path,
-                                    query,
-                                    body,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        })
-                        .put({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::PUT,
-                                    path,
-                                    query,
-                                    body,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        })
-                        .delete({
-                            // DELETE /api/v1/actors/{namespace}/{actor_type_or_id} — stop actor
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                crate::http_gateway::stop_actor_http_request(
-                                    effective_tenant_id,
-                                    namespace,
-                                    actor_type,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        }),
-                    )
-                    .route(
-                        "/api/v1/actors/:namespace/:actor_type/ask",
-                        get({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path =
-                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::GET,
-                                    path,
-                                    query,
-                                    None,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        })
-                        .post({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path =
-                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::POST,
-                                    path,
-                                    query,
-                                    body,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        })
-                        .put({
-                            move |axum::extract::State((
-                                actor_service,
-                                auth_disabled,
-                                jwt_secret,
-                                _,
-                                _,
-                            )): axum::extract::State<
-                                HttpGatewayState,
-                            >,
-                                  jwt: Option<
-                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
-                            >,
-                                  Path((namespace, actor_type)): Path<(String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
-                                    &jwt,
-                                    auth_disabled,
-                                    jwt_secret.as_deref(),
-                                    &headers,
-                                );
-                                let path =
-                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(
-                                    effective_tenant_id,
-                                    axum::http::Method::PUT,
-                                    path,
-                                    query,
-                                    body,
-                                    headers,
-                                    actor_service,
-                                )
-                                .await
-                            }
-                        }),
-                    );
-
-                // Add HTTP multipart endpoint for WASM file uploads (large files)
-                // Max WASM file size: 100MB (enforced by multipart parser)
-                use axum::extract::Multipart;
-                use futures_util::StreamExt;
-                use plexspaces_proto::application::v1::{
-                    ApplicationSpec, DeployApplicationRequest,
-                };
-                use plexspaces_proto::wasm::v1::WasmModule;
-
-                const MAX_WASM_FILE_SIZE: usize = 100 * 1024 * 1024; // 100MB
-
-                let _node_clone = node_for_http.clone();
-                let _app_mgr_clone = application_manager_for_http.clone();
-                let wasm_deploy_handler =
-                    move |axum::extract::State((
-                        _actor_svc,
-                        auth_disabled,
-                        jwt_secret,
-                        _sl,
-                        _ds,
-                    )): axum::extract::State<HttpGatewayState>,
-                          headers: axum::http::HeaderMap,
-                          mut multipart: Multipart| async move {
-                        let mut application_id = None;
-                        let mut name = None;
-                        let mut version = None;
-                        let mut behavior_kind = None;
-                        let mut wasm_file_data: Option<Vec<u8>> = None;
-                        let mut config_data: Option<String> = None;
-
-                        while let Some(field) = multipart.next_field().await.map_err(|e| {
-                            let error_msg = format!("Failed to parse multipart form data: {}", e);
-                            tracing::error!(error = %e, "Multipart parsing error");
-                            (StatusCode::BAD_REQUEST, error_msg)
-                        })? {
-                            let field_name = field.name().unwrap_or("").to_string();
-                            match field_name.as_str() {
-                                "application_id" => {
-                                    application_id = Some(field.text().await.map_err(|e| {
-                                        (
-                                            StatusCode::BAD_REQUEST,
-                                            format!("Failed to read application_id: {}", e),
-                                        )
-                                    })?);
-                                }
-                                "name" => {
-                                    name = Some(field.text().await.map_err(|e| {
-                                        (
-                                            StatusCode::BAD_REQUEST,
-                                            format!("Failed to read name: {}", e),
-                                        )
-                                    })?);
-                                }
-                                "version" => {
-                                    version = Some(field.text().await.map_err(|e| {
-                                        (
-                                            StatusCode::BAD_REQUEST,
-                                            format!("Failed to read version: {}", e),
-                                        )
-                                    })?);
-                                }
-                                "behavior_kind" => {
-                                    behavior_kind = Some(field.text().await.map_err(|e| {
-                                        (
-                                            StatusCode::BAD_REQUEST,
-                                            format!("Failed to read behavior_kind: {}", e),
-                                        )
-                                    })?);
-                                }
-                                "wasm_file" => {
-                                    // Read entire field into memory (field.bytes() handles streaming internally)
-                                    // For very large files, this will use memory, but it's simpler and works with body limits
-                                    let bytes = field.bytes().await.map_err(|e| {
-                                    let error_msg = format!("Failed to read wasm_file field: {} (this may indicate body size limit issue)", e);
-                                    tracing::error!(error = %e, "WASM file read error - check body size limit configuration");
-                                    (StatusCode::BAD_REQUEST, error_msg)
-                                })?;
-
-                                    // Enforce 100MB max size
-                                    if bytes.len() > MAX_WASM_FILE_SIZE {
-                                        return Err((
-                                            StatusCode::PAYLOAD_TOO_LARGE,
-                                            format!(
-                                                "WASM file size {} bytes exceeds maximum {} bytes",
-                                                bytes.len(),
-                                                MAX_WASM_FILE_SIZE
-                                            ),
-                                        ));
-                                    }
-
-                                    // Verify WASM magic number immediately after reading
-                                    if bytes.len() < 4 {
-                                        tracing::error!(size = bytes.len(), "WASM file too small");
-                                        return Err((
-                                            StatusCode::BAD_REQUEST,
-                                            format!("WASM file too small: {} bytes", bytes.len()),
-                                        ));
-                                    }
-
-                                    let magic = &bytes[0..4];
-                                    if magic != b"\0asm" {
-                                        tracing::error!(
-                                        magic_bytes = format!("{:02x?}", magic),
-                                        expected = "0061736d",
-                                        "WASM file missing magic number - file may be corrupted"
-                                    );
-                                        return Err((
-                                            StatusCode::BAD_REQUEST,
-                                            format!(
-                                                "Invalid WASM file: missing magic number (got {:02x?}, expected 0061736d)",
-                                                magic
-                                            ),
-                                        ));
-                                    }
-
-                                    if tracing::enabled!(tracing::Level::TRACE) {
-                                        tracing::trace!(
-                                            wasm_file_size = bytes.len(),
-                                            wasm_file_first_bytes = format!(
-                                                "{:02x?}",
-                                                bytes.iter().take(8).collect::<Vec<_>>()
-                                            ),
-                                            wasm_version = format!(
-                                                "{:02x?}",
-                                                bytes.get(4..8).unwrap_or(&[])
-                                            ),
-                                            "Read WASM file from multipart upload - magic number verified"
-                                        );
-                                    }
-
-                                    wasm_file_data = Some(bytes.to_vec());
-                                }
-                                "config" => {
-                                    config_data = Some(field.text().await.map_err(|e| {
-                                        (
-                                            StatusCode::BAD_REQUEST,
-                                            format!("Failed to read config: {}", e),
-                                        )
-                                    })?);
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        let application_id = application_id.ok_or_else(|| {
-                            (
-                                StatusCode::BAD_REQUEST,
-                                "application_id is required".to_string(),
-                            )
-                        })?;
-                        let name = name.ok_or_else(|| {
-                            (StatusCode::BAD_REQUEST, "name is required".to_string())
-                        })?;
-                        let version = version.unwrap_or_else(|| "1.0.0".to_string());
-
-                        // Build DeployApplicationRequest
-                        let wasm_module = wasm_file_data.map(|bytes| {
-                            // Verify WASM magic number (0x00 0x61 0x73 0x6D = "\0asm")
-                            if bytes.len() < 4 || &bytes[0..4] != b"\0asm" {
-                                tracing::error!(
-                                    first_bytes = format!(
-                                        "{:02x?}",
-                                        bytes.iter().take(8).collect::<Vec<_>>()
-                                    ),
-                                    "WASM file does not start with magic number"
-                                );
-                            }
-
-                            WasmModule {
-                                name: name.clone(),
-                                version: version.clone(),
-                                module_bytes: bytes,
-                                module_hash: String::new(), // Will be computed by server
-                                ..Default::default()
-                            }
-                        });
-
-                        // Use shared helper for consistent ApplicationSpec creation
-                        // This ensures HTTP and gRPC deployment paths behave identically
-                        use crate::wasm_apps_loader::parse_app_config_toml;
-                        use plexspaces_services::create_default_application_spec;
-
-                        let config = if let Some(toml_str) = config_data {
-                            // Parse TOML config to ApplicationSpec
-                            match parse_app_config_toml(&toml_str, &name) {
-                                Ok(spec) => {
-                                    // Count total facets across all children for logging
-                                    let total_facets = spec
-                                        .supervisor
-                                        .as_ref()
-                                        .map(|s| {
-                                            s.children.iter().map(|c| c.facets.len()).sum::<usize>()
-                                        })
-                                        .unwrap_or(0);
-
-                                    if tracing::enabled!(tracing::Level::TRACE) {
-                                        tracing::trace!(
-                                            application_name = %name,
-                                            supervisor_children = spec.supervisor.as_ref().map(|s| s.children.len()).unwrap_or(0),
-                                            total_facets = total_facets,
-                                            "Parsed ApplicationSpec from TOML config"
-                                        );
-                                    }
-                                    spec
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "Failed to parse TOML config, using defaults"
-                                    );
-                                    create_default_application_spec(
-                                        &name,
-                                        &version,
-                                        behavior_kind.as_deref(),
-                                    )
-                                }
-                            }
-                        } else {
-                            // No config provided - use shared helper to create default spec (optional behavior_kind for event-handler actors)
-                            create_default_application_spec(
-                                &name,
-                                &version,
-                                behavior_kind.as_deref(),
-                            )
-                        };
-
-                        let request = DeployApplicationRequest {
-                            application_id: application_id.clone(),
-                            name: name.clone(),
-                            version: version.clone(),
-                            wasm_module,
-                            config: Some(config),
-                            initial_state: vec![],
-                        };
-
-                        // Verify WASM magic number one more time before deployment
-                        if let Some(ref wasm_mod) = request.wasm_module {
-                            if wasm_mod.module_bytes.len() >= 4 {
-                                if &wasm_mod.module_bytes[0..4] != b"\0asm" {
-                                    tracing::error!(
-                                    first_bytes = format!("{:02x?}", wasm_mod.module_bytes.iter().take(8).collect::<Vec<_>>()),
-                                    "WASM bytes corrupted - missing magic number before deployment"
-                                );
-                                    return Err((
-                                        StatusCode::BAD_REQUEST,
-                                        "WASM file is corrupted or invalid (missing magic number)"
-                                            .to_string(),
-                                    ));
-                                }
-                            }
-                        }
-
-                        // When auth enabled, extract tenant_id from JWT so deploy_application gets valid RequestContext
-                        let tenant_id_for_grpc = if auth_disabled {
-                            String::new()
-                        } else {
-                            let auth_header = headers
-                                .get("authorization")
-                                .and_then(|v| v.to_str().ok())
-                                .map(|s| s.to_string());
-                            let secret = match jwt_secret.as_deref() {
-                                Some(s) => s,
-                                None => {
-                                    return Err((
-                                        StatusCode::SERVICE_UNAVAILABLE,
-                                        "Auth enabled but JWT secret not configured".to_string(),
-                                    ));
-                                }
-                            };
-                            match crate::http_jwt::validate_bearer_token(
-                                secret,
-                                auth_header.as_deref(),
-                            ) {
-                                Ok(claims) => claims.tenant_id,
-                                Err(e) => {
-                                    return Err((
-                                        StatusCode::UNAUTHORIZED,
-                                        format!("Deploy requires valid JWT: {}", e),
-                                    ));
-                                }
-                            }
-                        };
-
-                        // Call ApplicationService directly (create instance same as gRPC service)
-                        // Set x-tenant-id and x-namespace so deploy_application gets valid RequestContext
-                        use plexspaces_proto::application::v1::application_service_server::ApplicationService;
-                        use plexspaces_services::application_service::ApplicationServiceImpl;
-                        use tonic::metadata::MetadataValue;
-                        let app_service = ApplicationServiceImpl::new(
-                            service_locator_for_deploy_handler.clone(),
-                            Some(node_connectivity_for_http.clone()),
-                        );
-                        let mut grpc_request = tonic::Request::new(request);
-                        grpc_request.metadata_mut().insert(
-                            "x-tenant-id",
-                            MetadataValue::try_from(tenant_id_for_grpc.as_str())
-                                .unwrap_or_else(|_| MetadataValue::from_static("")),
-                        );
-                        grpc_request.metadata_mut().insert(
-                            "x-namespace",
-                            MetadataValue::try_from(application_id.as_str())
-                                .unwrap_or_else(|_| MetadataValue::from_static("")),
-                        );
-                        let response =
-                            app_service
-                                .deploy_application(grpc_request)
-                                .await
-                                .map_err(|e| {
-                                    tracing::error!(
-                                        application_id = %application_id,
-                                        error = %e,
-                                        "ApplicationService::deploy_application failed"
-                                    );
-                                    (
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        format!("Deployment failed: {}", e),
-                                    )
-                                })?;
-
-                        let inner = response.into_inner();
-                        Ok::<_, (StatusCode, String)>(Json(serde_json::json!({
-                            "success": inner.success,
-                            "application_id": inner.application_id,
-                            "status": format!("{:?}", inner.status),
-                            "error": inner.error
-                        })))
-                    };
-
-                // Add WASM deployment and undeployment routes
-                // Body limit is already applied globally above (100MB)
-                // The route-specific limit below ensures it's definitely applied
-                let _app_mgr_for_undeploy = application_manager_for_http.clone();
-                let service_locator_for_undeploy = service_locator_for_http.clone();
-                let undeploy_handler =
-                    move |axum::extract::State((
-                        _actor_svc,
-                        auth_disabled,
-                        jwt_secret,
-                        _sl,
-                        _ds,
-                    )): axum::extract::State<HttpGatewayState>,
-                          headers: axum::http::HeaderMap,
-                          Path(application_id): Path<String>| async move {
-                        use plexspaces_proto::application::v1::{
-                            application_service_server::ApplicationService,
-                            UndeployApplicationRequest,
-                        };
-                        use plexspaces_services::application_service::ApplicationServiceImpl;
-                        use tonic::metadata::MetadataValue;
-
-                        // When auth enabled, extract tenant_id from JWT for RequestContext in undeploy_application
-                        let tenant_id_for_grpc = if auth_disabled {
-                            String::new()
-                        } else {
-                            let auth_header = headers
-                                .get("authorization")
-                                .and_then(|v| v.to_str().ok())
-                                .map(|s| s.to_string());
-                            let secret = match jwt_secret.as_deref() {
-                                Some(s) => s,
-                                None => {
-                                    return Err((
-                                        StatusCode::SERVICE_UNAVAILABLE,
-                                        "Auth enabled but JWT secret not configured".to_string(),
-                                    ));
-                                }
-                            };
-                            match crate::http_jwt::validate_bearer_token(
-                                secret,
-                                auth_header.as_deref(),
-                            ) {
-                                Ok(claims) => claims.tenant_id,
-                                Err(e) => {
-                                    return Err((
-                                        StatusCode::UNAUTHORIZED,
-                                        format!("Undeploy requires valid JWT: {}", e),
-                                    ));
-                                }
-                            }
-                        };
-
-                        let app_service =
-                            ApplicationServiceImpl::new(service_locator_for_undeploy.clone(), None);
-                        let mut grpc_request = tonic::Request::new(UndeployApplicationRequest {
-                            application_id: application_id.clone(),
-                            timeout: None, // Use default timeout from application config
-                        });
-                        grpc_request.metadata_mut().insert(
-                            "x-tenant-id",
-                            MetadataValue::try_from(tenant_id_for_grpc.as_str())
-                                .unwrap_or_else(|_| MetadataValue::from_static("")),
-                        );
-
-                        let response = app_service
-                            .undeploy_application(grpc_request)
-                            .await
-                            .map_err(|e| {
-                                if e.code() == tonic::Code::NotFound {
-                                    tracing::info!(
-                                        application_id = %application_id,
-                                        "Undeploy: application not found (returning 404)"
-                                    );
-                                    (StatusCode::NOT_FOUND, e.message().to_string())
-                                } else {
-                                    tracing::error!(
-                                        application_id = %application_id,
-                                        error = %e,
-                                        "ApplicationService::undeploy_application failed"
-                                    );
-                                    (
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        format!("Undeployment failed: {}", e),
-                                    )
-                                }
-                            })?;
-
-                        let inner = response.into_inner();
-                        Ok::<_, (StatusCode, String)>(Json(serde_json::json!({
-                            "success": inner.success,
-                            "error": inner.error
-                        })))
-                    };
-
-                /// HTTP mirror of `NodeService.ListConnectedNodes` for scripts and debugging.
-                async fn list_connected_nodes_http(
-                    axum::extract::State((
-                        _svc,
-                        _auth_disabled,
-                        _jwt_secret,
-                        service_locator,
-                        _ds,
-                    )): axum::extract::State<HttpGatewayState>,
-                    Query(params): Query<HashMap<String, String>>,
-                ) -> Result<Json<Value>, (StatusCode, String)> {
-                    use plexspaces_core::NodeRegistryTrait;
-
-                    let cluster = params
-                        .get("cluster")
-                        .map(|value| value.as_str())
-                        .filter(|value| !value.is_empty());
-                    let page_size = match params
-                        .get("page_size")
-                        .and_then(|value| value.parse::<i32>().ok())
-                    {
-                        Some(size) if size > 0 => (size as u32).min(1000),
-                        _ => 100,
-                    };
-                    let page_token = params
-                        .get("page_token")
-                        .map(String::as_str)
-                        .unwrap_or("")
-                        .to_string();
-
-                    let node_registry =
-                        service_locator.get_node_registry().await.ok_or_else(|| {
-                            (
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                "NodeRegistry not available".to_string(),
-                            )
-                        })?;
-
-                    let ctx = service_locator
-                        .request_context_for_system_operations()
-                        .await;
-
-                    let (nodes, next_page_token) = node_registry
-                        .list_nodes(&ctx, cluster, page_size, &page_token)
-                        .await
-                        .map_err(|error| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Failed to list nodes: {}", error),
-                            )
-                        })?;
-
-                    let nodes_json: Vec<Value> = nodes
-                        .iter()
-                        .map(|node| {
-                            serde_json::json!({
-                                "node_id": node.node_id,
-                                "node_address": node.node_address,
-                                "capabilities": node.capabilities,
-                                "status": node.status,
-                                "actor_count": node.actor_count,
-                                "message_count": node.message_count,
-                                "error_count": node.error_count,
-                            })
-                        })
-                        .collect();
-
-                    let total_count = i32::try_from(nodes_json.len()).unwrap_or(i32::MAX);
-                    Ok(Json(serde_json::json!({
-                        "nodes": nodes_json,
-                        "next_page_token": next_page_token,
-                        "total_count": total_count,
-                    })))
-                }
-
-                let deploy_router = Router::new()
-                    .route("/api/v1/nodes", get(list_connected_nodes_http))
-                    .route("/api/v1/applications/deploy", post(wasm_deploy_handler))
-                    .route(
-                        "/api/v1/applications/:application_id",
-                        delete(undeploy_handler),
-                    )
-                    .layer(DefaultBodyLimit::max(MAX_BODY_SIZE));
-                let app = app.merge(deploy_router);
-
-                // Add dashboard routes (if feature enabled)
-                let app = {
-                    #[cfg(feature = "dashboard")]
-                    {
-                        use plexspaces_dashboard::create_dashboard_router;
-                        // Same state type as app so merge succeeds; dashboard returns Router<HttpGatewayState> (no with_state)
-                        let dashboard_router = create_dashboard_router();
-                        app.merge(dashboard_router)
-                    }
-                    #[cfg(not(feature = "dashboard"))]
-                    app
-                };
-
-                // Axum 0.7: provide state once at the end to get Router<()> which implements Service for serve
-                let app = app.with_state(gateway_state);
-
-                // Use the pre-bound listener passed from outside the task
-                use axum::serve;
-                if let Err(e) = serve(http_listener, app).await {
-                    tracing::error!("HTTP gateway server error: {}", e);
-                }
-            })
-        };
+        tracing::info!(
+            addr = %listener.local_addr().unwrap_or(addr),
+            "Single-port gRPC+HTTP server ready"
+        );
 
         if let Some(wasm_apps_dir_str) = wasm_apps_directory {
             let service_locator_for_deploy = self.service_locator.clone();
@@ -3128,133 +1937,96 @@ impl Node {
         }
 
         tokio::select! {
-            result = grpc_server => {
+            result = axum::serve(listener, app) => {
                 result.map_err(|e| NodeError::GrpcError(e.to_string()))?;
             }
-            _ = shutdown_signal => {
-                // Shutdown signal received - server will stop gracefully
-                http_gateway_handle.abort();
-            }
+            _ = shutdown_signal => {}
         }
 
         Ok(())
     }
 
-    /// Monitor an actor (Erlang-style location transparent monitoring)
+    /// Monitor an actor (Erlang-style location-transparent monitoring).
     ///
-    /// ## Purpose
-    /// Establishes a monitor from `supervisor_id` on `actor_id`. When the target actor
-    /// terminates (for any reason), a `__DOWN__` message is delivered to the supervisor's
-    /// mailbox. This is fully location-transparent: the same call works for local and
-    /// remote actors.
+    /// Establishes a one-way watch: when `actor_id` terminates for any reason
+    /// a `__DOWN__` control message is delivered to `supervisor_id`'s mailbox.
+    /// Works identically for local and remote actors.
     ///
-    /// ## Erlang Philosophy
-    /// `monitor(process, Pid)` — one-way watch; supervisor always receives DOWN, never dies.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - The canonical actor ID of the actor to monitor
-    /// * `supervisor_id` - The actor that receives `__DOWN__` in its mailbox
-    /// * `ctx` - Authenticated [`plexspaces_core::RequestContext`] for this operation (JWT tenant,
-    ///   request namespace from gRPC/HTTP boundary). Stored on the monitored node and replayed
-    ///   when delivering `__DOWN__` to a remote supervisor.
-    ///
-    /// ## Returns
-    /// `Ok(monitor_ref)` - ULID monitor reference (use with `demonitor`)
-    /// `Err(NodeError)` - If actor not found or remote node not connected
+    /// Returns a ULID `monitor_ref` that can be passed to [`Self::demonitor`].
     pub async fn monitor(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         actor_id: &ActorId,
         supervisor_id: &ActorId,
-        ctx: &plexspaces_core::RequestContext,
     ) -> Result<MonitorRef, NodeError> {
-        let is_local = actor_id.node_id() == self.id.as_str();
-
-        if is_local {
-            // LOCAL MONITORING: Verify the actor is active and register in ActorRegistry.
-            let actor_registry = self.actor_registry().await?;
-            if !actor_registry.is_actor_activated(actor_id).await {
-                return Err(NodeError::ActorNotFound(actor_id.to_string()));
+        let registry = self.actor_registry().await?;
+        let result = registry
+            .monitor(ctx, actor_id, supervisor_id)
+            .await
+            .map_err(Self::map_actor_registry_error);
+        match &result {
+            Ok(monitor_ref) => {
+                metrics::counter!("plexspaces_node_monitor_established_total",
+                    "node_id" => self.id.as_str().to_string(),
+                    "local" => (actor_id.node_id() == self.id.as_str()).to_string()
+                ).increment(1);
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    supervisor_id = %supervisor_id,
+                    monitor_ref = %monitor_ref,
+                    node_id = %self.id.as_str(),
+                    "Monitor established"
+                );
             }
-
-            let monitor_ref = ulid::Ulid::new().to_string();
-            actor_registry
-                .monitor(actor_id, supervisor_id, monitor_ref.clone(), ctx)
-                .await
-                .map_err(|e| NodeError::InvalidArgument(format!("Monitor failed: {}", e)))?;
-
-            Ok(monitor_ref)
-        } else {
-            // REMOTE MONITORING: Register on the remote node via MonitorActor RPC.
-            // The remote node's ActorRegistry will hold the entry; when the actor dies, the
-            // remote node calls NotifyActorDown on this node, which delivers __DOWN__ locally.
-            let remote_node_id = crate::NodeId::new(actor_id.node_id().to_string());
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            let monitor_ref = client
-                .monitor_actor(
-                    ctx,
-                    actor_id.as_str(),
-                    supervisor_id.as_str(),
-                    &format!("http://{}", self.config.listen_addr),
-                )
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("MonitorActor RPC failed: {}", e)))?;
-
-            Ok(monitor_ref)
+            Err(e) => {
+                tracing::warn!(
+                    actor_id = %actor_id,
+                    supervisor_id = %supervisor_id,
+                    error = %e,
+                    "Monitor failed"
+                );
+            }
         }
+        result
     }
 
-    /// Cancel a previously established monitor (Erlang demonitor/1 equivalent).
+    /// Cancel a previously established monitor (idempotent).
     ///
-    /// ## Purpose
-    /// Removes the monitor identified by `monitor_ref` so the supervisor no longer
-    /// receives `__DOWN__` notifications when `actor_id` terminates.  Safe to call
-    /// multiple times for the same ref — idempotent.
-    ///
-    /// ## Arguments
-    /// * `actor_id`     - The actor that was being monitored
-    /// * `supervisor_id` - The actor that was receiving `__DOWN__` notifications
-    /// * `monitor_ref`  - The ULID returned by a prior `monitor()` call
-    /// * `ctx` - RequestContext for tenant/namespace isolation on remote RPCs
-    ///
-    /// ## Returns
-    /// `Ok(())` always — missing refs are silently ignored (idempotent).
+    /// Removes the monitor identified by `monitor_ref` so `supervisor_id` no
+    /// longer receives `__DOWN__` when `actor_id` terminates.  Safe to call
+    /// multiple times — missing refs are silently ignored.
     pub async fn demonitor(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         supervisor_id: &ActorId,
         monitor_ref: &str,
-        ctx: &RequestContext,
     ) -> Result<(), NodeError> {
-        let is_local = actor_id.node_id() == self.id.as_str();
-        if is_local {
-            let actor_registry = self.actor_registry().await?;
-            actor_registry
-                .demonitor(actor_id, supervisor_id, monitor_ref)
-                .await
-                .map_err(|e| NodeError::InvalidArgument(format!("Demonitor failed: {}", e)))?;
-            Ok(())
+        let registry = self.actor_registry().await?;
+        let result = registry
+            .demonitor(ctx, actor_id, supervisor_id, monitor_ref)
+            .await
+            .map_err(Self::map_actor_registry_error);
+        if let Err(ref e) = result {
+            tracing::warn!(
+                actor_id = %actor_id,
+                supervisor_id = %supervisor_id,
+                monitor_ref = %monitor_ref,
+                error = %e,
+                "Demonitor failed"
+            );
         } else {
-            let remote_node_id = crate::NodeId::new(actor_id.node_id().to_string());
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            client
-                .demonitor_actor(ctx, actor_id.as_str(), supervisor_id.as_str(), monitor_ref)
-                .await
-                .map_err(|e| {
-                    NodeError::NetworkError(format!("DemonitorActor RPC failed: {}", e))
-                })?;
-
-            Ok(())
+            metrics::counter!("plexspaces_node_monitor_cancelled_total",
+                "node_id" => self.id.as_str().to_string()
+            ).increment(1);
+            tracing::debug!(
+                actor_id = %actor_id,
+                supervisor_id = %supervisor_id,
+                monitor_ref = %monitor_ref,
+                "Monitor cancelled"
+            );
         }
+        result
     }
 
     /// Link two actors for bidirectional death propagation (Erlang link/1)
@@ -3289,82 +2061,27 @@ impl Node {
     /// ```rust
     /// // Link two actors (with RequestContext for tenant isolation)
     /// let ctx = RequestContext::new_without_auth("tenant-1".to_string(), "namespace-1".to_string());
-    /// node.link("actor-1", "actor-2", &ctx).await?;
+    /// node.link(&ctx, actor1.id(), actor2.id()).await?;
     ///
     /// // If actor-1 dies abnormally, actor-2 automatically dies
     /// // If actor-2 dies abnormally, actor-1 automatically dies
     /// ```
     pub async fn link(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        ctx: &RequestContext,
     ) -> Result<(), NodeError> {
-        // Prevent self-linking
         if actor_id == linked_actor_id {
             return Err(NodeError::InvalidArgument(
                 "Cannot link actor to itself".to_string(),
             ));
         }
-
-        let is_local1 = actor_id.node_id() == self.id.as_str();
-        let is_local2 = linked_actor_id.node_id() == self.id.as_str();
-
-        if is_local1 && is_local2 {
-            // Both local: register in ActorRegistry directly.
-            let actor_registry = self.actor_registry().await?;
-            actor_registry
-                .link(actor_id, linked_actor_id)
-                .await
-                .map_err(|e| NodeError::InvalidArgument(format!("Link failed: {}", e)))?;
-            Ok(())
-        } else {
-            // Cross-node: call link_actor RPC on BOTH nodes so each node's ActorRegistry
-            // holds the entry.  When either actor dies, propagate_exit_to_links() →
-            // ServiceLocator.get_actor_service().send() routes the EXIT across the network.
-            let link_on_node = |node_id: &str,
-                                a: ActorId,
-                                b: ActorId|
-             -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), NodeError>> + Send + '_>,
-            > {
-                let node_id = node_id.to_string();
-                Box::pin(async move {
-                    let remote_node_id = crate::NodeId::new(node_id.clone());
-                    let node_address = self.lookup_node_address(&remote_node_id).await?;
-                    let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
-                        .await
-                        .map_err(|e| {
-                            NodeError::NetworkError(format!("Connection failed: {}", e))
-                        })?;
-                    client
-                        .link_actor(ctx, a.as_str(), b.as_str())
-                        .await
-                        .map_err(|e| {
-                            NodeError::NetworkError(format!("LinkActor RPC failed: {}", e))
-                        })?;
-                    Ok(())
-                })
-            };
-
-            // Register link entry on the node that owns actor_id
-            link_on_node(
-                actor_id.node_id(),
-                actor_id.clone(),
-                linked_actor_id.clone(),
-            )
-            .await?;
-
-            // Register link entry on the node that owns linked_actor_id
-            link_on_node(
-                linked_actor_id.node_id(),
-                actor_id.clone(),
-                linked_actor_id.clone(),
-            )
-            .await?;
-
-            Ok(())
-        }
+        let registry = self.actor_registry().await?;
+        registry
+            .link(ctx, actor_id, linked_actor_id)
+            .await
+            .map_err(Self::map_actor_registry_error)
     }
 
     /// Unlink two actors (Erlang unlink/1 equivalent)
@@ -3386,61 +2103,15 @@ impl Node {
     /// - `NodeError::NetworkError` if remote actor unlink fails
     pub async fn unlink(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        ctx: &RequestContext,
     ) -> Result<(), NodeError> {
-        let is_local1 = actor_id.node_id() == self.id.as_str();
-        let is_local2 = linked_actor_id.node_id() == self.id.as_str();
-
-        if is_local1 && is_local2 {
-            let actor_registry = self.actor_registry().await?;
-            actor_registry
-                .unlink(actor_id, linked_actor_id)
-                .await
-                .map_err(|e| NodeError::InvalidArgument(format!("Unlink failed: {}", e)))?;
-            Ok(())
-        } else {
-            let unlink_on_node = |node_id: &str,
-                                  a: ActorId,
-                                  b: ActorId|
-             -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), NodeError>> + Send + '_>,
-            > {
-                let node_id = node_id.to_string();
-                Box::pin(async move {
-                    let remote_node_id = crate::NodeId::new(node_id.clone());
-                    let node_address = self.lookup_node_address(&remote_node_id).await?;
-                    let mut client = crate::grpc_client::RemoteActorClient::connect(&node_address)
-                        .await
-                        .map_err(|e| {
-                            NodeError::NetworkError(format!("Connection failed: {}", e))
-                        })?;
-                    client
-                        .unlink_actor(ctx, a.as_str(), b.as_str())
-                        .await
-                        .map_err(|e| {
-                            NodeError::NetworkError(format!("UnlinkActor RPC failed: {}", e))
-                        })?;
-                    Ok(())
-                })
-            };
-
-            unlink_on_node(
-                actor_id.node_id(),
-                actor_id.clone(),
-                linked_actor_id.clone(),
-            )
-            .await?;
-            unlink_on_node(
-                linked_actor_id.node_id(),
-                actor_id.clone(),
-                linked_actor_id.clone(),
-            )
-            .await?;
-
-            Ok(())
-        }
+        let registry = self.actor_registry().await?;
+        registry
+            .unlink(ctx, actor_id, linked_actor_id)
+            .await
+            .map_err(Self::map_actor_registry_error)
     }
 
     /// Publish a lifecycle event to all subscribers
@@ -3994,95 +2665,6 @@ impl Node {
         self.application_manager.clone()
     }
 
-    // ============================================================================
-    // Phase 8.5: Virtual Actor Lifecycle (Orleans-inspired)
-    // ============================================================================
-
-    /// Check if virtual actor exists (without activating)
-    ///
-    /// ## Purpose
-    /// Query whether a virtual actor exists without triggering activation.
-    /// Useful for existence checks, health monitoring, and discovery.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Canonical actor ID to check
-    ///
-    /// ## Returns
-    /// (exists, is_active, is_virtual) tuple
-    pub async fn check_virtual_actor_exists(&self, actor_id: &ActorId) -> (bool, bool, bool) {
-        // Use VirtualActorManager
-        if let Ok(manager) = self.get_virtual_actor_manager().await {
-            let is_virtual = manager.is_virtual(actor_id).await;
-            let is_active = if is_virtual {
-                manager.is_active(actor_id).await
-            } else {
-                false
-            };
-            // Actor exists only if it's virtual (virtual actors are always addressable)
-            return (is_virtual, is_active, is_virtual);
-        }
-
-        // VirtualActorManager not available - actor is not virtual
-        (false, false, false)
-    }
-
-    /// Register a virtual actor (Phase 8.5)
-    ///
-    /// ## Purpose
-    /// Registers an actor as virtual (always addressable but not always in memory).
-    /// Virtual actors are activated on-demand when they receive their first message.
-    ///
-    /// ## Arguments
-    /// * `ctx` - Request context (for tenant_id and namespace)
-    /// * `actor_id` - The actor ID
-    /// * `facet` - The VirtualActorFacet instance
-    /// * `actor_type` - Optional actor type (e.g., "GenServer")
-    /// * `config` - Optional actor configuration
-    ///
-    /// ## Returns
-    /// Ok(()) if registration successful
-    ///
-    /// ## Note
-    /// This method stores metadata in VirtualActorManager (source of truth for virtual actors).
-    /// The metadata persists across suspension/reactivation cycles.
-    pub async fn register_virtual_actor(
-        &self,
-        ctx: &RequestContext,
-        actor_id: ActorId,
-        facet: VirtualActorFacet,
-        actor_type: String,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-    ) -> Result<(), NodeError> {
-        // Convert VirtualActorFacet to VirtualActorLifecycleFacet trait object
-        use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
-        let lifecycle_facet = virtual_actor_facet_to_lifecycle_facet(facet);
-        let facet_box = Arc::new(tokio::sync::RwLock::new(lifecycle_facet));
-
-        // Use VirtualActorManager for registration (source of truth for virtual actors)
-        let manager = self.get_virtual_actor_manager().await?;
-        let actor_id_clone = actor_id.clone();
-        use plexspaces_core::ActorSpawnSpec;
-        use plexspaces_proto::common::v1::ActorIdentity;
-        let spec = ActorSpawnSpec {
-            identity: Some(ActorIdentity {
-                name: actor_id.name().to_string(),
-                actor_type: actor_type.clone(),
-            }),
-            role: String::new(),
-            namespace: ctx.namespace().to_string(),
-            tenant_id: ctx.tenant_id().to_string(),
-            behavior_kind: String::new(),
-            args: std::collections::HashMap::new(),
-            facets: vec![],
-            labels: std::collections::HashMap::new(),
-            config,
-        };
-        manager
-            .register(actor_id, facet_box, spec)
-            .await
-            .map_err(|e| NodeError::ActorRegistrationFailed(actor_id_clone, e.to_string()))
-    }
-
     /// Start idle timeout monitoring for virtual actors (Phase 8.5)
     ///
     /// ## Purpose
@@ -4366,6 +2948,7 @@ mod tests {
     use super::*;
     use plexspaces_actor::ActorRef;
     use plexspaces_core::ActorId;
+    use plexspaces_proto::actor::v1::ActorVisibility;
     use std::time::Duration;
 
     fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
@@ -4396,6 +2979,7 @@ mod tests {
                 "".to_string(), // TODO: get namespace from context
                 node.id().as_str().to_string(),
                 node.service_locator().clone(),
+                ActorVisibility::ActorVisibilityPublic,
             )))
         } else {
             if actor_id.node_id() != node.id().as_str() {
@@ -4405,6 +2989,7 @@ mod tests {
                     "".to_string(),
                     actor_id.node_id().to_string(),
                     node.service_locator().clone(),
+                    ActorVisibility::ActorVisibilityPublic,
                 )))
             } else {
                 Ok(None)
@@ -4440,6 +3025,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox,
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(node).await;
         let internal_ctx = node
@@ -4486,6 +3072,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry first
@@ -4498,6 +3085,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering and looking up test actors
@@ -4553,6 +3141,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry first
@@ -4565,6 +3154,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -4641,6 +3231,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry first (using MessageSender)
@@ -4708,6 +3299,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry (using MessageSender)
@@ -4732,35 +3324,22 @@ mod tests {
             )
             .await;
 
-        // Create message
+        // Send message via ActorRef directly to local mailbox
         let message = Message {
             id: ulid::Ulid::new().to_string(),
             payload: vec![1, 2, 3],
             ..Default::default()
         };
+        actor_ref.tell(&ctx, message).await.unwrap();
 
-        // Reset metrics before sending message
-        {
-            let mut metrics = node.metrics.write().await;
-            metrics.messages_routed = 0;
-            metrics.local_deliveries = 0;
-        }
-
-        // Send message via ActorRef (use the actor_ref we already have, don't lookup again)
-        actor_ref.tell(message).await.unwrap();
-
-        // Verify stats updated (metrics are now updated synchronously in ActorRef::tell)
-        let node_metrics = node.metrics().await;
-        assert_eq!(
-            node_metrics.messages_routed, 1,
-            "messages_routed should be 1, got {}",
-            node_metrics.messages_routed
-        );
-        assert_eq!(
-            node_metrics.local_deliveries, 1,
-            "local_deliveries should be 1, got {}",
-            node_metrics.local_deliveries
-        );
+        // Verify message was delivered to the mailbox
+        // ActorRef::tell() enqueues directly into the mailbox; routing metrics are
+        // only updated when messages flow through Node::route_message() / routing.rs.
+        let msg = mailbox
+            .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
+            .await;
+        assert!(msg.is_some(), "message should be delivered to mailbox");
+        assert_eq!(msg.unwrap().payload, vec![1, 2, 3]);
     }
 
     #[tokio::test]
@@ -4778,11 +3357,15 @@ mod tests {
 
         // Try to send to non-existent actor
         // lookup_actor_ref returns Ok(None) for local actors that don't exist
+        let tell_ctx = node
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
         let result =
             lookup_actor_ref(&node, &test_runtime_actor_id("nonexistent", "test-node")).await;
         let result = match result {
             Ok(Some(actor_ref)) => actor_ref
-                .tell(message)
+                .tell(&tell_ctx, message)
                 .await
                 .map_err(|e| NodeError::DeliveryFailed(format!("{}", e))),
             Ok(None) => {
@@ -4892,24 +3475,26 @@ mod tests {
             .await
             .expect("ActorFactoryImpl should be registered after initialize_services()");
 
-        // Test code - spawning test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
+        // Test code - spawn with explicit tenant/namespace per Rule #6
+        let spawn_ctx = plexspaces_core::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "default".to_string(),
+        );
+        // Build actor_id to match spawn spec: name="test-actor", type="test", namespace="default", node="test-node"
+        let actor_id =
+            ActorId::new("test-actor", "test", "default", "test-node").expect("valid actor id");
         let _message_sender = actor_factory
             .spawn_actor(
-                &internal_ctx,
+                &spawn_ctx,
                 &plexspaces_core::ActorSpawnSpec {
                     identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                         name: actor_id.name().to_string(),
-                        actor_type: "test".to_string(),
+                        actor_type: actor_id.actor_type().to_string(),
                     }),
                     role: String::new(),
-                    namespace: internal_ctx.namespace().to_string(),
-                    tenant_id: internal_ctx.tenant_id().to_string(),
+                    namespace: actor_id.namespace().to_string(),
+                    tenant_id: "test-tenant".to_string(),
+                    visibility: 0,
                     behavior_kind: String::new(),
                     args: std::collections::HashMap::new(),
                     facets: vec![],
@@ -4920,31 +3505,13 @@ mod tests {
             )
             .await
             .unwrap();
-        // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
-        let mailbox_for_ref = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-ref-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_ref = ActorRef::local(
-            actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox_for_ref,
-            service_locator,
-        );
 
-        // Verify ActorRef returned
-        assert_eq!(actor_ref.id(), &actor_id);
-
-        // Verify actor registered in ActorRegistry
+        // Verify actor registered in ActorRegistry — lookup by canonical ActorId
         let actor_registry = get_actor_registry(&node).await;
-        // Test code - looking up test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        assert!(actor_registry.lookup_actor(&actor_id).await.is_some());
+        assert!(
+            actor_registry.lookup_actor(&actor_id).await.is_some(),
+            "spawned actor must appear in registry"
+        );
     }
 
     // NOTE: test_spawn_actor_monitors_termination removed
@@ -5003,24 +3570,26 @@ mod tests {
             .await
             .expect("ActorFactory should be registered after initialize_services()");
 
-        // Test code - spawning test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_id = test_runtime_actor_id("test-actor", "test-node");
+        // Test code - spawn with explicit tenant/namespace per Rule #6
+        let spawn_ctx = plexspaces_core::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "default".to_string(),
+        );
+        // actor_id must match spawn spec: type="test", namespace="default"
+        let actor_id =
+            ActorId::new("test-actor", "test", "default", "test-node").expect("valid actor id");
         let _message_sender = actor_factory
             .spawn_actor(
-                &internal_ctx,
+                &spawn_ctx,
                 &plexspaces_core::ActorSpawnSpec {
                     identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                         name: actor_id.name().to_string(),
-                        actor_type: "test".to_string(),
+                        actor_type: actor_id.actor_type().to_string(),
                     }),
                     role: String::new(),
-                    namespace: internal_ctx.namespace().to_string(),
-                    tenant_id: internal_ctx.tenant_id().to_string(),
+                    namespace: actor_id.namespace().to_string(),
+                    tenant_id: "test-tenant".to_string(),
+                    visibility: 0,
                     behavior_kind: String::new(),
                     args: std::collections::HashMap::new(),
                     facets: vec![],
@@ -5031,46 +3600,30 @@ mod tests {
             )
             .await
             .unwrap();
-        // Create a new mailbox for ActorRef (actor is already spawned with its own mailbox)
-        let mailbox_for_ref = Arc::new(
-            Mailbox::new(
-                mailbox_config_default(),
-                format!("test-mailbox-ref-{}", ulid::Ulid::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let actor_ref = ActorRef::local(
-            actor_id.clone(),
-            "".to_string(),
-            "".to_string(),
-            mailbox_for_ref,
-            service_locator,
-        );
 
         // Establish monitoring link — supervisor just needs to be registered to receive __DOWN__.
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(&actor_id, &supervisor_id, &internal_ctx)
+        register_actor_for_test(node.as_ref(), &supervisor_id, {
+            Arc::new(
+                Mailbox::new(
+                    mailbox_config_default(),
+                    format!("sup-{}", ulid::Ulid::new()),
+                )
+                .await
+                .unwrap(),
+            )
+        })
+        .await;
+        node.monitor(&spawn_ctx, &actor_id, &supervisor_id)
             .await
             .unwrap();
 
-        // Send message to actor
-        // Note: In real usage, this would be done via Node::route_message() or ActorService
-        // For this test, we'll skip the message send as it's not essential
-
-        // Wait a bit for message processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // Manually abort the actor to simulate crash
-        // This will trigger "killed" termination reason in JoinHandle watcher
-        drop(actor_ref);
-
-        // Note: Without explicit stop, actor keeps running
-        // True panic test would require different approach
-        //
-        // For now, verify normal termination detection works
-        // Panic detection works (as seen in JoinHandle.await handling)
-        // but requires panic outside async error handling
+        // Verify the spawned actor is in the registry (monitoring only works on activated actors)
+        let actor_registry = get_actor_registry(node.as_ref()).await;
+        assert!(
+            actor_registry.lookup_actor(&actor_id).await.is_some(),
+            "spawned actor must appear in registry before monitoring"
+        );
     }
 
     // ============================================================================
@@ -5105,6 +3658,7 @@ mod tests {
             "".to_string(),
             "node2",
             node2.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor with ActorRegistry on node2
@@ -5153,10 +3707,14 @@ mod tests {
         // But it exercises the remote routing code path via ActorRef::tell()
         // Initialize services on node1
         node1.initialize_services().await.unwrap();
+        let tell_ctx = node1
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
         let actor_ref = lookup_actor_ref(&node1, &remote_actor_id).await;
         let result = match actor_ref {
             Ok(Some(actor_ref)) => actor_ref
-                .tell(message)
+                .tell(&tell_ctx, message)
                 .await
                 .map_err(|e| NodeError::DeliveryFailed(format!("{}", e))),
             Ok(None) => Err(NodeError::ActorNotFound(remote_actor_id.to_string())),
@@ -5245,6 +3803,7 @@ mod tests {
             "".to_string(),
             "node2",
             node2.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor with ActorRegistry on node2
@@ -5308,13 +3867,24 @@ mod tests {
             ..Default::default()
         };
 
-        // Try to send to node that's not in connections registry
-        // This will fail when trying to lookup the actor (node not found)
-        let result =
+        // Lookup returns Ok(Some(remote_ref)) even when node is unregistered;
+        // the failure surfaces at send time (connection refused / gRPC error).
+        let actor_ref =
             lookup_actor_ref(&node, &test_runtime_actor_id("test-actor", "unknown-node")).await;
+        assert!(
+            actor_ref.is_ok(),
+            "lookup should succeed (returns remote ref)"
+        );
+        let actor_ref = actor_ref.unwrap();
+        assert!(actor_ref.is_some(), "lookup should return a remote actor ref");
 
-        // Should fail with ActorNotFound or similar (node not registered)
-        assert!(result.is_err() || result.unwrap().is_none());
+        // Sending to an unregistered node fails at delivery time
+        let tell_ctx = node
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
+        let send_result = actor_ref.unwrap().tell(&tell_ctx, message).await;
+        assert!(send_result.is_err(), "tell to unknown node should fail");
     }
 
     // ============================================================================
@@ -5345,6 +3915,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry first (using MessageSender)
@@ -5382,7 +3953,7 @@ mod tests {
 
         // Monitor the actor
         let monitor_ref = node
-            .monitor(&monitored_actor_id, &supervisor_id, &ctx)
+            .monitor(&ctx, &monitored_actor_id, &supervisor_id)
             .await
             .unwrap();
 
@@ -5438,9 +4009,9 @@ mod tests {
             .await;
         let result = node
             .monitor(
+                &ctx,
                 &test_runtime_actor_id("nonexistent", "test-node"),
                 &test_runtime_actor_id("supervisor", "test-node"),
-                &ctx,
             )
             .await;
 
@@ -5460,9 +4031,9 @@ mod tests {
             .await;
         let result = node
             .monitor(
+                &ctx,
                 &test_runtime_actor_id("test-actor", "node2"),
                 &test_runtime_actor_id("supervisor", "node1"),
-                &ctx,
             )
             .await;
 
@@ -5513,6 +4084,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry first (using MessageSender)
@@ -5570,13 +4142,13 @@ mod tests {
         register_actor_for_test(&node, &sup2_id, sup2_mbox.clone()).await;
         register_actor_for_test(&node, &sup3_id, sup3_mbox.clone()).await;
 
-        node.monitor(&watched_actor_id, &sup1_id, &ctx)
+        node.monitor(&ctx, &watched_actor_id, &sup1_id)
             .await
             .unwrap();
-        node.monitor(&watched_actor_id, &sup2_id, &ctx)
+        node.monitor(&ctx, &watched_actor_id, &sup2_id)
             .await
             .unwrap();
-        node.monitor(&watched_actor_id, &sup3_id, &ctx)
+        node.monitor(&ctx, &watched_actor_id, &sup3_id)
             .await
             .unwrap();
 
@@ -5724,6 +4296,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -5734,6 +4307,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -5786,13 +4360,13 @@ mod tests {
             .unwrap(),
         );
         register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
-        node.monitor(&monitored_actor_id, &supervisor_id, &ctx)
+        node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
             .await
             .unwrap();
 
         // Create Terminated event
         let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
+            actor_id: monitored_actor_id.as_str().to_string(),
             timestamp: Some(prost_types::Timestamp {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
@@ -5860,6 +4434,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -5870,6 +4445,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -5922,13 +4498,13 @@ mod tests {
             .unwrap(),
         );
         register_actor_for_test(&node, &supervisor_id, sup_mbox.clone()).await;
-        node.monitor(&monitored_actor_id, &supervisor_id, &ctx)
+        node.monitor(&ctx, &monitored_actor_id, &supervisor_id)
             .await
             .unwrap();
 
         // Create Failed event
         let event = plexspaces_proto::ActorLifecycleEvent {
-            actor_id: "test-actor@test-node".to_string(),
+            actor_id: monitored_actor_id.as_str().to_string(),
             timestamp: Some(prost_types::Timestamp {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
@@ -6017,6 +4593,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register with ActorRegistry (using MessageSender)
@@ -6047,25 +4624,21 @@ mod tests {
         let lookup_result = actor_registry.lookup_actor(actor_ref.id()).await;
         assert!(lookup_result.is_some(), "Actor should be registered");
 
-        // Reset metrics before sending message
-        {
-            let mut metrics = node.metrics.write().await;
-            metrics.messages_routed = 0;
-            metrics.local_deliveries = 0;
-        }
-
-        // Send local message via ActorRef (use the actor_ref we already have)
+        // Send local message via ActorRef directly to mailbox
         let message = Message {
             id: ulid::Ulid::new().to_string(),
             payload: vec![1, 2, 3],
             ..Default::default()
         };
-        actor_ref.tell(message).await.unwrap();
+        actor_ref.tell(&ctx, message).await.unwrap();
 
-        // Check stats updated (metrics are now updated synchronously in ActorRef::tell)
-        let node_metrics = node.metrics().await;
-        assert_eq!(node_metrics.messages_routed, 1);
-        assert_eq!(node_metrics.local_deliveries, 1);
+        // Verify delivery: ActorRef::tell() enqueues into the mailbox.
+        // Routing counters (messages_routed, local_deliveries) are only updated
+        // when messages flow through Node::route_message() / routing.rs — not here.
+        let delivered = mailbox
+            .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
+            .await;
+        assert!(delivered.is_some(), "message should be delivered to mailbox");
 
         // Unregister actor
         let actor_registry = get_actor_registry(&node).await;
@@ -6154,6 +4727,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6164,6 +4738,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -6206,7 +4781,7 @@ mod tests {
         }
 
         // Verify config is stored
-        let actor_configs_arc = node.actor_configs().await.unwrap();
+        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
         let actor_configs = actor_configs_arc.read().await;
         assert!(actor_configs.contains_key(actor_ref.id()));
         let stored_config = actor_configs.get(actor_ref.id()).unwrap();
@@ -6247,6 +4822,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6257,6 +4833,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -6281,7 +4858,7 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
 
         // Verify config is not stored
-        let actor_configs_arc = node.actor_configs().await.unwrap();
+        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
         let actor_configs = actor_configs_arc.read().await;
         assert!(!actor_configs.contains_key(actor_ref.id()));
     }
@@ -6307,6 +4884,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6317,6 +4895,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -6359,7 +4938,7 @@ mod tests {
 
         // Verify config is stored
         {
-            let actor_configs_arc = node.actor_configs().await.unwrap();
+            let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
             let actor_configs = actor_configs_arc.read().await;
             assert!(actor_configs.contains_key(actor_ref.id()));
         }
@@ -6372,7 +4951,7 @@ mod tests {
             .unwrap();
 
         // Verify config is removed
-        let actor_configs_arc = node.actor_configs().await.unwrap();
+        let actor_configs_arc = get_actor_registry(&node).await.actor_configs().clone();
         let actor_configs = actor_configs_arc.read().await;
         assert!(!actor_configs.contains_key(actor_ref.id()));
     }
@@ -6400,6 +4979,7 @@ mod tests {
             "".to_string(),
             mailbox1.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6410,6 +4990,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox1.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = node
@@ -6462,6 +5043,7 @@ mod tests {
             "".to_string(),
             mailbox2.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         let config2 =
             create_actor_config_with_resources(1.5, 1024 * 1024 * 256, 512 * 1024 * 1024, 1);
@@ -6472,6 +5054,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox2.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         let internal_ctx = node
@@ -6570,6 +5153,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6580,6 +5164,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors
@@ -6650,6 +5235,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         let config = create_actor_config_with_resources(2.0, 1024 * 1024 * 512, 0, 0);
         let actor_registry = get_actor_registry(&node).await;
@@ -6741,6 +5327,7 @@ mod tests {
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Register actor with MessageSender (mailbox is internal)
 
@@ -6751,6 +5338,7 @@ mod tests {
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
         let actor_registry = get_actor_registry(&node).await;
         // Test code - registering test actors

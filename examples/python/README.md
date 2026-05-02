@@ -317,7 +317,7 @@ The [PlexSpaces Python SDK](../../docs/sdk.md) provides decorator-based actor de
 ```bash
 cd apps/bank_account
 ./build.sh           # Build WASM
-./test.sh 8092       # Test (server must be running on port 8091)
+./test.sh 8091       # Test (server must be running on port 8091)
 ```
 
 ## Troubleshooting

@@ -12,7 +12,7 @@ use plexspaces_core::{
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
-use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;
+use plexspaces_proto::actor::v1::{actor_service_server::ActorServiceServer, ActorVisibility};
 use plexspaces_services::actor_service::ActorServiceImpl;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -345,6 +345,7 @@ async fn register_test_actor(
         "system".to_string(), // namespace
         mailbox,
         service_locator,
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
@@ -423,6 +424,7 @@ impl GenServer for ForwarderActor {
             ctx.namespace.clone(), // namespace
             node_id,
             ctx.service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let request: CounterMessage = serde_json::from_slice(&msg.payload)
@@ -439,8 +441,12 @@ impl GenServer for ForwarderActor {
         forward_msg.sender_id = forwarder_id; // Use forwarder's own ID as sender
         forward_msg.message_type = "call".to_string();
 
+        let routing_ctx = plexspaces_core::RequestContext::new_without_auth(
+            ctx.tenant_id.clone(),
+            ctx.namespace.clone(),
+        );
         let reply = target_ref
-            .ask(forward_msg, Duration::from_secs(5))
+            .ask(&routing_ctx, forward_msg, Duration::from_secs(5))
             .await
             .map_err(|e| BehaviorError::ProcessingError(format!("Forward ask failed: {}", e)))?;
 
@@ -498,7 +504,9 @@ async fn test_outside_sender_calling_ask() {
     msg.receiver_id = actor_id.to_string();
     // No sender set (outside caller) - temporary sender will be created
 
-    let reply = counter_ref.ask(msg, Duration::from_secs(5)).await;
+    let reply = counter_ref
+        .ask(&ctx, msg, Duration::from_secs(5))
+        .await;
 
     assert!(
         reply.is_ok(),
@@ -563,7 +571,9 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     msg.receiver_id = actor2_id.to_string();
     msg.sender_id = actor1_id.to_string(); // Actor's own ID as sender
 
-    let reply = counter2_ref.ask(msg, Duration::from_secs(5)).await;
+    let reply = counter2_ref
+        .ask(&ctx, msg, Duration::from_secs(5))
+        .await;
 
     assert!(reply.is_ok(), "ask() should succeed");
     let reply_msg = reply.unwrap();
@@ -625,6 +635,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
         "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "default".to_string(),
@@ -646,6 +657,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
+    let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
         while let Some(msg) = mailbox_counter_clone.dequeue().await {
@@ -677,7 +689,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
                             if let Some(sender_ref) =
                                 actor_registry1_clone.lookup_actor(&sender_id).await
                             {
-                                let _ = sender_ref.tell(reply_msg).await;
+                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
                             }
                         }
                     }
@@ -710,7 +722,9 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     msg.receiver_id = forwarder_id.to_string();
     // No sender set (outside caller) - temporary sender will be created
 
-    let reply = forwarder_ref.ask(msg, Duration::from_secs(10)).await;
+    let reply = forwarder_ref
+        .ask(&ctx_spawn, msg, Duration::from_secs(10))
+        .await;
 
     // ASSERT: Should receive reply from counter via forwarder
     assert!(reply.is_ok(), "ask() should succeed");
@@ -772,6 +786,7 @@ async fn test_chained_asks_multi_node() {
         "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "default".to_string(),
@@ -793,6 +808,7 @@ async fn test_chained_asks_multi_node() {
     let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
+    let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
         while let Some(msg) = mailbox_counter_clone.dequeue().await {
@@ -824,7 +840,7 @@ async fn test_chained_asks_multi_node() {
                             if let Some(sender_ref) =
                                 actor_registry1_clone.lookup_actor(&sender_id).await
                             {
-                                let _ = sender_ref.tell(reply_msg).await;
+                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
                             }
                         }
                     }
@@ -857,7 +873,9 @@ async fn test_chained_asks_multi_node() {
     msg.receiver_id = forwarder_id.to_string();
     // No sender set (outside caller) - temporary sender will be created
 
-    let reply = forwarder_ref.ask(msg, Duration::from_secs(10)).await;
+    let reply = forwarder_ref
+        .ask(&ctx_spawn, msg, Duration::from_secs(10))
+        .await;
 
     // ASSERT: Should receive reply from counter via forwarder
     assert!(reply.is_ok(), "Chained ask() should succeed");
@@ -917,6 +935,7 @@ async fn test_concurrent_asks_multi_node() {
         "default".to_string(), // namespace
         Arc::clone(&mailbox_counter),
         node1_service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "default".to_string(),
@@ -938,6 +957,7 @@ async fn test_concurrent_asks_multi_node() {
     let mailbox_counter_clone = mailbox_counter.clone();
     let actor_registry1_clone = actor_registry1.clone();
     let counter_id_for_spawn = counter_id.to_string();
+    let reply_ctx = ctx.clone();
     let mut counter_actor = CounterActor::new();
     tokio::spawn(async move {
         while let Some(msg) = mailbox_counter_clone.dequeue().await {
@@ -969,7 +989,7 @@ async fn test_concurrent_asks_multi_node() {
                             if let Some(sender_ref) =
                                 actor_registry1_clone.lookup_actor(&sender_id).await
                             {
-                                let _ = sender_ref.tell(reply_msg).await;
+                                let _ = sender_ref.tell(&reply_ctx, reply_msg).await;
                             }
                         }
                     }
@@ -985,6 +1005,7 @@ async fn test_concurrent_asks_multi_node() {
         "default".to_string(),     // namespace
         local_node_id.to_string(), // Matches local_node_id, so "local via remote" path is used
         node1_service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // ACT: Spawn 10 concurrent ask() calls
@@ -992,13 +1013,19 @@ async fn test_concurrent_asks_multi_node() {
     for i in 0..10 {
         let counter_ref_clone = counter_ref.clone();
         let counter_id_clone = counter_id.clone();
+        let ask_ctx = plexspaces_core::RequestContext::new_without_auth(
+            "test".to_string(),
+            "default".to_string(),
+        );
         let handle = tokio::spawn(async move {
             let request = CounterMessage::Increment;
             let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
             msg.message_type = "call".to_string();
             msg.receiver_id = counter_id_clone.to_string();
 
-            let reply = counter_ref_clone.ask(msg, Duration::from_secs(10)).await;
+            let reply = counter_ref_clone
+                .ask(&ask_ctx, msg, Duration::from_secs(10))
+                .await;
             (i, reply)
         });
         handles.push(handle);

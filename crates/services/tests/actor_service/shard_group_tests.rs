@@ -28,13 +28,41 @@ use plexspaces_proto::actor::v1::{
     MapShardGroupRequest, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
     SendToShardRequest, ShardGroupAggregationStrategy, ShardGroupState, SpawnActorRequest,
 };
-use plexspaces_proto::common::v1::Message as ProtoMessage;
+use plexspaces_proto::actor::v1::ActorSpawnSpec;
+use plexspaces_proto::common::v1::{ActorIdentity, Message as ProtoMessage};
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
 use plexspaces_services::actor_service::{ActorServiceImpl, ActorServiceWrapper};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::Request;
 use ulid::Ulid;
+
+fn spawn_actor_request_for_test(
+    namespace: &str,
+    actor_type: &str,
+    instance_name: &str,
+    instances_count: u32,
+) -> SpawnActorRequest {
+    SpawnActorRequest {
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: instance_name.to_string(),
+                actor_type: actor_type.to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            facets: vec![],
+            config: None,
+            labels: HashMap::new(),
+        }),
+        namespace: namespace.to_string(),
+        instances_count,
+    }
+}
 
 /// Build CreateShardGroupRequest with unified DataParallelConfig.
 /// Labels go in config.placement.required_labels for scheduler node matching.
@@ -1474,17 +1502,12 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
 
     let requested_base_id = "remote-counter".to_string();
     let response = client
-        .spawn_actor(Request::new(SpawnActorRequest {
-            actor_type: "counter".to_string(),
-            actor_id: requested_base_id.clone(),
-            initial_state: Vec::new(),
-            config: None,
-            labels: HashMap::new(),
-            facets: vec![],
-            namespace: "heat-diffusion-rust".to_string(),
-            instances_count: 1,
-            role: String::new(),
-        }))
+        .spawn_actor(Request::new(spawn_actor_request_for_test(
+            "heat-diffusion-rust",
+            "counter",
+            &requested_base_id,
+            1,
+        )))
         .await
         .expect("remote spawn should succeed")
         .into_inner();
@@ -2048,16 +2071,8 @@ async fn test_spawn_actors_success() {
 
     let req = Request::new(SpawnActorsRequest {
         requests: vec![
-            SpawnActorRequest {
-                actor_type: "counter".to_string(),
-                namespace: "default".to_string(),
-                ..Default::default()
-            },
-            SpawnActorRequest {
-                actor_type: "counter".to_string(),
-                namespace: "default".to_string(),
-                ..Default::default()
-            },
+            spawn_actor_request_for_test("default", "counter", "", 1),
+            spawn_actor_request_for_test("default", "counter", "", 1),
         ],
     });
 
@@ -2090,13 +2105,7 @@ async fn test_spawn_actors_instances_count_replicas() {
 
     // Spawn 3 replicas of the same actor type with a single request
     let req = Request::new(SpawnActorsRequest {
-        requests: vec![SpawnActorRequest {
-            actor_type: "counter".to_string(),
-            namespace: "default".to_string(),
-            actor_id: "worker".to_string(),
-            instances_count: 3,
-            ..Default::default()
-        }],
+        requests: vec![spawn_actor_request_for_test("default", "counter", "worker", 3)],
     });
 
     let result = service.spawn_actors(req).await;
@@ -2132,12 +2141,7 @@ async fn test_spawn_actors_instances_count_zero_spawns_one() {
 
     // instances_count=0 should behave as 1
     let req = Request::new(SpawnActorsRequest {
-        requests: vec![SpawnActorRequest {
-            actor_type: "counter".to_string(),
-            namespace: "default".to_string(),
-            instances_count: 0,
-            ..Default::default()
-        }],
+        requests: vec![spawn_actor_request_for_test("default", "counter", "", 0)],
     });
 
     let result = service.spawn_actors(req).await;
@@ -2157,12 +2161,7 @@ async fn test_spawn_actors_instances_count_auto_id() {
 
     // No actor_id + instances_count=2 should generate ULID-based IDs
     let req = Request::new(SpawnActorsRequest {
-        requests: vec![SpawnActorRequest {
-            actor_type: "counter".to_string(),
-            namespace: "default".to_string(),
-            instances_count: 2,
-            ..Default::default()
-        }],
+        requests: vec![spawn_actor_request_for_test("default", "counter", "", 2)],
     });
 
     let result = service.spawn_actors(req).await;

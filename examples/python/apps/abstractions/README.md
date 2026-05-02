@@ -14,5 +14,5 @@ Run it against a running node:
 
 ```bash
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```

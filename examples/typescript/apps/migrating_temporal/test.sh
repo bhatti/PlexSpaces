@@ -2,7 +2,7 @@
 # Test Order Fulfillment Workflow - E-commerce saga (TypeScript WASM)
 #
 # Usage: ./test.sh [HTTP_PORT]
-#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8092)
+#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8091)
 #
 # Prerequisites: Start PlexSpaces node first:
 #   ./scripts/server.sh (from repo root)
@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/order_fulfillment_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

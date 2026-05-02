@@ -4,13 +4,13 @@
 # Both terminals use the same lock; one becomes leader and renews every 5s until killed.
 # Usage: ./compete.sh <term1|term2> [HTTP_PORT]
 # IMPORTANT: Use the SAME port in both terminals so both hit the same node and same lock.
-# Example: Terminal 1: ./compete.sh term1 8092
-#          Terminal 2: ./compete.sh term2 8092
+# Example: Terminal 1: ./compete.sh term1 8091
+#          Terminal 2: ./compete.sh term2 8091
 
 set -euo pipefail
 
 OWNER_ID="${1:?Usage: $0 <term1|term2> [HTTP_PORT]}"
-HTTP_PORT="${2:-8092}"
+HTTP_PORT="${2:-8091}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="leader-election-${OWNER_ID}"

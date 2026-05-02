@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/leader_election_actor.wasm"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 # Leader holds lock and renews for this long (seconds)
 RENEW_DURATION=60

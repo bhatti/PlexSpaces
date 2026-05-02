@@ -18,7 +18,7 @@ Durable job queue with **retries** and **dead-letter queue (DLQ)**. Uses **Workf
 # Terminal 2
 cd examples/go/apps/migrating_dapr
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

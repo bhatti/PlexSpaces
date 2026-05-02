@@ -144,8 +144,12 @@ async fn test_node_spawns_actor_with_full_context() {
         .await
         .expect("Actor should be registered")
         .expect("Actor should exist");
+    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
     actor_ref
-        .tell(message)
+        .tell(&tell_ctx, message)
         .await
         .expect("Should send message successfully");
 

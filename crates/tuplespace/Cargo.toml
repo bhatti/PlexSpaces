@@ -39,7 +39,7 @@ aws-config = { version = "1", optional = true }
 metrics = "0.23"
 
 # Proto support (for StorageStats)
-prost = "0.12"
+prost = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }

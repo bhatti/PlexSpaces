@@ -18,7 +18,7 @@ Idempotent payment processing with retries using **Workflow behavior** (run / si
 # Terminal 2
 cd examples/go/apps/migrating_cadence
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

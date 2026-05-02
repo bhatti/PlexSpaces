@@ -76,7 +76,11 @@ impl TestMessageSender {
 
 #[async_trait::async_trait]
 impl MessageSender for TestMessageSender {
-    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn tell(
+        &self,
+        _ctx: &RequestContext,
+        message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.messages.write().await.push(message);
         Ok(())
     }
@@ -359,7 +363,7 @@ async fn test_register_actor_mailbox_not_exposed() {
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
     let message = create_test_message(vec![1, 2, 3]);
-    let result = sender.tell(message).await;
+    let result = sender.tell(&ctx, message).await;
     if let Err(e) = &result {
         eprintln!("Error sending message: {}", e);
     }

@@ -178,6 +178,12 @@ pub trait ServiceLocator: Send + Sync {
     /// Register FacetManager
     async fn register_facet_manager(&self, service: Arc<FacetManagerServiceWrapper>);
 
+    /// Returns the in-memory facet container for `actor_id` when the facet manager has registered facets for it.
+    async fn facet_container_for_actor(
+        &self,
+        actor_id: &str,
+    ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>>;
+
     /// Get FacetRegistry
     async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>>;
 

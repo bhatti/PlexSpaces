@@ -9,7 +9,7 @@ WASM_FILE="$REPO_ROOT/target/examples/typescript/ai_monitor_link_supervision/ai_
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
 if [[ -z "${1:-}" ]]; then
-  NODES="localhost:8092 localhost:8094"
+  NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
   NODES="localhost:$1"
 else

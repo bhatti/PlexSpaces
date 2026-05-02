@@ -52,11 +52,13 @@
 //! only and are lost on actor restart. This is a future enhancement.
 
 use plexspaces_channel::{create_channel, Channel, ChannelError};
+use plexspaces_core::is_ctrl_message;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider};
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Notify, RwLock};
@@ -265,6 +267,18 @@ pub struct Mailbox {
     shutdown_flag: Arc<RwLock<bool>>,
     /// In-progress message count (for graceful shutdown tracking)
     in_progress_count: Arc<RwLock<usize>>,
+
+    // ── Control-message fast lane ─────────────────────────────────────────────
+    /// Sender half of the unbounded ctrl channel.  Shared so `enqueue` can push
+    /// to it without holding any lock.
+    ctrl_sender: mpsc::UnboundedSender<ProtoMessage>,
+    /// Receiver half — kept behind a Mutex so the async `dequeue` future can
+    /// lock and poll it without requiring `&mut self`.
+    ctrl_receiver: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ProtoMessage>>>,
+    /// Number of messages currently in the ctrl channel.  Checked with a single
+    /// `Relaxed` load in the dequeue hot-path so we never spin when the ctrl
+    /// queue is empty.
+    ctrl_size: Arc<AtomicUsize>,
 }
 
 /// Internal message storage (used for ordering/priority before sending to channel)
@@ -386,6 +400,11 @@ impl Mailbox {
             _ => MessageStorage::Queue(VecDeque::new()),
         };
 
+        // Ctrl channel: unbounded, never back-pressured.
+        // Control messages (__DOWN__, __EXIT__, __PING__, …) are sent here and
+        // drained before the data queue on every dequeue call.
+        let (ctrl_sender, ctrl_receiver) = mpsc::unbounded_channel::<ProtoMessage>();
+
         let mailbox = Mailbox {
             config: config.clone(),
             channel: Arc::from(channel),
@@ -410,6 +429,9 @@ impl Mailbox {
             idempotency_cache_size: mailbox_config_idempotency_cache_size(&config),
             shutdown_flag: Arc::new(RwLock::new(false)),
             in_progress_count: Arc::new(RwLock::new(0)),
+            ctrl_sender,
+            ctrl_receiver: Arc::new(tokio::sync::Mutex::new(ctrl_receiver)),
+            ctrl_size: Arc::new(AtomicUsize::new(0)),
         };
 
         // Store is_in_memory flag for later use (we'll add a method to access it)
@@ -639,6 +661,33 @@ impl Mailbox {
     /// - Message IDs: Duplicate message IDs within deduplication_window are skipped (LRU cache with fixed size)
     /// - Idempotency keys: Duplicate idempotency keys return cached response (if available) (LRU cache with fixed size)
     pub async fn enqueue(&self, message: ProtoMessage) -> Result<(), MailboxError> {
+        // ── Ctrl-queue fast lane ──────────────────────────────────────────────
+        // Control messages are routed FIRST — before shutdown checks, dedup caches,
+        // and backpressure.  Rationale:
+        //   • __DOWN__ / __EXIT__ must be delivered even during shutdown so actors
+        //     can propagate exit reasons to their monitors/links.
+        //   • Dedup does not apply: each ctrl message has a unique ULID id by
+        //     construction; applying the LRU write-lock would add latency for zero
+        //     benefit.
+        //   • Backpressure does not apply: ctrl volume is always tiny and must
+        //     never be dropped.
+        //
+        // send() first, fetch_add after: this ensures ctrl_size is only
+        // incremented once the message is guaranteed to be in the channel, so
+        // try_recv() in dequeue() cannot observe ctrl_size > 0 before the item
+        // is actually present.
+        if is_ctrl_message(&message.message_type) {
+            // send() only fails if the receiver is dropped (mailbox torn down).
+            let _ = self.ctrl_sender.send(message);
+            self.ctrl_size.fetch_add(1, AtomicOrdering::Release);
+            metrics::counter!("plexspaces_mailbox_ctrl_enqueued_total",
+                "mailbox_id" => self.mailbox_id.clone()
+            )
+            .increment(1);
+            return Ok(());
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // For non-memory channels, check shutdown flag to stop accepting new messages
         if !self.is_in_memory() {
             let shutdown = *self.shutdown_flag.read().await;
@@ -835,6 +884,8 @@ impl Mailbox {
         let local_receiver = self.local_receiver.clone();
         let mailbox_id = self.mailbox_id.clone();
         let shutdown_flag = self.shutdown_flag.clone();
+        let ctrl_receiver = self.ctrl_receiver.clone();
+        let ctrl_size = self.ctrl_size.clone();
         // Compute is_in_memory from channel_provider (avoiding lifetime issues)
         use plexspaces_proto::channel::v1::ChannelProvider;
         let channel_provider = self.channel_provider; // Copy the i32 value
@@ -845,18 +896,72 @@ impl Mailbox {
 
         async move {
             tracing::trace!(mailbox_id = %mailbox_id, "Mailbox::dequeue_with_timeout: Starting dequeue operation");
+
+            // ── Ctrl-queue fast lane (non-blocking) ───────────────────────────
+            // Try ctrl first without blocking.  Acquire pairs with the Release
+            // store in enqueue() so the message data is visible.
+            if ctrl_size.load(AtomicOrdering::Acquire) > 0 {
+                if let Ok(msg) = ctrl_receiver.lock().await.try_recv() {
+                    ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
+                    metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
+                        "mailbox_id" => mailbox_id.clone(),
+                        "message_type" => msg.message_type.clone()
+                    )
+                    .increment(1);
+                    tracing::debug!(
+                        mailbox_id = %mailbox_id,
+                        message_id = %msg.id,
+                        message_type = %msg.message_type,
+                        "Mailbox: dequeued ctrl message (priority fast path)"
+                    );
+                    return Some(msg);
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
             let mut receiver_opt = local_receiver.lock().await;
             if let Some(receiver) = receiver_opt.as_mut() {
+                // Race ctrl and data queues so a ctrl message that arrives while
+                // blocking on the data queue is returned on this call, not the next.
+                let mut ctrl_guard = ctrl_receiver.lock().await;
                 let message = match timeout {
-                    Some(duration) => match tokio::time::timeout(duration, receiver.recv()).await {
-                        Ok(message) => message,
-                        Err(_) => return None,
+                    Some(duration) => {
+                        match tokio::time::timeout(duration, async {
+                            tokio::select! {
+                                biased; // ctrl always wins if both are ready
+                                ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
+                                data_msg = receiver.recv() => data_msg.map(|m| (m, false)),
+                            }
+                        })
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(_) => return None,
+                        }
+                    }
+                    None => tokio::select! {
+                        biased;
+                        ctrl_msg = ctrl_guard.recv() => ctrl_msg.map(|m| (m, true)),
+                        data_msg = receiver.recv() => data_msg.map(|m| (m, false)),
                     },
-                    None => receiver.recv().await,
                 };
+                drop(ctrl_guard);
 
-                if let Some(msg) = message {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
+                if let Some((msg, is_ctrl)) = message {
+                    if is_ctrl {
+                        // Ctrl message won the select — account for the size decrement.
+                        ctrl_size.fetch_sub(1, AtomicOrdering::Relaxed);
+                        metrics::counter!("plexspaces_mailbox_ctrl_dequeued_total",
+                            "mailbox_id" => mailbox_id.clone(),
+                            "message_type" => msg.message_type.clone()
+                        )
+                        .increment(1);
+                        tracing::debug!(
+                            mailbox_id = %mailbox_id,
+                            message_id = %msg.id,
+                            message_type = %msg.message_type,
+                            "Mailbox: dequeued ctrl message (select priority)"
+                        );
+                    } else if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             mailbox_id = %mailbox_id,
                             message_id = %msg.id,
@@ -1151,8 +1256,15 @@ impl Mailbox {
     }
 
     /// Get current size
+    /// Returns the total number of pending messages across both queues.
     pub async fn size(&self) -> usize {
         self.stats.read().await.current_size
+            + self.ctrl_size.load(AtomicOrdering::Relaxed)
+    }
+
+    /// Returns the number of pending control messages.
+    pub fn ctrl_size(&self) -> usize {
+        self.ctrl_size.load(AtomicOrdering::Relaxed)
     }
 
     /// Clear all messages
@@ -1222,7 +1334,8 @@ impl Mailbox {
     pub async fn get_stats(&self) -> MailboxObservabilityStats {
         let stats = self.stats.read().await;
         MailboxObservabilityStats {
-            current_size: stats.current_size,
+            data_queue_size: stats.current_size,
+            ctrl_queue_size: self.ctrl_size.load(AtomicOrdering::Relaxed),
             total_enqueued: stats.total_enqueued as usize,
             total_dequeued: stats.total_dequeued as usize,
             backend_type: self.backend_type().to_string(),
@@ -1365,9 +1478,11 @@ impl Mailbox {
 /// Mailbox statistics for observability (public API)
 #[derive(Debug, Clone)]
 pub struct MailboxObservabilityStats {
-    /// Current number of messages in mailbox
-    pub current_size: usize,
-    /// Total messages enqueued since creation
+    /// Current number of data messages in the data queue
+    pub data_queue_size: usize,
+    /// Current number of control messages waiting in the ctrl queue
+    pub ctrl_queue_size: usize,
+    /// Total data (non-ctrl) messages enqueued since creation
     pub total_enqueued: usize,
     /// Total messages dequeued since creation
     pub total_dequeued: usize,
@@ -1375,6 +1490,13 @@ pub struct MailboxObservabilityStats {
     pub backend_type: String,
     /// Whether this mailbox is durable
     pub is_durable: bool,
+}
+
+impl MailboxObservabilityStats {
+    /// Total pending messages across both data and ctrl queues.
+    pub fn total_size(&self) -> usize {
+        self.data_queue_size + self.ctrl_queue_size
+    }
 }
 
 // MailboxError is defined above (wrapper around proto enum)
@@ -2967,5 +3089,160 @@ mod tests {
         }
 
         assert!(received_count > 0);
+    }
+
+    // ── Ctrl-queue tests ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ctrl_message_bypasses_data_queue() {
+        let mailbox = create_default_mailbox().await;
+
+        // Enqueue several data messages first
+        for i in 0..5 {
+            let msg = with_message_type(new_message(vec![i]), "call");
+            mailbox.enqueue(msg).await.unwrap();
+        }
+
+        // Enqueue a ctrl message after the data messages
+        let ctrl = with_message_type(new_message(b"ctrl".to_vec()), "__DOWN__");
+        mailbox.enqueue(ctrl.clone()).await.unwrap();
+
+        // The ctrl message must be returned first, regardless of insertion order
+        let first = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            mailbox.dequeue(),
+        )
+        .await
+        .expect("timed out")
+        .expect("no message");
+
+        assert_eq!(first.message_type, "__DOWN__", "ctrl message must arrive before data messages");
+    }
+
+    #[tokio::test]
+    async fn test_ctrl_size_tracking() {
+        let mailbox = create_default_mailbox().await;
+
+        assert_eq!(mailbox.ctrl_size(), 0);
+
+        mailbox.enqueue(with_message_type(new_message(vec![]), "__EXIT__")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![]), "__DOWN__")).await.unwrap();
+        assert_eq!(mailbox.ctrl_size(), 2);
+
+        // Dequeue one ctrl message
+        tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
+            .await.unwrap();
+        assert_eq!(mailbox.ctrl_size(), 1);
+
+        // Dequeue the second
+        tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
+            .await.unwrap();
+        assert_eq!(mailbox.ctrl_size(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_includes_ctrl_queue_size() {
+        let mailbox = create_default_mailbox().await;
+
+        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![]), "__DOWN__")).await.unwrap();
+
+        // Give the internal processor a moment to move the data message to the channel
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let stats = mailbox.get_stats().await;
+        assert_eq!(stats.ctrl_queue_size, 1, "ctrl_queue_size must count pending ctrl messages");
+        assert_eq!(stats.total_size(), stats.data_queue_size + stats.ctrl_queue_size);
+    }
+
+    #[tokio::test]
+    async fn test_ctrl_queue_does_not_apply_backpressure() {
+        // Use a tiny capacity so the data queue fills up
+        let config = MailboxConfig {
+            capacity: 2,
+            backpressure_strategy: plexspaces_proto::mailbox::v1::BackpressureStrategy::Error.into(),
+            ..mailbox_config_default()
+        };
+        let mailbox = create_test_mailbox(config).await;
+
+        // Fill the data queue to capacity
+        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
+
+        // Ctrl messages must still be accepted even when data queue is full
+        let result = mailbox.enqueue(with_message_type(new_message(vec![]), "__PING__")).await;
+        assert!(result.is_ok(), "ctrl messages must not be blocked by data-queue backpressure");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_ctrl_types_ordered() {
+        let mailbox = create_default_mailbox().await;
+
+        // Interleave ctrl and data messages
+        mailbox.enqueue(with_message_type(new_message(vec![1]), "call")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![2]), "__DOWN__")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![3]), "call")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![4]), "__EXIT__")).await.unwrap();
+        mailbox.enqueue(with_message_type(new_message(vec![5]), "call")).await.unwrap();
+
+        // First two dequeues must be ctrl messages
+        let m1 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
+            .await.unwrap().unwrap();
+        let m2 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
+            .await.unwrap().unwrap();
+
+        assert!(
+            plexspaces_core::is_ctrl_message(&m1.message_type),
+            "first dequeue must be ctrl, got {}",
+            m1.message_type
+        );
+        assert!(
+            plexspaces_core::is_ctrl_message(&m2.message_type),
+            "second dequeue must be ctrl, got {}",
+            m2.message_type
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ping_message_is_ctrl() {
+        let down = with_message_type(new_message(vec![]), "__PING__");
+        assert!(plexspaces_core::is_ctrl_message(&down.message_type));
+    }
+
+    #[tokio::test]
+    async fn test_ctrl_priority_while_blocking_on_data() {
+        // Verifies the tokio::select! path: a ctrl message that arrives while
+        // dequeue_with_timeout is blocking on the data queue must be returned on
+        // the same call, not deferred to the next one.
+        let mailbox = Arc::new(create_default_mailbox().await);
+        let mailbox2 = mailbox.clone();
+
+        // Start dequeue before any messages exist — this will block.
+        let dequeue = tokio::spawn(async move {
+            mailbox2
+                .dequeue_with_timeout(Some(std::time::Duration::from_millis(500)))
+                .await
+        });
+
+        // Give the dequeue task time to enter its blocking wait.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Enqueue a ctrl message while the dequeue is blocked.
+        mailbox
+            .enqueue(with_message_type(new_message(vec![42]), "__DOWN__"))
+            .await
+            .unwrap();
+
+        let msg = tokio::time::timeout(std::time::Duration::from_millis(400), dequeue)
+            .await
+            .expect("join timed out")
+            .expect("task panicked");
+
+        let msg = msg.expect("no message returned");
+        assert_eq!(
+            msg.message_type, "__DOWN__",
+            "ctrl message must be returned on the blocking call, got {}",
+            msg.message_type
+        );
     }
 }

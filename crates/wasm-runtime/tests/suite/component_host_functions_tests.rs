@@ -424,10 +424,10 @@ mod tests {
 
         // ACT: Test send_to_queue
         let result = channels
+            .host_functions
             .send_to_queue(
-                test_context("", ""),
-                "test-queue".to_string(),
-                "test-msg".to_string(),
+                "test-queue",
+                "test-msg",
                 vec![1, 2, 3],
             )
             .await;
@@ -447,7 +447,8 @@ mod tests {
 
         // ACT: Test receive_from_queue (with timeout 0 = poll immediately)
         let result = channels
-            .receive_from_queue(test_context("", ""), "test-queue".to_string(), 0)
+            .host_functions
+            .receive_from_queue("test-queue", 0)
             .await;
 
         // ASSERT: Should fail without channel service configured
@@ -465,10 +466,10 @@ mod tests {
 
         // ACT: Test publish_to_topic
         let result = channels
+            .host_functions
             .publish_to_topic(
-                test_context("", ""),
-                "test-topic".to_string(),
-                "test-msg".to_string(),
+                "test-topic",
+                "test-msg",
                 vec![1, 2, 3],
             )
             .await;

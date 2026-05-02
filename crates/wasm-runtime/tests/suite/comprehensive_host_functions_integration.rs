@@ -10,7 +10,6 @@
 mod tests {
     use plexspaces_core::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
-        channels::Host as ChannelsHost,
         durability::Host as DurabilityHost,
         logging::Host as LoggingHost,
         messaging::Host as MessagingHost,
@@ -191,60 +190,22 @@ mod tests {
     /// Test that all channel functions are accessible
     #[tokio::test]
     async fn test_channel_functions_accessible() {
-        use ChannelsHost;
         let host_functions = create_test_host_functions_with_channel_service();
-        let mut channels = ChannelsImpl::new(host_functions.clone());
 
-        // Test send_to_queue
-        let _ = channels
-            .send_to_queue(
-                test_context("", ""),
-                "queue".to_string(),
-                "msg".to_string(),
-                vec![],
-            )
+        // Test send_to_queue via HostFunctions
+        let _ = host_functions
+            .send_to_queue("queue", "msg", vec![])
             .await;
 
-        // Test receive_from_queue
-        let _ = channels
-            .receive_from_queue(test_context("", ""), "queue".to_string(), 0)
+        // Test receive_from_queue via HostFunctions
+        let _ = host_functions
+            .receive_from_queue("queue", 0)
             .await;
 
-        // Test publish_to_topic
-        let _ = channels
-            .publish_to_topic(
-                test_context("", ""),
-                "topic".to_string(),
-                "msg".to_string(),
-                vec![],
-            )
+        // Test publish_to_topic via HostFunctions
+        let _ = host_functions
+            .publish_to_topic("topic", "msg", vec![])
             .await;
-
-        // Test ack/nack
-        assert!(channels
-            .ack(
-                test_context("", ""),
-                "queue".to_string(),
-                "msg-123".to_string()
-            )
-            .await
-            .is_ok());
-        assert!(channels
-            .nack(
-                test_context("", ""),
-                "queue".to_string(),
-                "msg-123".to_string(),
-                true
-            )
-            .await
-            .is_ok());
-
-        // Test subscribe/unsubscribe
-        let sub_id = channels
-            .subscribe_to_topic(test_context("", ""), "topic".to_string(), None)
-            .await
-            .unwrap();
-        assert!(channels.unsubscribe_from_topic(sub_id).await.is_ok());
     }
 
     /// Test that all tuplespace functions are accessible

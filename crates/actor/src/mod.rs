@@ -791,7 +791,11 @@ impl Actor {
     ///
     /// Call this only after `start()` succeeds so the registered sender carries the live local
     /// runtime handle with shutdown and processor state attached.
-    pub async fn register_started(&self, registry: &Arc<plexspaces_core::ActorRegistry>) {
+    pub async fn register_started(
+        &self,
+        registry: &Arc<plexspaces_core::ActorRegistry>,
+        visibility: plexspaces_proto::actor::v1::ActorVisibility,
+    ) {
         use crate::ActorRef;
         use plexspaces_core::{MessageSender, RequestContext};
 
@@ -806,6 +810,7 @@ impl Actor {
             self.context.namespace.clone(),
             self.mailbox.clone(),
             self.context.service_locator.clone(),
+            visibility,
         );
 
         let behavior_guard = self.behavior.read().await;
@@ -1344,6 +1349,49 @@ impl Actor {
                                 continue; // Skip normal message processing for EXIT messages
                             }
                         }
+
+                        // ── PING auto-reply ───────────────────────────────────────────────
+                        // __PING__ is a control message delivered via the ctrl queue.
+                        // The actor loop replies automatically with __PONG__ so actor code
+                        // never needs to handle it.  The reply reuses the caller's
+                        // correlation_id so an ask() future can match it.
+                        if message.message_type == "__PING__" {
+                            metrics::counter!("plexspaces_actor_ping_total",
+                                "actor_id" => actor_id_for_logging.to_string()
+                            ).increment(1);
+                            if !message.sender_id.is_empty() {
+                                let pong = plexspaces_core::create_pong_message(&message);
+                                if let Err(e) = context
+                                    .send_reply(
+                                        Some(&message.correlation_id),
+                                        &message.sender_id,
+                                        ActorId::from_canonical(&actor_id_for_logging)
+                                            .unwrap_or_else(|_| {
+                                                ActorId::new("unknown", "system", "default", "unknown")
+                                                    .expect("fallback actor id must be valid")
+                                            }),
+                                        pong,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        actor_id = %actor_id_for_logging,
+                                        sender_id = %message.sender_id,
+                                        correlation_id = %message.correlation_id,
+                                        error = %e,
+                                        "Failed to send __PONG__ reply"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %actor_id_for_logging,
+                                        sender_id = %message.sender_id,
+                                        "Sent __PONG__ reply"
+                                    );
+                                }
+                            }
+                            continue; // __PING__ is fully handled here
+                        }
+                        // ─────────────────────────────────────────────────────────────────
 
                         // Process normal message with facets
                         if tracing::enabled!(tracing::Level::TRACE) {
@@ -1964,7 +2012,7 @@ impl Actor {
 
             // Record metrics
             metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
-                .set(mailbox_stats.current_size as f64);
+                .set(mailbox_stats.total_size() as f64);
             metrics::gauge!("plexspaces_mailbox_is_durable", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type)
                 .set(if mailbox_stats.is_durable { 1.0 } else { 0.0 });
 
@@ -2008,7 +2056,9 @@ impl Actor {
             tracing::info!(
                 actor_id = %self.id,
                 mailbox_backend = %mailbox_stats.backend_type,
-                mailbox_size = mailbox_stats.current_size,
+                mailbox_size = mailbox_stats.total_size(),
+                data_queue_size = mailbox_stats.data_queue_size,
+                ctrl_queue_size = mailbox_stats.ctrl_queue_size,
                 total_enqueued = mailbox_stats.total_enqueued,
                 total_dequeued = mailbox_stats.total_dequeued,
                 "Detaching DurabilityFacet - final mailbox stats"
@@ -2016,7 +2066,7 @@ impl Actor {
 
             // Record final metrics
             metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
-                .set(mailbox_stats.current_size as f64);
+                .set(mailbox_stats.total_size() as f64);
         }
 
         let mut facets = self.facets.write().await;

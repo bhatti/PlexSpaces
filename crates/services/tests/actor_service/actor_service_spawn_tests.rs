@@ -4,11 +4,39 @@
 // Tests for ActorServiceImpl::spawn_actor - local-only design (TDD)
 
 use plexspaces_core::{
+    actor_context::ActorService as CoreActorSpawnService,
     actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext,
 };
 use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_services::actor_service::ActorServiceImpl;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+fn spawn_spec_for_test(
+    ctx: &RequestContext,
+    logical_name: &str,
+    actor_type: &str,
+    config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+    labels: HashMap<String, String>,
+) -> ActorSpawnSpec {
+    ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: logical_name.to_string(),
+            actor_type: actor_type.to_string(),
+        }),
+        role: String::new(),
+        namespace: ctx.namespace().to_string(),
+        tenant_id: ctx.tenant_id().to_string(),
+        visibility: ActorVisibility::ActorVisibilityPublic as i32,
+        behavior_kind: String::new(),
+        args: HashMap::new(),
+        facets: vec![],
+        config,
+        labels,
+    }
+}
 
 // Helper to wrap ObjectRegistry for ActorRegistry
 fn canonical_actor_id(name: &str, actor_type: &str, namespace: &str, node_id: &str) -> String {
@@ -184,16 +212,8 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     // Test 1: actor_id without @node should use local node_id
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            "test-actor",
-            "test-type",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(&ctx, "test-actor", "test-type", None, HashMap::new());
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     // With ActorFactory registered, spawn_actor should succeed or fail with a different error
     // The key is that client input is treated as a logical actor name and normalized
     // into a canonical ActorId with the request namespace and local node id.
@@ -220,16 +240,14 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     // Test 2: actor_id with local node_id should work
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            "test-actor@local-node",
-            "test-type",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(
+        &ctx,
+        "test-actor@local-node",
+        "test-type",
+        None,
+        HashMap::new(),
+    );
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     // Should succeed or fail with appropriate error, but should use local node_id
     if let Ok(actor_ref) = result {
         assert!(
@@ -247,16 +265,14 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     // Test 3: canonical actor ids should remain canonical after normalization
     let canonical_actor_id =
         canonical_actor_id("explicit-id", "test-type", "test-namespace", "local-node");
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            &canonical_actor_id,
-            "test-type",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(
+        &ctx,
+        &canonical_actor_id,
+        "test-type",
+        None,
+        HashMap::new(),
+    );
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     if let Ok(actor_ref) = result {
         assert_eq!(actor_ref.id(), &canonical_actor_id);
     }
@@ -295,16 +311,14 @@ async fn test_spawn_actor_rejects_remote_node_id() {
     // Should reject remote node_id
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            "test-actor@remote-node",
-            "test-type",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(
+        &ctx,
+        "test-actor@remote-node",
+        "test-type",
+        None,
+        HashMap::new(),
+    );
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
@@ -376,16 +390,8 @@ async fn test_spawn_actor_design_principle() {
     // ActorService on node1 should only create actors on node1
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            "actor1",
-            "type1",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(&ctx, "actor1", "type1", None, HashMap::new());
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     // Should succeed or fail appropriately, but should use node1 as local node
     if let Ok(actor_ref) = result {
         assert!(
@@ -451,16 +457,8 @@ async fn test_spawn_actor_with_callback() {
     // but it should at least get past the "ActorFactory not found" error
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = actor_service
-        .spawn_actor(
-            &ctx,
-            "test-actor",
-            "test-type",
-            vec![],
-            None,
-            std::collections::HashMap::new(),
-        )
-        .await;
+    let spec = spawn_spec_for_test(&ctx, "test-actor", "test-type", None, HashMap::new());
+    let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     // The test verifies that spawn_actor doesn't fail with "ActorFactory not found"
     // It may fail for other reasons (like behavior not found), which is expected
     if let Err(e) = &result {

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# HTTP ports in NODES; gRPC seeds use port-1 per node. "Placement produced no target nodes"
-# means list_nodes was empty when the leader ran (registry / cluster / connectivity).
+# gRPC and HTTP share a single port — NODES lists single port per node.
+# "Placement produced no target nodes" means list_nodes was empty when the leader ran
+# (registry / cluster / connectivity).
 #
 # Debugging:
 #   SKIP_TEST_UNDEPLOY=1 ./test.sh   — on EXIT, do not DELETE the app (trap). Otherwise a failed
 #   run still undeploys and you will see leader "shutdown lifecycle" in the gRPC node's log.
-#   Asks go only to ENTRY_NODE (default first HTTP port, e.g. 8092); the other node's HTTP log
-#   stays quiet unless you curl it or traffic routes there.
+#   Asks go only to ENTRY_NODE (default first port, e.g. 8091); the other node stays quiet
+#   unless you curl it or traffic routes there.
 #   DATA_LAKE_RAG_POST_DEPLOY_SECS / DATA_LAKE_RAG_PRE_LIST_NODES_SECS — extra sleep after deploy
 #   and immediately before listing nodes (helps _unknown_ peer ids and registry settle).
 set -euo pipefail
@@ -24,7 +25,7 @@ if [[ -f "$HOME/venv/bin/activate" ]]; then
 fi
 
 if [[ -z "${1:-}" ]]; then
-  NODES="localhost:8092 localhost:8094"
+  NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
   NODES="localhost:$1"
 else
@@ -75,7 +76,8 @@ grpc_seed_nodes() {
   for node in "${NODE_LIST[@]}"; do
     local host="${node%%:*}"
     local port="${node##*:}"
-    seed_list+=("\"${host}:$((port - 1))\"")
+    # gRPC and HTTP share a single port
+    seed_list+=("\"${host}:${port}\"")
   done
   local joined=""
   local sep=""

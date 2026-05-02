@@ -3,21 +3,28 @@
 //
 // This file is part of PlexSpaces.
 //
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Monitor and link state management.
 //!
 //! This module provides:
+//! - [`CTRL_MSG_PREFIX`] / [`is_ctrl_message`]: control-message convention (`__` prefix)
 //! - [`MonitorLink`]: records a monitoring relationship (who receives `__DOWN__`)
 //! - [`ActorMonitor`]: owns all monitor and link state; CRUD operations for both
 //! - [`create_down_message`]: builds the `__DOWN__` mailbox message
 //! - [`create_exit_message`]: builds the `__EXIT__` mailbox message
+//! - [`create_ping_message`] / [`create_pong_message`]: liveness probe messages
 //! - [`exit_reason_to_string`]: converts `ExitReason` to header string
 //! - [`LocalOnlyActorService`]: no-op ActorService for tests / early startup
 //! - [`start_monitor_gc_task`]: background GC that prunes stale remote monitor entries
@@ -57,6 +64,24 @@ use crate::actor_context::ActorService;
 use crate::{ActorId, ActorRef, RequestContext};
 use plexspaces_proto::common::v1::Message;
 use ulid::Ulid;
+
+// ─── Control-message convention ──────────────────────────────────────────────
+
+/// Message types whose names start with this prefix are **control messages**.
+///
+/// Control messages (`__DOWN__`, `__EXIT__`, `__PING__`, `__INFO__`, …) are
+/// routed through the mailbox ctrl-queue, which is drained before the data
+/// queue on every dequeue call.  This guarantees that lifecycle signals are
+/// never buried behind application messages regardless of load.
+pub const CTRL_MSG_PREFIX: &str = "__";
+
+/// Returns `true` when `message_type` identifies a control message.
+///
+/// Inline so the hot-path check compiles to a single byte-comparison.
+#[inline(always)]
+pub fn is_ctrl_message(message_type: &str) -> bool {
+    message_type.starts_with(CTRL_MSG_PREFIX)
+}
 
 // ─── Data types ──────────────────────────────────────────────────────────────
 
@@ -362,6 +387,52 @@ pub fn exit_reason_to_string(reason: &crate::ExitReason) -> String {
     }
 }
 
+/// Build a `__PING__` control message directed at `target_id`.
+///
+/// The receiving actor's message loop automatically sends a `__PONG__` reply
+/// (same `correlation_id`, sender/receiver swapped) without involving actor
+/// code.  Callers use the `ask` pattern with a short timeout to measure
+/// liveness.
+///
+/// | field            | value                  |
+/// |------------------|------------------------|
+/// | `message_type`   | `"__PING__"`           |
+/// | `sender_id`      | `from_id`              |
+/// | `receiver_id`    | `target_id`            |
+/// | `correlation_id` | fresh ULID             |
+pub fn create_ping_message(from_id: &str, target_id: &str) -> Message {
+    let correlation_id = Ulid::new().to_string();
+    let mut headers = HashMap::new();
+    headers.insert("type".to_string(), "__PING__".to_string());
+    Message {
+        id: Ulid::new().to_string(),
+        sender_id: from_id.to_string(),
+        receiver_id: target_id.to_string(),
+        message_type: "__PING__".to_string(),
+        correlation_id: correlation_id.clone(),
+        headers,
+        ..Default::default()
+    }
+}
+
+/// Build the `__PONG__` reply for a received `__PING__` message.
+///
+/// Mirrors `sender_id`/`receiver_id` and preserves `correlation_id` so the
+/// original caller's `ask` future can match the reply.
+pub fn create_pong_message(ping: &Message) -> Message {
+    let mut headers = HashMap::new();
+    headers.insert("type".to_string(), "__PONG__".to_string());
+    Message {
+        id: Ulid::new().to_string(),
+        sender_id: ping.receiver_id.clone(),
+        receiver_id: ping.sender_id.clone(),
+        message_type: "__PONG__".to_string(),
+        correlation_id: ping.correlation_id.clone(),
+        headers,
+        ..Default::default()
+    }
+}
+
 // ─── LocalOnlyActorService ────────────────────────────────────────────────────
 
 /// No-op `ActorService` used when no real service is available (tests, early startup).
@@ -376,13 +447,17 @@ impl ActorService for LocalOnlyActorService {
     async fn spawn_actor(
         &self,
         _ctx: &RequestContext,
-        actor_id: &str,
-        _actor_type: &str,
-        _initial_state: Vec<u8>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
     ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        let label = spec
+            .identity
+            .as_ref()
+            .map(|i| i.name.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(no name)");
         Err(format!(
             "LocalOnlyActorService: remote spawn not supported (actor '{}'). Inject a real ActorService.",
-            actor_id
+            label
         )
         .into())
     }
@@ -525,5 +600,65 @@ async fn run_gc_pass(
             );
             monitor.remove_monitors_for_actors(&stale).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ctrl_message_detects_double_underscore_prefix() {
+        assert!(is_ctrl_message("__DOWN__"));
+        assert!(is_ctrl_message("__EXIT__"));
+        assert!(is_ctrl_message("__PING__"));
+        assert!(is_ctrl_message("__PONG__"));
+        assert!(is_ctrl_message("__INFO__"));
+        assert!(is_ctrl_message("__CUSTOM__"));
+    }
+
+    #[test]
+    fn test_is_ctrl_message_rejects_data_messages() {
+        assert!(!is_ctrl_message("call"));
+        assert!(!is_ctrl_message("cast"));
+        assert!(!is_ctrl_message("timer"));
+        assert!(!is_ctrl_message(""));
+        assert!(!is_ctrl_message("_single_underscore"));
+    }
+
+    #[test]
+    fn test_create_ping_message_fields() {
+        let ping = create_ping_message("sender@node1", "target@node2");
+        assert_eq!(ping.message_type, "__PING__");
+        assert_eq!(ping.sender_id, "sender@node1");
+        assert_eq!(ping.receiver_id, "target@node2");
+        assert!(!ping.correlation_id.is_empty(), "correlation_id must be set");
+        assert_eq!(ping.headers.get("type").map(String::as_str), Some("__PING__"));
+    }
+
+    #[test]
+    fn test_create_pong_message_mirrors_ping() {
+        let ping = create_ping_message("sender@node1", "target@node2");
+        let pong = create_pong_message(&ping);
+
+        assert_eq!(pong.message_type, "__PONG__");
+        assert_eq!(pong.sender_id, ping.receiver_id);
+        assert_eq!(pong.receiver_id, ping.sender_id);
+        assert_eq!(pong.correlation_id, ping.correlation_id, "correlation_id must be preserved");
+        assert_eq!(pong.headers.get("type").map(String::as_str), Some("__PONG__"));
+    }
+
+    #[test]
+    fn test_ping_and_pong_are_ctrl_messages() {
+        let ping = create_ping_message("a", "b");
+        let pong = create_pong_message(&ping);
+        assert!(is_ctrl_message(&ping.message_type));
+        assert!(is_ctrl_message(&pong.message_type));
+    }
+
+    #[test]
+    fn test_ctrl_msg_prefix_constant() {
+        assert_eq!(CTRL_MSG_PREFIX, "__");
+        assert!("__DOWN__".starts_with(CTRL_MSG_PREFIX));
     }
 }

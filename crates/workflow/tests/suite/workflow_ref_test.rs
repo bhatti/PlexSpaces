@@ -214,7 +214,7 @@ async fn test_workflow_ref_run() {
     };
 
     let result: ApprovalState = workflow
-        .run(&request)
+        .run(&ctx, &request)
         .await
         .expect("Failed to run workflow");
 
@@ -262,13 +262,14 @@ async fn test_workflow_ref_signal_and_query() {
     };
 
     let _: ApprovalState = workflow
-        .run(&request)
+        .run(&ctx, &request)
         .await
         .expect("Failed to run workflow");
 
     // Send approval signal
     workflow
         .signal(
+            &ctx,
             "approve",
             &ApprovePayload {
                 approver_id: "alice".to_string(),
@@ -282,7 +283,7 @@ async fn test_workflow_ref_signal_and_query() {
 
     // Query status
     let status: StatusResponse = workflow
-        .query("status")
+        .query(&ctx, "status")
         .await
         .expect("Failed to query status");
 
@@ -293,6 +294,7 @@ async fn test_workflow_ref_signal_and_query() {
     // Send second approval
     workflow
         .signal(
+            &ctx,
             "approve",
             &ApprovePayload {
                 approver_id: "bob".to_string(),
@@ -305,7 +307,7 @@ async fn test_workflow_ref_signal_and_query() {
 
     // Query final status
     let final_status: StatusResponse = workflow
-        .query("status")
+        .query(&ctx, "status")
         .await
         .expect("Failed to query status");
 
@@ -359,7 +361,7 @@ async fn test_workflow_ref_with_timeout() {
 
     // Use run_with_timeout for custom timeout
     let result: ApprovalState = workflow
-        .run_with_timeout(&request, Duration::from_secs(60))
+        .run_with_timeout(&ctx, &request, Duration::from_secs(60))
         .await
         .expect("Failed to run workflow");
 
@@ -367,7 +369,7 @@ async fn test_workflow_ref_with_timeout() {
 
     // Query with custom timeout
     let status: StatusResponse = workflow
-        .query_with_timeout("status", Duration::from_secs(10))
+        .query_with_timeout(&ctx, "status", Duration::from_secs(10))
         .await
         .expect("Failed to query status");
 
@@ -407,7 +409,10 @@ async fn test_workflow_ref_error_handling() {
     let workflow = WorkflowRef::new(actor_ref);
 
     // Query without running first should work but return empty state
-    let status: StatusResponse = workflow.query("status").await.expect("Query should work");
+    let status: StatusResponse = workflow
+        .query(&ctx, "status")
+        .await
+        .expect("Query should work");
 
     assert_eq!(status.document_id, "");
     assert_eq!(status.status, "");

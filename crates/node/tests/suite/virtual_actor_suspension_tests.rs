@@ -21,7 +21,8 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 
 use super::test_helpers::{
-    lookup_actor_ref, registry_ask, registry_tell, spawn_actor_helper, test_runtime_actor_id,
+    check_virtual_actor_exists_triplet, lookup_actor_ref, registry_ask, registry_tell,
+    spawn_actor_helper, test_runtime_actor_id,
 };
 
 /// Helper to create a test message
@@ -316,7 +317,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active
-    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
+    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_virtual, "Actor should be virtual");
     assert!(is_active, "Eager actor should be active immediately");
@@ -326,8 +327,12 @@ async fn test_suspend_active_virtual_actor_then_ask() {
 
     let increment_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
     let _ = actor_ref
-        .ask(increment_msg, Duration::from_secs(5))
+        .ask(&ctx, increment_msg, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -335,7 +340,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let get_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
     let result = actor_ref
-        .ask(get_msg, Duration::from_secs(5))
+        .ask(&ctx, get_msg, Duration::from_secs(5))
         .await
         .unwrap();
     let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
@@ -382,7 +387,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
 
     // Verify actor is suspended (not active but still registered as virtual)
     let (exists_after, is_active_after, is_virtual_after) =
-        node.check_virtual_actor_exists(&actor_id).await;
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     assert!(exists_after, "Actor should still exist after suspension");
     assert!(
         is_virtual_after,
@@ -408,7 +413,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     assert!(matches!(reply, TestMessage::Count(0)), "State preservation not yet implemented - new actor instance starts with count=0. See docs/state-preservation-design.md");
 
     // Verify actor is active again
-    let (_, is_active_final, _) = node.check_virtual_actor_exists(&actor_id).await;
+    let (_, is_active_final, _) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     assert!(is_active_final, "Actor should be active again after ask()");
 }
 
@@ -453,7 +458,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active immediately (spawn_built_actor is synchronous)
-    let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
+    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     eprintln!(
         "🔵 [TEST] After registration: exists={}, is_active={}, is_virtual={}, actor_id={}",
         exists, is_active, is_virtual, actor_id
@@ -481,7 +486,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
 
     // Verify actor is suspended after stop_actor passivates the virtual actor.
     let (exists_after, is_active_after, is_virtual_after) =
-        node.check_virtual_actor_exists(&actor_id).await;
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     eprintln!(
         "🔵 [TEST] After suspension: exists={}, is_active={}, is_virtual={}, actor_id={}",
         exists_after, is_active_after, is_virtual_after, actor_id
@@ -516,7 +521,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
 
     // Verify actor is active again after registry-owned reactivation
     let (exists_final, is_active_final, is_virtual_final) =
-        node.check_virtual_actor_exists(&actor_id).await;
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     eprintln!(
         "🔵 [TEST] After tell(): exists={}, is_active={}, is_virtual={}, actor_id={}",
         exists_final, is_active_final, is_virtual_final, actor_id

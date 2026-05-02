@@ -194,6 +194,40 @@ impl ApplicationServiceImpl {
         Ok((node_id, registration.node_address))
     }
 
+    /// Remove the on-disk WASM app directory for `application_id` if it exists.
+    /// Non-fatal: logs a warning on failure so undeploy still succeeds.
+    async fn remove_wasm_app_directory(&self, application_id: &str) {
+        let wasm_apps_dir = self
+            .service_locator
+            .get_runtime_config()
+            .await
+            .map(|rc| rc.wasm_apps_directory)
+            .unwrap_or_default();
+
+        if wasm_apps_dir.is_empty() {
+            return;
+        }
+
+        let app_dir = std::path::Path::new(&wasm_apps_dir).join(application_id);
+        if !app_dir.exists() {
+            return;
+        }
+
+        match std::fs::remove_dir_all(&app_dir) {
+            Ok(()) => tracing::info!(
+                application_id = %application_id,
+                path = %app_dir.display(),
+                "Removed WASM app directory on undeploy"
+            ),
+            Err(e) => tracing::warn!(
+                application_id = %application_id,
+                path = %app_dir.display(),
+                error = %e,
+                "Failed to remove WASM app directory on undeploy"
+            ),
+        }
+    }
+
     async fn cleanup_namespace_for_undeploy(
         &self,
         tenant_id: &str,
@@ -719,6 +753,7 @@ impl ApplicationService for ApplicationServiceImpl {
             if status.code() == tonic::Code::NotFound {
                 self.cleanup_namespace_for_undeploy(&tenant_id, &req.application_id)
                     .await?;
+                self.remove_wasm_app_directory(&req.application_id).await;
 
                 metrics::counter!("plexspaces_node_application_undeploy_success_total",
                     "application_id" => req.application_id.clone()
@@ -764,6 +799,8 @@ impl ApplicationService for ApplicationServiceImpl {
                 }
             }
         }
+
+        self.remove_wasm_app_directory(&req.application_id).await;
 
         // OBSERVABILITY: Log successful undeployment
         metrics::counter!("plexspaces_node_application_undeploy_success_total",

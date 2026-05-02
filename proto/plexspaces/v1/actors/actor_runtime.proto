@@ -1671,100 +1671,47 @@ message ActorMetrics {
 // 5. node2 returns ActorRef with format "actor-123@node2"
 // 6. node1 caches remote ActorRef for future messaging
 // 7. Subsequent tell/ask automatically routes via gRPC to node2
+//
+// Who may invoke tell/ask on the spawned actor (enforced in ActorRef).
+// UNSPECIFIED is treated as PUBLIC by the runtime.
+enum ActorVisibility {
+  ACTOR_VISIBILITY_UNSPECIFIED = 0;
+  // Any tenant and namespace may message this actor.
+  ACTOR_VISIBILITY_PUBLIC = 1;
+  // Only callers in the same tenant_id may message; namespace may differ within the tenant.
+  ACTOR_VISIBILITY_PROTECTED = 2;
+  // Only callers matching both tenant_id and namespace may message.
+  ACTOR_VISIBILITY_PRIVATE = 3;
+}
+
 message SpawnActorRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "Spawn Remote Actor Request"
-      description: "Spawn actor on the node receiving this gRPC request (target node is implicit from endpoint)"
-      required: ["actor_type"]
+      description: "Spawn actor on the node receiving this gRPC request using ActorSpawnSpec as the single contract (identity, facets, args, config, visibility)."
+      required: ["spec"]
     }
   };
 
-  // Pre-deployed actor type name (REQUIRED)
-  // Must exist in target node's actor registry
-  // Examples: "worker", "general", "counter", "session"
-  //
-  // Future (Week 11-12): Will become part of `oneof code_source` to support WASM:
-  // - actor_type: Use pre-deployed type (current)
-  // - wasm_module: Deploy WASM bytecode on-the-fly
-  // - wasm_url: Fetch WASM from URL
-  string actor_type = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 128
-      pattern: "^[a-z][a-z0-9_-]*$"
-    }
-  ];
+  // Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
+  ActorSpawnSpec spec = 1 [(google.api.field_behavior) = REQUIRED];
 
-  // Optional: Client-specified actor ID (for virtual actors)
-  // If provided: Use this ID (must be unique, format: "{actor_type}/{key}" or "{actor_type}@{key}")
-  // If not provided: Server generates ULID
-  // Examples: "user/123", "session/abc-xyz", "counter@node1"
-  // Industry standard: Client-specified IDs for virtual actors (Orleans pattern)
-  string actor_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).string = {max_len: 255}
-  ];
-
-  // Optional serialized initial state for actor
-  // Format depends on actor type (actor deserializes)
-  bytes initial_state = 3;
-
-  // Optional actor configuration
-  // If not provided, target node uses default config for actor_type
-  ActorConfig config = 4;
-
-  // Optional labels for tagging and filtering
-  // Examples: {"env": "prod", "team": "platform", "version": "v2"}
-  map<string, string> labels = 5;
-
-  // Optional facets to attach during spawn
-  // Facets are attached in priority order (high priority first) before actor.init() is called
-  // Examples:
-  // - VirtualActorFacet: Makes actor virtual (Orleans-style grain)
-  // - DurabilityFacet: Enables state persistence
-  // - MetricsFacet: Adds metrics collection
-  repeated plexspaces.common.v1.Facet facets = 6;
-
-  // Namespace for actor isolation (REQUIRED for multi-tenant deployments)
-  // Tenant ID comes from gRPC auth (JWT middleware), not from request
-  // Namespace provides sub-isolation within a tenant (e.g., different apps)
-  // Examples: "production", "staging", "app-v1", "team-platform"
-  string namespace = 7 [
+  // Optional namespace override for this RPC only.
+  // If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
+  string namespace = 2 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 
-  // Number of identical replicas to spawn (default: 1)
-  // When > 1, spawns N identical actors of this type with auto-generated IDs.
-  // The actor_id field is used as a prefix (e.g. "worker" → "worker-0", "worker-1", ...).
-  // If actor_id is empty, server generates ULID-based IDs for each replica.
-  // Use case: data-parallel workloads, shard groups, worker pools.
-  uint32 instances_count = 8 [
+  // Number of identical replicas to spawn (default: 1 when 0).
+  // When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
+  uint32 instances_count = 3 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).uint32 = {
       gte: 0
       lte: 1024
     }
   ];
-
-  // Role of the actor within its application (e.g. "worker", "leader").
-  // Maps 1:1 to ChildSpec.role (TOML `role` field in [[supervisor.children]]).
-  // Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-  // If empty, falls back to actor_id.name() for dispatch.
-  string role = 9 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).string = {max_len: 128}
-  ];
-
-  // RESERVED for future WASM support (Week 11-12)
-  // When WASM support is added, these fields will be used:
-  // - bytes wasm_module = 10;        // WASM bytecode for dynamic deployment
-  // - string wasm_url = 11;          // URL to fetch WASM module
-  // - string wasm_checksum = 12;     // SHA256 for cache validation
-  // - map<string, string> wasm_env = 13; // Environment variables for WASM
-  reserved 10 to 20;
 }
 
 // Response from SpawnActor
@@ -1999,68 +1946,6 @@ message StreamMessageResponse {
   }];
   // Optional error message
   string error = 4 [(buf.validate.field).string.max_len = 1024];
-}
-
-// Request to activate/deactivate actor
-message SetActorStateRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Set Actor State Request"
-      description: "Request to change actor state"
-      required: [
-        "actor_id",
-        "target_state"
-      ]
-    }
-  };
-
-  string actor_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-  ActorState target_state = 2 [(google.api.field_behavior) = REQUIRED];
-  bool force = 3;
-}
-
-message SetActorStateResponse {
-  Actor actor = 1;
-}
-
-// Request to migrate actor
-message MigrateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Migrate Actor Request"
-      description: "Request to migrate actor to different node"
-      required: [
-        "actor_id",
-        "target_node_id"
-      ]
-    }
-  };
-
-  string actor_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-  string target_node_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-  bool preserve_state = 3;
-}
-
-message MigrateActorResponse {
-  Actor actor = 1;
 }
 
 // Request to delete actor
@@ -2858,32 +2743,6 @@ service ActorService {
       summary: "Stream Messages"
       description: "Bidirectional streaming for high-throughput message passing"
       tags: "Messages"
-    };
-  }
-
-  // Change actor state
-  rpc SetActorState(SetActorStateRequest) returns (SetActorStateResponse) {
-    option (google.api.http) = {
-      patch: "/api/v1/actors/{actor_id}/state"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Set Actor State"
-      description: "Change the state of an actor (activate/deactivate/etc.)"
-      tags: "Actors"
-    };
-  }
-
-  // Migrate actor to different node
-  rpc MigrateActor(MigrateActorRequest) returns (MigrateActorResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actors/{actor_id}/migrate"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Migrate Actor"
-      description: "Migrate an actor to a different node"
-      tags: "Actors"
     };
   }
 
@@ -3849,25 +3708,29 @@ message ActorSpawnSpec {
   // Overridden from JWT claims at request time when auth is enabled.
   string tenant_id = 4;
 
+  // Tell/ask isolation for cross-tenant/cross-namespace callers (see ActorVisibility).
+  // UNSPECIFIED is treated as PUBLIC.
+  ActorVisibility visibility = 5;
+
   // OTP-style behavior kind for logging and observability.
   // Examples: "GenServer", "GenEvent", "GenStateMachine", "Workflow".
-  string behavior_kind = 5;
+  string behavior_kind = 6;
 
   // User-supplied initialization arguments.
   // These become the "args" field in the WASM init() payload so TypeScript/Python/Go
   // actors can read them via host.config("initial_count"), etc.
   // Also used by Rust embedded actors as configuration.
-  map<string, string> args = 6;
+  map<string, string> args = 7;
 
   // Facet declarations attached to this actor.
   // Carries virtual_actor, durability, timer, etc. facets verbatim from ChildSpec.
   // ActorFactory instantiates these at spawn time via create_facets_from_config().
-  repeated plexspaces.common.v1.Facet facets = 7;
+  repeated plexspaces.common.v1.Facet facets = 8;
 
   // Observability labels propagated to metrics and traces.
-  map<string, string> labels = 8;
+  map<string, string> labels = 9;
 
   // Actor runtime configuration (mailbox, restart policy, etc.).
   // Optional — defaults apply when absent.
-  ActorConfig config = 9;
+  ActorConfig config = 10;
 }

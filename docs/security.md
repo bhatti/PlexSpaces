@@ -32,6 +32,10 @@ PlexSpaces uses multiple layers of security to prevent unauthorized access:
   - All queries filtered by tenant_id
   - Role-based access control (RBAC) for fine-grained permissions
 
+### Link, monitor, unlink, demonitor
+
+These operations use the caller’s **`RequestContext`** (JWT-derived tenant when auth is enabled, namespace from the request boundary). On each node, **`ActorRegistry::validate_link_monitor_operand_scope`** runs only for operands **hosted on that node**: namespace on **`ActorId`** must match **`RequestContext::namespace`**; when **auth is enabled**, the actor must appear under **`(tenant_id, namespace, actor_id)`** in the local registry (live sender or registered index entry). **`link` / `unlink`** mirror **`monitor` / `demonitor`**: validate and mutate locals inside the local branch; read **`ActorService`** only in remote **`else`** branches. Remote-only operands are enforced when the peer handles the forwarded RPC. This is **orthogonal** to **`ActorVisibility`** (**`ActorRef::tell` / `ask`**).
+
 ### Tenant Isolation
 
 Tenant isolation is **mandatory** in PlexSpaces. All operations require a `tenant_id`:

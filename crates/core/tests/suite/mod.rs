@@ -12,6 +12,7 @@ pub mod actor_error_comprehensive_tests;
 pub mod actor_ref_tests;
 pub mod actor_registry_no_mailbox_exposure_tests;
 pub mod actor_registry_parent_child_tests;
+pub mod actor_registry_resolve_actor_id_tests;
 pub mod behavior_context_tests;
 pub mod channel_service_tests;
 pub mod exit_reason_tests;

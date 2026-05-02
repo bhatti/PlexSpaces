@@ -42,7 +42,7 @@ Demonstrates **Orbit-style virtual actors** with durability for per-user message
 # Terminal 2: Build and test
 cd examples/typescript/apps/migrating_orbit
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## SDK Features Used

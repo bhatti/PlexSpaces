@@ -38,7 +38,7 @@ Requirements: PlexSpaces Python SDK installed (`pip install -e <repo>/sdks/pytho
 ./test.sh localhost:8091
 
 # Against custom nodes
-./test.sh localhost:8091 localhost:8092
+./test.sh localhost:8091 localhost:8091
 ```
 
 The test script:
@@ -68,7 +68,7 @@ SCALING_LOGICAL_ACTORS=1000 \
 SCALING_DATA_SIZE_BYTES=65536 \
 SCALING_MODEL_TYPE=large \
 SCALING_WORK_MULTIPLIER=20 \
-./test.sh localhost:8092 localhost:8094
+./test.sh localhost:8091 localhost:8094
 ```
 
 For blog-style runs, keep the node list, logical actor count, payload size, and work multiplier fixed, and only change `SCALING_SHARDS`.

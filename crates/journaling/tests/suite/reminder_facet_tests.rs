@@ -53,9 +53,7 @@ impl ActorService for MockActorService {
     async fn spawn_actor(
         &self,
         _ctx: &plexspaces_core::RequestContext,
-        _actor_id: &str,
-        _actor_type: &str,
-        _initial_state: Vec<u8>,
+        _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
     ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         Err("Not implemented for tests".into())
     }

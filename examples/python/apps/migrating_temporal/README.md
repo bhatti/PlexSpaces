@@ -17,7 +17,7 @@ E-commerce order fulfillment workflow using **@workflow_actor** (run / signal / 
 # Terminal 2 (with venv that has plexspaces-py)
 cd examples/python/apps/migrating_temporal
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

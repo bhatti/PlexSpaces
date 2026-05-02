@@ -14,11 +14,14 @@ path = "src/lib.rs"
 [dependencies]
 plexspaces-proto = { path = "../proto" }
 plexspaces-common = { path = "../common" }
+plexspaces-core = { path = "../core" }
 
 # gRPC
-tonic = "0.12"
-tower = { version = "0.5", features = ["util"] }
+tonic = { workspace = true }
+tower = { workspace = true }
 tower-layer = "0.3"
+axum = { workspace = true }
+tonic-web = { workspace = true }
 
 # Async
 tokio = { version = "1.42", features = ["full"] }

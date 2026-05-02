@@ -92,17 +92,17 @@ Example HTTP calls:
 
 ```bash
 # Store config
-curl -s -X POST "http://localhost:8092/api/v1/actors/storefront-test/StorefrontService" \
+curl -s -X POST "http://localhost:8091/api/v1/actors/storefront-test/StorefrontService" \
   -H "Content-Type: application/json" \
   -d '{"msg_type":"set_store_config","payload":{"key":"free_shipping_threshold","value":"50"}}'
 
 # Create cart
-curl -s -X POST "http://localhost:8092/api/v1/actors/storefront-test/StorefrontService" \
+curl -s -X POST "http://localhost:8091/api/v1/actors/storefront-test/StorefrontService" \
   -H "Content-Type: application/json" \
   -d '{"msg_type":"create_cart","payload":{"cart_id":"cart-1","user_id":"alice","items":"[{\"sku\":\"WIDGET\",\"qty\":2,\"price\":\"9.99\"}]"}}'
 
 # Checkout rate limit (call repeatedly to see allowed → denied)
-curl -s -X POST "http://localhost:8092/api/v1/actors/storefront-test/StorefrontService" \
+curl -s -X POST "http://localhost:8091/api/v1/actors/storefront-test/StorefrontService" \
   -H "Content-Type: application/json" \
   -d '{"msg_type":"checkout_allowed","payload":{"identity":"user-alice","max_requests":5}}'
 ```

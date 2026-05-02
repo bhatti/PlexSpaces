@@ -39,9 +39,17 @@ pub mod actor_context;
 pub use actor_context::LinkProvider;
 pub mod actor_monitor;
 pub use actor_monitor::{
-    create_down_message, create_exit_message, exit_reason_to_string, start_monitor_gc_task,
-    ActorMonitor, LocalOnlyActorService, MonitorLink,
+    create_down_message, create_exit_message, create_ping_message, create_pong_message,
+    exit_reason_to_string, is_ctrl_message, start_monitor_gc_task, ActorMonitor,
+    LocalOnlyActorService, MonitorLink, CTRL_MSG_PREFIX,
 };
+pub mod actor_visibility;
+pub use actor_visibility::{
+    check_actor_visibility_for_messaging, enforce_visibility_for_actor_ref_messaging,
+};
+pub mod spawn_init_parse;
+pub use spawn_init_parse::legacy_spawn_init_json_to_role_and_args;
+
 pub mod actor_registry;
 pub mod service_trait;
 pub mod service_wrappers;

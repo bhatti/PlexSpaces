@@ -174,6 +174,7 @@ impl TestMessageSender {
 impl MessageSender for TestMessageSender {
     async fn tell(
         &self,
+        _ctx: &plexspaces_core::RequestContext,
         _message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())

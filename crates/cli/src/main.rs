@@ -123,7 +123,7 @@ enum Commands {
 
     /// List deployed applications
     List {
-        /// Node gRPC address (HTTP gateway is often this port + 1)
+        /// Node address (gRPC and HTTP share a single port, e.g. localhost:8091)
         #[arg(short, long, default_value = "localhost:8000")]
         node: String,
 

@@ -62,6 +62,9 @@ pub mod helpers;
 pub mod repository;
 pub mod service;
 
+#[cfg(feature = "sql-backend")]
+pub mod node_startup;
+
 #[cfg(feature = "presigned-urls")]
 pub mod presigned;
 #[cfg(not(feature = "presigned-urls"))]

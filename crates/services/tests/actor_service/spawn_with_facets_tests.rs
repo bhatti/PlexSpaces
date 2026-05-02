@@ -9,7 +9,8 @@
 // - Spawn actor with unknown facet type (graceful handling)
 // - Verify facets are returned in response
 
-use plexspaces_proto::common::v1::Facet as ProtoFacet;
+use plexspaces_proto::actor::v1::ActorSpawnSpec;
+use plexspaces_proto::common::v1::{ActorIdentity, Facet as ProtoFacet};
 use plexspaces_proto::v1::actor::SpawnActorRequest;
 use plexspaces_services::actor_service::{ActorServiceImpl, ActorServiceWrapper};
 use plexspaces_services::ServiceLocatorImpl;
@@ -262,15 +263,23 @@ async fn test_spawn_actor_with_virtual_actor_facet() {
     };
 
     let request = SpawnActorRequest {
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: "virtual-actor-1".to_string(),
+                actor_type: "test-worker".to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            facets: vec![facet.clone()],
+            config: None,
+            labels: HashMap::new(),
+        }),
         namespace: "test-namespace".to_string(),
-        actor_type: "test-worker".to_string(),
-        actor_id: "virtual-actor-1".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: HashMap::new(),
-        facets: vec![facet.clone()],
         instances_count: 1,
-        role: String::new(),
     };
 
     // Add required metadata for RequestContext
@@ -354,15 +363,23 @@ async fn test_spawn_actor_with_multiple_facets() {
     };
 
     let request = SpawnActorRequest {
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: "multi-facet-actor".to_string(),
+                actor_type: "test-worker".to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            facets: vec![virtual_facet, unknown_facet],
+            config: None,
+            labels: HashMap::new(),
+        }),
         namespace: "test-namespace".to_string(),
-        actor_type: "test-worker".to_string(),
-        actor_id: "multi-facet-actor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: HashMap::new(),
-        facets: vec![virtual_facet, unknown_facet],
         instances_count: 1,
-        role: String::new(),
     };
 
     let mut grpc_request = Request::new(request);
@@ -407,15 +424,23 @@ async fn test_spawn_actor_without_facets() {
     let actor_service = ActorServiceImpl::new(service_locator, "test-node".to_string());
 
     let request = SpawnActorRequest {
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: "no-facet-actor".to_string(),
+                actor_type: "test-worker".to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            facets: vec![], // No facets
+            config: None,
+            labels: HashMap::new(),
+        }),
         namespace: "test-namespace".to_string(),
-        actor_type: "test-worker".to_string(),
-        actor_id: "no-facet-actor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: HashMap::new(),
-        facets: vec![], // No facets
         instances_count: 1,
-        role: String::new(),
     };
 
     let mut grpc_request = Request::new(request);

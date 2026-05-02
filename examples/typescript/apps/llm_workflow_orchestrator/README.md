@@ -41,7 +41,7 @@ The WASM artifact is written to `<repo_root>/target/examples/typescript/llm_work
 ## Test
 
 ```bash
-./test.sh [HTTP_PORT]   # default port: 8092
+./test.sh [HTTP_PORT]   # default port: 8091
 ```
 
 Requires a running PlexSpaces node (`./scripts/server.sh`).

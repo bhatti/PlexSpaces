@@ -57,7 +57,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **Events**: EventEmitterFacet
 
 **Primitives**:
-- **ActorRef**: Location-transparent actor references
+- **ActorRef**: Location-transparent actor references (spawn **visibility** on **`tell` / `ask`**; **link/monitor** validate **local** operands against **`RequestContext`** namespace and tenant scope when auth is on, then **`ActorService`** for remote halves)
 - **ActorContext**: Service access for actors
 - **TupleSpace**: Linda-style coordination
 - **Channels**: Queue and topic patterns (InMemory, Redis, Kafka, SQLite, NATS, UDP)
@@ -134,7 +134,7 @@ Get PlexSpaces running in under 5 minutes:
 
 ```bash
 # Using Docker (recommended)
-docker run -p 8080:8080 -p 8000:8000 -p 8001:8001 plexspaces/node:latest
+docker run -p 8000:8000 plexspaces/node:latest
 
 # Or build from source
 git clone https://github.com/plexobject/plexspaces.git

@@ -23,7 +23,7 @@ Same behavior as the [Python example](../../../python/apps/migrating_eflows4hpc/
 # Terminal 2
 cd examples/typescript/apps/migrating_eflows4hpc
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

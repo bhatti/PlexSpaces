@@ -22,7 +22,7 @@ Serverless webhook ingestion (e.g. Stripe, GitHub): duplicate deliveries must be
 # In another terminal: build and test
 cd examples/go/apps/migrating_aws_durable_lambda
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

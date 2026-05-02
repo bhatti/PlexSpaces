@@ -14,7 +14,7 @@ if [[ -f "$HOME/venv/bin/activate" ]]; then
 fi
 
 if [[ -z "${1:-}" ]]; then
-  NODES="localhost:8092 localhost:8094"
+  NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
   NODES="localhost:$1"
 else

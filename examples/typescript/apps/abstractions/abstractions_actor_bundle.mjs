@@ -1428,6 +1428,19 @@ var ProcessGroups = class {
       throw new Error(result);
     }
   }
+  /** Return the first member of a process group, or null if empty. */
+  first(group) {
+    const members = this.members(group);
+    return members.length > 0 ? members[0] : null;
+  }
+  /** Return the first member of a process group, throwing if empty. */
+  firstOrThrow(group) {
+    const members = this.members(group);
+    if (members.length === 0) {
+      throw new Error(`no members in process group '${group}'`);
+    }
+    return members[0];
+  }
 };
 var Host = class {
   constructor() {
@@ -1614,6 +1627,40 @@ var Host = class {
       return JSON.stringify(hostKvList(prefix));
     } catch (e) {
       return `ERROR:${e}`;
+    }
+  }
+  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
+  kvGetJson(key) {
+    const raw = this.kvGet(key);
+    if (!raw || raw.startsWith("ERROR:"))
+      return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  /** Serialize value to JSON and store under key. Throws on write failure. */
+  kvPutJson(key, value) {
+    const serialized = JSON.stringify(value);
+    const result = this.kvPut(key, serialized);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(`kvPutJson(${key}): ${result}`);
+    }
+  }
+  /** Increment a single named application metric counter by 1. Errors are swallowed. */
+  incrCounter(applicationId, name) {
+    this.incrCounters(applicationId, { [name]: 1 });
+  }
+  /** Increment one or more named application metric counters. Errors are swallowed. */
+  incrCounters(applicationId, counters) {
+    try {
+      this.applicationMetricsAdd(applicationId, {
+        message_count: Object.keys(counters).length,
+        counter_metrics: counters
+      });
+    } catch (e) {
+      this.warn(`incrCounters: metrics update failed: ${e}`);
     }
   }
   // ========================================================================

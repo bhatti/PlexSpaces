@@ -18,7 +18,7 @@ BPMN-style **insurance claim** workflow: submit → validate → (human) review 
 # Terminal 2
 cd examples/python/apps/migrating_zeebe
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

@@ -90,15 +90,26 @@ impl TestHarness {
             .spawn()
             .map_err(|e| format!("Failed to spawn node_runner: {}", e))?;
 
-        // Wait for gRPC server to be ready
-        println!("Waiting for node {} to start...", node_id);
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        // Create gRPC client
+        // Poll until the gRPC server accepts connections (up to 5 s, 100 ms intervals).
         let addr = format!("http://127.0.0.1:{}", port);
-        let client = ActorServiceClient::connect(addr.clone())
-            .await
-            .map_err(|e| format!("Failed to connect to node {} at {}: {}", node_id, addr, e))?;
+        let client = {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match ActorServiceClient::connect(addr.clone()).await {
+                    Ok(c) => break c,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to connect to node {} at {} within 5s: {}",
+                            node_id, addr, e
+                        )
+                        .into());
+                    }
+                }
+            }
+        };
 
         println!("Node {} ready at {}", node_id, addr);
 

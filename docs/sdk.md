@@ -835,10 +835,10 @@ Same API surface as Rust/TypeScript/Go. Use when driving multi-node from a Pytho
 from plexspaces import LeaderWorkerClient, list_worker_node_ids
 
 # One-off list
-node_ids = list_worker_node_ids("http://localhost:8092", page_size=100)
+node_ids = list_worker_node_ids("http://localhost:8091", page_size=100)
 
 # Or use a client (required for spawn_actor_on_node)
-client = LeaderWorkerClient("http://localhost:8092")
+client = LeaderWorkerClient("http://localhost:8091")
 node_ids = client.list_worker_node_ids(cluster=None, page_size=100)
 # Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 # Non-virtual: spawn on a specific node
@@ -964,10 +964,10 @@ Same API surface as Rust/Python/Go. Use when driving multi-node from Node or bro
 import { LeaderWorkerClient, listWorkerNodeIds } from "@plexspaces/sdk";
 
 // One-off list
-const nodeIds = await listWorkerNodeIds("http://localhost:8092", null, 100);
+const nodeIds = await listWorkerNodeIds("http://localhost:8091", null, 100);
 
 // Or use a client (required for spawnActorOnNode)
-const client = new LeaderWorkerClient("http://localhost:8092");
+const client = new LeaderWorkerClient("http://localhost:8091");
 const ids = await client.listWorkerNodeIds(undefined, 100);
 // Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
@@ -1121,22 +1121,27 @@ The SDK provides helper functions for creating messages with correct invocation 
 
 | Function | Description | Use With |
 |----------|-------------|----------|
-| `call_message(payload)` | Create request-reply message (`message_type = "call"`) | `actor_ref.ask()` |
-| `cast_message(payload)` | Create fire-and-forget message (`message_type = "cast"`) | `actor_ref.tell()` |
+| `call_message(payload)` | Create request-reply message (`message_type = "call"`) | `actor_ref.ask(&ctx, …)` |
+| `cast_message(payload)` | Create fire-and-forget message (`message_type = "cast"`) | `actor_ref.tell(&ctx, …)` |
 | `new_message(invocation, payload)` | Create message with custom invocation type | Either |
 
 **Example:**
 ```rust
+use plexspaces_core::RequestContext;
 use plexspaces_sdk::{call_message, cast_message, json};
 use std::time::Duration;
 
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
+
 // Request-reply: use call_message() with ask()
 let request = call_message(json!({ "action": "get_balance" }));
-let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+let reply = actor_ref
+    .ask(&ctx, request, Duration::from_secs(5))
+    .await?;
 
 // Fire-and-forget: use cast_message() with tell()
 let event = cast_message(json!({ "event": "user_login", "user_id": "123" }));
-actor_ref.tell(event).await?;
+actor_ref.tell(&ctx, event).await?;
 ```
 
 **Message Routing Design:**
@@ -1310,7 +1315,7 @@ Multi-node parallelization is **one logical run** with work **split across nodes
 | API | Purpose |
 |-----|---------|
 | `list_worker_node_ids(ctx, service_locator, cluster, page_size)` | Returns node IDs from the registry (after ConnectNodes). Leader uses this to distribute work. |
-| `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s SpawnActor. Use for non-virtual workers only. |
+| `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s **`SpawnActor`** RPC with **`SpawnActorRequest.spec`** (`ActorSpawnSpec`). Legacy **`initial_state`** bytes (JSON in the WASM init shape) are mapped into **`spec.role`** / **`spec.args`** via **`plexspaces_core::legacy_spawn_init_json_to_role_and_args`**. Prefer building **`ActorSpawnSpec`** directly when you already have structured args. |
 
 **Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to the canonical actor ID for the shard, such as `chunk-1//worker::default@node-B`; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
 
@@ -1425,7 +1430,7 @@ let actor_ref = spawn_with_facets(&ctx, sl, "user-123", "sessions", SessionActor
 
 // Send fire-and-forget message using cast_message()
 let activity_event = cast_message(json!({ "event": "user_activity" }));
-actor_ref.tell(activity_event).await?;
+actor_ref.tell(&ctx, activity_event).await?;
 ```
 
 ### Timer vs Reminder: Transient vs Durable Scheduling
@@ -1474,8 +1479,8 @@ let mut node_client = NodeClient::connect("http://localhost:8000").await?;
 // Connect to multiple nodes with health checks
 let resp = node_client.connect_nodes(
     vec![
-        "http://localhost:8001".to_string(),
-        "http://localhost:8002".to_string(),
+        "http://localhost:8092".to_string(),
+        "http://localhost:8093".to_string(),
     ],
     None, // cluster name (optional)
     30,   // timeout seconds
@@ -1517,7 +1522,7 @@ let mut node_client = NodeClient::connect_with_health_check(
 
 // Connect multiple nodes with custom config
 let resp = node_client.connect_nodes_with_health_check(
-    vec!["http://localhost:8001".to_string()],
+    vec!["http://localhost:8092".to_string()],
     None,
     30,
     config,
@@ -1734,13 +1739,13 @@ Same API surface as Rust/Python/TypeScript. Use when driving multi-node from a G
 ```go
 import "github.com/plexspaces/plexspaces/sdks/go/plexspaces"
 
-client := plexspaces.NewLeaderWorkerClient("http://localhost:8092")
+client := plexspaces.NewLeaderWorkerClient("http://localhost:8091")
 ids, err := client.ListWorkerNodeIds("", 100, "")
 // Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 actorRef, err := client.SpawnActorOnNode(ids[0], "worker", "w-1", nil, nil, nil)
 
 // Or one-off list:
-ids, err := plexspaces.ListWorkerNodeIds("http://localhost:8092", "", 100)
+ids, err := plexspaces.ListWorkerNodeIds("http://localhost:8091", "", 100)
 ```
 
 ### Installation

@@ -79,6 +79,7 @@ async fn register_actor_as_active_in_registry(
         namespace.to_string(),
         mailbox,
         service_locator,
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     );
     actor_registry
         .register_actor(
@@ -189,6 +190,7 @@ fn test_spawn_spec(
         role: String::new(),
         namespace: namespace.to_string(),
         tenant_id: tenant.to_string(),
+        visibility: 0,
         behavior_kind: String::new(),
         args: std::collections::HashMap::new(),
         facets: vec![Facet {

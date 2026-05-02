@@ -15,6 +15,9 @@ plexspaces-proto = { workspace = true }
 plexspaces-channel = { path = "../channel", default-features = false }
 plexspaces-core = { workspace = true }
 
+# Observability
+metrics = { workspace = true }
+
 # Core dependencies
 tokio = { workspace = true }
 async-trait = { workspace = true }

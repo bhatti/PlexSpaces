@@ -67,8 +67,8 @@ cd examples/rust/embedded/heat_diffusion
 Optional: pass a port or list of `host:port` for multi-node convention (see [Multi-node and realistic benchmarks](../../../README.md#multi-node-and-realistic-benchmarks-plan)):
 
 ```bash
-./test.sh 8092
-./test.sh "localhost:8092 localhost:8094"
+./test.sh 8091
+./test.sh "localhost:8091 localhost:8094"
 ```
 
 Currently the example runs a single in-process node; `PLEXSPACES_PEERS` is set when a list is given for future use. Run directly: `cargo run`

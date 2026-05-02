@@ -38,6 +38,7 @@ use tokio::time::timeout as tokio_timeout;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{Actor, ActorRef as ActorActorRef};
+use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_core::{
     ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait,
 };
@@ -333,7 +334,8 @@ impl Supervisor {
     /// ## Purpose
     /// When LinkProvider is provided, supervisor uses links internally for cascading failures.
     /// This enables the Erlang/OTP pattern where supervision uses links.
-    /// ActorRegistry implements LinkProvider and should be used for local actors.
+    /// Pass an [`ActorRegistry`] (as `dyn LinkProvider`) or another implementation that
+    /// establishes links with the same tenant-scoped [`RequestContext`] you use elsewhere.
     ///
     /// ## Arguments
     /// * `link_provider` - LinkProvider implementation (typically ActorRegistry)
@@ -348,10 +350,6 @@ impl Supervisor {
     /// supervisor.with_link_provider(actor_registry as Arc<dyn LinkProvider + Send + Sync>);
     /// ```
     ///
-    /// ## TODO: Remote Actor Linking
-    /// Node supports remote actor linking via gRPC, but this is advanced functionality.
-    /// For now, LinkProvider in ActorRegistry only supports local actors.
-    /// Remote linking can be added later by enhancing ActorRegistry with Node reference.
     pub fn with_link_provider(
         mut self,
         link_provider: Arc<dyn LinkProvider + Send + Sync>,
@@ -448,6 +446,7 @@ impl Supervisor {
             existing_ctx.namespace.clone(),
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         let self_ref = plexspaces_core::ActorRef::new(child_id.clone())
             .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
@@ -475,7 +474,9 @@ impl Supervisor {
 
         if let Some(service_locator) = &self.service_locator {
             if let Some(registry) = service_locator.actor_registry().await {
-                actor.register_started(&registry).await;
+                actor
+                    .register_started(&registry, ActorVisibility::ActorVisibilityPublic)
+                    .await;
             }
         }
 
@@ -521,7 +522,7 @@ impl Supervisor {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            if let Err(e) = node.link(&supervisor_id, &child_id, &ctx).await {
+            if let Err(e) = node.link(&ctx, &supervisor_id, &child_id).await {
                 // Log error but don't fail - supervision can work without links
                 warn!(
                     supervisor_id = %self.id,
@@ -571,7 +572,7 @@ impl Supervisor {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let _ = node.unlink(&supervisor_id, id, &ctx).await; // Ignore errors (idempotent)
+            let _ = node.unlink(&ctx, &supervisor_id, id).await; // Ignore errors (idempotent)
         }
 
         // Phase 3: Unregister parent-child relationship in ActorRegistry
@@ -753,7 +754,7 @@ impl Supervisor {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            if let Err(e) = node.link(&supervisor_id, &child_supervisor_id, &ctx).await {
+            if let Err(e) = node.link(&ctx, &supervisor_id, &child_supervisor_id).await {
                 warn!(
                     supervisor_id = %self.id,
                     child_supervisor_id = %child_id,
@@ -810,7 +811,7 @@ impl Supervisor {
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let _ = node
-                .unlink(&supervisor_id_actor, &child_supervisor_id_actor, &ctx)
+                .unlink(&ctx, &supervisor_id_actor, &child_supervisor_id_actor)
                 .await; // Ignore errors (idempotent)
         }
 
@@ -861,7 +862,7 @@ impl Supervisor {
     ///
     /// ## Arguments
     /// * `id` - Actor ID that failed
-    /// * `reason` - Failure reason (string, for backward compatibility)
+    /// * `reason` - Failure reason as a string (parsed when `exit_reason` is absent)
     /// * `exit_reason` - Exit reason (None if unknown, will be parsed from reason string)
     #[instrument(skip(self), fields(supervisor_id = %self.id, child_id = %id, reason = %reason))]
     pub async fn handle_failure(
@@ -1573,7 +1574,9 @@ impl Supervisor {
 
         if let Some(service_locator) = &self.service_locator {
             if let Some(registry) = service_locator.actor_registry().await {
-                new_actor.register_started(&registry).await;
+                new_actor
+                    .register_started(&registry, ActorVisibility::ActorVisibilityPublic)
+                    .await;
             }
         }
 
@@ -2940,7 +2943,7 @@ mod tests {
     }
 
     /// Helper function to create a ChildSpec with sync factory
-    /// Accepts RestartPolicy for backward compatibility and converts to RestartStrategy internally
+    /// Converts `RestartPolicy` to `RestartStrategy` for the child spec.
     fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpec {
         use crate::child_spec::{ChildSpec, RestartStrategy as CSRestartStrategy};
 

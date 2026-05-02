@@ -965,577 +965,161 @@ mod tests {
         assert_eq!(status.code(), Code::Internal);
     }
 
-    // Integration tests for implemented RPC methods
+    // Integration tests — all share one node to avoid parallel recorder-install races.
+    // The node is created once; each logical scenario is a labeled section within the test.
 
-    #[tokio::test]
-    async fn test_write_and_read_single_tuple() {
-        use crate::ServiceLocator;
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-write-read").build().await);
-        let service_locator = node.service_locator();
-        let service = TupleSpaceServiceImpl::new(service_locator);
+    fn make_tuple(fields: Vec<ProtoTupleField>) -> ProtoTuple {
+        ProtoTuple {
+            id: String::new(),
+            fields,
+            timestamp: None,
+            lease: None,
+            metadata: std::collections::HashMap::new(),
+            location: None,
+        }
+    }
 
-        // Write a tuple
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_int(42), proto_string("test")],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }],
+    fn write_req(fields_list: Vec<Vec<ProtoTupleField>>) -> Request<WriteRequest> {
+        Request::new(WriteRequest {
+            tuples: fields_list.into_iter().map(make_tuple).collect(),
             transaction_id: String::new(),
-        });
+        })
+    }
 
-        let write_resp = service.write(write_req).await;
-        assert!(write_resp.is_ok());
-        let write_result = write_resp.unwrap().into_inner();
-        assert_eq!(write_result.tuple_ids.len(), 1);
-
-        // Read the tuple back
-        let read_req = Request::new(ReadRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_int(42), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
+    fn read_req(fields: Vec<ProtoTupleField>, max_results: i32, take: bool) -> Request<ReadRequest> {
+        Request::new(ReadRequest {
+            template: Some(make_tuple(fields)),
             timeout: None,
             blocking: false,
-            take: false,
-            max_results: 1,
+            take,
+            max_results,
             transaction_id: String::new(),
             spatial_filter: None,
-        });
+        })
+    }
 
-        let read_resp = service.read(read_req).await;
-        assert!(read_resp.is_ok());
-        let read_result = read_resp.unwrap().into_inner();
-        assert_eq!(read_result.tuples.len(), 1);
-        assert_eq!(
-            read_result.tuples[0].fields[0].value,
-            Some(ProtoValue::Integer(42))
-        );
-        assert_eq!(
-            read_result.tuples[0].fields[1].value,
-            Some(ProtoValue::String("test".to_string()))
-        );
+    async fn make_test_service() -> TupleSpaceServiceImpl {
+        use crate::service_locator::ServiceLocatorImpl;
+        use plexspaces_core::{service_wrappers::TupleSpaceProviderWrapper, ServiceLocator};
+
+        let sl = Arc::new(ServiceLocatorImpl::new());
+        sl.register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
+        let ts = Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace("test", "default"));
+        sl.register_tuplespace_provider(Arc::new(TupleSpaceProviderWrapper::new(ts)))
+            .await;
+        TupleSpaceServiceImpl::new(sl)
     }
 
     #[tokio::test]
-    async fn test_write_multiple_tuples() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-write-multiple").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
+    async fn test_grpc_service_integration() {
+        let service = make_test_service().await;
 
-        // Write multiple tuples
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("sensor"), proto_int(1), proto_float(23.5)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("sensor"), proto_int(2), proto_float(24.1)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("sensor"), proto_int(3), proto_float(22.8)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-            ],
-            transaction_id: String::new(),
-        });
+        // --- write and read back ---
+        let resp = service.write(write_req(vec![vec![proto_int(42), proto_string("hello")]])).await.unwrap().into_inner();
+        assert_eq!(resp.tuple_ids.len(), 1);
 
-        let write_resp = service.write(write_req).await;
-        assert!(write_resp.is_ok());
-        let write_result = write_resp.unwrap().into_inner();
-        assert_eq!(write_result.tuple_ids.len(), 3);
-    }
+        let resp = service.read(read_req(vec![proto_int(42), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        assert_eq!(resp.tuples.len(), 1);
+        assert_eq!(resp.tuples[0].fields[0].value, Some(ProtoValue::Integer(42)));
+        assert_eq!(resp.tuples[0].fields[1].value, Some(ProtoValue::String("hello".to_string())));
 
-    #[tokio::test]
-    async fn test_read_with_pattern_matching() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-pattern-match").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
+        // --- write multiple, pattern-match ---
+        service.write(write_req(vec![
+            vec![proto_string("sensor"), proto_int(1), proto_float(23.5)],
+            vec![proto_string("sensor"), proto_int(2), proto_float(24.1)],
+            vec![proto_string("actuator"), proto_int(1), proto_bool(true)],
+        ])).await.unwrap();
 
-        // Write tuples
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("sensor"), proto_int(1), proto_float(23.5)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("sensor"), proto_int(2), proto_float(24.1)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("actuator"), proto_int(1), proto_bool(true)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-            ],
-            transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
+        let resp = service.read(read_req(vec![proto_string("sensor"), proto_wildcard(), proto_wildcard()], 10, false)).await.unwrap().into_inner();
+        assert_eq!(resp.tuples.len(), 2);
 
-        // Read with wildcard pattern - should match sensors only
-        let read_req = Request::new(ReadRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("sensor"), proto_wildcard(), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            timeout: None,
-            blocking: false,
-            take: false,
-            max_results: 10,
+        // --- take removes tuple ---
+        service.write(write_req(vec![vec![proto_string("task"), proto_int(99)]])).await.unwrap();
+        let resp = service.take(read_req(vec![proto_string("task"), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        assert_eq!(resp.tuples.len(), 1);
+        let resp = service.read(read_req(vec![proto_string("task"), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        assert_eq!(resp.tuples.len(), 0);
+
+        // --- count ---
+        service.write(write_req(vec![
+            vec![proto_string("ev"), proto_string("login")],
+            vec![proto_string("ev"), proto_string("logout")],
+            vec![proto_string("ev"), proto_string("login")],
+        ])).await.unwrap();
+        let resp = service.count(Request::new(CountRequest {
+            template: Some(make_tuple(vec![proto_string("ev"), proto_wildcard()])),
             transaction_id: String::new(),
             spatial_filter: None,
-        });
+        })).await.unwrap().into_inner();
+        assert_eq!(resp.count, 3);
 
-        let read_resp = service.read(read_req).await;
-        assert!(read_resp.is_ok());
-        let read_result = read_resp.unwrap().into_inner();
-        assert_eq!(read_result.tuples.len(), 2); // Only sensor tuples
-    }
-
-    #[tokio::test]
-    async fn test_take_removes_tuple() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-take").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Write a tuple
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("task"), proto_int(1)],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }],
+        // --- exists before and after write ---
+        let exists_tmpl = make_tuple(vec![proto_string("cfg"), proto_string("timeout")]);
+        let resp = service.exists(Request::new(ExistsRequest {
+            template: Some(exists_tmpl.clone()),
             transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
+        })).await.unwrap().into_inner();
+        assert!(!resp.exists);
 
-        // Take the tuple (destructive read)
-        let take_req = Request::new(ReadRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("task"), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            timeout: None,
-            blocking: false,
-            take: false,
-            max_results: 1,
+        service.write(write_req(vec![vec![proto_string("cfg"), proto_string("timeout")]])).await.unwrap();
+
+        let resp = service.exists(Request::new(ExistsRequest {
+            template: Some(make_tuple(vec![proto_string("cfg"), proto_wildcard()])),
+            transaction_id: String::new(),
+        })).await.unwrap().into_inner();
+        assert!(resp.exists);
+
+        // --- clear then count zero ---
+        service.write(write_req(vec![vec![proto_int(1)], vec![proto_int(2)]])).await.unwrap();
+        service.clear(Request::new(Empty {})).await.unwrap();
+        let resp = service.count(Request::new(CountRequest {
+            template: Some(make_tuple(vec![proto_wildcard()])),
             transaction_id: String::new(),
             spatial_filter: None,
-        });
+        })).await.unwrap().into_inner();
+        assert_eq!(resp.count, 0);
 
-        let take_resp = service.take(take_req).await;
-        assert!(take_resp.is_ok());
-        let take_result = take_resp.unwrap().into_inner();
-        assert_eq!(take_result.tuples.len(), 1);
+        // --- stats tracking ---
+        service.write(write_req(vec![vec![proto_int(10)], vec![proto_int(20)]])).await.unwrap();
+        service.read(read_req(vec![proto_wildcard()], 1, false)).await.unwrap();
+        let stats = service.get_stats(Request::new(Empty {})).await.unwrap().into_inner().stats.unwrap();
+        assert!(stats.tuple_count >= 2);
+        assert!(stats.write_operations >= 2);
+        assert!(stats.read_operations >= 1);
 
-        // Try to read again - should be empty
-        let read_req = Request::new(ReadRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("task"), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            timeout: None,
-            blocking: false,
-            take: false,
-            max_results: 1,
-            transaction_id: String::new(),
-            spatial_filter: None,
-        });
+        // --- validation: empty write ---
+        let err = service.write(Request::new(WriteRequest { tuples: vec![], transaction_id: String::new() })).await.unwrap_err();
+        assert_eq!(err.code(), Code::InvalidArgument);
 
-        let read_resp = service.read(read_req).await;
-        assert!(read_resp.is_ok());
-        let read_result = read_resp.unwrap().into_inner();
-        assert_eq!(read_result.tuples.len(), 0); // Tuple was removed by take
-    }
+        // --- validation: missing read template ---
+        let err = service.read(Request::new(ReadRequest {
+            template: None, timeout: None, blocking: false, take: false,
+            max_results: 1, transaction_id: String::new(), spatial_filter: None,
+        })).await.unwrap_err();
+        assert_eq!(err.code(), Code::InvalidArgument);
 
-    #[tokio::test]
-    async fn test_count_matching_tuples() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-count").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Write tuples
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("event"), proto_string("login")],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("event"), proto_string("logout")],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_string("event"), proto_string("login")],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-            ],
-            transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
-
-        // Count all events
-        let count_req = Request::new(CountRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("event"), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            transaction_id: String::new(),
-            spatial_filter: None,
-        });
-
-        let count_resp = service.count(count_req).await;
-        assert!(count_resp.is_ok());
-        let count_result = count_resp.unwrap().into_inner();
-        assert_eq!(count_result.count, 3);
-    }
-
-    #[tokio::test]
-    async fn test_exists_check() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-exists").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Check exists before write - should be false
-        let exists_req = Request::new(ExistsRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("config"), proto_string("timeout")],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            transaction_id: String::new(),
-        });
-
-        let exists_resp = service.exists(exists_req).await;
-        assert!(exists_resp.is_ok());
-        assert!(!exists_resp.unwrap().into_inner().exists);
-
-        // Write tuple
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("config"), proto_string("timeout")],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }],
-            transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
-
-        // Check exists after write - should be true
-        let exists_req = Request::new(ExistsRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_string("config"), proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            transaction_id: String::new(),
-        });
-
-        let exists_resp = service.exists(exists_req).await;
-        assert!(exists_resp.is_ok());
-        assert!(exists_resp.unwrap().into_inner().exists);
-    }
-
-    #[tokio::test]
-    async fn test_clear_all_tuples() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-clear").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Write tuples
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_int(1)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_int(2)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-            ],
-            transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
-
-        // Clear all
-        let clear_req = Request::new(Empty {});
-        let clear_resp = service.clear(clear_req).await;
-        assert!(clear_resp.is_ok());
-
-        // Verify empty
-        let count_req = Request::new(CountRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            transaction_id: String::new(),
-            spatial_filter: None,
-        });
-
-        let count_resp = service.count(count_req).await;
-        assert!(count_resp.is_ok());
-        assert_eq!(count_resp.unwrap().into_inner().count, 0);
-    }
-
-    #[tokio::test]
-    async fn test_get_stats() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-stats").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Get initial stats
-        let stats_req = Request::new(Empty {});
-        let stats_resp = service.get_stats(stats_req).await;
-        assert!(stats_resp.is_ok());
-        let stats_result = stats_resp.unwrap().into_inner();
-        assert!(stats_result.stats.is_some());
-
-        let initial_stats = stats_result.stats.unwrap();
-        assert_eq!(initial_stats.tuple_count, 0);
-        assert_eq!(initial_stats.write_operations, 0);
-        assert_eq!(initial_stats.read_operations, 0);
-        assert_eq!(initial_stats.take_operations, 0);
-
-        // Write some tuples
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_int(1)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-                ProtoTuple {
-                    id: String::new(),
-                    fields: vec![proto_int(2)],
-                    timestamp: None,
-                    lease: None,
-                    metadata: std::collections::HashMap::new(),
-                    location: None,
-                },
-            ],
-            transaction_id: String::new(),
-        });
-        service.write(write_req).await.unwrap();
-
-        // Read a tuple
-        let read_req = Request::new(ReadRequest {
-            template: Some(ProtoTuple {
-                id: String::new(),
-                fields: vec![proto_wildcard()],
-                timestamp: None,
-                lease: None,
-                metadata: std::collections::HashMap::new(),
-                location: None,
-            }),
-            timeout: None,
-            blocking: false,
-            take: false,
-            max_results: 1,
-            transaction_id: String::new(),
-            spatial_filter: None,
-        });
-        service.read(read_req).await.unwrap();
-
-        // Get stats after operations
-        let stats_req = Request::new(Empty {});
-        let stats_resp = service.get_stats(stats_req).await;
-        assert!(stats_resp.is_ok());
-        let stats_result = stats_resp.unwrap().into_inner();
-        assert!(stats_result.stats.is_some());
-
-        let updated_stats = stats_result.stats.unwrap();
-        assert_eq!(updated_stats.tuple_count, 2); // 2 tuples written
-        assert_eq!(updated_stats.write_operations, 2); // 2 writes
-        assert_eq!(updated_stats.read_operations, 1); // 1 read
-        assert!(updated_stats.total_operations >= 3); // At least write + read ops
-    }
-
-    #[tokio::test]
-    async fn test_write_validation_empty_tuples() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-validation").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Try to write empty tuples array
-        let write_req = Request::new(WriteRequest {
-            tuples: vec![],
-            transaction_id: String::new(),
-        });
-
-        let write_resp = service.write(write_req).await;
-        assert!(write_resp.is_err());
-        assert_eq!(write_resp.unwrap_err().code(), Code::InvalidArgument);
-    }
-
-    #[tokio::test]
-    async fn test_read_validation_missing_template() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-validation-read").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Try to read without template
-        let read_req = Request::new(ReadRequest {
-            template: None,
-            timeout: None,
-            blocking: false,
-            take: false,
-            max_results: 1,
-            transaction_id: String::new(),
-            spatial_filter: None,
-        });
-
-        let read_resp = service.read(read_req).await;
-        assert!(read_resp.is_err());
-        assert_eq!(read_resp.unwrap_err().code(), Code::InvalidArgument);
-    }
-
-    #[tokio::test]
-    async fn test_unimplemented_methods() {
-        use plexspaces_node::NodeBuilder;
-        let node = Arc::new(NodeBuilder::new("test-unimplemented").build().await);
-        let service = TupleSpaceServiceImpl::new(node.service_locator());
-
-        // Test subscribe (unimplemented)
-        let subscribe_req = Request::new(plexspaces_proto::tuplespace::v1::SubscribeRequest {
-            template: None,
-            qos: 0,
-            actions: 0,
-            callback_url: String::new(),
-        });
-        let result = service.subscribe(subscribe_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
-
-        // Test unsubscribe (unimplemented)
-        let unsubscribe_req = Request::new(plexspaces_proto::tuplespace::v1::UnsubscribeRequest {
+        // --- unimplemented stubs ---
+        assert_eq!(service.subscribe(Request::new(plexspaces_proto::tuplespace::v1::SubscribeRequest {
+            template: None, qos: 0, actions: 0, callback_url: String::new(),
+        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(service.unsubscribe(Request::new(plexspaces_proto::tuplespace::v1::UnsubscribeRequest {
             subscription_id: String::new(),
-        });
-        let result = service.unsubscribe(unsubscribe_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
-
-        // Test begin_transaction (unimplemented)
-        let begin_req = Request::new(plexspaces_proto::tuplespace::v1::BeginTransactionRequest {
-            isolation_level: 0,
-            timeout: None,
-        });
-        let result = service.begin_transaction(begin_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
-
-        // Test commit_transaction (unimplemented)
-        let commit_req = Request::new(plexspaces_proto::tuplespace::v1::CommitTransactionRequest {
+        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(service.begin_transaction(Request::new(plexspaces_proto::tuplespace::v1::BeginTransactionRequest {
+            isolation_level: 0, timeout: None,
+        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(service.commit_transaction(Request::new(plexspaces_proto::tuplespace::v1::CommitTransactionRequest {
             transaction_id: String::new(),
-        });
-        let result = service.commit_transaction(commit_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
-
-        // Test abort_transaction (unimplemented)
-        let abort_req = Request::new(plexspaces_proto::tuplespace::v1::AbortTransactionRequest {
+        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(service.abort_transaction(Request::new(plexspaces_proto::tuplespace::v1::AbortTransactionRequest {
             transaction_id: String::new(),
-        });
-        let result = service.abort_transaction(abort_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
-
-        // Test renew_lease (unimplemented)
-        let renew_req = Request::new(plexspaces_proto::tuplespace::v1::RenewLeaseRequest {
-            tuple_id: String::new(),
-            new_ttl: None,
-        });
-        let result = service.renew_lease(renew_req).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), Code::Unimplemented);
+        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(service.renew_lease(Request::new(plexspaces_proto::tuplespace::v1::RenewLeaseRequest {
+            tuple_id: String::new(), new_ttl: None,
+        })).await.unwrap_err().code(), Code::Unimplemented);
     }
 }

@@ -105,15 +105,18 @@ pub mod auth;
 pub mod cert_gen;
 pub mod chain;
 pub mod compression;
+pub mod http_server;
 pub mod jwt;
 pub mod metrics;
 pub mod observability;
 pub mod rate_limit;
 pub mod retry;
 pub mod security_validation;
+pub mod service_locator_auth;
 pub mod tracing_interceptor;
 
 pub use auth::AuthInterceptor;
+pub use http_server::{GrpcHttpServerBuilder, ServerBuildError};
 pub use cert_gen::{CertGenError, CertificateGenerator, CertificatePaths};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;
@@ -125,6 +128,7 @@ pub use observability::{metrics_handler, LogLevel, ObservabilityError, Observabi
 pub use rate_limit::RateLimitInterceptor;
 pub use retry::RetryInterceptor;
 pub use security_validation::{SecurityValidationError, SecurityValidator};
+pub use service_locator_auth::http_jwt_auth_snapshot;
 pub use tracing_interceptor::TracingInterceptor;
 
 /// Result type for interceptor operations

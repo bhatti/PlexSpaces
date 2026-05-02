@@ -71,7 +71,7 @@ This uses the shared workspace `target/` directory and produces:
 
 ```bash
 ./test.sh
-./test.sh "localhost:8092 localhost:8094"
+./test.sh "localhost:8091 localhost:8094"
 ```
 
 The test script:

@@ -58,6 +58,14 @@ impl FacetManagerServiceWrapper {
     pub fn inner_clone(&self) -> Arc<plexspaces_facet::FacetManager> {
         self.inner.clone()
     }
+
+    /// Returns the facet container for `actor_id` if the facet manager holds one for that actor.
+    pub async fn facet_container_for_actor(
+        &self,
+        actor_id: &str,
+    ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
+        self.inner.get_facets(actor_id).await
+    }
 }
 
 impl Service for FacetManagerServiceWrapper {

@@ -24,6 +24,7 @@
 mod tests {
     use crate::actor_ref::{ActorRef, ActorRefError};
     use plexspaces_core::{ActorId, Message, ServiceLocator};
+    use plexspaces_proto::actor::v1::ActorVisibility;
     use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
     use std::sync::Arc;
     use std::time::Duration;
@@ -98,6 +99,7 @@ mod tests {
             "test".to_string(),
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let ttl = Duration::from_secs(30);
@@ -122,6 +124,7 @@ mod tests {
             "test".to_string(),
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let message = create_test_message(b"test".to_vec());
@@ -144,17 +147,18 @@ mod tests {
             "test".to_string(),
             Arc::clone(&mailbox),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
+        let tell_ctx =
+            RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         if let Some(registry) = service_locator.actor_registry().await {
-            let ctx =
-                RequestContext::new_without_auth("internal".to_string(), "system".to_string());
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
             registry
                 .register_actor(
-                    &ctx,
+                    &tell_ctx,
                     actor_id,
                     sender,
                     "test_actor".to_string(),
@@ -176,7 +180,7 @@ mod tests {
         assert!(is_message_expired(&message));
 
         // ActorRef should still allow sending (TTL is informational)
-        let result = actor_ref.tell(message).await;
+        let result = actor_ref.tell(&tell_ctx, message).await;
         // This should succeed - TTL checking is done by mailbox/actor, not ActorRef
         assert!(result.is_ok());
     }

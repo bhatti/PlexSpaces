@@ -23,7 +23,7 @@ High-throughput log ingestion: accept batches of log lines, parse level/source, 
 # In another terminal: build and test
 cd examples/typescript/apps/migrating_v8_isolates
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

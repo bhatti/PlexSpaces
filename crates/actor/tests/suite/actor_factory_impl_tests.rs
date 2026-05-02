@@ -55,6 +55,7 @@ fn make_spawn_spec(
         role: String::new(),
         namespace: actor_id.namespace().to_string(),
         tenant_id: String::new(),
+        visibility: 0,
         behavior_kind: String::new(),
         args: HashMap::new(),
         facets: vec![],
@@ -304,6 +305,7 @@ async fn test_activate_virtual_actor_success() {
             }),
             tenant_id: "default".to_string(),
             namespace: "default".to_string(),
+            visibility: 0,
             labels: HashMap::from([("source".to_string(), "test".to_string())]),
             ..Default::default()
         };
@@ -315,10 +317,7 @@ async fn test_activate_virtual_actor_success() {
 
     // Activate - this should rebuild the actor from virtual metadata.
     let result = factory.activate_virtual_actor(&actor_id).await;
-    if let Err(e) = &result {
-        eprintln!("Activation failed: {}", e);
-    }
-    assert!(result.is_ok(), "Activation should succeed");
+    assert!(result.is_ok(), "Activation should succeed: {:?}", result.err());
 
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     assert!(
@@ -355,6 +354,7 @@ async fn test_activate_virtual_actor_already_active() {
             }),
             tenant_id: "default".to_string(),
             namespace: "default".to_string(),
+            visibility: 0,
             ..Default::default()
         };
         manager
@@ -395,6 +395,7 @@ async fn test_activate_virtual_actor_already_active() {
         "default".to_string(),
         actor.mailbox().clone(),
         service_locator.clone(),
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     );
     let wrapper: Arc<dyn MessageSender> = Arc::new(actor_ref);
 
@@ -514,6 +515,7 @@ async fn test_spawn_actor_sets_self_ref_before_init() {
         role: String::new(),
         namespace: "system".to_string(),
         tenant_id: String::new(),
+        visibility: 0,
         behavior_kind: String::new(),
         args: HashMap::new(),
         facets: vec![],
@@ -873,6 +875,7 @@ async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
             }),
             tenant_id: "default".to_string(),
             namespace: "default".to_string(),
+            visibility: 0,
             ..Default::default()
         };
         manager

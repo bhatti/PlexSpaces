@@ -25,14 +25,14 @@ A multi-actor PlexSpaces example demonstrating **Agentic RAG** (Retrieval-Augmen
 # Build the WASM module
 ./build.sh
 
-# Run against a local PlexSpaces node (default: localhost:8092)
+# Run against a local PlexSpaces node (default: localhost:8091)
 ./test.sh
 
 # Run against a specific port
-./test.sh 8092
+./test.sh 8091
 
 # Run against multiple nodes
-./test.sh localhost:8092 localhost:8094
+./test.sh localhost:8091 localhost:8094
 ```
 
 ## Test Scenarios

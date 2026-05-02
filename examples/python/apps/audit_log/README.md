@@ -32,7 +32,7 @@ This example demonstrates:
 From repo root:
 
 ```bash
-# Terminal 1: start server (gRPC 8091, HTTP 8092)
+# Terminal 1: start server (gRPC 8091, HTTP 8091)
 cd /path/to/tspaces
 make build
 ./scripts/server.sh
@@ -42,7 +42,7 @@ make build
 cd examples/python/apps/audit_log
 source ~/venv/bin/activate
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 Check the node log for lines like `audit action=login actor_id=user-1 resource=/api/session ...`.
@@ -52,7 +52,7 @@ Check the node log for lines like `audit action=login actor_id=user-1 resource=/
 Deploy with `behavior_kind=GenEvent` so registry and process_message logs show `EventHandler`:
 
 ```bash
-curl -s -X POST "http://localhost:8092/api/v1/applications/deploy" \
+curl -s -X POST "http://localhost:8091/api/v1/applications/deploy" \
   -F "application_id=audit-log-test" \
   -F "name=audit-log-test" \
   -F "version=1.0.0" \

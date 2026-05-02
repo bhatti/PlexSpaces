@@ -2,18 +2,18 @@
 # Test Ray Parameter Server - Distributed ML Training (Python WASM)
 #
 # Usage: ./test.sh [HTTP_PORT]
-#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8092)
+#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8091)
 #
 # Prerequisites: Start PlexSpaces node first:
 #   PLEXSPACES_JWT_SECRET=test cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:8091
-# (HTTP gateway will be on 8091 + 1 = 8092)
+# (HTTP gateway will be on 8091 + 1 = 8091)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/ray_actors.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/auction_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 APP_ID="migrating-mozartspaces-auction-go"
 ACTOR_TYPE="auction"

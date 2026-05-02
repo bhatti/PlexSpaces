@@ -210,7 +210,11 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Send message to actor to trigger some activity
     let msg = create_test_message(vec![1, 2, 3]);
-    let _: Result<(), _> = actor_ref.tell(msg).await;
+    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "test-namespace".to_string(),
+    );
+    let _: Result<(), _> = actor_ref.tell(&tell_ctx, msg).await;
 
     // Wait for message to be processed - route_message completes after enqueueing
     // Message processing happens asynchronously, so we just yield to allow processing
@@ -671,7 +675,11 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Send message and terminate
     let msg = create_test_message(vec![1, 2, 3]);
-    let _: Result<(), _> = actor_ref.tell(msg).await;
+    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "test-namespace".to_string(),
+    );
+    let _: Result<(), _> = actor_ref.tell(&tell_ctx, msg).await;
     // Wait for message to be processed - route_message completes after enqueueing
     let processing_future = async {
         tokio::task::yield_now().await;

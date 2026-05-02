@@ -36,7 +36,7 @@ docker build \
 echo "✅ Build complete!"
 echo ""
 echo "📦 To run locally:"
-echo "   docker run -p 8000:8000 -p 8001:8001 ${IMAGE_NAME}"
+echo "   docker run -p 8000:8000 ${IMAGE_NAME}"
 echo ""
 echo "📤 To push (if registry provided):"
 if [[ "${REGISTRY}" != "plexspaces" ]]; then

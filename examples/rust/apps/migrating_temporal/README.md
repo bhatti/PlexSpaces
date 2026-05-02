@@ -40,7 +40,7 @@ flowchart LR
 # Terminal 2
 cd examples/rust/apps/migrating_temporal
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## Build

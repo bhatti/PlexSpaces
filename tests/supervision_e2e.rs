@@ -42,6 +42,7 @@ use plexspaces::{ActorContext, BehaviorError, BehaviorType};
 use plexspaces_actor::Actor as ActorStruct;
 use plexspaces_core::Actor as ActorTrait;
 use plexspaces_core::Message;
+use plexspaces_core::RequestContext;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_persistence::MemoryJournal;
 use ulid::Ulid;
@@ -67,6 +68,10 @@ fn test_actor_id(name: &str) -> ActorId {
 
 fn test_actor_id_string(name: &str) -> String {
     test_actor_id(name).to_string()
+}
+
+fn supervision_test_ctx() -> RequestContext {
+    RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string())
 }
 
 // ============================================================================
@@ -265,8 +270,11 @@ async fn test_one_for_one_restart() {
     let _ = event_rx.recv().await; // stable started
 
     // Send messages to faulty worker to trigger crash
+    let ctx = supervision_test_ctx();
     for _ in 0..3 {
-        let _ = faulty_ref.tell(create_test_message(b"test".to_vec())).await;
+        let _ = faulty_ref
+            .tell(&ctx, create_test_message(b"test".to_vec()))
+            .await;
         sleep(Duration::from_millis(10)).await;
     }
 
@@ -387,11 +395,12 @@ async fn test_one_for_all_restart() {
     let _ = event_rx.recv().await;
 
     // Trigger crash in worker1
+    let ctx = supervision_test_ctx();
     let _ = worker1_ref
-        .tell(create_test_message(b"crash".to_vec()))
+        .tell(&ctx, create_test_message(b"crash".to_vec()))
         .await;
     let _ = worker1_ref
-        .tell(create_test_message(b"crash".to_vec()))
+        .tell(&ctx, create_test_message(b"crash".to_vec()))
         .await;
 
     sleep(Duration::from_millis(100)).await;
@@ -518,9 +527,10 @@ async fn test_restart_limits() {
     let _ = event_rx.recv().await; // Started event
 
     // Trigger multiple crashes
+    let ctx = supervision_test_ctx();
     for _ in 0..5 {
         let _ = crasher_ref
-            .tell(create_test_message(b"crash".to_vec()))
+            .tell(&ctx, create_test_message(b"crash".to_vec()))
             .await;
         sleep(Duration::from_millis(50)).await;
     }

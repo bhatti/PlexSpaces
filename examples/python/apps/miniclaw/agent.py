@@ -64,7 +64,7 @@ class AgentActor:
                 final_response = f"[no LLM] Processed: {message}"
                 break
 
-            llm_resp = ask(llm_id, "chat_completion", {"messages": self.messages, "tools": tools}, 10000)
+            llm_resp = ask(llm_id, "chat_completion", {"messages": [{"role": "system", "content": self.system_prompt}] + self.messages, "tools": tools}, 10000)
             if not llm_resp or "error" in llm_resp:
                 final_response = f"LLM unavailable: {llm_resp}"
                 break

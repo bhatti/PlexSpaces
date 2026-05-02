@@ -1,224 +1,176 @@
 # Mailbox - Composable Message Queue Abstractions
 
-**Purpose**: Provides composable mailbox implementations for actors, supporting priority-based message delivery, backpressure, and async message handling.
+**Purpose**: Provides composable mailbox implementations for actors, supporting priority-based message delivery, backpressure, deduplication, and a high-priority control-message lane.
 
 ## Overview
 
-This crate provides message queue abstractions for actors. Mailboxes are the communication mechanism between actors, enabling asynchronous message passing with various delivery guarantees and priorities.
+This crate provides the message queue abstraction used by every actor in PlexSpaces.  Each actor owns one `Mailbox` which internally maintains **two independent queues**:
+
+| Queue | Content | Back-pressure |
+|-------|---------|--------------|
+| `ctrl_queue` | Control messages (`__DOWN__`, `__EXIT__`, `__PING__`, `__INFO__`, …) | None — unbounded, never blocks |
+| `data_queue` | All other application messages (`call`, `cast`, `timer`, …) | Configurable (Error / DropOldest / DropNewest / Block) |
+
+On every `dequeue()` call the ctrl queue is checked first via a single atomic load (`ctrl_size: AtomicUsize`).  When no control messages are pending this is effectively free — one relaxed load + a branch that is always-not-taken at steady state.
+
+## Control-Message Convention
+
+A message is a **control message** when `message_type.starts_with("__")`.
+
+```rust
+use plexspaces_core::{is_ctrl_message, CTRL_MSG_PREFIX};
+
+assert!(is_ctrl_message("__DOWN__"));
+assert!(is_ctrl_message("__EXIT__"));
+assert!(is_ctrl_message("__PING__"));
+assert!(!is_ctrl_message("call"));
+```
+
+Built-in control messages:
+
+| Type | Direction | Meaning |
+|------|-----------|---------|
+| `__DOWN__` | node → watcher | Monitored actor terminated |
+| `__EXIT__` | node → linked | Linked actor terminated with error |
+| `__PING__` | caller → actor | Liveness probe (auto-replied as `__PONG__`) |
+| `__PONG__` | actor → caller | Automatic reply to `__PING__` |
+
+### PING / PONG Liveness Probe
+
+`__PING__` is handled automatically by the actor run loop — actor code never sees it.  The loop sends a `__PONG__` reply with the same `correlation_id` so an `ask()` future can match the response:
+
+```rust
+use plexspaces_core::create_ping_message;
+use std::time::Duration;
+
+// Send a PING and wait for PONG (≤ 100 ms = actor is live)
+let ping = create_ping_message(my_actor_id.as_str(), target_actor_id.as_str());
+let pong = target_actor_ref.ask(ping, Duration::from_millis(100)).await?;
+assert_eq!(pong.message_type, "__PONG__");
+```
 
 ## Key Components
 
 ### Mailbox
 
-Main mailbox abstraction:
-
 ```rust
-pub struct Mailbox {
-    config: MailboxConfig,
-    queue: Arc<RwLock<MessageQueue>>,
-}
-
 impl Mailbox {
-    pub async fn send(&self, message: Message) -> Result<(), MailboxError>;
-    pub async fn receive(&self) -> Result<Message, MailboxError>;
-    pub async fn try_receive(&self) -> Result<Option<Message>, MailboxError>;
-    pub fn len(&self) -> usize;
-    pub fn is_empty(&self) -> bool;
+    // Enqueue: ctrl messages go to the ctrl queue; data messages to the data queue
+    pub async fn enqueue(&self, message: Message) -> Result<(), MailboxError>;
+
+    // Dequeue: drains ctrl queue first, then data queue
+    pub fn dequeue(&self) -> impl Future<Output = Option<Message>>;
+    pub fn dequeue_with_timeout(&self, timeout: Option<Duration>) -> impl Future<Output = Option<Message>>;
+
+    // Size helpers
+    pub async fn size(&self) -> usize;         // data + ctrl
+    pub fn ctrl_size(&self) -> usize;          // ctrl only (atomic, O(1))
+
+    // Observability
+    pub async fn get_stats(&self) -> MailboxObservabilityStats;
 }
 ```
 
-### Message
-
-Message type with metadata:
+### MailboxObservabilityStats
 
 ```rust
-pub struct Message {
-    id: String,
-    payload: Vec<u8>,
-    sender: Option<String>,
-    priority: Priority,
-    timestamp: SystemTime,
-    metadata: HashMap<String, String>,
-    idempotency_key: Option<String>,  // For message deduplication
+pub struct MailboxObservabilityStats {
+    pub data_queue_size: usize,   // pending data messages
+    pub ctrl_queue_size: usize,   // pending control messages
+    pub total_enqueued:  usize,
+    pub total_dequeued:  usize,
+    pub backend_type:    String,
+    pub is_durable:      bool,
+}
+
+impl MailboxObservabilityStats {
+    pub fn total_size(&self) -> usize; // data_queue_size + ctrl_queue_size
 }
 ```
 
-**Idempotency Keys**: Messages can include an optional `idempotency_key` for deduplication. The mailbox uses an LRU cache to track processed idempotency keys within a configurable time window, preventing duplicate message processing.
+## Backpressure
 
-### MailboxConfig
-
-Configuration for mailbox behavior:
-
-```rust
-pub struct MailboxConfig {
-    max_size: Option<usize>,
-    priority_enabled: bool,
-    backpressure_strategy: BackpressureStrategy,
-}
-```
-
-## Features
-
-### Priority-Based Delivery
-
-Messages can have priorities (High, Normal, Low):
-
-```rust
-let message = new_message("data")
-    .with_priority(Priority::High);
-mailbox.send(message).await?;
-```
-
-### Backpressure Support
-
-Mailbox can handle backpressure when full:
+Backpressure applies **only to data messages**.  Control messages are never dropped or blocked regardless of how full the data queue is.
 
 ```rust
 pub enum BackpressureStrategy {
-    Block,      // Block sender until space available
-    DropOldest, // Drop oldest message
-    DropNewest, // Drop newest message
-    Reject,     // Reject new messages
+    Block,      // Return MailboxError::Full (default)
+    DropOldest, // Drop the oldest data message and accept the new one
+    DropNewest, // Silently drop the incoming message
+    Error,      // Same as Block
 }
 ```
 
-### Async Message Handling
+## Channel Backends
 
-Non-blocking message operations:
+The data queue is backed by a pluggable `Channel` trait:
 
-```rust
-// Non-blocking receive
-if let Some(msg) = mailbox.try_receive().await? {
-    // Process message
-}
+| Backend | Durable | Use Case |
+|---------|---------|----------|
+| `InMemory` (default) | No | Development, single-node |
+| `SQLite` | Yes | Single-node persistence |
+| `Redis` | Yes | Distributed, low-latency |
+| `Kafka` | Yes | High-throughput streaming |
+| `NATS` | Yes | Cloud-native messaging |
 
-// Blocking receive (waits for message)
-let msg = mailbox.receive().await?;
-```
+## Metrics (via `metrics` crate)
 
-### Idempotency and Deduplication
+| Counter | Labels | Description |
+|---------|--------|-------------|
+| `plexspaces_mailbox_ctrl_enqueued_total` | `mailbox_id` | Ctrl messages enqueued |
+| `plexspaces_mailbox_ctrl_dequeued_total` | `mailbox_id`, `message_type` | Ctrl messages dequeued |
+| `plexspaces_mailbox_size` | `actor_id`, `backend` | Current total mailbox size (gauge) |
 
-Messages with `idempotency_key` are automatically deduplicated:
+## Usage
 
-```rust
-use plexspaces_mailbox::Message;
-
-// Send message with idempotency key
-let message = new_message("data")
-    .with_idempotency_key("unique-request-id-123");
-
-mailbox.enqueue(message.clone()).await?;
-
-// Duplicate message with same idempotency key is skipped
-mailbox.enqueue(message).await?;  // Deduplicated, not processed again
-```
-
-**Implementation**: The mailbox uses an LRU cache with configurable size and TTL to track idempotency keys. Duplicate messages within the time window are automatically skipped.
-
-### Metrics and Monitoring
-
-Built-in hooks for metrics:
+### Basic
 
 ```rust
-pub trait MailboxMetrics {
-    fn on_message_sent(&self, priority: Priority);
-    fn on_message_received(&self, priority: Priority);
-    fn on_backpressure(&self, strategy: BackpressureStrategy);
-}
+use plexspaces_mailbox::{Mailbox, mailbox_config_default, new_message};
+use std::time::Duration;
+
+let mailbox = Mailbox::new(mailbox_config_default(), "my-actor".into()).await?;
+
+// Data message
+mailbox.enqueue(new_message(b"hello".to_vec())).await?;
+
+// Control message — goes to ctrl queue, returned first
+let mut down = new_message(vec![]);
+down.message_type = "__DOWN__".into();
+mailbox.enqueue(down).await?;
+
+// __DOWN__ arrives before "hello"
+let first = mailbox.dequeue().await.unwrap();
+assert_eq!(first.message_type, "__DOWN__");
 ```
 
-## Usage Examples
-
-### Basic Mailbox Usage
+### Building with MailboxBuilder
 
 ```rust
-use plexspaces_core::new_message;
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_mailbox::MailboxBuilder;
 
-let mailbox = Mailbox::new(MailboxConfig::default());
-
-// Send message
-let message = new_message("hello");
-mailbox.send(message).await?;
-
-// Receive message
-let received = mailbox.receive().await?;
+let mailbox = MailboxBuilder::new()
+    .with_capacity(10_000)
+    .build("actor-mailbox".into())
+    .await?;
 ```
 
-### Priority Mailbox
+## Performance
 
-```rust
-use plexspaces_mailbox::{Mailbox, MailboxConfig, Message, Priority};
-
-let config = MailboxConfig {
-    priority_enabled: true,
-    max_size: Some(1000),
-    backpressure_strategy: BackpressureStrategy::Block,
-};
-let mailbox = Mailbox::new(config);
-
-// Send high-priority message
-let urgent = new_message("urgent")
-    .with_priority(Priority::High);
-mailbox.send(urgent).await?;
-
-// Send normal-priority message
-let normal = new_message("normal")
-    .with_priority(Priority::Normal);
-mailbox.send(normal).await?;
-```
-
-### Backpressure Handling
-
-```rust
-use plexspaces_mailbox::{Mailbox, MailboxConfig, BackpressureStrategy};
-
-let config = MailboxConfig {
-    max_size: Some(100),
-    backpressure_strategy: BackpressureStrategy::DropOldest,
-    ..Default::default()
-};
-let mailbox = Mailbox::new(config);
-
-// If mailbox is full, oldest message will be dropped
-for i in 0..200 {
-    let msg = new_message(format!("msg{}", i));
-    mailbox.send(msg).await?; // May drop older messages
-}
-```
-
-## Performance Characteristics
-
-- **Message send**: < 1μs (in-memory)
-- **Message receive**: < 1μs (in-memory)
-- **Priority sorting**: O(log n) for priority queue
-- **Memory per message**: ~100 bytes (metadata overhead)
+- **Ctrl-queue enqueue**: ~1 atomic increment + unbounded channel send (no allocation)
+- **Ctrl-queue check on dequeue**: one `Relaxed` atomic load; zero mutex cost when empty
+- **Data enqueue**: channel send + optional priority-heap insertion
+- **Data dequeue**: channel recv (async, zero-copy for InMemory backend)
 
 ## Testing
 
 ```bash
-# Run all mailbox tests
-cargo test -p plexspaces-mailbox
-
-# Check coverage
-cargo tarpaulin -p plexspaces-mailbox --out Html
+cargo test -p plexspaces-mailbox --lib
 ```
-
-## Dependencies
-
-This crate depends on:
-- `tokio`: Async runtime
-- `serde`: Serialization
-- `uuid`: Message ID generation
-
-## Dependents
-
-This crate is used by:
-- `plexspaces_actor`: Actors use Mailbox for message delivery
-- `plexspaces_core`: Re-exports Mailbox and Message types
-- All other crates: For message passing
 
 ## References
 
-- Implementation: `crates/mailbox/src/`
-- Tests: `crates/mailbox/src/` (unit tests)
+- Architecture: [docs/architecture.md](../../docs/architecture.md)
+- Detailed design: [docs/detailed-design.md](../../docs/detailed-design.md)
+- Control messages: `crates/core/src/actor_monitor.rs` (`CTRL_MSG_PREFIX`, `is_ctrl_message`)
+- Durability: [docs/durability.md](../../docs/durability.md)

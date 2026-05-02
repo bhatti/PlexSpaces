@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 APP_ID="orleans-batch-predictor"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/batch_predictor_actor.wasm"

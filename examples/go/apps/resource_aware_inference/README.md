@@ -41,7 +41,7 @@ routing_workflow
 ./build.sh
 
 # Deploy and run all tests against a running PlexSpaces node
-./test.sh [HTTP_PORT]   # default port: 8092
+./test.sh [HTTP_PORT]   # default port: 8091
 ```
 
 ## Test Scenarios

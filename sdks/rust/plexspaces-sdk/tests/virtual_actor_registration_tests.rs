@@ -184,9 +184,12 @@ async fn test_virtual_actor_type_registration_on_spawn() {
         "test-namespace".to_string(),
         node.id().as_str().to_string(),
         service_locator.clone(),
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     );
     let get_msg = call_message(json!({}));
-    let reply = actor_ref3.ask(get_msg, Duration::from_secs(5)).await;
+    let reply = actor_ref3
+        .ask(&ctx, get_msg, Duration::from_secs(5))
+        .await;
     match &reply {
         Ok(reply_msg) => {
             let body: Value = serde_json::from_slice(&reply_msg.payload).unwrap_or(json!({}));

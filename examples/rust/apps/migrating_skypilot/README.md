@@ -42,7 +42,7 @@ Task shape: `task_id`, `task_type`, `gpu_required`, `gpu_memory_gb`, `cpu_cores`
 
 ```bash
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 Requires: Rust (`wasm32-wasip1`), `wasm-tools`, WASI adapter (e.g. from `jco`). See `build.sh` for `CARGO_PROFILE` / shared `target`.

@@ -553,6 +553,13 @@ mod tests {
         ) {
         }
 
+        async fn facet_container_for_actor(
+            &self,
+            _: &str,
+        ) -> Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> {
+            None
+        }
+
         // Node config
         async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
             None

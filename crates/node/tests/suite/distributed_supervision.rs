@@ -91,7 +91,7 @@ async fn test_monitor_local_actor() {
     register_actor_with_message_sender(&node, &worker_id, worker_mailbox.clone()).await;
 
     let ctx = node_request_context(&node).await;
-    let monitor_ref = node.monitor(&worker_id, &supervisor_id, &ctx).await;
+    let monitor_ref = node.monitor(&ctx, &worker_id, &supervisor_id).await;
     assert!(monitor_ref.is_ok(), "Monitoring local actor should succeed");
     assert!(
         !monitor_ref.unwrap().is_empty(),
@@ -107,9 +107,9 @@ async fn test_monitor_nonexistent_actor() {
     let ctx = node_request_context(&node).await;
     let result = node
         .monitor(
+            &ctx,
             &test_runtime_actor_id("nonexistent", "node1"),
             &test_runtime_actor_id("supervisor", "node1"),
-            &ctx,
         )
         .await;
 
@@ -135,7 +135,7 @@ async fn test_local_actor_termination_down_message() {
 
     // Establish monitor.
     let ctx = node_request_context(&node).await;
-    node.monitor(&worker_id, &supervisor_id, &ctx)
+    node.monitor(&ctx, &worker_id, &supervisor_id)
         .await
         .unwrap();
 
@@ -181,8 +181,8 @@ async fn test_multiple_monitors_same_actor() {
     let sup2_mailbox = register_supervisor(&node, &sup2_id).await;
 
     let ctx = node_request_context(&node).await;
-    node.monitor(&worker_id, &sup1_id, &ctx).await.unwrap();
-    node.monitor(&worker_id, &sup2_id, &ctx).await.unwrap();
+    node.monitor(&ctx, &worker_id, &sup1_id).await.unwrap();
+    node.monitor(&ctx, &worker_id, &sup2_id).await.unwrap();
 
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
@@ -232,8 +232,8 @@ async fn test_monitor_ref_uniqueness() {
     register_supervisor(&node, &sup2_id).await;
 
     let ctx = node_request_context(&node).await;
-    let mon1 = node.monitor(&worker_id, &sup1_id, &ctx).await.unwrap();
-    let mon2 = node.monitor(&worker_id, &sup2_id, &ctx).await.unwrap();
+    let mon1 = node.monitor(&ctx, &worker_id, &sup1_id).await.unwrap();
+    let mon2 = node.monitor(&ctx, &worker_id, &sup2_id).await.unwrap();
 
     assert_ne!(mon1, mon2, "Monitor refs should be unique");
 }
@@ -255,7 +255,7 @@ async fn test_actor_crash_reason_propagation() {
     let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
 
     let ctx = node_request_context(&node).await;
-    node.monitor(&worker_id, &supervisor_id, &ctx)
+    node.monitor(&ctx, &worker_id, &supervisor_id)
         .await
         .unwrap();
 
@@ -299,13 +299,13 @@ async fn test_demonitor_cancels_down_notification() {
     // Establish and then immediately cancel the monitor.
     let ctx = node_request_context(&node).await;
     let monitor_ref = node
-        .monitor(&worker_id, &supervisor_id, &ctx)
+        .monitor(&ctx, &worker_id, &supervisor_id)
         .await
         .unwrap();
 
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
-        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .demonitor(&ctx, &worker_id, &supervisor_id, &monitor_ref)
         .await
         .unwrap();
 
@@ -338,7 +338,7 @@ async fn test_monitor_down_on_shutdown() {
     let supervisor_mailbox = register_supervisor(&node, &supervisor_id).await;
 
     let ctx = node_request_context(&node).await;
-    node.monitor(&worker_id, &supervisor_id, &ctx)
+    node.monitor(&ctx, &worker_id, &supervisor_id)
         .await
         .unwrap();
 
@@ -377,19 +377,19 @@ async fn test_demonitor_idempotent() {
 
     let ctx = node_request_context(&node).await;
     let monitor_ref = node
-        .monitor(&worker_id, &supervisor_id, &ctx)
+        .monitor(&ctx, &worker_id, &supervisor_id)
         .await
         .unwrap();
 
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     // First demonitor — should succeed.
     actor_registry
-        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .demonitor(&ctx, &worker_id, &supervisor_id, &monitor_ref)
         .await
         .unwrap();
     // Second demonitor — must also succeed (idempotent, no panic/error).
     actor_registry
-        .demonitor(&worker_id, &supervisor_id, &monitor_ref)
+        .demonitor(&ctx, &worker_id, &supervisor_id, &monitor_ref)
         .await
         .unwrap();
 }

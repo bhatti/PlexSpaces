@@ -214,13 +214,16 @@ pub fn ask_helper(
             }
         }
 
-        if let Err(e) = registry.tell(&target_actor_id, message).await {
+        if let Err(e) = registry.tell(&ctx, &target_actor_id, message).await {
             waiter_registry.remove(&correlation_id).await;
             return Err(match e {
                 plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
                     ActorRefError::ActorNotFound(id.into())
                 }
                 plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                    ActorRefError::VisibilityDenied(msg)
+                }
                 other => ActorRefError::SendFailed(other.to_string()),
             });
         }
@@ -313,6 +316,9 @@ pub fn route_local(
                         ActorRefError::ActorNotFound(id.into())
                     }
                     plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                        ActorRefError::VisibilityDenied(msg)
+                    }
                     other => ActorRefError::SendFailed(other.to_string()),
                 });
 
@@ -338,6 +344,7 @@ pub fn route_local(
                         ActorRefError::Timeout => "timeout",
                         ActorRefError::ActorNotFound(_) => "not_found",
                         ActorRefError::InvalidActorId(_) => "invalid_actor_id",
+                        ActorRefError::VisibilityDenied(_) => "visibility_denied",
                         _ => "other",
                     };
                     metrics::counter!("plexspaces_routing_local_route_error_total",
@@ -351,13 +358,16 @@ pub fn route_local(
             result.map(|reply| (message_id, Some(reply)))
         } else {
             let result = actor_registry
-                .tell(&actor_id, message)
+                .tell(&ctx, &actor_id, message)
                 .await
                 .map_err(|e| match e {
                     plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
                         ActorRefError::ActorNotFound(id.into())
                     }
                     plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                        ActorRefError::VisibilityDenied(msg)
+                    }
                     other => ActorRefError::SendFailed(other.to_string()),
                 });
 
@@ -624,6 +634,8 @@ pub fn route_message(
 
         // Determine routing: local if node_id matches OR actor exists locally
         let is_local = is_actor_local(&target_actor_id, &service_locator).await;
+
+        // Local delivery enforces visibility inside [`ActorRegistry::tell`] / [`ActorRegistry::ask`].
 
         // OBSERVABILITY: Track routing decision
         metrics::counter!("plexspaces_routing_route_total",

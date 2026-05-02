@@ -126,6 +126,7 @@ pub async fn register_virtual_actor_type_consistent(
         facets: effective_proto_facets,
         labels: HashMap::new(),
         config: actor_config,
+        visibility: 0,
     };
     register_virtual_actor_definition(service_locator, spec).await
 }

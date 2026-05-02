@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 APP_ID="${2:-bank-test-ts}"
 WASM_FILE="$EXAMPLE_DIR/account_actor.wasm"
 CONFIG_FILE="$EXAMPLE_DIR/app-config.toml"

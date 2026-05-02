@@ -275,7 +275,9 @@ use ulid::Ulid;
 use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
 
 // Import proto types for gRPC communication
-use plexspaces_proto::actor::v1::{actor_service_client::ActorServiceClient, SendMessageRequest};
+use plexspaces_proto::actor::v1::{
+    actor_service_client::ActorServiceClient, ActorVisibility, SendMessageRequest,
+};
 use prost_types;
 // Message alias removed - using Message directly
 
@@ -303,6 +305,10 @@ pub enum ActorRefError {
 
     #[error("Remote messaging not implemented: {0}")]
     RemoteNotImplemented(String),
+
+    /// Caller failed actor visibility policy (tenant/namespace).
+    #[error("Actor visibility denied: {0}")]
+    VisibilityDenied(String),
 }
 
 /// A reference to an actor that can receive messages
@@ -394,12 +400,15 @@ enum ActorRefInner {
         /// ServiceLocator for service access (shared across all ActorRefs)
         /// Used for service discovery, creating remote ActorRefs, metrics, etc.
         service_locator: Arc<dyn ServiceLocatorTrait>,
+        /// Spawn-time [`ActorVisibility`] from spec (enforced on tell/ask with caller context).
+        visibility: ActorVisibility,
     },
     /// Remote actor (uses ServiceLocator for gRPC client caching)
     Remote {
         node_id: String,
         /// ServiceLocator for gRPC client caching and service access (shared across all ActorRefs)
         service_locator: Arc<dyn ServiceLocatorTrait>,
+        visibility: ActorVisibility,
     },
 }
 
@@ -435,6 +444,7 @@ impl ActorRef {
         namespace: impl Into<String>,
         mailbox: Arc<Mailbox>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
+        visibility: ActorVisibility,
     ) -> Self {
         Self {
             id: id.into(),
@@ -443,6 +453,7 @@ impl ActorRef {
             inner: ActorRefInner::Local {
                 mailbox,
                 service_locator,
+                visibility,
             },
             actor_type: Arc::new(RwLock::new(None)),
             behavior_kind: Arc::new(RwLock::new(None)),
@@ -484,6 +495,7 @@ impl ActorRef {
         namespace: impl Into<String>,
         node_id: impl Into<String>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
+        visibility: ActorVisibility,
     ) -> Self {
         Self {
             id: id.into(),
@@ -492,6 +504,7 @@ impl ActorRef {
             inner: ActorRefInner::Remote {
                 node_id: node_id.into(),
                 service_locator,
+                visibility,
             },
             actor_type: Arc::new(RwLock::new(None)),
             behavior_kind: Arc::new(RwLock::new(None)),
@@ -599,11 +612,6 @@ impl ActorRef {
             .unwrap_or(false)
     }
 
-    /// Get the caller's node ID from ActorRegistry
-    ///
-    /// ## Purpose
-    /// Used to create temporary sender IDs that include the caller's node_id
-    /// for proper remote routing of replies.
     async fn get_caller_node_id(&self) -> Result<String, ActorRefError> {
         match &self.inner {
             ActorRefInner::Local {
@@ -711,21 +719,6 @@ impl ActorRef {
         use plexspaces_core::RequestContext;
         RequestContext::new_without_auth(self.tenant_id.clone(), self.namespace.clone())
     }
-    ///
-    /// ## When to Use
-    /// - Always pass tenant_id from the external call/auth when available
-    /// - For internal operations where auth is disabled, pass empty string
-    async fn get_default_request_context(
-        &self,
-        tenant_id: impl Into<String>,
-    ) -> Result<plexspaces_core::RequestContext, ActorRefError> {
-        use plexspaces_core::RequestContext;
-        // Tenant comes from caller (auth), namespace from this ActorRef
-        Ok(RequestContext::new_without_auth(
-            tenant_id.into(),
-            self.namespace.clone(),
-        ))
-    }
 
     /// Get the remote node ID (if remote)
     pub fn remote_node_id(&self) -> Option<&str> {
@@ -758,9 +751,11 @@ impl ActorRef {
     ///
     /// ## Purpose
     /// Unified `tell()` pattern that supports both local and remote actors.
-    /// No ActorContext required - ActorRef is self-contained.
     ///
     /// ## Arguments
+    /// * `ctx` - Caller's [`plexspaces_core::RequestContext`] (same tenant/namespace semantics as
+    ///   [`ActorRegistry::tell`](plexspaces_core::ActorRegistry::tell): JWT-derived tenant and
+    ///   request-scoped namespace from gRPC/HTTP middleware, not fields on [`Message`].
     /// * `message` - Message to send
     ///
     /// ## Returns
@@ -793,18 +788,26 @@ impl ActorRef {
     /// ## Examples
     /// ```rust,ignore
     /// // Send message (works for local and remote)
-    /// actor_ref.tell(message).await?;
+    /// actor_ref.tell(&ctx, message).await?;
     ///
     /// // Also accepts mailbox Message directly (no .to_proto() needed)
     /// let msg = plexspaces_mailbox::Message::json(&data)?.with_message_type("foo");
-    /// actor_ref.tell(msg).await?;
+    /// actor_ref.tell(&ctx, msg).await?;
     /// ```
-    pub async fn tell(&self, message: impl Into<Message>) -> Result<(), ActorRefError> {
-        self.tell_impl(message.into()).await
+    pub async fn tell(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        message: impl Into<Message>,
+    ) -> Result<(), ActorRefError> {
+        self.tell_impl(ctx, message.into()).await
     }
 
     /// Internal implementation of tell() - used by both inherent method and MessageSender trait
-    async fn tell_impl(&self, message: Message) -> Result<(), ActorRefError> {
+    async fn tell_impl(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        message: Message,
+    ) -> Result<(), ActorRefError> {
         use plexspaces_core::monitoring;
 
         let actor_id = self.id.clone();
@@ -911,7 +914,8 @@ impl ActorRef {
         let result = match &self.inner {
             ActorRefInner::Local {
                 mailbox,
-                service_locator,
+                service_locator: _,
+                visibility,
             } => {
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(
@@ -921,6 +925,17 @@ impl ActorRef {
                         correlation_id = ?message.correlation_id,
                         "[TELL] LOCAL PATH"
                     );
+                }
+
+                if let Err(msg) =
+                    plexspaces_core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
+                        ctx,
+                        self.tenant_id(),
+                        self.namespace(),
+                        visibility.clone(),
+                    )
+                {
+                    return Err(ActorRefError::VisibilityDenied(msg));
                 }
 
                 // REQUEST or normal message → send to mailbox
@@ -965,6 +980,7 @@ impl ActorRef {
             ActorRefInner::Remote {
                 node_id,
                 service_locator,
+                visibility,
             } => {
                 // VALIDATION: Remote ActorRef must NOT point to local node (misconfiguration)
                 if let Some(ref local_id) = local_node_id {
@@ -975,6 +991,17 @@ impl ActorRef {
                             node_id, local_id
                         )));
                     }
+                }
+
+                if let Err(msg) =
+                    plexspaces_core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
+                        ctx,
+                        self.tenant_id(),
+                        self.namespace(),
+                        visibility.clone(),
+                    )
+                {
+                    return Err(ActorRefError::VisibilityDenied(msg));
                 }
 
                 // REMOTE PATH: Use gRPC client directly (not ActorService)
@@ -997,8 +1024,8 @@ impl ActorRef {
                     // Convert message to proto
                     let proto_message = Self::to_proto_message(&message, &self.id)?;
 
-                    // Create request
-                    let request = tonic::Request::new(SendMessageRequest {
+                    // Create request and attach caller identity for remote ActorService (JWT / tenant)
+                    let mut request = tonic::Request::new(SendMessageRequest {
                         namespace: self.namespace().to_string(),
                         actor_type: self.id.actor_type().to_string(),
                         actor_name: self.id.name().to_string(),
@@ -1014,6 +1041,7 @@ impl ActorRef {
                         reply_to: proto_message.reply_to,
                         message_id: proto_message.id,
                     });
+                    plexspaces_core::apply_request_context_to_grpc_metadata(ctx, request.metadata_mut());
 
                     // Send via gRPC
                     client_ref.send_message(request).await.map_err(|e| {
@@ -1137,7 +1165,7 @@ impl ActorRef {
     /// ```rust,ignore
     /// // Send request and wait for reply (works for local and remote)
     /// let request = create_test_message(b"get_state".to_vec());
-    /// let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+    /// let reply = actor_ref.ask(&ctx, request, Duration::from_secs(5)).await?;
     /// println!("Received: {:?}", reply.payload);
     /// ```
     ///
@@ -1145,8 +1173,12 @@ impl ActorRef {
     /// - `ActorRefError::Timeout` - No reply received within timeout
     /// - `ActorRefError::SendFailed` - Failed to send request message
     /// - `ActorRefError::ActorTerminated` - Actor terminated before reply
+    ///
+    /// ## Arguments
+    /// * `ctx` - Caller's [`plexspaces_core::RequestContext`] (JWT / gRPC / HTTP boundary), same as [`Self::tell`].
     pub async fn ask(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         mut message: Message,
         timeout: Duration,
     ) -> Result<Message, ActorRefError> {
@@ -1205,13 +1237,9 @@ impl ActorRef {
             )));
         }
 
-        // Use unified route_message for both local and remote routing
-        // CRITICAL: Use tenant_id from ActorRef (flows from API → ActorBuilder → ActorRef)
-        let ctx = self.get_request_context();
-
         // Use unified routing (returns Future for parallel operations)
         let routing_result = crate::routing::route_message(
-            ctx,
+            ctx.clone(),
             self.service_locator().clone(),
             target_actor_id.to_string(),
             message,
@@ -1373,20 +1401,23 @@ impl PartialEq for ActorRef {
 
 #[async_trait]
 impl MessageSender for ActorRef {
-    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Call the internal implementation to avoid recursion
-        self.tell_impl(message)
+    async fn tell(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.tell_impl(ctx, message)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn ask(
         &self,
+        ctx: &plexspaces_core::RequestContext,
         message: Message,
         timeout: std::time::Duration,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-        // Delegate to ActorRef::ask() which handles correlation-based reply routing
-        ActorRef::ask(self, message, timeout)
+        ActorRef::ask(self, ctx, message, timeout)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -1500,6 +1531,11 @@ mod tests {
         test_actor_id(name, node_id).to_string()
     }
 
+    /// Minimal caller scope for `tell`/`ask` in unit tests (auth off; tenant/namespace empty).
+    fn tell_test_ctx() -> plexspaces_core::RequestContext {
+        plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
+    }
+
     /// TEST 1: Can create a local ActorRef
     #[tokio::test]
     async fn test_create_local_actor_ref() {
@@ -1511,6 +1547,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         assert_eq!(actor_ref.id(), &test_actor_id("test-actor", "test-node"));
@@ -1534,6 +1571,7 @@ mod tests {
             "test",
             "node1",
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         assert_eq!(actor_ref.id(), &test_actor_id("remote-actor", "node1"));
@@ -1553,6 +1591,7 @@ mod tests {
             "test",
             mailbox.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
@@ -1579,7 +1618,8 @@ mod tests {
 
         // Send message
         let message_id = message.id.clone();
-        actor_ref.tell(message).await.unwrap();
+        let ctx = tell_test_ctx();
+        actor_ref.tell(&ctx, message).await.unwrap();
 
         // Verify received
         let received = mailbox_clone.dequeue().await.unwrap();
@@ -1600,6 +1640,7 @@ mod tests {
             "ns-a",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         actor_ref.set_actor_type(Some("counter".to_string())).await;
         actor_ref
@@ -1628,6 +1669,7 @@ mod tests {
             "ns-a",
             "test-node-2",
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         let sender: Arc<dyn MessageSender> = Arc::new(actor_ref);
         assert_eq!(sender.tenant_id(), Some("tenant-a"));
@@ -1653,9 +1695,7 @@ mod tests {
         async fn spawn_actor(
             &self,
             _ctx: &plexspaces_core::RequestContext,
-            _actor_id: &str,
-            _actor_type: &str,
-            _initial_state: Vec<u8>,
+            _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
@@ -1746,6 +1786,7 @@ mod tests {
             "test",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let msg = create_test_message(b"data".to_vec());
@@ -1766,6 +1807,7 @@ mod tests {
             "test",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let message = create_test_message(b"hello".to_vec());
@@ -1787,6 +1829,7 @@ mod tests {
             "test",
             mailbox.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
@@ -1820,8 +1863,9 @@ mod tests {
         let msg1_id = format!("req-{}", msg1.id);
         let msg2_id = format!("req-{}", msg2.id);
 
-        actor_ref1.tell(msg1).await.unwrap();
-        actor_ref2.tell(msg2).await.unwrap();
+        let ctx = tell_test_ctx();
+        actor_ref1.tell(&ctx, msg1).await.unwrap();
+        actor_ref2.tell(&ctx, msg2).await.unwrap();
 
         // Both messages received
         let received1 = mailbox_clone.dequeue().await.unwrap();
@@ -1844,6 +1888,7 @@ mod tests {
             "test",
             mailbox1.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         let ref2 = ActorRef::local(
             test_actor_id("actor-1", "test-node"),
@@ -1851,6 +1896,7 @@ mod tests {
             "test",
             mailbox1.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
         let ref3 = ActorRef::local(
             test_actor_id("actor-2", "test-node"),
@@ -1858,6 +1904,7 @@ mod tests {
             "test",
             mailbox2.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         assert_eq!(ref1, ref2); // Same ID and location
@@ -1875,6 +1922,7 @@ mod tests {
             "test",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let debug_str = format!("{:?}", actor_ref);
@@ -1949,6 +1997,7 @@ mod tests {
             "test",
             mailbox.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
@@ -1974,7 +2023,8 @@ mod tests {
         let message = create_test_message(b"hello".to_vec());
         let message_id = message.id.clone();
 
-        actor_ref.tell(message).await.unwrap();
+        let ctx = tell_test_ctx();
+        actor_ref.tell(&ctx, message).await.unwrap();
 
         let received = mailbox_clone.dequeue().await.unwrap();
         assert_eq!(received.id, format!("req-{}", message_id));
@@ -1996,9 +2046,7 @@ mod tests {
             async fn spawn_actor(
                 &self,
                 _ctx: &plexspaces_core::RequestContext,
-                _actor_id: &str,
-                _actor_type: &str,
-                _initial_state: Vec<u8>,
+                _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
             ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
@@ -2068,11 +2116,13 @@ mod tests {
             "test".to_string(), // namespace
             "node2".to_string(),
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         let message = create_test_message(b"remote hello".to_vec());
         // Remote tell will fail (no server), but that's expected in unit test
-        let result = actor_ref.tell(message.clone()).await;
+        let ctx = tell_test_ctx();
+        let result = actor_ref.tell(&ctx, message.clone()).await;
         // Should fail with connection error (no server running)
         // The remote ActorRef tries to connect via gRPC, which fails without a server
         assert!(result.is_err());
@@ -2126,6 +2176,7 @@ mod tests {
             "test".to_string(),
             Arc::clone(&target_mailbox_arc),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
@@ -2155,7 +2206,11 @@ mod tests {
 
         // Send via ActorRef - ReplyWaiterRegistry routes it if there's a pending ask
         // For this test, we just verify the message can be sent
-        target_ref.tell(reply_message.clone()).await.unwrap();
+        let ctx = tell_test_ctx();
+        target_ref
+            .tell(&ctx, reply_message.clone())
+            .await
+            .unwrap();
 
         // Verify message was received
         let received = target_mailbox_arc.dequeue().await.unwrap();
@@ -2176,11 +2231,15 @@ mod tests {
             "test".to_string(),
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Use unified ask() API - sends to self and waits for reply
         let request = create_test_message(b"request".to_vec());
-        let result = actor_ref.ask(request, Duration::from_millis(100)).await;
+        let ctx = tell_test_ctx();
+        let result = actor_ref
+            .ask(&ctx, request, Duration::from_millis(100))
+            .await;
 
         // Should timeout since no reply will be sent
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
@@ -2209,9 +2268,7 @@ mod tests {
             async fn spawn_actor(
                 &self,
                 _ctx: &plexspaces_core::RequestContext,
-                _actor_id: &str,
-                _actor_type: &str,
-                _initial_state: Vec<u8>,
+                _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
             ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
@@ -2276,12 +2333,16 @@ mod tests {
             "test".to_string(), // namespace
             "node2".to_string(),
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
 
-        // Use unified ask() API - no ActorContext needed
+        // Use unified ask() API
         let request = create_test_message(b"remote request".to_vec());
         // Remote ask will fail (no server), but that's expected in unit test
-        let result = actor_ref.ask(request, Duration::from_secs(1)).await;
+        let ctx = tell_test_ctx();
+        let result = actor_ref
+            .ask(&ctx, request, Duration::from_secs(1))
+            .await;
         // Should fail with connection error (no server running)
         // The remote ActorRef tries to connect via gRPC, which fails without a server
         assert!(result.is_err());
@@ -2300,9 +2361,13 @@ mod tests {
             "test",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         let request = create_test_message(b"request".to_vec());
-        let result = actor_ref.ask(request, Duration::from_millis(10)).await;
+        let ctx = tell_test_ctx();
+        let result = actor_ref
+            .ask(&ctx, request, Duration::from_millis(10))
+            .await;
 
         // Should timeout since no reply will be sent
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
@@ -2335,10 +2400,14 @@ mod tests {
             "test",
             mailbox,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         // Send request but no one will reply (simulates terminated actor)
         let request = create_test_message(b"request".to_vec());
-        let result = actor_ref.ask(request, Duration::from_millis(10)).await;
+        let ctx = tell_test_ctx();
+        let result = actor_ref
+            .ask(&ctx, request, Duration::from_millis(10))
+            .await;
 
         // Should timeout since no reply will come
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
@@ -2379,6 +2448,7 @@ mod tests {
             "test",
             mailbox1.clone(),
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register actor before calling tell()
@@ -2401,8 +2471,9 @@ mod tests {
                 .await;
         }
 
+        let ctx = tell_test_ctx();
         actor_ref1
-            .tell(create_test_message(b"local".to_vec()))
+            .tell(&ctx, create_test_message(b"local".to_vec()))
             .await
             .unwrap();
         assert!(mailbox1_clone.dequeue().await.is_some());
@@ -2420,9 +2491,7 @@ mod tests {
             async fn spawn_actor(
                 &self,
                 _ctx: &plexspaces_core::RequestContext,
-                _actor_id: &str,
-                _actor_type: &str,
-                _initial_state: Vec<u8>,
+                _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
             ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
@@ -2491,9 +2560,10 @@ mod tests {
             "test",
             mailbox2,
             service_locator,
+            ActorVisibility::ActorVisibilityPublic,
         );
         actor_ref2
-            .tell(create_test_message(b"remote".to_vec()))
+            .tell(&ctx, create_test_message(b"remote".to_vec()))
             .await
             .unwrap();
         assert!(mailbox2_clone.dequeue().await.is_some());
@@ -2535,6 +2605,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Create a ReplyWaiter and register it in ReplyWaiterRegistry
@@ -2578,6 +2649,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Try to notify with unknown correlation_id
@@ -2599,6 +2671,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register multiple waiters in ReplyWaiterRegistry
@@ -2675,6 +2748,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register multiple waiters in ReplyWaiterRegistry
@@ -2719,6 +2793,7 @@ mod tests {
             "test",
             mailbox,
             service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         );
 
         // Register a waiter in ReplyWaiterRegistry

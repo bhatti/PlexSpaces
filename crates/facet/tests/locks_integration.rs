@@ -180,6 +180,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
                 String::new(),
                 mailbox_for_ref,
                 node.service_locator().clone(),
+                plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -263,7 +264,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let reply = actor_ref
-                .ask(acquire_msg, ASK_TIMEOUT)
+                .ask(&ctx, acquire_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to acquire lock");
 
@@ -275,6 +276,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
 
             let acquire_reply2 = actor_ref
                 .ask(
+                    &ctx,
                     json_message(
                         &json!({
                             "lock_key": lock_key,
@@ -303,7 +305,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let release_reply = actor_ref
-                .ask(release_msg, ASK_TIMEOUT)
+                .ask(&ctx, release_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to release lock");
 
@@ -360,11 +362,13 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 String::new(),
                 node_clone1.id().as_str().to_string(),
                 node_clone1.service_locator().clone(),
+                plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
 
             let actor_id1_str = actor_id1.to_string();
             actor_ref1
                 .ask(
+                    &ctx1,
                     json_message(
                         &json!({
                             "lock_key": lock_key,
@@ -425,10 +429,12 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 String::new(),
                 node_clone2.id().as_str().to_string(),
                 node_clone2.service_locator().clone(),
+                plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
 
             let try_reply = actor_ref2
                 .ask(
+                    &ctx2,
                     json_message(
                         &json!({
                             "lock_key": lock_key,
@@ -481,7 +487,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
 
             let get_msg = json_message(&json!(lock_key), "get_lock");
             let get_reply = actor_ref
-                .ask(get_msg, ASK_TIMEOUT)
+                .ask(&ctx, get_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to get lock");
 
@@ -491,6 +497,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
 
             actor_ref
                 .ask(
+                    &ctx,
                     json_message(
                         &json!({
                             "lock_key": lock_key,
@@ -505,7 +512,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .expect("Failed to acquire lock");
 
             let get_reply2 = actor_ref
-                .ask(json_message(&json!(lock_key), "get_lock"), ASK_TIMEOUT)
+                .ask(&ctx, json_message(&json!(lock_key), "get_lock"), ASK_TIMEOUT)
                 .await
                 .expect("Failed to get lock");
 
@@ -571,6 +578,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             let actor_ref = get_actor_ref_after_spawn(node, &actor_id).await;
             let reply = actor_ref
                 .ask(
+                    &ctx,
                     json_message(
                         &json!({
                             "lock_key": lock_key,

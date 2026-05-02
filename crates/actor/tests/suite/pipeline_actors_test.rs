@@ -332,7 +332,7 @@ async fn test_input_actor_processes_messages() {
 
     // Ask for response
     let response = input_ref
-        .ask(request, Duration::from_secs(5))
+        .ask(&ctx, request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -375,7 +375,7 @@ async fn test_processor_actor_filters_events() {
 
     // Ask for response
     let response = processor_ref
-        .ask(request, Duration::from_secs(5))
+        .ask(&ctx, request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -422,7 +422,7 @@ async fn test_output_actor_sends_events() {
 
     // Ask for response
     let response = output_ref
-        .ask(request, Duration::from_secs(5))
+        .ask(&ctx, request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -480,7 +480,7 @@ async fn test_full_pipeline() {
     );
 
     let input_response = input_ref
-        .ask(input_request, Duration::from_secs(5))
+        .ask(&ctx, input_request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -500,7 +500,7 @@ async fn test_full_pipeline() {
     );
 
     let processor_response = processor_ref
-        .ask(processor_request, Duration::from_secs(5))
+        .ask(&ctx, processor_request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -521,7 +521,7 @@ async fn test_full_pipeline() {
     );
 
     let output_response = output_ref
-        .ask(output_request, Duration::from_secs(5))
+        .ask(&ctx, output_request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -574,6 +574,7 @@ async fn test_concurrent_pipeline_processing() {
         let input_ref_clone = input_ref.clone();
         let processor_ref_clone = processor_ref.clone();
         let output_ref_clone = output_ref.clone();
+        let pipe_ctx = ctx.clone();
         let task = tokio::spawn(async move {
             // Stage 1: Input
             let ingest_msg = PipelineMessage::Ingest {
@@ -588,7 +589,7 @@ async fn test_concurrent_pipeline_processing() {
             };
 
             let input_response = input_ref_clone
-                .ask(input_request, Duration::from_secs(5))
+                .ask(&pipe_ctx, input_request, Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Input actor ask failed: {}", e))?;
             let input_result: PipelineMessage = serde_json::from_slice(&input_response.payload)
@@ -611,7 +612,7 @@ async fn test_concurrent_pipeline_processing() {
             };
 
             let processor_response = processor_ref_clone
-                .ask(processor_request, Duration::from_secs(5))
+                .ask(&pipe_ctx, processor_request, Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Processor actor ask failed: {}", e))?;
             let processor_result: PipelineMessage =
@@ -635,7 +636,7 @@ async fn test_concurrent_pipeline_processing() {
             };
 
             let output_response = output_ref_clone
-                .ask(output_request, Duration::from_secs(5))
+                .ask(&pipe_ctx, output_request, Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Output actor ask failed: {}", e))?;
             let output_result: PipelineMessage =

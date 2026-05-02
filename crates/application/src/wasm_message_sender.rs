@@ -7,7 +7,8 @@
 //!
 //! Bridges WASM host function calls to the actor framework.
 //! Implements [`plexspaces_wasm_runtime::MessageSender`] using:
-//! - ActorRegistry for tell and ask so passivated virtual actors are reactivated
+//! - `ActorRegistry` for `tell` and `ask` so passivated virtual actors are reactivated (`tell`
+//!   uses the sender actor’s registered tenant/namespace as `RequestContext`)
 //! - ActorFactory for stop_actor with tenant isolation
 //!
 //! Actor IDs follow the canonical `{name}//{actor_type}::{namespace}@{node_id}` format (e.g.,
@@ -17,7 +18,7 @@
 
 use async_trait::async_trait;
 use plexspaces_common::dialable_node_address;
-use plexspaces_core::{ActorService, ServiceLocator};
+use plexspaces_core::ActorService;
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
@@ -248,7 +249,6 @@ impl MessageSender for ActorServiceMessageSender {
         message_type: &str,
         message: &[u8],
     ) -> Result<(), String> {
-        use plexspaces_core::ActorId;
         use plexspaces_core::ActorRegistry;
 
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
@@ -270,10 +270,13 @@ impl MessageSender for ActorServiceMessageSender {
             .actor_registry()
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let to_id = ActorId::from_canonical(to)
-            .map_err(|e| format!("Invalid canonical actor ID '{to}': {e}"))?;
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
+        // resolve_actor_id handles canonical, "type:name", and bare-type addressing.
+        let to_id = registry.resolve_actor_id(&ctx, to).await?;
         registry
-            .tell(&to_id, msg)
+            .tell(&ctx, &to_id, msg)
             .await
             .map_err(|e| e.to_string())
     }
@@ -311,7 +314,6 @@ impl MessageSender for ActorServiceMessageSender {
             .request_context_from_registered_sender_actor(from)
             .await?;
 
-        use plexspaces_core::ActorId;
         use plexspaces_core::ActorRegistry;
 
         let registry: Arc<ActorRegistry> = self
@@ -319,8 +321,8 @@ impl MessageSender for ActorServiceMessageSender {
             .actor_registry()
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
-        let to_id = ActorId::from_canonical(to)
-            .map_err(|e| format!("Invalid canonical actor ID '{to}': {e}"))?;
+        // resolve_actor_id handles canonical, "type:name", and bare-type addressing.
+        let to_id = registry.resolve_actor_id(&ctx, to).await?;
 
         let msg = Message {
             id: request_id.clone(),
@@ -367,8 +369,6 @@ impl MessageSender for ActorServiceMessageSender {
         labels: Vec<(String, String)>,
         _durable: bool,
     ) -> Result<String, String> {
-        let _labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
-
         // For now, use module_ref as actor_type
         // TODO: Resolve module_ref to get actual actor_type
         let actor_type = module_ref.to_string();
@@ -376,14 +376,31 @@ impl MessageSender for ActorServiceMessageSender {
         let ctx = self
             .request_context_from_registered_sender_actor(from)
             .await?;
+        let labels_map: std::collections::HashMap<String, String> =
+            labels.into_iter().collect();
+        // WASM host still supplies legacy JSON bytes for `initial_state`; map into spec fields.
+        let (role_hint, args_map) =
+            plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+        use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
+        use plexspaces_proto::common::v1::ActorIdentity;
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.unwrap_or_else(|| ulid::Ulid::new().to_string()),
+                actor_type,
+            }),
+            role: role_hint.unwrap_or_default(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: ActorVisibility::ActorVisibilityPublic as i32,
+            behavior_kind: String::new(),
+            args: args_map,
+            facets: vec![],
+            config: None,
+            labels: labels_map,
+        };
         let spawned_id = self
             .actor_service
-            .spawn_actor(
-                &ctx,
-                &actor_id.unwrap_or_else(|| ulid::Ulid::new().to_string()),
-                &actor_type,
-                initial_state,
-            )
+            .spawn_actor(&ctx, &spec)
             .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
 
@@ -415,7 +432,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn link_actor(
         &self,
-        _from: &str,
+        from: &str,
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), String> {
@@ -434,8 +451,12 @@ impl MessageSender for ActorServiceMessageSender {
         let actor2_id = ActorId::from_canonical(linked_actor_id)
             .map_err(|e| format!("Invalid canonical linked actor ID '{linked_actor_id}': {e}"))?;
 
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
+
         actor_registry
-            .link(&actor1_id, &actor2_id)
+            .link(&ctx, &actor1_id, &actor2_id)
             .await
             .map_err(|e| format!("Failed to link actors: {}", e))?;
 
@@ -444,7 +465,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn unlink_actor(
         &self,
-        _from: &str,
+        from: &str,
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), String> {
@@ -463,8 +484,12 @@ impl MessageSender for ActorServiceMessageSender {
         let actor2_id = ActorId::from_canonical(linked_actor_id)
             .map_err(|e| format!("Invalid canonical linked actor ID '{linked_actor_id}': {e}"))?;
 
+        let ctx = self
+            .request_context_from_registered_sender_actor(from)
+            .await?;
+
         actor_registry
-            .unlink(&actor1_id, &actor2_id)
+            .unlink(&ctx, &actor1_id, &actor2_id)
             .await
             .map_err(|e| format!("Failed to unlink actors: {}", e))?;
 
@@ -489,12 +514,9 @@ impl MessageSender for ActorServiceMessageSender {
             .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
         let monitor_id = ActorId::from_canonical(from)
             .map_err(|e| format!("Invalid canonical monitor actor ID '{from}': {e}"))?;
-        let monitor_ref = ulid::Ulid::new().to_string();
 
-        // Register the monitor. When the target terminates, ActorRegistry delivers a
-        // __DOWN__ message directly to the monitoring actor's mailbox — no separate channel needed.
-        actor_registry
-            .monitor(&target_id, &monitor_id, monitor_ref.clone(), &ctx)
+        let monitor_ref = actor_registry
+            .monitor(&ctx, &target_id, &monitor_id)
             .await
             .map_err(|e| format!("Failed to monitor actor: {}", e))?;
 
@@ -551,13 +573,17 @@ impl MessageSender for ActorServiceMessageSender {
                 .await
                 .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
+            let ctx = self
+                .request_context_from_registered_sender_actor(from)
+                .await?;
+
             let target_id = ActorId::from_canonical(actor_id)
                 .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
             let monitor_id = ActorId::from_canonical(from)
                 .map_err(|e| format!("Invalid canonical monitor actor ID '{from}': {e}"))?;
 
             actor_registry
-                .demonitor(&target_id, &monitor_id, &monitor_ref_string)
+                .demonitor(&ctx, &target_id, &monitor_id, &monitor_ref_string)
                 .await
                 .map_err(|e| format!("Failed to demonitor actor: {}", e))?;
 
@@ -970,9 +996,7 @@ mod tests {
         async fn spawn_actor(
             &self,
             _ctx: &plexspaces_core::RequestContext,
-            _actor_id: &str,
-            _actor_type: &str,
-            _initial_state: Vec<u8>,
+            _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("not needed for this test".into())
         }

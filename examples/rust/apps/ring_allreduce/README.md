@@ -108,7 +108,7 @@ Deploy and run:
 Or target a specific node list:
 
 ```bash
-./test.sh "localhost:8092 localhost:8094"
+./test.sh "localhost:8091 localhost:8094"
 ```
 
 ## Metrics

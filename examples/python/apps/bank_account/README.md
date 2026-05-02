@@ -106,7 +106,7 @@ RUST_LOG=info cargo run -p plexspaces-cli -- start --node-id test-node --listen-
 
 Then in another terminal:
 ```bash
-./test.sh 8092       # HTTP port is gRPC port + 1
+./test.sh 8091       # gRPC and HTTP share a single port
 ```
 
 ## Operations

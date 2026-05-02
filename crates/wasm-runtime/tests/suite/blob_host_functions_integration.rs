@@ -85,6 +85,7 @@ mod tests {
             Some(blob_service), // blob_service
             None,               // elastic_pool_service
             None,               // outbound_http_client
+            None,               // shared_timer_pool
         ))
     }
 
@@ -434,6 +435,7 @@ mod tests {
             None, None, None, None, None, None, None, None,
             None, // No blob_service, no elastic_pool
             None, // No outbound HTTP client
+            None, // No shared timer pool
         ));
         let mut blob_impl = create_test_blob_impl(host_functions);
 

@@ -57,7 +57,10 @@ use crate::resource::ResourceProfile;
 use crate::Actor as ActorStruct;
 use plexspaces_core::{Actor, ActorId};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::actor::ActorConfig;
+use std::collections::HashMap;
 use std::sync::Arc;
 // Note: mailbox_config_default() is not exported, so we'll use MailboxConfig::default() and set capacity
 
@@ -83,6 +86,12 @@ pub struct ActorBuilder {
     resource_profile: Option<ResourceProfile>,
     config: Option<ActorConfig>,
     node_id: Option<String>,
+    /// Spawn visibility from [`ActorSpawnSpec`]. Defaults to PUBLIC for programmatic builders.
+    visibility: ActorVisibility,
+    role: String,
+    behavior_kind: String,
+    args: HashMap<String, String>,
+    labels: HashMap<String, String>,
 }
 
 impl ActorBuilder {
@@ -107,6 +116,11 @@ impl ActorBuilder {
             resource_profile: None,
             config: None,
             node_id: None,
+            visibility: ActorVisibility::ActorVisibilityPublic,
+            role: String::new(),
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            labels: HashMap::new(),
         }
     }
 
@@ -135,10 +149,63 @@ impl ActorBuilder {
         }
         builder.namespace = spec.namespace.clone();
         builder.tenant_id = spec.tenant_id.clone();
+        builder.visibility = ActorVisibility::try_from(spec.visibility)
+            .unwrap_or(ActorVisibility::ActorVisibilityPublic);
+        builder.role = spec.role.clone();
+        builder.behavior_kind = spec.behavior_kind.clone();
+        builder.args = spec.args.clone();
+        builder.labels = spec.labels.clone();
         if let Some(config) = spec.config.clone() {
             builder.config = Some(config);
         }
         builder
+    }
+
+    /// Snapshot builder fields into an [`ActorSpawnSpec`] for factory / RPC boundaries.
+    ///
+    /// `runtime_actor_type` must be the resolved behavior class (for example after virtual-name
+    /// resolution), matching [`ActorFactory`] expectations.
+    pub fn to_spawn_spec(&self, runtime_actor_type: impl Into<String>) -> ActorSpawnSpec {
+        let actor_type = runtime_actor_type.into();
+        let name = self
+            .actor_name
+            .clone()
+            .or_else(|| self.actor_id.as_ref().map(|id| id.name().to_string()))
+            .unwrap_or_default();
+        ActorSpawnSpec {
+            identity: Some(ActorIdentity { name, actor_type }),
+            role: self.role.clone(),
+            namespace: self.namespace.clone(),
+            tenant_id: self.tenant_id.clone(),
+            visibility: self.visibility.clone() as i32,
+            behavior_kind: self.behavior_kind.clone(),
+            args: self.args.clone(),
+            facets: vec![],
+            config: self.config.clone(),
+            labels: self.labels.clone(),
+        }
+    }
+
+    /// Consume the builder into `(spec, behavior, runtime_facets)` without creating a mailbox.
+    ///
+    /// Use with [`ActorFactory::spawn_actor`](plexspaces_core::ActorFactory::spawn_actor) when the
+    /// behavior is created from [`plexspaces_core::BehaviorRegistry`], or with
+    /// [`ActorFactoryImpl::spawn_built_actor_impl`](crate::ActorFactoryImpl::spawn_built_actor_impl)
+    /// when the caller already holds a concrete [`Actor`](plexspaces_core::Actor). Proto facets
+    /// belong on [`ActorSpawnSpec::facets`](plexspaces_proto::actor::v1::ActorSpawnSpec::facets);
+    /// this type’s `facets` vector is Rust-only instantiated facets.
+    pub fn into_spawn_inputs(
+        self,
+        runtime_actor_type: impl Into<String>,
+    ) -> (
+        ActorSpawnSpec,
+        Box<dyn Actor>,
+        Vec<Box<dyn plexspaces_facet::Facet>>,
+    ) {
+        let spec = self.to_spawn_spec(runtime_actor_type);
+        let behavior = self.behavior;
+        let facets = self.facets;
+        (spec, behavior, facets)
     }
 
     /// Set the actor name used by runtime-owned ActorId construction.
@@ -707,10 +774,15 @@ impl ActorBuilder {
             mailbox_config_default()
         });
         // Mailbox::new() is async, so build() must be async too
-        let mailbox_id = format!("mailbox_{}", actor_id);
+        let mailbox_id = format!("mailbox_{actor_id}");
         let mailbox = Mailbox::new(mailbox_config, mailbox_id)
             .await
-            .expect("Failed to create mailbox");
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create mailbox: {e}"),
+                )
+            })?;
 
         let node_id = self.node_id.clone();
 
@@ -818,20 +890,20 @@ impl ActorBuilder {
         // CRITICAL: Clone tenant_id before self is moved by build()
         let tenant_id_for_ref = self.tenant_id.clone();
         let namespace_for_ref = ctx.namespace().to_string();
+        let spawn_visibility = self.visibility.clone();
 
-        // Build the actor (facets are attached during build)
+        // Build the actor (facets are attached during build). One mailbox `Arc` is shared by the
+        // runtime [`Actor`](ActorStruct) and the returned [`ActorRef`] (single allocation).
         let mut actor = self.build().await?;
 
-        // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
-        let mailbox = actor.mailbox().clone();
-
         let actor_ref = ActorRef::local(
             actor_id.clone(),
             tenant_id_for_ref.clone(),
             namespace_for_ref.clone(),
-            mailbox.clone(),
+            Arc::clone(actor.mailbox()),
             service_locator.clone(),
+            spawn_visibility.clone(),
         );
         let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
             .map_err(|e| format!("Failed to construct actor self_ref: {}", e))?;
@@ -873,7 +945,9 @@ impl ActorBuilder {
 
         // Register in ActorRegistry so discovery, routing, and lookup all work.
         // This mirrors what actor_factory_impl and supervisor do after start().
-        actor.register_started(&registry).await;
+        actor
+            .register_started(&registry, spawn_visibility)
+            .await;
 
         // Return ActorRef
         Ok(actor_ref)

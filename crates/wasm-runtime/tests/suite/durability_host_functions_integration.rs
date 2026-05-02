@@ -43,6 +43,7 @@ mod tests {
             None, // No blob service
             None, // No elastic pool service
             None, // No outbound HTTP client
+            None, // No shared timer pool
         ))
     }
 

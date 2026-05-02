@@ -17,7 +17,7 @@ Demonstrates **outbound HTTP via a named service link** with a deterministic tes
 ```bash
 cd examples/rust/apps/weather_actor
 ./test.sh            # deterministic offline mode by default
-./test.sh 8092       # same, explicit HTTP port
+./test.sh 8091       # same, explicit HTTP port
 ./test.sh --contract-only
 ```
 

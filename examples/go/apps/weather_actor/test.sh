@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$PROJECT_ROOT/target/examples/go/weather_actor/weather_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 APP_ID="weather-go-test"
 export GOCACHE="${GOCACHE:-$PROJECT_ROOT/.cache/go-build}"
 

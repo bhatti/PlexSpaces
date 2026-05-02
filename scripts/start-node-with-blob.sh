@@ -141,7 +141,7 @@ echo -e "${GREEN}Starting node...${NC}"
 echo ""
 
 # Extract port from address (e.g., "0.0.0.0:8000" -> "8000")
-# HTTP port is gRPC_PORT + 100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
+# Blob HTTP server uses gRPC_PORT + 100 (separate from main gRPC+HTTP single port)
 GRPC_PORT="${PORT##*:}"
 HTTP_PORT=$((GRPC_PORT + 100))
 GRPC_HOST="${PORT%:*}"

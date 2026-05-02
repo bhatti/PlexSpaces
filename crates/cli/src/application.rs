@@ -236,26 +236,12 @@ async fn deploy_via_http_multipart(
     config_file: Option<&str>,
     _release_config_file: Option<&str>,
 ) -> Result<()> {
-    // HTTP gateway runs on gRPC port + 1
-    // Parse port from node_addr (format: host:port)
-    let http_port = if let Some(colon_pos) = node_addr.rfind(':') {
-        let port_str = &node_addr[colon_pos + 1..];
-        if let Ok(port) = port_str.parse::<u16>() {
-            port + 1
-        } else {
-            anyhow::bail!("Invalid port in node address: {}", node_addr);
-        }
+    // gRPC and HTTP share a single port — use node_addr directly as the HTTP base URL
+    let http_url = if node_addr.starts_with("http://") || node_addr.starts_with("https://") {
+        node_addr.trim_end_matches('/').to_string()
     } else {
-        anyhow::bail!("Node address must include port: {}", node_addr);
+        format!("http://{}", node_addr)
     };
-
-    let host = if let Some(colon_pos) = node_addr.rfind(':') {
-        &node_addr[..colon_pos]
-    } else {
-        node_addr
-    };
-
-    let http_url = format!("http://{}:{}", host, http_port);
 
     // OBSERVABILITY: Log HTTP multipart deployment
     tracing::info!(

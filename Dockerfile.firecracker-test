@@ -85,7 +85,7 @@ RUN echo "Firecracker kernel and rootfs should be provided via volume mount" > /
 # Copy CLI binary from builder
 COPY --from=builder /app/target/release/plexspaces /usr/local/bin/plexspaces
 
-# Expose gRPC port
+# Expose the single port (gRPC + HTTP share one port)
 EXPOSE 8000
 
 # Health check (using simple TCP check)

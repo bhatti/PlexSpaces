@@ -283,18 +283,14 @@ pub trait ActorService: Send + Sync {
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant/namespace isolation
-    /// * `actor_id` - Actor ID in format "actor_name@node_id" (or just "actor_name" for local)
-    /// * `actor_type` - Type of actor to spawn
-    /// * `initial_state` - Initial state bytes
+    /// * `spec` - Canonical [`ActorSpawnSpec`] (identity.actor_type required; identity.name may be a logical name or canonical id)
     ///
     /// ## Returns
-    /// ActorRef for the spawned actor
+    /// Lightweight [`ActorRef`] (identity only) for the spawned actor
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
-        actor_id: &str,
-        actor_type: &str,
-        initial_state: Vec<u8>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
     ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Send a message to an actor (local or remote)
@@ -462,6 +458,51 @@ pub trait ActorService: Send + Sync {
     > {
         Err("spawn_actors is not implemented".into())
     }
+
+    /// Establish a monitor on the node that hosts `actor_id` (remote gRPC when needed).
+    ///
+    /// `supervisor_callback` is the caller node's dialable HTTP/gRPC base URL for
+    /// `NotifyActorDown` delivery when the supervisor is remote.
+    async fn monitor_actor(
+        &self,
+        _ctx: &RequestContext,
+        _actor_id: &str,
+        _supervisor_id: &str,
+        _supervisor_callback: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Err("monitor_actor is not implemented".into())
+    }
+
+    /// Cancel a monitor on the node that hosts `actor_id`.
+    async fn demonitor_actor(
+        &self,
+        _ctx: &RequestContext,
+        _actor_id: &str,
+        _supervisor_id: &str,
+        _monitor_ref: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("demonitor_actor is not implemented".into())
+    }
+
+    /// Register a link on the node that hosts `actor_id` toward `linked_actor_id`.
+    async fn link_actor(
+        &self,
+        _ctx: &RequestContext,
+        _actor_id: &str,
+        _linked_actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("link_actor is not implemented".into())
+    }
+
+    /// Remove a link on the node that hosts `actor_id` toward `linked_actor_id`.
+    async fn unlink_actor(
+        &self,
+        _ctx: &RequestContext,
+        _actor_id: &str,
+        _linked_actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("unlink_actor is not implemented".into())
+    }
 }
 
 /// Trait for providing link semantics (bidirectional death propagation)
@@ -475,41 +516,40 @@ pub trait ActorService: Send + Sync {
 /// adds a child, it links to the child so cascading failures work correctly.
 ///
 /// ## Design
-/// - Supports local actors (actors registered in ActorRegistry)
-/// - Remote actor linking is handled by Node (advanced functionality)
+/// - [`ActorRegistry`] routes `link`/`unlink` locally or via [`ActorService`] like messaging.
 /// - Follows Erlang/OTP link semantics (bidirectional death propagation)
 #[async_trait]
 pub trait LinkProvider: Send + Sync {
     /// Link two actors (bidirectional death propagation)
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link
-    /// * `ctx` - RequestContext for tenant/namespace isolation
     ///
     /// ## Returns
     /// Success or error
     async fn link(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        ctx: &RequestContext,
     ) -> Result<(), String>;
 
     /// Unlink two actors
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     /// * `actor_id` - First actor in the link
     /// * `linked_actor_id` - Second actor in the link
-    /// * `ctx` - RequestContext for tenant/namespace isolation
     ///
     /// ## Returns
     /// Success or error
     async fn unlink(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        ctx: &RequestContext,
     ) -> Result<(), String>;
 }
 

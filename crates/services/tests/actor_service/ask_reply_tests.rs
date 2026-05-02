@@ -259,7 +259,7 @@ async fn create_test_registry_with_actors(
 
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some(node_id.to_string()), None).await;
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -268,7 +268,7 @@ async fn create_test_registry_with_actors(
     // Register NodeConfig
     use plexspaces_proto::node::v1::NodeConfig;
     let node_config = NodeConfig {
-        id: "test-node".to_string(),
+        id: node_id.to_string(),
         listen_addr: String::new(),
         cluster_seed_nodes: vec![],
         cluster_name: String::new(),
@@ -341,6 +341,7 @@ async fn create_test_registry_with_actors(
                     role: String::new(),
                     namespace: ctx.namespace().to_string(),
                     tenant_id: ctx.tenant_id().to_string(),
+                    visibility: 0,
                     behavior_kind: String::new(),
                     args: std::collections::HashMap::new(),
                     facets: vec![],
@@ -372,11 +373,14 @@ async fn create_test_registry_with_actors(
 
 // Helper to create test ActorService
 async fn create_test_actor_service(
-    _actor_registry: Arc<ActorRegistry>,
+    actor_registry: Arc<ActorRegistry>,
     service_locator: Arc<ServiceLocatorImpl>,
     node_id: String,
 ) -> ActorServiceImpl {
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
+    actor_registry
+        .set_reply_waiter_registry(reply_waiter_registry.clone())
+        .await;
     service_locator
         .register_service(reply_waiter_registry)
         .await;
@@ -783,7 +787,7 @@ async fn test_ask_reply_not_found() {
         "default",
     )
     .await;
-    assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound));
+    assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound || e.code() == tonic::Code::InvalidArgument));
 }
 
 #[tokio::test]

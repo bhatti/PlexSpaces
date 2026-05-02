@@ -27,11 +27,11 @@ Output: `<repo-root>/target/examples/go/abstractions/abstractions_actor.wasm`.
 cd ../../../../sdks/go && go test ./plexspaces/... -count=1
 ```
 
-**End-to-end (requires a running node):** `test.sh` deploys the app, drives HTTP `ask` calls (including Step 5: KV, `ts_write` / `ts_read` with pattern `["abstractions","task","*"]`, blob), and tears down. Pass the node HTTP port (default `8092`):
+**End-to-end (requires a running node):** `test.sh` deploys the app, drives HTTP `ask` calls (including Step 5: KV, `ts_write` / `ts_read` with pattern `["abstractions","task","*"]`, blob), and tears down. Pass the node HTTP port (default `8091`):
 
 ```bash
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 To capture server-side traces while debugging, enable debug logging on the node and keep a log file (for example `plexspaces-node-8091.log`) open; tuple matching issues usually show up as empty reads or decode errors on the WASM host path.

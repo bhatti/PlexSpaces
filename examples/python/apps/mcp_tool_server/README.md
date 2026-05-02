@@ -41,7 +41,7 @@ All actors are supervised under a `one_for_one` supervisor. Each specialist acto
 
 ## Prerequisites
 
-- PlexSpaces node(s) running (default ports 8092, 8094)
+- PlexSpaces node(s) running (default ports 8091, 8094)
 - Python 3.11+ with `plexspaces` SDK installed
 - `plexspaces-py` CLI on `$PATH`
 
@@ -56,14 +56,14 @@ Produces `mcp_tool_server_actor.wasm`.
 ## Run Tests
 
 ```bash
-# Against default nodes (localhost:8092 and localhost:8094)
+# Against default nodes (localhost:8091 and localhost:8094)
 ./test.sh
 
 # Single node
-./test.sh 8092
+./test.sh 8091
 
 # Specific addresses
-./test.sh localhost:8092 localhost:8094
+./test.sh localhost:8091 localhost:8094
 ```
 
 The test script:

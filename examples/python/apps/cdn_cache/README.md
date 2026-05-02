@@ -88,7 +88,7 @@ docker run -d \
 
 # Terminal 2: Run tests
 cd examples/python/apps/cdn_cache
-./test.sh 8092
+./test.sh 8091
 ```
 
 ### MinIO Configuration (release.yaml)

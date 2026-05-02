@@ -29,7 +29,7 @@ cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:7
 # Terminal 2: Build and run
 cd examples/python/apps/migrating_ractor
 ./build.sh        # Builds ractor_calculator.wasm
-./test.sh 7993    # Deploy + test (HTTP port = gRPC 7992 + 1)
+./test.sh 7992    # gRPC and HTTP share a single port
 ```
 
 ## PlexSpaces SDK Features

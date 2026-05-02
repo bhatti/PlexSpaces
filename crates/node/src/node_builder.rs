@@ -460,6 +460,19 @@ impl NodeBuilder {
             sl.register_security_config(security).await;
         }
 
+        // Remote monitor/link RPCs need a non-empty dialable base on this node's registry
+        // (`Node::start` also sets this from config). `NodeBuilder::build` skips `start`, so set
+        // it here from `listen_addr` for tests and embedded nodes.
+        if let Some(registry) = node.service_locator().actor_registry().await {
+            let addr = node.config().listen_addr.trim();
+            let base = if addr.starts_with("http://") || addr.starts_with("https://") {
+                addr.to_string()
+            } else {
+                format!("http://{}", addr)
+            };
+            registry.set_local_listen_addr(base).await;
+        }
+
         node
     }
 

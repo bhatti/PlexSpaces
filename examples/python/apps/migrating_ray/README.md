@@ -36,7 +36,7 @@ cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:7
 # Terminal 2: Build and run
 cd examples/python/apps/migrating_ray
 ./build.sh        # Builds ray_actors.wasm
-./test.sh 8092    # Deploy + train (HTTP port = gRPC 7992 + 100)
+./test.sh 8091    # gRPC and HTTP share a single port
 ```
 
 ## PlexSpaces SDK Features

@@ -245,10 +245,10 @@ Secrets must **not** be inlined in proto: use `api_key_env_var`, `bearer_token_e
 ```bash
 # Add a new service link at runtime
 grpcurl -plaintext -d '{"link":{"name":"weather-api","transport":"OUTBOUND_TRANSPORT_HTTP","base_url":"https://api.open-meteo.com"}}' \
-    localhost:8092 plexspaces.node.v1.ServiceLinkService/AddServiceLink
+    localhost:8091 plexspaces.node.v1.ServiceLinkService/AddServiceLink
 
 # List registered service links
-grpcurl -plaintext localhost:8092 plexspaces.node.v1.ServiceLinkService/ListServiceLinks
+grpcurl -plaintext localhost:8091 plexspaces.node.v1.ServiceLinkService/ListServiceLinks
 ```
 
 ### WASM actor host function
@@ -419,7 +419,7 @@ let mut node_client = NodeClient::connect("http://localhost:8000").await?;
 
 // Connect multiple nodes with health checks
 let resp = node_client.connect_nodes(
-    vec!["http://localhost:8001".to_string()],
+    vec!["http://localhost:8092".to_string()],
     None,
     30,
 ).await?;

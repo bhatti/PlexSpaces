@@ -69,8 +69,8 @@ async fn wait_for_down(
 
 #[tokio::test]
 async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
-    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
+    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
 
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
 
@@ -128,7 +128,7 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
     );
 
     let monitor_ref = node1
-        .monitor(&worker_id, &sup_id, &ctx)
+        .monitor(&ctx, &worker_id, &sup_id)
         .await
         .expect("remote MonitorActor RPC");
 
@@ -139,7 +139,7 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
     );
 
     node1
-        .demonitor(&worker_id, &sup_id, &monitor_ref, &ctx)
+        .demonitor(&ctx, &worker_id, &sup_id, &monitor_ref)
         .await
         .expect("remote DemonitorActor RPC");
 
@@ -154,8 +154,8 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
 
 #[tokio::test]
 async fn test_cross_node_link_registers_on_both_actor_registries() {
-    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
+    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
@@ -240,7 +240,7 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
 
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     node1
-        .link(&a_id, &b_id, &ctx)
+        .link(&ctx, &a_id, &b_id)
         .await
         .expect("cross-node link");
 
@@ -266,8 +266,8 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
 /// routing to the supervisor's canonical `ActorId`).
 #[tokio::test]
 async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
-    let node1 = Arc::new(NodeBuilder::new("node1").build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").build().await);
+    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
@@ -344,7 +344,7 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     node1
-        .monitor(&worker_id, &supervisor_id, &ctx1)
+        .monitor(&ctx1, &worker_id, &supervisor_id)
         .await
         .expect("establish remote monitor on node2");
 

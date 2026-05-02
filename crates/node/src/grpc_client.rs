@@ -23,7 +23,8 @@
 
 use plexspaces_core::{apply_request_context_to_grpc_metadata, RequestContext};
 use plexspaces_proto::{
-    common::v1::Message as ProtoMessage,
+    actor::v1::{ActorSpawnSpec, ActorVisibility},
+    common::v1::{ActorIdentity, Message as ProtoMessage},
     v1::actor::{
         DemonitorActorRequest, LinkActorRequest, MonitorActorRequest, SendMessageRequest,
         SpawnActorRequest, SpawnActorResponse, UnlinkActorRequest,
@@ -73,6 +74,18 @@ pub struct RemoteActorClient {
 }
 
 impl RemoteActorClient {
+    /// Construct from an already-established pooled channel.
+    ///
+    /// Prefer this over [`Self::connect`] when a
+    /// [`plexspaces_core::GrpcConnectionManager`] is available so that TCP
+    /// connections are reused across calls.
+    pub fn from_channel(node_address: impl Into<String>, channel: Channel) -> Self {
+        RemoteActorClient {
+            node_address: node_address.into(),
+            client: ActorServiceClient::new(channel),
+        }
+    }
+
     /// Connect to a remote node
     ///
     /// ## Arguments
@@ -165,9 +178,13 @@ impl RemoteActorClient {
     /// ## Arguments
     /// * `target_node_id` - ID of the target node (where actor will be created)
     /// * `actor_type` - Type/name of the actor to spawn
-    /// * `initial_state` - Optional initial state for the actor
+    /// * `init_args` - String key/value arguments for [`ActorSpawnSpec::args`] (structured init; no JSON bytes)
     /// * `config` - Optional actor configuration
     /// * `labels` - Optional labels for the actor
+    ///
+    /// ## Note
+    /// This helper leaves [`ActorSpawnSpec::role`] empty. For virtual definitions or dispatch
+    /// roles, call `ActorServiceClient::spawn_actor` with a fully built `SpawnActorRequest`.
     ///
     /// ## Returns
     /// ActorRef for the newly created remote actor
@@ -185,10 +202,10 @@ impl RemoteActorClient {
     /// let mut client = RemoteActorClient::connect("http://localhost:8000").await?;
     ///
     /// let actor_ref = client
-    ///     .spawn_remote_actor(
+    ///     .spawn_actor(
     ///         "node2",
     ///         "my-actor",
-    ///         None,
+    ///         std::collections::HashMap::new(),
     ///         Some(ActorConfig::default()),
     ///         std::collections::HashMap::new(),
     ///     )
@@ -202,20 +219,29 @@ impl RemoteActorClient {
         &mut self,
         _target_node_id: &str,
         actor_type: &str,
-        initial_state: Option<Vec<u8>>,
+        init_args: std::collections::HashMap<String, String>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
     ) -> Result<plexspaces_core::ActorRef, String> {
-        let request = Request::new(SpawnActorRequest {
-            actor_type: actor_type.to_string(),
-            actor_id: String::new(), // Empty string = server generates ID
-            initial_state: initial_state.unwrap_or_default(),
+        let spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: String::new(),
+                actor_type: actor_type.to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: ActorVisibility::ActorVisibilityPublic as i32,
+            behavior_kind: String::new(),
+            args: init_args,
+            facets: vec![],
             config,
             labels,
-            facets: vec![],           // No facets for basic spawn
-            namespace: String::new(), // Use default namespace (from JWT in production)
+        };
+        let request = Request::new(SpawnActorRequest {
+            spec: Some(spec),
+            namespace: String::new(),
             instances_count: 1,
-            role: String::new(),
         });
 
         let response = self

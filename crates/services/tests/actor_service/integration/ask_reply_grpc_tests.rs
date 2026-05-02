@@ -6,7 +6,6 @@
 use super::TestHarness;
 use plexspaces_proto::actor::v1::{AskReplyRequest, SendMessageRequest};
 use std::collections::HashMap;
-use std::time::Duration;
 use tonic::Request;
 
 #[tokio::test]
@@ -17,8 +16,6 @@ async fn test_ask_reply_get_counter_real_grpc() {
         .spawn_node("node1")
         .await
         .expect("Failed to spawn node1");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(AskReplyRequest {
@@ -68,8 +65,6 @@ async fn test_send_message_post_counter_real_grpc() {
         .await
         .expect("Failed to spawn node1");
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(SendMessageRequest {
         namespace: "default".to_string(),
@@ -115,8 +110,6 @@ async fn test_ask_reply_post_counter_real_grpc() {
         .spawn_node("node1")
         .await
         .expect("Failed to spawn node1");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(AskReplyRequest {

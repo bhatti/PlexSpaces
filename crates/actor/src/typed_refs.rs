@@ -54,7 +54,7 @@
 //! ```
 
 use crate::ActorRef;
-use plexspaces_core::Message;
+use plexspaces_core::{Message, RequestContext};
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
@@ -215,18 +215,24 @@ impl GenServerRef {
     /// ```ignore
     /// let result: ExtractResult = extractor.call("extract", &document).await?;
     /// ```
-    pub async fn call<I, O>(&self, operation: &str, request: &I) -> Result<O, GenServerError>
+    pub async fn call<I, O>(
+        &self,
+        ctx: &RequestContext,
+        operation: &str,
+        request: &I,
+    ) -> Result<O, GenServerError>
     where
         I: Serialize,
         O: DeserializeOwned,
     {
-        self.call_with_timeout(operation, request, DEFAULT_CALL_TIMEOUT)
+        self.call_with_timeout(ctx, operation, request, DEFAULT_CALL_TIMEOUT)
             .await
     }
 
     /// Call the GenServer with custom timeout.
     pub async fn call_with_timeout<I, O>(
         &self,
+        ctx: &RequestContext,
         operation: &str,
         request: &I,
         timeout: Duration,
@@ -246,7 +252,7 @@ impl GenServerRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| GenServerError::Call(e.to_string()))?;
 
@@ -265,6 +271,7 @@ impl GenServerRef {
     /// ```
     pub async fn cast<T: Serialize>(
         &self,
+        ctx: &RequestContext,
         operation: &str,
         data: &T,
     ) -> Result<(), GenServerError> {
@@ -278,7 +285,7 @@ impl GenServerRef {
         };
 
         self.inner
-            .tell(msg)
+            .tell(ctx, msg)
             .await
             .map_err(|e| GenServerError::Cast(e.to_string()))
     }
@@ -341,7 +348,12 @@ impl FsmRef {
     /// ```ignore
     /// fsm.transition("submit", &SubmitOrder { items: vec![...] }).await?;
     /// ```
-    pub async fn transition<T: Serialize>(&self, event: &str, data: &T) -> Result<(), FsmError> {
+    pub async fn transition<T: Serialize>(
+        &self,
+        ctx: &RequestContext,
+        event: &str,
+        data: &T,
+    ) -> Result<(), FsmError> {
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             receiver_id: self.inner.id().to_string(),
@@ -352,7 +364,7 @@ impl FsmRef {
         };
 
         self.inner
-            .tell(msg)
+            .tell(ctx, msg)
             .await
             .map_err(|e| FsmError::Transition(e.to_string()))
     }
@@ -366,18 +378,24 @@ impl FsmRef {
     /// ```ignore
     /// let new_state: OrderState = fsm.transition_and_wait("submit", &order).await?;
     /// ```
-    pub async fn transition_and_wait<T, S>(&self, event: &str, data: &T) -> Result<S, FsmError>
+    pub async fn transition_and_wait<T, S>(
+        &self,
+        ctx: &RequestContext,
+        event: &str,
+        data: &T,
+    ) -> Result<S, FsmError>
     where
         T: Serialize,
         S: DeserializeOwned,
     {
-        self.transition_and_wait_with_timeout(event, data, DEFAULT_FSM_TIMEOUT)
+        self.transition_and_wait_with_timeout(ctx, event, data, DEFAULT_FSM_TIMEOUT)
             .await
     }
 
     /// Send a transition event and wait with custom timeout.
     pub async fn transition_and_wait_with_timeout<T, S>(
         &self,
+        ctx: &RequestContext,
         event: &str,
         data: &T,
         timeout: Duration,
@@ -397,7 +415,7 @@ impl FsmRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| FsmError::Transition(e.to_string()))?;
 
@@ -411,13 +429,17 @@ impl FsmRef {
     /// ```ignore
     /// let state: OrderState = fsm.query_state().await?;
     /// ```
-    pub async fn query_state<S: DeserializeOwned>(&self) -> Result<S, FsmError> {
-        self.query_state_with_timeout(DEFAULT_FSM_TIMEOUT).await
+    pub async fn query_state<S: DeserializeOwned>(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<S, FsmError> {
+        self.query_state_with_timeout(ctx, DEFAULT_FSM_TIMEOUT).await
     }
 
     /// Query the current FSM state with custom timeout.
     pub async fn query_state_with_timeout<S: DeserializeOwned>(
         &self,
+        ctx: &RequestContext,
         timeout: Duration,
     ) -> Result<S, FsmError> {
         let msg = Message {
@@ -430,7 +452,7 @@ impl FsmRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| FsmError::Query(e.to_string()))?;
 
@@ -444,13 +466,18 @@ impl FsmRef {
     /// ```ignore
     /// let history: Vec<StateChange> = fsm.query("history").await?;
     /// ```
-    pub async fn query<O: DeserializeOwned>(&self, name: &str) -> Result<O, FsmError> {
-        self.query_with_timeout(name, DEFAULT_FSM_TIMEOUT).await
+    pub async fn query<O: DeserializeOwned>(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<O, FsmError> {
+        self.query_with_timeout(ctx, name, DEFAULT_FSM_TIMEOUT).await
     }
 
     /// Query FSM with custom timeout.
     pub async fn query_with_timeout<O: DeserializeOwned>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         timeout: Duration,
     ) -> Result<O, FsmError> {
@@ -464,7 +491,7 @@ impl FsmRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| FsmError::Query(e.to_string()))?;
 
@@ -527,7 +554,12 @@ impl EventRef {
     /// ```ignore
     /// logger.emit("user_login", &LoginEvent { user_id: "alice".into() }).await?;
     /// ```
-    pub async fn emit<T: Serialize>(&self, event_type: &str, data: &T) -> Result<(), EventError> {
+    pub async fn emit<T: Serialize>(
+        &self,
+        ctx: &RequestContext,
+        event_type: &str,
+        data: &T,
+    ) -> Result<(), EventError> {
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             receiver_id: self.inner.id().to_string(),
@@ -538,7 +570,7 @@ impl EventRef {
         };
 
         self.inner
-            .tell(msg)
+            .tell(ctx, msg)
             .await
             .map_err(|e| EventError::Emit(e.to_string()))
     }
@@ -546,7 +578,12 @@ impl EventRef {
     /// Emit an event with raw payload.
     ///
     /// Use this when you already have serialized data.
-    pub async fn emit_raw(&self, event_type: &str, payload: Vec<u8>) -> Result<(), EventError> {
+    pub async fn emit_raw(
+        &self,
+        ctx: &RequestContext,
+        event_type: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), EventError> {
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             receiver_id: self.inner.id().to_string(),
@@ -556,7 +593,7 @@ impl EventRef {
         };
 
         self.inner
-            .tell(msg)
+            .tell(ctx, msg)
             .await
             .map_err(|e| EventError::Emit(e.to_string()))
     }
@@ -637,12 +674,12 @@ impl WorkflowRef {
     ///     approvers: vec!["alice", "bob"],
     /// }).await?;
     /// ```
-    pub async fn run<I, O>(&self, input: &I) -> Result<O, WorkflowRefError>
+    pub async fn run<I, O>(&self, ctx: &RequestContext, input: &I) -> Result<O, WorkflowRefError>
     where
         I: Serialize,
         O: DeserializeOwned,
     {
-        self.run_with_timeout(input, DEFAULT_RUN_TIMEOUT).await
+        self.run_with_timeout(ctx, input, DEFAULT_RUN_TIMEOUT).await
     }
 
     /// Run the workflow with a custom timeout.
@@ -658,6 +695,7 @@ impl WorkflowRef {
     /// ```
     pub async fn run_with_timeout<I, O>(
         &self,
+        ctx: &RequestContext,
         input: &I,
         timeout: Duration,
     ) -> Result<O, WorkflowRefError>
@@ -676,7 +714,7 @@ impl WorkflowRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 
@@ -699,7 +737,12 @@ impl WorkflowRef {
     ///     comment: Some("Looks good!".into()),
     /// }).await?;
     /// ```
-    pub async fn signal<T: Serialize>(&self, name: &str, data: &T) -> Result<(), WorkflowRefError> {
+    pub async fn signal<T: Serialize>(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+        data: &T,
+    ) -> Result<(), WorkflowRefError> {
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             receiver_id: self.inner.id().to_string(),
@@ -710,7 +753,7 @@ impl WorkflowRef {
         };
 
         self.inner
-            .tell(msg)
+            .tell(ctx, msg)
             .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))
     }
@@ -727,18 +770,24 @@ impl WorkflowRef {
     /// ```ignore
     /// let status: WorkflowStatus = workflow.query("status").await?;
     /// ```
-    pub async fn query<O: DeserializeOwned>(&self, name: &str) -> Result<O, WorkflowRefError> {
-        self.query_with_params_and_timeout(name, &(), DEFAULT_OPERATION_TIMEOUT)
+    pub async fn query<O: DeserializeOwned>(
+        &self,
+        ctx: &RequestContext,
+        name: &str,
+    ) -> Result<O, WorkflowRefError> {
+        self.query_with_params_and_timeout(ctx, name, &(), DEFAULT_OPERATION_TIMEOUT)
             .await
     }
 
     /// Query the workflow state with a custom timeout.
     pub async fn query_with_timeout<O: DeserializeOwned>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         timeout: Duration,
     ) -> Result<O, WorkflowRefError> {
-        self.query_with_params_and_timeout(name, &(), timeout).await
+        self.query_with_params_and_timeout(ctx, name, &(), timeout)
+            .await
     }
 
     /// Query the workflow state with parameters.
@@ -746,6 +795,7 @@ impl WorkflowRef {
     /// Uses `DEFAULT_OPERATION_TIMEOUT` (30 seconds).
     pub async fn query_with_params<I, O>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         params: &I,
     ) -> Result<O, WorkflowRefError>
@@ -753,13 +803,14 @@ impl WorkflowRef {
         I: Serialize,
         O: DeserializeOwned,
     {
-        self.query_with_params_and_timeout(name, params, DEFAULT_OPERATION_TIMEOUT)
+        self.query_with_params_and_timeout(ctx, name, params, DEFAULT_OPERATION_TIMEOUT)
             .await
     }
 
     /// Query the workflow state with parameters and custom timeout.
     pub async fn query_with_params_and_timeout<I, O>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         params: &I,
         timeout: Duration,
@@ -779,7 +830,7 @@ impl WorkflowRef {
 
         let response = self
             .inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 
@@ -794,16 +845,18 @@ impl WorkflowRef {
     /// Unlike `signal()`, this waits for the signal to be processed.
     pub async fn signal_and_wait<T: Serialize>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         data: &T,
     ) -> Result<(), WorkflowRefError> {
-        self.signal_and_wait_with_timeout(name, data, DEFAULT_OPERATION_TIMEOUT)
+        self.signal_and_wait_with_timeout(ctx, name, data, DEFAULT_OPERATION_TIMEOUT)
             .await
     }
 
     /// Signal and wait for acknowledgment with custom timeout.
     pub async fn signal_and_wait_with_timeout<T: Serialize>(
         &self,
+        ctx: &RequestContext,
         name: &str,
         data: &T,
         timeout: Duration,
@@ -819,7 +872,7 @@ impl WorkflowRef {
 
         // Use ask instead of tell to wait for processing
         self.inner
-            .ask(msg, timeout)
+            .ask(ctx, msg, timeout)
             .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 

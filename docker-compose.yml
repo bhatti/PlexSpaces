@@ -79,8 +79,7 @@ services:
     container_name: plexspaces-node
     hostname: node1
     ports:
-      - "8000:8000"  # gRPC
-      - "8001:8001"  # HTTP Gateway
+      - "8000:8000"  # gRPC + HTTP (single port)
     environment:
       # Node configuration
       - NODE_ID=node1

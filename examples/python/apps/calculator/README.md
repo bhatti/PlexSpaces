@@ -77,7 +77,7 @@ class Calculator:
 
 ```bash
 # Send operation
-curl -X POST "http://localhost:8092/api/v1/actors/calculator-test/calculator-test" \
+curl -X POST "http://localhost:8091/api/v1/actors/calculator-test/calculator-test" \
     -H "Content-Type: application/json" \
     -d '{"operation": "add", "operands": [1, 2, 3]}'
 ```

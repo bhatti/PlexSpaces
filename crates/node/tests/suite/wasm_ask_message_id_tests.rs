@@ -209,8 +209,12 @@ async fn test_wasm_ask_single_message_id_flow() {
         request_id, calc_actor_id
     );
 
+    let ask_ctx = plexspaces_core::RequestContext::new_without_auth(
+        "test-tenant".to_string(),
+        "default".to_string(),
+    );
     let reply = actor_ref
-        .ask(ask_message, std::time::Duration::from_secs(10))
+        .ask(&ask_ctx, ask_message, std::time::Duration::from_secs(10))
         .await;
 
     // ── 5. Verify reply ────────────────────────────────────────────

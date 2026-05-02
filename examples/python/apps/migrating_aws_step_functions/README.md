@@ -17,7 +17,7 @@ AI/ML pipeline workflow: **data_prep (fan-out)** → **training** → **evaluati
 # Terminal 2 (with venv that has plexspaces-py)
 cd examples/python/apps/migrating_aws_step_functions
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

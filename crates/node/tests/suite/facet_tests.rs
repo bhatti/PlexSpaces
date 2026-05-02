@@ -10,7 +10,8 @@
 // Total: 10 tests (+1 feature-gated)
 
 use super::test_helpers::{
-    lookup_actor_ref, registry_tell, spawn_actor_helper, test_runtime_actor_id,
+    check_virtual_actor_exists_triplet, lookup_actor_ref, registry_tell, spawn_actor_helper,
+    test_runtime_actor_id,
 };
 
 use plexspaces_actor::ActorBuilder;
@@ -180,7 +181,10 @@ async fn test_facet_storage_after_spawn() {
 
     sleep(Duration::from_millis(200)).await;
 
-    let facets = node.get_facets(&actor_id).await;
+    let facets = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     if let Some(facets_arc) = facets {
         let facets_guard = facets_arc.read().await;
         let _timer_facet_arc = facets_guard.get_facet("timer");
@@ -211,7 +215,10 @@ async fn test_facet_service_get_facet_normal_actor() {
     assert!(actor_id.as_str().contains("test-actor"));
     assert!(actor_id.as_str().contains("@"));
 
-    let facets = node.clone().get_facets(&actor_id).await;
+    let facets = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     assert!(
         facets.is_some(),
         "Facets should be stored for normal actor (actor_id={:?})",
@@ -269,9 +276,13 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let mut facets = None;
     while start.elapsed() < timeout {
         tokio::task::yield_now().await;
-        let (exists, is_active, _) = node.check_virtual_actor_exists(&actor_id).await;
+        let (exists, is_active, _) =
+            check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
         if exists && is_active {
-            facets = node.clone().get_facets(&actor_id).await;
+            facets = node
+                .service_locator()
+                .facet_container_for_actor(actor_id.as_str())
+                .await;
             if facets.is_some() {
                 break;
             }
@@ -310,7 +321,10 @@ async fn test_facet_service_get_facet_not_found() {
 
     sleep(Duration::from_millis(200)).await;
 
-    let facets = node.clone().get_facets(&actor_id).await;
+    let facets = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     if let Some(facets_arc) = facets {
         let facets_guard = facets_arc.read().await;
         let timer_facet_arc = facets_guard.get_facet("timer");
@@ -335,7 +349,10 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
 
-    let facets = node.clone().get_facets(&actor_id).await;
+    let facets = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     assert!(facets.is_some(), "Facets should be stored");
 
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
@@ -344,7 +361,10 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
         .await
         .unwrap();
 
-    let facets_after = node.clone().get_facets(&actor_id).await;
+    let facets_after = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     assert!(
         facets_after.is_none(),
         "Facets should be cleaned up after unregister"
@@ -370,7 +390,10 @@ async fn test_facet_service_with_sqlite_backend() {
 
     sleep(Duration::from_millis(200)).await;
 
-    let facets = node.clone().get_facets(&actor_id).await;
+    let facets = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     assert!(
         facets.is_some(),
         "Facets should be stored with SQLite backend"
@@ -417,7 +440,10 @@ async fn test_facet_storage_direct() {
 
     sleep(Duration::from_millis(100)).await;
 
-    let facets_arc = node.get_facets(&actor_id).await;
+    let facets_arc = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
 
     if facets_arc.is_none() {
         panic!("Facets not found for actor_id: {}", actor_id);

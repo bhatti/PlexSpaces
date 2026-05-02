@@ -17,7 +17,7 @@ Demonstrates **outbound HTTP via a named service link** combined with **KV-based
 cd examples/go/apps/weather_actor
 ./build.sh           # builds target/examples/go/weather_actor/weather_actor.wasm
 ./test.sh            # requires a running node with the weather-api service link
-./test.sh 8092       # same, explicit HTTP port
+./test.sh 8091       # same, explicit HTTP port
 ./test.sh --contract-only
 ```
 

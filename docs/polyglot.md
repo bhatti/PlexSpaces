@@ -825,7 +825,7 @@ tinygo build -target=wasi -o counter.wasm .
 For large WASM files (>5MB), use HTTP multipart upload:
 
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -901,7 +901,7 @@ cargo run --release --bin plexspaces -- start \
   --listen-addr 0.0.0.0:8000
 
 # 3. Deploy actor
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \

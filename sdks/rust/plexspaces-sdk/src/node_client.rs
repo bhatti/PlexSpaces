@@ -24,7 +24,7 @@ use plexspaces_proto::system::v1::system_service_client::SystemServiceClient;
 use plexspaces_proto::system::v1::{
     LivenessProbeRequest, LivenessProbeResponse, ReadinessProbeRequest, ReadinessProbeResponse,
 };
-use prost_types::Duration;
+use plexspaces_proto::prost_types::Duration;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;

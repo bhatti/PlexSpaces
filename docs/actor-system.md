@@ -1148,7 +1148,7 @@ sequenceDiagram
     participant Child
     participant Registry
     
-    Supervisor->>Registry: monitor(child_id, supervisor_id)
+    Supervisor->>Registry: monitor(ctx, child_id, supervisor_id)
     Registry-->>Supervisor: MonitorRef
     
     Note over Supervisor,Child: Child running...
@@ -1168,7 +1168,7 @@ sequenceDiagram
 - **How `__DOWN__` is delivered:** When that node runs `ActorRegistry::handle_actor_termination`, it sends a **`__DOWN__` mailbox message** to each monitoring actor’s canonical `ActorId` via `ActorRegistry::tell`. For a supervisor on another node, `tell` routes over **gRPC** (`ActorService` / `SendMessage`), same family of path as remote `ActorRef::tell`.
 - **RequestContext flow:** The monitor registration stores the caller’s `RequestContext`. On remote `__DOWN__` delivery, the framework reuses that stored context so **tenant_id** remains the one derived from JWT/mTLS at the original API boundary and **namespace** remains the one supplied by the gRPC request when the monitor was established.
 - **Demonitor:** `DemonitorActor` (or local `demonitor`) runs on the **monitored actor’s host** and removes the entry; the caller must pass the `monitor_ref` returned from `MonitorActor`.
-- **Proto `supervisor_callback`:** Required on the wire for compatibility; the current Rust server does not use it for DOWN delivery (DOWN goes to `supervisor_id`’s mailbox). See `MonitorActorRequest` in `actor_runtime.proto`.
+- **Proto `supervisor_callback`:** Required on the wire; the Rust server does not use it for DOWN delivery (DOWN goes to `supervisor_id`’s mailbox). See `MonitorActorRequest` in `actor_runtime.proto`.
 
 ### Linking (Two-Way)
 
@@ -1180,7 +1180,7 @@ sequenceDiagram
     participant Actor2
     participant Registry
     
-    Actor1->>Registry: link(actor1_id, actor2_id)
+    Actor1->>Registry: link(ctx, actor1_id, actor2_id)
     Registry->>Registry: Create bidirectional link
     
     Note over Actor1,Actor2: Both actors running...
@@ -1198,7 +1198,7 @@ sequenceDiagram
 
 **Cross-node `link`:** `Node::link` may contact **both** hosts via `ActorService`. Each node’s `NodeRegistry` must register **itself** and **peers** so RPC addresses resolve (integration tests mirror this).
 
-**Example** (high-level API; use `Node::link` with `RequestContext` — `ActorRegistry::link` takes only the two `ActorId`s and is for same-node registry operations):
+**Example** (high-level API; `RequestContext` is always first after `&self`, same as `monitor` / `demonitor`):
 
 ```rust
 use plexspaces_core::{ActorId, RequestContext};
@@ -1206,16 +1206,16 @@ use plexspaces_core::{ActorId, RequestContext};
 let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
 node
     .link(
+        &ctx,
         &ActorId::from_canonical("actor1//gen_server::default@node1")?,
         &ActorId::from_canonical("actor2//gen_server::default@node2")?,
-        &ctx,
     )
     .await?;
 
 // If actor1 dies abnormally, actor2 also dies (and vice versa for abnormal exits).
 ```
 
-For **same-node** registration-only tests you can call `actor_registry.link(&id_a, &id_b).await?` directly (no `ctx`).
+`ActorRegistry::link`, `unlink`, `monitor`, and `demonitor` take the same `&RequestContext` first (then actor ids) and route locally or via `ActorService` gRPC like `tell` / `ask`. For **same-node** tests you may call `actor_registry.local_link` / `local_monitor` when you intentionally bypass remote routing.
 
 ---
 
@@ -1422,7 +1422,7 @@ Counters and gauges are recorded with the in-process `metrics` crate and rendere
 
 ```bash
 # Scrape metrics
-curl http://localhost:8001/metrics
+curl http://localhost:8000/metrics
 
 # Prometheus configuration
 scrape_configs:

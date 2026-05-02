@@ -11,7 +11,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 SDK_DIR="$PROJECT_ROOT/sdks/python"
 WASM_FILE="$SCRIPT_DIR/weather_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 APP_ID="weather-python-test"
 RUN_ID="$(date +%s)"
 

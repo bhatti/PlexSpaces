@@ -15,7 +15,7 @@ use plexspaces_proto::actor::v1::{
     SpawnActorsResponse,
 };
 use plexspaces_proto::common::v1::Message as ProtoMessage;
-use prost_types::Duration;
+use plexspaces_proto::prost_types::{Duration, Timestamp};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -53,7 +53,7 @@ fn make_call_message(payload: Vec<u8>) -> ProtoMessage {
         channel: String::new(),
         message_type: "call".to_string(),
         payload,
-        timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
+        timestamp: Some(Timestamp::from(SystemTime::now())),
         headers: HashMap::new(),
         priority: 0,
         ttl: None,

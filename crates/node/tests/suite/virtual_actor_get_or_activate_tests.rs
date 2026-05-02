@@ -152,7 +152,13 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
 
-    let result = actor_ref.ask(msg, Duration::from_secs(5)).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
+    let result = actor_ref
+        .ask(&ctx, msg, Duration::from_secs(5))
+        .await;
 
     assert!(
         result.is_ok(),

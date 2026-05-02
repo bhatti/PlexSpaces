@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Start empty PlexSpaces node using repo scripts/server.sh (gRPC 8091, HTTP 8092).
+# Start empty PlexSpaces node using repo scripts/server.sh (gRPC 8091, HTTP 8091).
 # Run from repo root. Node runs in background; script exits when server is ready.
 
 set -e

@@ -20,16 +20,47 @@
 //!
 //! Tests for Erlang-style spawn/4 equivalent remote actor spawning.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 use plexspaces_core::{ActorId, ServiceLocator};
 use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_proto::{
-    actor::v1::{ActorConfig as ProtoActorConfig, SpawnActorRequest},
+    actor::v1::{
+        ActorConfig as ProtoActorConfig, ActorSpawnSpec, ActorVisibility, SpawnActorRequest,
+    },
+    common::v1::ActorIdentity,
     ActorService as ActorServiceTrait, ActorServiceServer,
 };
 use tonic::Request;
+
+fn spawn_actor_grpc_request(
+    namespace: &str,
+    actor_type: &str,
+    role: &str,
+    instance_name: &str,
+) -> SpawnActorRequest {
+    SpawnActorRequest {
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: instance_name.to_string(),
+                actor_type: actor_type.to_string(),
+            }),
+            role: role.to_string(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: HashMap::new(),
+            facets: vec![],
+            config: None,
+            labels: HashMap::new(),
+        }),
+        namespace: namespace.to_string(),
+        instances_count: 1,
+    }
+}
 
 /// Helper to create a test node
 fn create_test_node(id: &str, port: u16) -> Node {
@@ -53,11 +84,7 @@ async fn test_spawn_actor_basic() {
     );
 
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
-    let request = Request::new(SpawnActorRequest {
-        actor_type: "test_actor".to_string(),
-        role: "test_actor".to_string(),
-        ..Default::default()
-    });
+    let request = Request::new(spawn_actor_grpc_request("", "test_actor", "test_actor", ""));
 
     // Spawn actor via gRPC
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -90,11 +117,7 @@ async fn test_spawn_remote_actor_missing_target_node() {
     );
 
     // Missing actor_type (should fail)
-    let request = Request::new(SpawnActorRequest {
-        actor_type: "".to_string(), // Empty actor_type should fail
-        role: String::new(),
-        ..Default::default()
-    });
+    let request = Request::new(spawn_actor_grpc_request("", "", "", ""));
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
@@ -102,7 +125,11 @@ async fn test_spawn_remote_actor_missing_target_node() {
     assert!(response.is_err());
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(err.message().contains("actor_type") || err.message().contains("Missing actor_type"));
+    assert!(
+        err.message().contains("actor_type")
+            || err.message().contains("Missing")
+            || err.message().contains("spec.identity")
+    );
 }
 
 #[tokio::test]
@@ -114,17 +141,7 @@ async fn test_spawn_remote_actor_missing_actor_type() {
     );
 
     // Missing actor_type
-    let request = Request::new(SpawnActorRequest {
-        actor_id: String::new(),
-        actor_type: "".to_string(),
-        role: String::new(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        facets: vec![],
-        namespace: "default".to_string(),
-        instances_count: 1,
-    });
+    let request = Request::new(spawn_actor_grpc_request("default", "", "", ""));
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
@@ -132,7 +149,11 @@ async fn test_spawn_remote_actor_missing_actor_type() {
     assert!(response.is_err());
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(err.message().contains("actor_type") || err.message().contains("Missing actor_type"));
+    assert!(
+        err.message().contains("actor_type")
+            || err.message().contains("Missing")
+            || err.message().contains("spec.identity")
+    );
 }
 
 #[tokio::test]
@@ -147,17 +168,12 @@ async fn test_spawn_remote_actor_wrong_node() {
     // gRPC spawn_actor always spawns on the node receiving the request
     // The test for "wrong node" doesn't make sense anymore since target is implicit
     // This test is now redundant - spawn_actor always succeeds on the receiving node
-    let request = Request::new(SpawnActorRequest {
-        actor_id: String::new(),
-        actor_type: "test_actor".to_string(),
-        role: "test_actor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        facets: vec![],
-        namespace: "default".to_string(),
-        instances_count: 1,
-    });
+    let request = Request::new(spawn_actor_grpc_request(
+        "default",
+        "test_actor",
+        "test_actor",
+        "",
+    ));
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
@@ -179,11 +195,12 @@ async fn test_spawn_multiple_remote_actors() {
 
     // Spawn 3 actors
     for i in 0..3 {
-        let request = Request::new(SpawnActorRequest {
-            actor_type: format!("test_actor_{}", i),
-            role: format!("test_actor_{}", i),
-            ..Default::default()
-        });
+        let request = Request::new(spawn_actor_grpc_request(
+            "",
+            &format!("test_actor_{}", i),
+            &format!("test_actor_{}", i),
+            "",
+        ));
 
         let response = ActorServiceTrait::spawn_actor(&service, request).await;
         assert!(response.is_ok(), "spawn {} should succeed", i);
@@ -225,7 +242,7 @@ async fn test_spawn_remote_actor_via_grpc() {
         .spawn_actor(
             "node1",
             "remote_test_actor",
-            Some(vec![1, 2, 3, 4]),
+            std::collections::HashMap::new(),
             None,
             std::collections::HashMap::new(),
         )
@@ -303,6 +320,7 @@ async fn test_node_route_local_message() {
         "".to_string(),
         mailbox.clone(),
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     let wrapper = Arc::new(ActorRef::local(
@@ -311,6 +329,7 @@ async fn test_node_route_local_message() {
         "".to_string(), // test namespace
         mailbox.clone(),
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
         .service_locator()
@@ -337,7 +356,7 @@ async fn test_node_route_local_message() {
         .await;
 
     let message = create_routing_test_message(vec![1, 2, 3]);
-    let result = actor_ref.tell(message).await;
+    let result = actor_ref.tell(&ctx, message).await;
 
     assert!(result.is_ok(), "Local routing should succeed");
     let received = mailbox.dequeue().await;
@@ -368,6 +387,7 @@ async fn test_node_route_remote_message() {
         "".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     let wrapper2 = Arc::new(ActorRef::local(
@@ -376,6 +396,7 @@ async fn test_node_route_remote_message() {
         "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2
         .service_locator()
@@ -453,9 +474,10 @@ async fn test_node_route_remote_message() {
         "".to_string(),
         "node2".to_string(),
         service_locator1,
+        ActorVisibility::ActorVisibilityPublic,
     );
     let message = create_routing_test_message(vec![4, 5, 6]);
-    let result = remote_actor_ref.tell(message).await;
+    let result = remote_actor_ref.tell(&ctx, message).await;
 
     assert!(result.is_ok(), "Remote routing should succeed");
     let received_opt = mailbox2
@@ -473,9 +495,13 @@ async fn test_node_route_to_unregistered_remote() {
     let missing_actor_id = test_runtime_actor_id("actor", "node999");
 
     let message = create_routing_test_message(vec![7, 8, 9]);
+    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    );
     let result = match lookup_actor_ref(&node, &missing_actor_id).await {
         Ok(Some(actor_ref)) => actor_ref
-            .tell(message)
+            .tell(&tell_ctx, message)
             .await
             .map_err(|e| plexspaces_node::NodeError::DeliveryFailed(format!("{}", e))),
         Ok(None) => Err(plexspaces_node::NodeError::ActorNotFound(
@@ -511,6 +537,7 @@ async fn test_connection_pooling() {
         "".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     let wrapper_pooled = Arc::new(ActorRef::local(
@@ -519,6 +546,7 @@ async fn test_connection_pooling() {
         "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     ));
     let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2
         .service_locator()
@@ -596,11 +624,12 @@ async fn test_connection_pooling() {
         "".to_string(),
         "node2".to_string(),
         service_locator1,
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     for i in 0..5 {
         let message = create_routing_test_message(vec![i]);
-        let result = remote_actor_ref.tell(message).await;
+        let result = remote_actor_ref.tell(&ctx, message).await;
         assert!(result.is_ok(), "Message {} should succeed", i);
     }
 

@@ -1546,10 +1546,10 @@ health:
 		echo "grpc_health_probe not found. Install from: https://github.com/grpc-ecosystem/grpc-health-probe"; \
 	fi
 
-# View metrics (if HTTP gateway enabled)
+# View metrics
 metrics:
 	@echo "Fetching metrics..."
-	@curl -s http://localhost:8001/metrics || echo "Metrics endpoint not available. Ensure HTTP gateway is enabled."
+	@curl -s http://localhost:8000/metrics || echo "Metrics endpoint not available. Ensure node is running."
 
 # Backup data (SQLite)
 backup:

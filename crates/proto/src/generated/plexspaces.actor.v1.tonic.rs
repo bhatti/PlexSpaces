@@ -86,6 +86,29 @@ pub mod actor_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Spawn an actor on the node receiving this gRPC request
+
+ ## Purpose
+ Spawns an actor on the node where this RPC is called. The target node is implicit
+ from the gRPC endpoint (no target_node_id field needed).
+
+ ## Erlang Comparison
+ Erlang: spawn(Node, Module, Function, Args)
+ PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
+   - Node is implicit from gRPC connection endpoint
+
+ ## Design Notes
+ - This RPC is called ON the target node (node2 receives the request)
+ - The caller (node1) sends gRPC request to node2's ActorService
+ - node2 validates actor_type exists locally, then spawns
+ - Returns canonical ActorRef string for location-transparent messaging
+ - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
+
+ ## Security
+ - Target node validates caller has permission to spawn actors
+ - Target node validates actor_type is registered and safe to spawn
+ - Rate limiting applied per caller to prevent spawn bombing
+*/
         pub async fn spawn_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::SpawnActorRequest>,
@@ -316,6 +339,8 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Delete an actor
+*/
         pub async fn delete_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteActorRequest>,
@@ -950,6 +975,29 @@ pub mod actor_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ActorServiceServer.
     #[async_trait]
     pub trait ActorService: Send + Sync + 'static {
+        /** Spawn an actor on the node receiving this gRPC request
+
+ ## Purpose
+ Spawns an actor on the node where this RPC is called. The target node is implicit
+ from the gRPC endpoint (no target_node_id field needed).
+
+ ## Erlang Comparison
+ Erlang: spawn(Node, Module, Function, Args)
+ PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
+   - Node is implicit from gRPC connection endpoint
+
+ ## Design Notes
+ - This RPC is called ON the target node (node2 receives the request)
+ - The caller (node1) sends gRPC request to node2's ActorService
+ - node2 validates actor_type exists locally, then spawns
+ - Returns canonical ActorRef string for location-transparent messaging
+ - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
+
+ ## Security
+ - Target node validates caller has permission to spawn actors
+ - Target node validates actor_type is registered and safe to spawn
+ - Rate limiting applied per caller to prevent spawn bombing
+*/
         async fn spawn_actor(
             &self,
             request: tonic::Request<super::SpawnActorRequest>,
@@ -1026,6 +1074,8 @@ pub mod actor_service_server {
             tonic::Response<super::MigrateActorResponse>,
             tonic::Status,
         >;
+        /** Delete an actor
+*/
         async fn delete_actor(
             &self,
             request: tonic::Request<super::DeleteActorRequest>,

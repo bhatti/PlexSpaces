@@ -51,7 +51,7 @@ class ChatRoom:
 
 ```bash
 # Start PlexSpaces server first
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

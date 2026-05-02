@@ -9,7 +9,7 @@
     "build:ts": "tsc -p .",
     "build:bundle": "node build-bundle.mjs",
     "test": "npm run build",
-    "verify": "npm run build && echo 'Run ./test.sh 8092 with server (./scripts/server.sh) for e2e'"
+    "verify": "npm run build && echo 'Run ./test.sh 8091 with server (./scripts/server.sh) for e2e'"
   },
   "dependencies": {
     "@plexspaces/sdk": "file:../../../../sdks/typescript"

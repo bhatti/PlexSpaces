@@ -137,17 +137,18 @@ async fn test_actor_ref_tell_with_ttl_message() {
         "test".to_string(),
         Arc::clone(&mailbox),
         service_locator.clone(),
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     );
 
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};
+    let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         registry
             .register_actor(
-                &ctx,
+                &tell_ctx,
                 actor_id,
                 sender,
                 "test_actor".to_string(),
@@ -163,7 +164,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     let message_id = message.id.clone();
 
     // Send message
-    actor_ref.tell(message).await.unwrap();
+    actor_ref.tell(&tell_ctx, message).await.unwrap();
 
     // Message should be in mailbox
     let received = mailbox.dequeue().await;

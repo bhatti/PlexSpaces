@@ -61,6 +61,7 @@ mod tests {
             durability_enabled: false,
             use_instance_pool: false,
             max_concurrent_instantiations: None,
+            shared_timer_pool: None,
         }
     }
 

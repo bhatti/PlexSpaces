@@ -37,10 +37,9 @@ use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, Message, RequestContext, spawn_with_facets, TimerFacet,
 };
-use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
-use plexspaces_core::ActorId;
+use plexspaces_core::{ActorId, ServiceLocator};
+use plexspaces_node::{CoordinationComputeTracker, NodeBuilder};
 use serde_json::json;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;
 use anyhow::Result;
@@ -241,7 +240,10 @@ async fn main() -> Result<()> {
     
     for (i, actor_id) in session_ids.iter().enumerate() {
         // Get TimerFacet from node (facets are configured with actor_ref and actor_service after spawn)
-        let facets_arc = node.get_facets(actor_id).await
+        let facets_arc = node
+            .service_locator()
+            .facet_container_for_actor(actor_id.as_str())
+            .await
             .ok_or_else(|| anyhow::anyhow!("Facets not found for actor {}", actor_id))?;
         
         let facets_guard = facets_arc.read().await;
@@ -319,7 +321,10 @@ async fn main() -> Result<()> {
     // Cancel idle_timeout for first 20 sessions (simulate user activity)
     for actor_id in session_ids.iter().take(20) {
         // Get TimerFacet from node
-        let facets_arc = node.get_facets(actor_id).await
+        let facets_arc = node
+            .service_locator()
+            .facet_container_for_actor(actor_id.as_str())
+            .await
             .ok_or_else(|| anyhow::anyhow!("Failed to get facets for {}", actor_id))?;
         let facets_guard = facets_arc.read().await;
         let timer_facet_arc = facets_guard.get_facet("timer")

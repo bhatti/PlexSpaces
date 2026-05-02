@@ -67,7 +67,7 @@ Message types are the same in all SDKs: `workflow_run`, `workflow_signal:<name>`
 # Terminal 2: build and test
 cd examples/typescript/apps/migrating_temporal
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## Metrics and Benchmarks (per PLAN criteria)

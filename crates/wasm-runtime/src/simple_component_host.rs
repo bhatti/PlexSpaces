@@ -1861,29 +1861,36 @@ mod tests {
                 results: req
                     .requests
                     .into_iter()
-                    .map(|request| plexspaces_proto::actor::v1::SpawnActorResult {
-                        success: true,
-                        error: String::new(),
-                        response: Some(plexspaces_proto::actor::v1::SpawnActorResponse {
-                            actor_ref: format!(
-                                "{}@node-a",
-                                if request.actor_id.is_empty() {
-                                    request.actor_type.clone()
-                                } else {
-                                    request.actor_id.clone()
-                                }
-                            ),
-                            actor: Some(plexspaces_proto::actor::v1::Actor {
-                                actor_id: if request.actor_id.is_empty() {
-                                    request.actor_type.clone()
-                                } else {
-                                    request.actor_id.clone()
-                                },
-                                actor_type: request.actor_type,
-                                namespace: request.namespace,
-                                ..Default::default()
+                    .map(|request| {
+                        let spec = request.spec.as_ref();
+                        let identity = spec.and_then(|s| s.identity.as_ref());
+                        let actor_type = identity
+                            .map(|i| i.actor_type.clone())
+                            .unwrap_or_default();
+                        let actor_name = identity.map(|i| i.name.clone()).unwrap_or_default();
+                        let effective_name = if actor_name.is_empty() {
+                            actor_type.clone()
+                        } else {
+                            actor_name.clone()
+                        };
+                        let namespace = if !request.namespace.is_empty() {
+                            request.namespace.clone()
+                        } else {
+                            spec.map(|s| s.namespace.clone()).unwrap_or_default()
+                        };
+                        plexspaces_proto::actor::v1::SpawnActorResult {
+                            success: true,
+                            error: String::new(),
+                            response: Some(plexspaces_proto::actor::v1::SpawnActorResponse {
+                                actor_ref: format!("{}@node-a", effective_name),
+                                actor: Some(plexspaces_proto::actor::v1::Actor {
+                                    actor_id: effective_name.clone(),
+                                    actor_type,
+                                    namespace,
+                                    ..Default::default()
+                                }),
                             }),
-                        }),
+                        }
                     })
                     .collect(),
             })
@@ -2215,11 +2222,26 @@ mod tests {
             host.spawn_actors(
                 SpawnActorsRequest {
                     requests: vec![SpawnActorRequest {
-                        actor_type: "worker".to_string(),
-                        actor_id: "worker-0".to_string(),
+                        spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
+                            identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                                name: "worker-0".to_string(),
+                                actor_type: "worker".to_string(),
+                            }),
+                            role: String::new(),
+                            namespace: String::new(),
+                            tenant_id: String::new(),
+                            visibility: 0,
+                            behavior_kind: String::new(),
+                            args: std::collections::HashMap::from([(
+                                "rank".to_string(),
+                                "rank-0".to_string(),
+                            )]),
+                            facets: vec![],
+                            config: None,
+                            labels: std::collections::HashMap::new(),
+                        }),
                         namespace: "mpi-app".to_string(),
-                        initial_state: b"rank-0".to_vec(),
-                        ..Default::default()
+                        instances_count: 1,
                     }],
                 }
                 .encode_to_vec(),

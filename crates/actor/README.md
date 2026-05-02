@@ -157,12 +157,16 @@ let remote_ref = ActorRef::remote(
 );
 
 // Send message (fire-and-forget) - same API for local and remote
+use plexspaces_core::RequestContext;
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
 let message = new_message("increment");
-actor_ref.tell(message).await?;
-remote_ref.tell(message).await?;
+actor_ref.tell(&ctx, message.clone()).await?;
+remote_ref.tell(&ctx, message).await?;
 
 // Ask pattern (request-reply)
-let reply = remote_ref.ask(message, Duration::from_secs(5)).await?;
+let reply = remote_ref
+    .ask(&ctx, new_message("get"), Duration::from_secs(5))
+    .await?;
 ```
 
 **Design**: `ActorRef` is location-transparent. Remote `ActorRef`s use `ServiceLocator` for efficient gRPC client caching (one client per node, shared across all ActorRefs to that node). This scales to hundreds of thousands of ActorRefs without creating excessive connections.
@@ -244,9 +248,14 @@ if message.is_expired() {
 Location-transparent messaging without ActorContext:
 
 ```rust
-// Local or remote - same API
-actor_ref.tell(message).await?;
-let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+use plexspaces_core::RequestContext;
+
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
+// Local or remote - same API; pass caller RequestContext for visibility and routing metadata
+actor_ref.tell(&ctx, message).await?;
+let reply = actor_ref
+    .ask(&ctx, request, Duration::from_secs(5))
+    .await?;
 ```
 
 ## Known Limitations

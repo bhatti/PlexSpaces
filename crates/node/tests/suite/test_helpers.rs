@@ -19,8 +19,9 @@
 //! Test helper functions to replace deprecated Node methods
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{ActorId, ActorRegistry, MessageSender};
+use plexspaces_core::{ActorId, ActorRegistry, MessageSender, RequestContext, VirtualActorMetadata};
 use plexspaces_node::Node;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::metadata::MetadataValue;
@@ -48,6 +49,46 @@ pub fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
 /// Build a canonical actor ID for generic node integration tests.
 pub fn test_actor_id(name: &str, node_id: &str) -> ActorId {
     ActorId::new(name, "test_actor", "default", node_id).expect("test actor IDs must be valid")
+}
+
+/// Same semantics as the former `Node::check_virtual_actor_exists` (virtual manager as source of truth).
+///
+/// Returns `(exists, is_active, is_virtual)` where `exists` means instance metadata is registered
+/// (`get_metadata` is `Some`), matching passivated actors that remain in the virtual registry.
+pub async fn check_virtual_actor_exists_triplet(
+    node: &Node,
+    actor_id: &ActorId,
+) -> (bool, bool, bool) {
+    let Some(manager) = node.service_locator().virtual_actor_manager().await else {
+        return (false, false, false);
+    };
+    let exists = manager.get_metadata(actor_id).await.is_some();
+    let is_virtual = manager.is_virtual(actor_id).await;
+    let is_active = if is_virtual {
+        manager.is_active(actor_id).await
+    } else {
+        false
+    };
+    (exists, is_active, is_virtual)
+}
+
+/// Read virtual actor metadata via [`ServiceLocator::virtual_actor_manager`].
+pub async fn virtual_actor_metadata_optional(
+    node: &Node,
+    actor_id: &ActorId,
+) -> Option<VirtualActorMetadata> {
+    let manager = node.service_locator().virtual_actor_manager().await?;
+    manager.get_metadata(actor_id).await
+}
+
+/// Registered actor ids from the node's actor registry.
+pub async fn registered_actor_ids_from_node(node: &Node) -> Result<HashSet<ActorId>, plexspaces_node::NodeError> {
+    let registry = node
+        .service_locator()
+        .actor_registry()
+        .await
+        .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
+    Ok(registry.registered_actor_ids().await)
 }
 
 async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId) -> bool {
@@ -110,8 +151,12 @@ pub async fn registry_tell(
         .ok_or_else(|| {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
+    let ctx = RequestContext::new_without_auth(
+        "test-tenant".into(),
+        actor_id.namespace().to_string(),
+    );
     actor_registry
-        .tell(actor_id, message)
+        .tell(&ctx, actor_id, message)
         .await
         .map_err(|e| plexspaces_node::NodeError::ConfigError(e.to_string()))
 }
@@ -239,6 +284,7 @@ pub async fn register_actor_with_message_sender(
         String::new(),
         mailbox,
         node.service_locator().clone(),
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
     ));
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()

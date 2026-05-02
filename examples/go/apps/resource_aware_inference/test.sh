@@ -6,11 +6,11 @@ WASM_FILE="$SCRIPT_DIR/resource_aware_inference_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
 if [[ -z "${1:-}" ]]; then
-  HTTP_PORT=8092
+  HTTP_PORT=8091
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
   HTTP_PORT="$1"
 else
-  HTTP_PORT=8092
+  HTTP_PORT=8091
 fi
 
 GREEN='\033[0;32m'
@@ -112,8 +112,8 @@ if [ "$HTTP_CHECK" = "000" ]; then
   exit 1
 fi
 
-# Render config with correct gRPC seed port (HTTP_PORT - 1)
-GRPC_PORT=$((HTTP_PORT - 1))
+# gRPC and HTTP share a single port
+GRPC_PORT=$HTTP_PORT
 TEMP_CONFIG="$(mktemp -t resource-aware-inference-config)"
 python3 - "$CONFIG_FILE" "$TEMP_CONFIG" "$GRPC_PORT" <<'PY'
 import pathlib, sys

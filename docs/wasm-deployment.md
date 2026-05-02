@@ -49,7 +49,7 @@ namespace = "my-app"  # Required: all actors scoped to this namespace
 
 **Specifying in API request** (form field):
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=my-app" \
   -F "name=my-app" \
   -F "namespace=my-app" \
@@ -137,7 +137,7 @@ impl CounterActor {
 
 **Best Practice**: Use HTTP multipart/form-data for large file uploads (>5MB), similar to document uploads in production applications.
 
-**Endpoint**: `POST http://localhost:8001/api/v1/applications/deploy`
+**Endpoint**: `POST http://localhost:8000/api/v1/applications/deploy`
 
 **Content-Type**: `multipart/form-data`
 
@@ -204,7 +204,7 @@ If `config` is not provided, the HTTP handler automatically creates an `Applicat
   --wasm examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
 
 # Or use HTTP directly
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -225,7 +225,7 @@ cargo build --target wasm32-wasip2 --release
   --wasm target/wasm32-wasip2/release/rust_actor.wasm
 
 # Or use HTTP
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=rust-app" \
   -F "name=rust-actor" \
   -F "version=1.0.0" \
@@ -242,7 +242,7 @@ npm run build          # tsc + esbuild bundle
 jco componentize account_actor_bundle.mjs --wit wit/plexspaces-actor -o account_actor.wasm --disable all
 
 # Deploy via HTTP
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=bank-test-ts" \
   -F "name=account" \
   -F "version=1.0.0" \
@@ -323,7 +323,7 @@ wasm-opt -Oz --strip-debug greeter.wasm -o greeter_opt.wasm
 **HTTP DELETE:**
 ```bash
 # Use the canonical application_id
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
+curl -X DELETE http://localhost:8000/api/v1/applications/calculator-app
 ```
 
 **CLI:**
@@ -360,7 +360,7 @@ cd examples/simple/wasm_calculator
 **Deploy**:
 ```bash
 # HTTP (recommended for 39MB Python WASM)
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -370,7 +370,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 **Undeploy**:
 ```bash
 # Use application name (not application_id)
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator
+curl -X DELETE http://localhost:8000/api/v1/applications/calculator
 ```
 
 ### Rust Actor
@@ -393,7 +393,7 @@ cargo build --target wasm32-wasip2 --release
   --wasm target/wasm32-wasip2/release/rust_actor.wasm
 
 # Or HTTP
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=rust-app" \
   -F "name=rust-actor" \
   -F "version=1.0.0" \
@@ -419,7 +419,7 @@ cd examples/typescript/apps/bank_account
 
 **Deploy**:
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=bank-test-ts" \
   -F "name=account" \
   -F "version=1.0.0" \
@@ -439,7 +439,7 @@ tinygo build -target=wasip2 -o go_actor.wasm go_actor.go
 **Deploy**:
 ```bash
 # HTTP (recommended)
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=go-app" \
   -F "name=go-actor" \
   -F "version=1.0.0" \
@@ -452,13 +452,13 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 **Endpoint**: `POST /api/v1/applications/deploy`
 
-**Port**: HTTP gateway runs on gRPC port + 1 (e.g., if gRPC is 8000, HTTP is 8001)
+**Port**: gRPC and HTTP share a single port (e.g., `8000` by default)
 
 **Max File Size**: 100MB
 
 **Example**:
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -489,7 +489,7 @@ Without the timeout parameter, the default HTTP timeout applies. Use this when i
 **Example**:
 ```bash
 # Use application_id
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
+curl -X DELETE http://localhost:8000/api/v1/applications/calculator-app
 ```
 
 ### gRPC / CLI
@@ -690,14 +690,13 @@ cargo run --release --bin plexspaces -- start \
 ```
 
 **Note**: 
-- HTTP gateway automatically starts on port 8001 (gRPC port + 1)
-- Dashboard is available at `http://localhost:8001/`
+- gRPC and HTTP share a single port; dashboard available at `http://localhost:8000/`
 - You can check dashboard stats before deployment (should show 0 applications)
 
 **Verify Node is Running:**
 ```bash
 # Check dashboard summary
-curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
+curl http://localhost:8000/api/v1/dashboard/summary | jq '.total_applications'
 # Should return: 0
 ```
 
@@ -725,14 +724,14 @@ curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
 **Deployment via HTTP (Recommended for Large Files >5MB):**
 ```bash
 # Deploy with auto-generated ApplicationSpec
-curl -v -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -v -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@wasm-modules/calculator_actor.wasm"
 
 # Deploy with custom ApplicationSpec (via config TOML)
-curl -v -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -v -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -812,7 +811,7 @@ When deploying via HTTP/gRPC API, you can optionally save WASM files to disk for
 export PLEXSPACES_SAVE_WASM_APPS=1
 
 # 2. Deploy via API - files are saved to apps/payment-handler/app.wasm and application-spec.toml
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=payment-handler" \
   -F "name=payment-handler" \
   -F "version=1.0.0" \
@@ -830,11 +829,11 @@ See [Installation Guide](installation.md#wasm-applications-auto-deploy-and-persi
 **Check Dashboard Stats:**
 ```bash
 # Check dashboard summary (should show 1 application now)
-curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
+curl http://localhost:8000/api/v1/dashboard/summary | jq '.total_applications'
 # Should return: 1
 ```
 
-**List applications** (gRPC; when HTTP is on 8001, gRPC is typically 8000):
+**List applications** (gRPC; gRPC and HTTP share the same port, e.g. 8000):
 ```bash
 cargo run --bin plexspaces -- list --node localhost:8000 --json
 ```
@@ -843,9 +842,9 @@ Use the same `ListApplications` RPC with `grpcurl` or other gRPC clients if you 
 **View Dashboard:**
 ```bash
 # Open in browser
-open http://localhost:8001/
+open http://localhost:8000/
 # Or
-http://localhost:8001/dashboard/node/test-node
+http://localhost:8000/dashboard/node/test-node
 ```
 
 **Complete Dashboard Workflow:**
@@ -862,7 +861,7 @@ See [DEPLOY_EMPTY_NODE_GUIDE.md](../DEPLOY_EMPTY_NODE_GUIDE.md) for the complete
 **HTTP:**
 ```bash
 # Use application_id
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
+curl -X DELETE http://localhost:8000/api/v1/applications/calculator-app
 ```
 
 **CLI:**
@@ -875,7 +874,7 @@ cargo run --release --bin plexspaces -- application undeploy \
 **Verify Undeployment:**
 ```bash
 # Check dashboard (should show 0 applications again)
-curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
+curl http://localhost:8000/api/v1/dashboard/summary | jq '.total_applications'
 # Should return: 0
 ```
 
@@ -889,7 +888,7 @@ curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
 - **CLI**: Automatically handles this - if you see this error, the CLI should have automatically switched to HTTP. Check CLI version.
 - **Manual**: Use HTTP multipart upload:
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "wasm_file=@large_file.wasm" \
   ...
 ```
@@ -907,7 +906,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 **Example with proper curl syntax**:
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -1020,7 +1019,7 @@ for c in (flag + user):
 ### Deployment Fails
 
 **Check**:
-1. Node is running: `curl http://localhost:8001/health` or `curl http://localhost:8000/health`
+1. Node is running: `curl http://localhost:8000/health` or `curl http://localhost:8000/health`
 2. WASM file is valid: `wasm-validate calculator_actor.wasm` (if wasm-validate is installed)
 3. WIT interface matches: Check `wit/plexspaces-actor/actor.wit`
 4. HTTP gateway is running: Check logs for "Starting HTTP gateway server on http://..."
@@ -1030,8 +1029,8 @@ for c in (flag + user):
 **Problem**: Cannot connect to HTTP endpoint
 
 **Check**:
-1. HTTP gateway runs on gRPC port + 1 (e.g., if gRPC is 8000, HTTP is 8001)
-2. Check node logs for "Starting HTTP gateway server on http://..."
+1. gRPC and HTTP share a single port — check node logs for "Single-port gRPC+HTTP server ready"
+2. Verify the port in `--listen-addr` matches your curl commands
 3. Verify firewall allows connections to HTTP port
 
 ## Python WASM Development
@@ -1457,7 +1456,7 @@ Optional **`behavior_kind`** on the same child is **OTP-style metadata only** (f
 
 Deploy with custom config:
 ```bash
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=my-app" \
   -F "name=my-app" \
   -F "version=1.0.0" \

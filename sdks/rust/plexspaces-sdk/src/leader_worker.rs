@@ -64,8 +64,10 @@ pub async fn spawn_actor_on_node(
     labels: std::collections::HashMap<String, String>,
 ) -> Result<String> {
     use plexspaces_proto::actor::v1::{
-        actor_service_client::ActorServiceClient, SpawnActorRequest, SpawnActorResponse,
+        actor_service_client::ActorServiceClient, ActorSpawnSpec, SpawnActorRequest,
+        SpawnActorResponse,
     };
+    use plexspaces_proto::common::v1::ActorIdentity;
 
     let channel = service_locator
         .get_actor_service_client(node_id)
@@ -73,16 +75,27 @@ pub async fn spawn_actor_on_node(
         .map_err(|e| anyhow::anyhow!("get_actor_service_client failed: {}", e))?;
     let mut client = ActorServiceClient::new(channel);
 
-    let req = SpawnActorRequest {
-        actor_type: actor_type.to_string(),
-        actor_id: actor_name,
-        initial_state,
+    let (role_opt, args) = plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+    let spec = ActorSpawnSpec {
+        identity: Some(ActorIdentity {
+            name: actor_name,
+            actor_type: actor_type.to_string(),
+        }),
+        role: role_opt.unwrap_or_default(),
+        namespace: String::new(),
+        tenant_id: String::new(),
+        visibility: 0,
+        behavior_kind: String::new(),
+        args,
+        facets: vec![],
         config,
         labels,
-        facets: vec![],
+    };
+
+    let req = SpawnActorRequest {
+        spec: Some(spec),
         namespace: String::new(),
         instances_count: 1,
-        role: String::new(),
     };
 
     let resp: SpawnActorResponse = client

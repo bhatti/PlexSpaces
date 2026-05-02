@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/cdn_cache_actor.wasm"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

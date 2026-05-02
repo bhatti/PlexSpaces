@@ -55,7 +55,7 @@ Use **deploy once**, then **compete from two terminals**. One becomes leader; th
 ```bash
 # Terminal 2: deploy both term1 and term2 apps (run once)
 cd examples/python/apps/leader_election
-./deploy.sh 8092
+./deploy.sh 8091
 ```
 
 ### 3. Compete from two terminals
@@ -64,10 +64,10 @@ cd examples/python/apps/leader_election
 
 ```bash
 # Terminal 2: run competitor term1 (same port as term2)
-./compete.sh term1 8092
+./compete.sh term1 8091
 
 # Terminal 3: run competitor term2 (same port as term1)
-./compete.sh term2 8092
+./compete.sh term2 8091
 ```
 
 - **One terminal** acquires the lock and prints "Acquired lock → leader (term1)" (or term2), then renews every 5s until you stop it.
@@ -78,7 +78,7 @@ cd examples/python/apps/leader_election
 
 | Script | Purpose |
 |--------|---------|
-| `deploy.sh [port]` | Deploy app for **term1** and **term2** (run once). Builds WASM if needed. Default port 8092. |
+| `deploy.sh [port]` | Deploy app for **term1** and **term2** (run once). Builds WASM if needed. Default port 8091. |
 | `compete.sh term1\|term2 [port]` | Compete for the **same lock**. No deploy. Try-acquire → if leader, renew every 5s until killed; else retry every 5s (up to 300s). |
 | `test.sh [port]` | One-shot flow (deploy + acquire + renew + release). Optional. |
 

@@ -202,6 +202,7 @@ mod tests {
             None, // No blob service
             None, // No elastic pool service
             None, // No outbound HTTP client
+            None, // No shared timer pool
         ))
     }
 
@@ -620,6 +621,7 @@ mod tests {
             None, // blob_service
             None, // elastic_pool_service
             None, // outbound_http_client
+            None, // shared_timer_pool
         ));
         let ctx_leader = test_context("", "leader-election");
         let lock_key = "leader".to_string();

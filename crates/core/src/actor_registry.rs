@@ -75,6 +75,14 @@ pub enum ActorRegistryError {
     /// Required registry dependency is not configured
     #[error("Registry dependency unavailable: {0}")]
     DependencyUnavailable(String),
+
+    /// Messaging visibility denied (reserved; local routing uses `ActorRef` errors today).
+    #[error("Actor visibility denied: {0}")]
+    VisibilityDenied(String),
+
+    /// Link/monitor/unlink/demonitor rejected (namespace/tenant scope or locality).
+    #[error("link/monitor denied: {0}")]
+    LinkMonitorDenied(String),
 }
 
 /// ## Actor Data Storage
@@ -122,6 +130,9 @@ pub struct ActorRegistry {
     /// node startup once a real service is available.  Always non-None so routing code
     /// never checks for an Optional.
     actor_service: Arc<RwLock<Arc<dyn ActorService>>>,
+    /// Dialable HTTP base (`http://listen_addr`) for remote `NotifyActorDown` when the
+    /// supervisor is on another node. Set via [`Self::set_local_listen_addr`] during node startup.
+    local_listen_addr: Arc<RwLock<String>>,
     /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
     /// Used for ask() pattern when called from outside actor context
     /// Key: structured temporary sender ActorId
@@ -222,7 +233,13 @@ impl ActorRegistry {
             actor_service: Arc::new(RwLock::new(Arc::new(
                 crate::actor_monitor::LocalOnlyActorService,
             ) as Arc<dyn ActorService>)),
+            local_listen_addr: Arc::new(RwLock::new(String::new())),
         }
+    }
+
+    /// Sets the local node's public HTTP/gRPC listen base used in cross-node monitor RPCs.
+    pub async fn set_local_listen_addr(&self, addr: String) {
+        *self.local_listen_addr.write().await = addr;
     }
 
     pub async fn set_actor_factory(&self, actor_factory: Arc<dyn ActorFactory>) {
@@ -253,26 +270,79 @@ impl ActorRegistry {
         }
     }
 
-    // === Accessor methods for actor-related data ===
-
-    /// Check if a live local runtime handle exists for an actor.
-    ///
-    /// ## Purpose
-    /// Internal method to check whether a registered sender carries a local runtime/state handle.
-    /// Used by runtime code that needs to distinguish a live local actor from a passivated
-    /// virtual actor that is only represented by metadata.
-    ///
-    /// ## Note
-    /// This is kept private to maintain encapsulation. External code should use lookup_actor() to get MessageSender.
-    pub(crate) fn has_actor_instance(&self, actor_id: &ActorId) -> bool {
-        if let Ok(actors) = self.actors.try_read() {
-            actors.iter().any(|(key, sender)| {
-                key.actor_id == *actor_id && sender.local_state_handle().is_some()
-            })
-        } else {
-            false
-        }
+    /// HTTP base (`http://host:port`) used when peers must call back for supervision RPCs.
+    pub async fn local_listen_base_url(&self) -> String {
+        self.local_listen_addr.read().await.clone()
     }
+
+    /// For operands **on this node** (others skipped): `ActorId::namespace` must match
+    /// `ctx.namespace()` unless `ctx` is internal or [`RequestContext::should_skip_namespace_filter`].
+    ///
+    /// When **`ctx.auth_enabled`**, the actor must appear under this node’s registry inventory for
+    /// **`(ctx.tenant_id(), ctx.namespace(), actor_id)`** (live sender or registered entry). No
+    /// extra scans beyond that keyed check. Remote-only operands are validated on the peer when
+    /// `ActorService` forwards the RPC.
+    pub async fn validate_link_monitor_operand_scope(
+        &self,
+        ctx: &RequestContext,
+        operands: &[&ActorId],
+    ) -> Result<(), ActorRegistryError> {
+        if ctx.internal || ctx.should_skip_namespace_filter() {
+            return Ok(());
+        }
+        for id in operands {
+            if !id.is_on_node(&self.local_node_id) {
+                continue;
+            }
+            self.validate_one_local_operand_scope(ctx, id).await?;
+        }
+        Ok(())
+    }
+
+    async fn validate_one_local_operand_scope(
+        &self,
+        ctx: &RequestContext,
+        id: &ActorId,
+    ) -> Result<(), ActorRegistryError> {
+        if id.namespace() != ctx.namespace() {
+            return Err(ActorRegistryError::LinkMonitorDenied(format!(
+                "actor {} namespace '{}' does not match request namespace '{}'",
+                id,
+                id.namespace(),
+                ctx.namespace()
+            )));
+        }
+        if !ctx.auth_enabled {
+            return Ok(());
+        }
+        let key = Self::scoped_actor_key(
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+            id.clone(),
+        );
+        if self
+            .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), id)
+            .await
+            .is_some()
+        {
+            return Ok(());
+        }
+        let in_registered = {
+            let entries = self.registered_actor_entries.read().await;
+            entries.contains(&key)
+        };
+        if in_registered {
+            return Ok(());
+        }
+        Err(ActorRegistryError::LinkMonitorDenied(format!(
+            "actor {} is not registered under tenant '{}' namespace '{}' on this node",
+            id,
+            ctx.tenant_id(),
+            ctx.namespace()
+        )))
+    }
+
+    // === Accessor methods for actor-related data ===
 
     /// Get the local runtime/state handle for active actors and tests.
     ///
@@ -848,30 +918,6 @@ impl ActorRegistry {
         self.is_actor_activated(actor_id).await
     }
 
-    fn is_local_actor_id(&self, actor_id: &ActorId) -> bool {
-        actor_id.node_id() == self.local_node_id
-    }
-
-    async fn actor_exists_locally(&self, actor_id: &ActorId) -> bool {
-        if self
-            .registered_actor_entries
-            .read()
-            .await
-            .iter()
-            .any(|key| key.actor_id == *actor_id)
-        {
-            return true;
-        }
-        if self.lookup_actor(actor_id).await.is_some() {
-            return true;
-        }
-        let manager = self.virtual_actor_manager.read().await.clone();
-        if let Some(manager) = manager {
-            return manager.is_virtual(actor_id).await;
-        }
-        false
-    }
-
     async fn require_actor_factory(&self) -> Result<Arc<dyn ActorFactory>, ActorRegistryError> {
         self.actor_factory
             .read()
@@ -936,12 +982,13 @@ impl ActorRegistry {
 
     async fn dispatch_local_message(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         message: Message,
     ) -> Result<(), ActorRegistryError> {
         if let Some(sender) = self.lookup_actor(actor_id).await {
             return sender
-                .tell(message)
+                .tell(ctx, message)
                 .await
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
@@ -962,7 +1009,7 @@ impl ActorRegistry {
         if manager.is_active(actor_id).await {
             let sender = self.get_or_activate_local_sender(actor_id).await?;
             return sender
-                .tell(message)
+                .tell(ctx, message)
                 .await
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
@@ -973,7 +1020,7 @@ impl ActorRegistry {
             should_activate = facet_guard.start_activation().await;
         }
 
-        manager.queue_message(actor_id, message).await;
+        manager.queue_message(actor_id, message, ctx).await;
 
         if should_activate {
             let actor_factory = self.require_actor_factory().await?;
@@ -990,11 +1037,19 @@ impl ActorRegistry {
     /// Sends a message to an actor, routing locally or remotely as needed.
     ///
     /// If the actor's node_id matches the local node, dispatches via the local
-    /// mailbox (fast path). If the actor is on a different node and ActorService
-    /// has been wired up, routes via gRPC. Returns an error if the actor is not
-    /// found locally and no ActorService is available.
+    /// mailbox (fast path). If the actor is on a different node and [`ActorService`]
+    /// has been wired up, routes via gRPC with `ctx` attached to outbound metadata
+    /// (same pattern as [`Self::ask`]). Returns an error if the actor is not found
+    /// locally and no [`ActorService`] is available.
+    ///
+    /// Callers must pass the same [`RequestContext`] they use for other scoped work
+    /// (JWT-derived tenant when auth is enabled; namespace from the request boundary
+    /// or WASM application scope). For framework-internal fan-out where only the
+    /// target namespace is known, use [`RequestContext::new_without_auth`] with the
+    /// appropriate tenant and [`ActorId::namespace`].
     pub async fn tell(
         &self,
+        ctx: &RequestContext,
         actor_id: &ActorId,
         message: Message,
     ) -> Result<(), ActorRegistryError> {
@@ -1008,14 +1063,12 @@ impl ActorRegistry {
         let result = if is_remote {
             // Remote node: route via ActorService (gRPC).
             let svc = self.actor_service.read().await.clone();
-            let ctx =
-                crate::RequestContext::new_without_auth("system".to_string(), "system".to_string());
-            svc.send(&ctx, &actor_id.to_string(), message)
+            svc.send(ctx, &actor_id.to_string(), message)
                 .await
                 .map(|_| ())
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
         } else {
-            self.dispatch_local_message(actor_id, message).await
+            self.dispatch_local_message(ctx, actor_id, message).await
         };
 
         metrics::histogram!("plexspaces_actor_registry_local_tell_duration_seconds")
@@ -1078,7 +1131,7 @@ impl ActorRegistry {
                 .map(|_| ())
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
         } else {
-            self.dispatch_local_message(actor_id, message).await
+            self.dispatch_local_message(ctx, actor_id, message).await
         };
         if let Err(err) = dispatch_result {
             waiter_registry.remove(&correlation_id).await;
@@ -1762,8 +1815,8 @@ impl ActorRegistry {
     ///
     /// ## Returns
     /// `Ok(())` on success, `Err(ActorRegistryError)` on failure
-    /// Add a bidirectional link between two actors.  Delegates to `ActorMonitor`.
-    pub async fn link(
+    /// Add a bidirectional link between two **local** actors. Delegates to `ActorMonitor`.
+    pub async fn local_link(
         &self,
         actor1_id: &ActorId,
         actor2_id: &ActorId,
@@ -1774,8 +1827,8 @@ impl ActorRegistry {
             .map_err(|e| ActorRegistryError::RegistrationFailed(e.to_string()))
     }
 
-    /// Remove the bidirectional link between two actors.  Delegates to `ActorMonitor`.
-    pub async fn unlink(
+    /// Remove the bidirectional link between two **local** actors.
+    pub async fn local_unlink(
         &self,
         actor1_id: &ActorId,
         actor2_id: &ActorId,
@@ -1789,17 +1842,17 @@ impl ActorRegistry {
         self.actor_monitor.get_links(actor_id).await
     }
 
-    /// Register a one-way monitor.  Delegates to `ActorMonitor`.
+    /// Register a one-way monitor in the local `ActorMonitor` only.
     ///
     /// `ctx` must be the authenticated [`RequestContext`] for the monitor-establishing
     /// operation (edge gRPC/JWT or explicit caller scope). It is stored and replayed
     /// when delivering `__DOWN__` to a remote supervisor.
-    pub async fn monitor(
+    pub async fn local_monitor(
         &self,
+        ctx: &RequestContext,
         target_id: &ActorId,
         monitor_id: &ActorId,
         monitor_ref: String,
-        ctx: &RequestContext,
     ) -> Result<(), ActorRegistryError> {
         self.actor_monitor
             .add_monitor(target_id, monitor_id, monitor_ref, ctx.clone())
@@ -1807,8 +1860,8 @@ impl ActorRegistry {
         Ok(())
     }
 
-    /// Remove a specific monitor by its `monitor_ref`.  Delegates to `ActorMonitor`.
-    pub async fn demonitor(
+    /// Remove a specific monitor by its `monitor_ref` on this node only.
+    pub async fn local_demonitor(
         &self,
         target_id: &ActorId,
         _monitor_id: &ActorId,
@@ -1817,6 +1870,172 @@ impl ActorRegistry {
         self.actor_monitor
             .remove_monitor(target_id, monitor_ref)
             .await;
+        Ok(())
+    }
+
+    /// Establish a monitor (location-transparent): local targets update this node's monitor table;
+    /// remote targets are forwarded via [`ActorService::monitor_actor`].
+    ///
+    /// # TODO (lazy virtual actors)
+    ///
+    /// When the monitored actor is a **passivated** lazy virtual actor (`is_actor_activated` is
+    /// false but it is registered), decide whether to activate first, register metadata-only, or
+    /// defer until activation. Until then, local monitor requires an activated sender.
+    pub async fn monitor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        supervisor_id: &ActorId,
+    ) -> Result<String, ActorRegistryError> {
+        if actor_id.is_on_node(&self.local_node_id) {
+            self.validate_link_monitor_operand_scope(ctx, &[actor_id, supervisor_id])
+                .await?;
+            // TODO(lazy-virtual): allow monitor/link for passivated lazy virtuals (policy TBD).
+            if !self.is_actor_activated(actor_id).await {
+                return Err(ActorRegistryError::ActorNotFound(actor_id.to_string()));
+            }
+            let monitor_ref = ulid::Ulid::new().to_string();
+            self.local_monitor(ctx, actor_id, supervisor_id, monitor_ref.clone())
+                .await?;
+            Ok(monitor_ref)
+        } else {
+            let svc = self.actor_service.read().await.clone();
+            let callback = self.local_listen_base_url().await;
+            if callback.is_empty() {
+                return Err(ActorRegistryError::DependencyUnavailable(
+                    "local listen URL unset; call set_local_listen_addr before cross-node monitor"
+                        .into(),
+                ));
+            }
+            svc.monitor_actor(
+                ctx,
+                actor_id.as_str(),
+                supervisor_id.as_str(),
+                &callback,
+            )
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+        }
+    }
+
+    /// Cancel a monitor (location-transparent).
+    pub async fn demonitor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        supervisor_id: &ActorId,
+        monitor_ref: &str,
+    ) -> Result<(), ActorRegistryError> {
+        if actor_id.is_on_node(&self.local_node_id) {
+            self.validate_link_monitor_operand_scope(ctx, &[actor_id, supervisor_id])
+                .await?;
+            self.local_demonitor(actor_id, supervisor_id, monitor_ref).await
+        } else {
+            let svc = self.actor_service.read().await.clone();
+            svc.demonitor_actor(
+                ctx,
+                actor_id.as_str(),
+                supervisor_id.as_str(),
+                monitor_ref,
+            )
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+        }
+    }
+
+    /// Bidirectional link between two actors (location-transparent via [`ActorService`]).
+    ///
+    /// # TODO (lazy virtual actors)
+    ///
+    /// Same as [`Self::monitor`]: linking when one or both operands are passivated lazy virtuals
+    /// needs an explicit policy (activate vs metadata-only).
+    pub async fn link(
+        &self,
+        ctx: &RequestContext,
+        actor1_id: &ActorId,
+        actor2_id: &ActorId,
+    ) -> Result<(), ActorRegistryError> {
+        if actor1_id == actor2_id {
+            return Err(ActorRegistryError::RegistrationFailed(
+                "Cannot link actor to itself".into(),
+            ));
+        }
+        let local = &self.local_node_id;
+        if actor1_id.is_on_node(local) {
+            if actor2_id.is_on_node(local) {
+                self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                    .await?;
+                return self.local_link(actor1_id, actor2_id).await;
+            }
+            self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                .await?;
+            self.local_link(actor1_id, actor2_id).await?;
+            let svc = self.actor_service.read().await.clone();
+            svc.link_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            return Ok(());
+        }
+        if actor2_id.is_on_node(local) {
+            let svc = self.actor_service.read().await.clone();
+            svc.link_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                .await?;
+            self.local_link(actor1_id, actor2_id).await?;
+            return Ok(());
+        }
+        let svc = self.actor_service.read().await.clone();
+        svc.link_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+        svc.link_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Remove a bidirectional link (location-transparent via [`ActorService`]).
+    pub async fn unlink(
+        &self,
+        ctx: &RequestContext,
+        actor1_id: &ActorId,
+        actor2_id: &ActorId,
+    ) -> Result<(), ActorRegistryError> {
+        let local = &self.local_node_id;
+        if actor1_id.is_on_node(local) {
+            if actor2_id.is_on_node(local) {
+                self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                    .await?;
+                return self.local_unlink(actor1_id, actor2_id).await;
+            }
+            self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                .await?;
+            self.local_unlink(actor1_id, actor2_id).await?;
+            let svc = self.actor_service.read().await.clone();
+            svc.unlink_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            return Ok(());
+        }
+        if actor2_id.is_on_node(local) {
+            let svc = self.actor_service.read().await.clone();
+            svc.unlink_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
+                .await?;
+            self.local_unlink(actor1_id, actor2_id).await?;
+            return Ok(());
+        }
+        let svc = self.actor_service.read().await.clone();
+        svc.unlink_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+        svc.unlink_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+            .await
+            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
         Ok(())
     }
 
@@ -1888,7 +2107,8 @@ impl ActorRegistry {
             let monitoring_id = &monitor_link.monitoring_actor_id;
 
             let delivery_result = if monitoring_id.is_on_node(&self.local_node_id) {
-                self.dispatch_local_message(monitoring_id, down_msg).await
+                self.dispatch_local_message(&monitor_link.monitoring_context, monitoring_id, down_msg)
+                    .await
             } else {
                 let svc = self.actor_service.read().await.clone();
                 svc.send(
@@ -2065,8 +2285,17 @@ impl ActorRegistry {
                 );
             }
 
-            // tell() routes locally or via ActorService automatically
-            if let Err(e) = self.tell(linked_id, exit_message).await {
+            // Tenant from the dying actor's registration when present; namespace from the
+            // linked peer's canonical id so remote gRPC metadata matches the target mailbox.
+            let (tenant_id, _) = self
+                .get_actor_metadata(actor_id)
+                .await
+                .unwrap_or_else(|| ("system".to_string(), actor_id.namespace().to_string()));
+            let exit_ctx = crate::RequestContext::new_without_auth(
+                tenant_id,
+                linked_id.namespace().to_string(),
+            );
+            if let Err(e) = self.tell(&exit_ctx, linked_id, exit_message).await {
                 tracing::warn!(
                     from = %actor_id,
                     to = %linked_id,
@@ -2123,6 +2352,117 @@ impl ActorRegistry {
             .remove_monitors_for_actors(actor_ids)
             .await;
     }
+
+    /// Resolve a flexible actor target string into a canonical [`ActorId`].
+    ///
+    /// Accepts three addressing formats used by WASM, HTTP, and gRPC callers:
+    ///
+    /// | Format | Example | Resolution |
+    /// |--------|---------|------------|
+    /// | Canonical | `alerts//channel::ns@node` | Parsed directly |
+    /// | `actor_type:name` | `channel:alerts` | Live lookup then virtual |
+    /// | Bare name / type | `channel` | Discover live actors by type |
+    ///
+    /// Resolution order (fastest to slowest):
+    /// 1. Canonical `//` format → `ActorId::from_canonical` (zero registry traffic)
+    /// 2. `type:name` → O(1) live lookup (type-index), then virtual definition build
+    /// 3. Bare address → O(1) type-index lookup, then virtual definition build
+    ///
+    /// All three paths consult `VirtualActorManager` when no live actor is found so that
+    /// passivated virtual actors can be addressed by short form.
+    pub async fn resolve_actor_id(
+        &self,
+        ctx: &RequestContext,
+        target: &str,
+    ) -> Result<ActorId, String> {
+        // 1. Canonical format — fast path, no registry traffic needed.
+        if target.contains("//") {
+            return ActorId::from_canonical(target)
+                .map_err(|e| format!("Invalid canonical actor ID '{target}': {e}"));
+        }
+
+        let namespace = ctx.namespace().to_string();
+
+        if let Some((actor_type, name)) = target.split_once(':') {
+            if actor_type.is_empty() || name.is_empty() {
+                return Err(format!("Invalid actor target format '{target}': type and name must both be non-empty"));
+            }
+
+            // 2a. Live O(1) lookup: interpret left=actor_type, right=name.
+            {
+                let actor_ids = self.discover_actors_by_type(ctx, actor_type).await;
+                if let Some(live_id) = actor_ids
+                    .iter()
+                    .find(|id| id.name() == name && id.namespace() == namespace)
+                {
+                    return Ok(live_id.clone());
+                }
+            }
+
+            // 2b. Virtual actor definition lookup via VirtualActorManager.
+            if let Some(manager) = self.virtual_actor_manager.read().await.clone() {
+                // Resolve actor_type in case the left side is a definition name.
+                let resolved_type = manager.resolve_actor_type_for_name(&namespace, actor_type).await;
+                // Try to get a virtual actor type registration so we can obtain the namespace.
+                if let Some(type_meta) = manager.get_virtual_actor_type(&resolved_type).await {
+                    let canonical_ns = type_meta.namespace().to_string();
+                    let actor_id = ActorId::new(name, &resolved_type, &canonical_ns, &self.local_node_id)
+                        .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
+                    manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+                    return Ok(actor_id);
+                }
+                // Definition-name lookup: left=definition_name, right=instance_name.
+                if let Some(def_meta) = manager.get_virtual_actor_definition(&namespace, actor_type).await {
+                    let def_ns = def_meta.namespace().to_string();
+                    let resolved = manager.resolve_actor_type_for_name(&def_ns, actor_type).await;
+                    let actor_id = ActorId::new(name, &resolved, &def_ns, &self.local_node_id)
+                        .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
+                    manager.prime_instance_from_definition(&actor_id, &def_meta).await;
+                    return Ok(actor_id);
+                }
+            }
+
+            // 2c. Fallback: build canonical directly (actor may not be virtual).
+            ActorId::new(name, actor_type, &namespace, &self.local_node_id)
+                .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))
+        } else {
+            // 3. Bare address — treat as actor_type (or instance name for sole singleton).
+            let actor_ids = self.discover_actors_by_type(ctx, target).await;
+
+            // Return an active actor of this type if one exists.
+            let active: Vec<&ActorId> = actor_ids
+                .iter()
+                .filter(|id| id.namespace() == namespace)
+                .collect();
+            if active.len() == 1 {
+                return Ok(active[0].clone());
+            }
+            if active.len() > 1 {
+                // Multiple live actors of this type — pick one at random (load-balance).
+                use rand::Rng;
+                let idx = rand::thread_rng().gen_range(0..active.len());
+                return Ok(active[idx].clone());
+            }
+
+            // No live actor found; check VirtualActorManager for a registered type.
+            if let Some(manager) = self.virtual_actor_manager.read().await.clone() {
+                let resolved_type = manager.resolve_actor_type_for_name(&namespace, target).await;
+                if let Some(type_meta) = manager.get_virtual_actor_type(&resolved_type).await {
+                    let canonical_ns = type_meta.namespace().to_string();
+                    // Use the resolved type as both the name and type for singleton-style actors.
+                    let actor_id = ActorId::new(&resolved_type, &resolved_type, &canonical_ns, &self.local_node_id)
+                        .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
+                    manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+                    return Ok(actor_id);
+                }
+            }
+
+            Err(format!(
+                "No actor found for target '{}' in namespace '{}'",
+                target, namespace
+            ))
+        }
+    }
 }
 
 // Implement Service trait for ActorRegistry
@@ -2139,59 +2479,31 @@ impl Service for ActorRegistry {
 /// LinkProvider implementation for ActorRegistry
 ///
 /// ## Purpose
-/// Provides link/unlink functionality for local actors. This is the primary
-/// implementation used by supervisors and other components that need to link actors.
+/// Primary link/unlink surface for supervisors and other components that hold an
+/// `Arc<dyn LinkProvider>`.
 ///
 /// ## Design
-/// - Supports local actors only (actors registered in this ActorRegistry)
-/// - Remote actor linking is handled by Node (see TODO below)
-/// - Follows Erlang/OTP link semantics (bidirectional death propagation)
-///
-/// ## TODO: Remote Actor Linking
-/// Node currently supports remote actor linking via gRPC, but this is advanced
-/// functionality. For now, LinkProvider in ActorRegistry only supports local actors.
-/// Remote linking is intentionally unsupported here; node-level code should own
-/// any future remote-link protocol.
+/// Delegates to location-transparent [`ActorRegistry::link`] / [`ActorRegistry::unlink`].
 #[async_trait::async_trait]
 impl crate::LinkProvider for ActorRegistry {
     async fn link(
         &self,
+        ctx: &crate::RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        _ctx: &crate::RequestContext,
     ) -> Result<(), String> {
-        if !self.is_local_actor_id(actor_id) || !self.is_local_actor_id(linked_actor_id) {
-            return Err(
-                "Remote link is not supported by ActorRegistry; use a local actor pair".to_string(),
-            );
-        }
-        if !self.actor_exists_locally(actor_id).await {
-            return Err(format!("Actor {} is not local or not found", actor_id));
-        }
-        if !self.actor_exists_locally(linked_actor_id).await {
-            return Err(format!(
-                "Actor {} is not local or not found",
-                linked_actor_id
-            ));
-        }
-        self.link(actor_id, linked_actor_id)
+        self.link(ctx, actor_id, linked_actor_id)
             .await
             .map_err(|e| format!("Link failed: {}", e))
     }
 
     async fn unlink(
         &self,
+        ctx: &crate::RequestContext,
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
-        _ctx: &crate::RequestContext,
     ) -> Result<(), String> {
-        if !self.is_local_actor_id(actor_id) || !self.is_local_actor_id(linked_actor_id) {
-            return Err(
-                "Remote unlink is not supported by ActorRegistry; use a local actor pair"
-                    .to_string(),
-            );
-        }
-        self.unlink(actor_id, linked_actor_id)
+        self.unlink(ctx, actor_id, linked_actor_id)
             .await
             .map_err(|e| format!("Unlink failed: {}", e))
     }

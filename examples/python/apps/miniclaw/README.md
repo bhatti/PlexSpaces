@@ -92,7 +92,7 @@ graph TB
 ./build.sh
 
 # Run tests against a running node
-./test.sh [HTTP_PORT]   # default: 8092
+./test.sh [HTTP_PORT]   # default: 8091
 ```
 
 ## Project structure

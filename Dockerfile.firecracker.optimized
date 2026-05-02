@@ -114,7 +114,7 @@ RUN if [ -f config/release.yaml ]; then \
 # Switch to non-root user
 USER plexspaces
 
-# Expose the default gRPC port
+# Expose the single port (gRPC + HTTP share one port)
 EXPOSE 8000
 
 # Default environment variables

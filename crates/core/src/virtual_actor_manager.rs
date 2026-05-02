@@ -43,7 +43,7 @@ use tokio::sync::RwLock;
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use crate::Service;
 use crate::{ActorId, ActorRegistry};
-use plexspaces_common::{from_config_str, ActivationStrategy};
+use plexspaces_common::{from_config_str, ActivationStrategy, RequestContext};
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Message;
@@ -241,8 +241,11 @@ pub struct VirtualActorNamespaceCleanup {
 pub struct VirtualActorRegistry {
     /// Virtual actor metadata: actor_id -> VirtualActorMetadata
     virtual_actors: Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>,
-    /// Pending messages for actors being activated: actor_id -> Vec<Message>
-    pending_activations: Arc<RwLock<HashMap<ActorId, Vec<Message>>>>,
+    /// Pending messages for actors being activated: actor_id -> (message, caller context).
+    ///
+    /// Preserves the `RequestContext` from each `tell` so post-activation delivery runs the same
+    /// visibility and tracing semantics as an immediate send (see `ActorRef::tell`).
+    pending_activations: Arc<RwLock<HashMap<ActorId, Vec<(Message, RequestContext)>>>>,
     /// Virtual actor types: actor_type -> VirtualActorMetadata
     /// Key is actor_type (behavior class, e.g. "inference_worker").
     /// Used for BehaviorRegistry lookup, canonical ID construction, and LRU eviction.
@@ -276,7 +279,9 @@ impl VirtualActorRegistry {
         &self.virtual_actors
     }
 
-    pub fn pending_activations(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<Message>>>> {
+    pub fn pending_activations(
+        &self,
+    ) -> &Arc<RwLock<HashMap<ActorId, Vec<(Message, RequestContext)>>>> {
         &self.pending_activations
     }
 
@@ -678,6 +683,7 @@ impl VirtualActorManager {
             facets,
             labels: HashMap::new(),
             config,
+            visibility: 0,
         };
         self.register_virtual_actor_definition(spec).await
     }
@@ -907,17 +913,20 @@ impl VirtualActorManager {
         })
     }
 
-    /// Queue a message for processing after activation
-    pub async fn queue_message(&self, actor_id: &ActorId, message: Message) {
+    /// Queue a message for processing after activation, retaining the caller `RequestContext`.
+    pub async fn queue_message(&self, actor_id: &ActorId, message: Message, ctx: &RequestContext) {
         let mut pending = self.registry.pending_activations().write().await;
         pending
             .entry(actor_id.clone())
             .or_insert_with(Vec::new)
-            .push(message);
+            .push((message, ctx.clone()));
     }
 
-    /// Get and clear pending messages for an actor
-    pub async fn take_pending_messages(&self, actor_id: &ActorId) -> Vec<Message> {
+    /// Get and clear pending (message, caller context) pairs for an actor.
+    pub async fn take_pending_messages(
+        &self,
+        actor_id: &ActorId,
+    ) -> Vec<(Message, RequestContext)> {
         let mut pending = self.registry.pending_activations().write().await;
         pending.remove(actor_id).unwrap_or_default()
     }
@@ -1291,6 +1300,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         }
     }
 
@@ -1444,6 +1454,7 @@ mod tests {
                 ],
                 labels: HashMap::new(),
                 config: None,
+                visibility: 0,
             })
             .await;
 
@@ -1486,6 +1497,7 @@ mod tests {
                     facets: vec![],
                     labels: HashMap::new(),
                     config: None,
+                    visibility: 0,
                 },
             )
             .await
@@ -1514,6 +1526,7 @@ mod tests {
                 }],
                 labels: HashMap::new(),
                 config: None,
+                visibility: 0,
             })
             .await
             .expect("virtual actor type should register");
@@ -1637,6 +1650,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: config.clone(),
+            visibility: 0,
         };
 
         let result = manager.register(actor_id.clone(), facet, spec).await;
@@ -1676,6 +1690,7 @@ mod tests {
             facets: vec![],
             labels: labels.clone(),
             config: None,
+            visibility: 0,
         };
 
         manager
@@ -1713,6 +1728,7 @@ mod tests {
                     facets: vec![],
                     labels: HashMap::new(),
                     config: None,
+                    visibility: 0,
                 },
             )
             .await;
@@ -1858,6 +1874,7 @@ mod tests {
                 ],
                 labels: HashMap::new(),
                 config: None,
+                visibility: 0,
             })
             .await
             .unwrap();
@@ -1880,6 +1897,7 @@ mod tests {
                     facets: vec![], // empty — should inherit from type
                     labels: HashMap::new(),
                     config: None,
+                    visibility: 0,
                 },
             )
             .await
@@ -1905,19 +1923,26 @@ mod tests {
         let messages = manager.take_pending_messages(&actor_id).await;
         assert!(messages.is_empty());
 
+        let ctx = crate::RequestContext::new_without_auth("t1".into(), "ns1".into());
         // Add pending messages
         let mut pending = manager.registry().pending_activations().write().await;
         pending.insert(
             actor_id.clone(),
             vec![
-                Message {
-                    id: "msg1".to_string(),
-                    ..Default::default()
-                },
-                Message {
-                    id: "msg2".to_string(),
-                    ..Default::default()
-                },
+                (
+                    Message {
+                        id: "msg1".to_string(),
+                        ..Default::default()
+                    },
+                    ctx.clone(),
+                ),
+                (
+                    Message {
+                        id: "msg2".to_string(),
+                        ..Default::default()
+                    },
+                    ctx.clone(),
+                ),
             ],
         );
         drop(pending);
@@ -1940,14 +1965,17 @@ mod tests {
             id: "msg1".to_string(),
             ..Default::default()
         };
+        let ctx = crate::RequestContext::new_without_auth("t1".into(), "ns1".into());
 
         // Queue message
-        manager.queue_message(&actor_id, message.clone()).await;
+        manager
+            .queue_message(&actor_id, message.clone(), &ctx)
+            .await;
 
         // Verify message is queued
         let messages = manager.take_pending_messages(&actor_id).await;
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].id, message.id);
+        assert_eq!(messages[0].0.id, message.id);
     }
 
     #[tokio::test]
@@ -2140,6 +2168,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         manager
             .register_virtual_actor_definition(def_spec.clone())
@@ -2191,6 +2220,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         manager
             .register(actor_id.clone(), facet, update_spec)
@@ -2228,6 +2258,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         manager
             .register(actor_id.clone(), facet, spec)
@@ -2265,6 +2296,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         manager
             .register_virtual_actor_definition(spec)
@@ -2291,6 +2323,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         let facet = create_test_virtual_actor_facet();
         manager
@@ -2333,6 +2366,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: None,
+            visibility: 0,
         };
         manager
             .register_virtual_actor_definition(spec)

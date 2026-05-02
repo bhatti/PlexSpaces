@@ -13,10 +13,10 @@ The official PlexSpaces Docker image is available at `plexobject/plexspaces`:
 docker pull plexobject/plexspaces:latest
 
 # Run a single node (empty, ready for WASM deployments)
+# gRPC and HTTP share a single port (8000)
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   plexobject/plexspaces:latest
@@ -57,17 +57,17 @@ docker pull plexobject/plexspaces:v0.1.0
 
 ```bash
 # Run empty node (auth disabled for testing)
+# gRPC and HTTP share a single port (8000)
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   plexobject/plexspaces:latest
 
 # Check if node is ready
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 
 # View logs
 docker logs -f plexspaces-node
@@ -77,10 +77,10 @@ docker logs -f plexspaces-node
 
 ```bash
 # Run with JWT authentication enabled
+# gRPC and HTTP share a single port (8000)
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
   -e PLEXSPACES_JWT_SECRET=your-secret-key-here \
@@ -154,7 +154,6 @@ docker build -t plexobject/plexspaces:latest \
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   plexobject/plexspaces:latest
 
@@ -191,7 +190,6 @@ To start a server similar to `scripts/server.sh` with debug logs and auth disabl
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=test-node \
   -e PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
@@ -205,7 +203,7 @@ docker run -d \
 docker logs -f plexspaces-node
 
 # Check if server is ready
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 ```
 
 **With Docker Compose** (override auth and logging at runtime):
@@ -224,7 +222,7 @@ docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 \
 
 **Key differences from `scripts/server.sh`**:
 - Uses Docker image instead of local build
-- Ports are 8000/8001 instead of 8091/8092 (configurable)
+- Port is 8000 instead of 8091 (configurable) (configurable)
 - Release config path is `/app/config/release.yaml` (mounted or default)
 - mTLS certs can be mounted as volume if needed
 
@@ -235,7 +233,6 @@ docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 \
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   plexobject/plexspaces:latest
@@ -244,13 +241,13 @@ docker run -d \
 2. **Wait for node to be ready**:
 ```bash
 # Check health endpoint
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 ```
 
 3. **Deploy WASM application** (see [Deploying WASM Applications](#deploying-wasm-applications)):
 ```bash
 # Example: Deploy calculator WASM app
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -260,7 +257,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 4. **Verify deployment**:
 ```bash
 # List deployed applications
-curl http://localhost:8001/api/v1/dashboard/applications | jq
+curl http://localhost:8000/api/v1/dashboard/applications | jq
 ```
 
 ### 2. Kubernetes
@@ -433,17 +430,16 @@ cargo run --release --bin plexspaces -- start \
   --listen-addr 0.0.0.0:8000
 ```
 
-**Default ports:**
-- gRPC: `8000`
-- HTTP/Dashboard: `8001`
+**Default port:**
+- gRPC + HTTP/Dashboard (single port): `8000`
 
 **Verify node is running:**
 ```bash
 # Check health
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 
 # View dashboard
-open http://localhost:8001
+open http://localhost:8000
 ```
 
 ## Security
@@ -637,10 +633,10 @@ PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (def
 **Example**:
 ```bash
 # Get counter value (tenant comes from JWT when auth is enabled)
-curl "http://localhost:8001/api/v1/actors/default/counter?action=get"
+curl "http://localhost:8000/api/v1/actors/default/counter?action=get"
 
 # Increment counter (tenant comes from JWT when auth is enabled)
-curl -X POST "http://localhost:8001/api/v1/actors/default/counter" \
+curl -X POST "http://localhost:8000/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"increment"}'
 ```
@@ -1131,8 +1127,8 @@ kill -9 <PID>
 **Best for**: Files >5MB (Python WASM, unoptimized builds)
 
 ```bash
-# HTTP gateway runs on gRPC port + 1 (e.g., 8001 if gRPC is 8000)
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+# gRPC and HTTP share a single port (e.g., 8000)
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
@@ -1171,7 +1167,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 ```bash
 # Deploy using the helper script
 ./scripts/deploy-wasm-app-test.sh \
-  http://localhost:8001 \
+  http://localhost:8000 \
   calculator-app \
   examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
 ```
@@ -1215,7 +1211,7 @@ grpcurl -plaintext \
 WASM_BASE64=$(base64 -w 0 calculator_actor.wasm)
 
 # Deploy via HTTP
-curl -X POST http://localhost:8001/api/v1/applications \
+curl -X POST http://localhost:8000/api/v1/applications \
   -H "Content-Type: application/json" \
   -d "{
     \"application_id\": \"calculator-app\",
@@ -1255,21 +1251,21 @@ cd examples/simple/wasm_calculator
 
 ```bash
 # Deploy calculator actor (HTTP multipart for large Python WASM)
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
 
 # Deploy durable calculator actor
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=durable-calculator-app" \
   -F "name=durable-calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/durable_calculator_actor.wasm"
 
 # Deploy tuplespace calculator actor
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=tuplespace-calculator-app" \
   -F "name=tuplespace-calculator" \
   -F "version=1.0.0" \
@@ -1308,7 +1304,6 @@ When a node starts, it automatically scans the `wasm_apps_directory` and deploys
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_WASM_APPS_DIR=/app/data/apps \
   -v /host/path/apps:/app/data/apps:ro \
@@ -1336,7 +1331,6 @@ When deploying WASM applications via HTTP/gRPC API, you can optionally save the 
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_NODE_ID=node1 \
   -e PLEXSPACES_WASM_APPS_DIR=/app/data/apps \
   -e PLEXSPACES_SAVE_WASM_APPS=1 \
@@ -1344,7 +1338,7 @@ docker run -d \
   plexobject/plexspaces:latest
 
 # Deploy via API - files will be saved to /app/data/apps/payment-handler/app.wasm and application-spec.toml
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=payment-handler" \
   -F "name=payment-handler" \
   -F "version=1.0.0" \
@@ -1365,22 +1359,22 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 ```bash
 # List all applications
-curl http://localhost:8001/api/v1/dashboard/applications | jq
+curl http://localhost:8000/api/v1/dashboard/applications | jq
 
 # Or check via dashboard API
-curl http://localhost:8001/api/v1/dashboard/applications | jq '.applications[]'
+curl http://localhost:8000/api/v1/dashboard/applications | jq '.applications[]'
 ```
 
 ### View Dashboard
 
 ```bash
 # Open dashboard in browser
-open http://localhost:8001
+open http://localhost:8000
 
 # Or view specific endpoints
-curl http://localhost:8001/api/v1/dashboard/summary | jq
-curl http://localhost:8001/api/v1/dashboard/applications | jq
-curl http://localhost:8001/api/v1/dashboard/actors | jq
+curl http://localhost:8000/api/v1/dashboard/summary | jq
+curl http://localhost:8000/api/v1/dashboard/applications | jq
+curl http://localhost:8000/api/v1/dashboard/actors | jq
 ```
 
 ## Complete Deployment Example
@@ -1398,17 +1392,17 @@ cd examples/simple/wasm_calculator
 
 # 4. Deploy calculator actor (HTTP multipart for large Python WASM)
 cd ../..
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
+curl -X POST http://localhost:8000/api/v1/applications/deploy \
   -F "application_id=calculator-app" \
   -F "name=calculator" \
   -F "version=1.0.0" \
   -F "wasm_file=@examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm"
 
 # 5. Verify deployment
-curl http://localhost:8001/api/v1/dashboard/applications | jq '.applications[] | select(.name == "calculator")'
+curl http://localhost:8000/api/v1/dashboard/applications | jq '.applications[] | select(.name == "calculator")'
 
 # 6. View dashboard
-open http://localhost:8001
+open http://localhost:8000
 ```
 
 ## Troubleshooting Deployment
@@ -1417,7 +1411,7 @@ open http://localhost:8001
 
 ```bash
 # Check node is running
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 
 # Check WASM file exists and is valid
 file examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm
@@ -1455,7 +1449,6 @@ docker pull plexobject/plexspaces:latest
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_JWT_SECRET=your-secret-key \
   plexobject/plexspaces:latest
 
@@ -1463,7 +1456,6 @@ docker run -d \
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   plexobject/plexspaces:latest
 
@@ -1471,7 +1463,6 @@ docker run -d \
 docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
-  -p 8001:8001 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
   plexobject/plexspaces:latest
@@ -1562,7 +1553,7 @@ docker images | grep plexspaces
 docker run --rm \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   -p 8000:8000 \
-  -p 8001:8001 \
+  
   plexobject/plexspaces:latest
 
 # Check image size
@@ -1744,7 +1735,7 @@ docker pull plexobject/plexspaces:latest
 docker run --rm \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   -p 8000:8000 \
-  -p 8001:8001 \
+  
   plexobject/plexspaces:latest
 
 # Check image on Docker Hub

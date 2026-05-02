@@ -69,15 +69,15 @@ async fn test_link_basic() {
     use plexspaces_core::RequestContext;
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
+    node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
 
     // Verify bidirectional linking: unlink should work from either direction
     // This confirms that linking is bidirectional (actor1->actor2 and actor2->actor1)
-    node.unlink(actor2.id(), actor1.id(), &ctx).await.unwrap();
+    node.unlink(&ctx, actor2.id(), actor1.id()).await.unwrap();
 
     // Re-link to test unlinking from original direction
-    node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
-    node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap();
+    node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
+    node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap();
 }
 
 #[tokio::test]
@@ -90,7 +90,7 @@ async fn test_link_self_fails() {
     use plexspaces_core::RequestContext;
     let ctx =
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = node.link(actor1.id(), actor1.id(), &ctx).await;
+    let result = node.link(&ctx, actor1.id(), actor1.id()).await;
     assert!(result.is_err());
 }
 
@@ -105,7 +105,7 @@ async fn test_unlink_nonexistent() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     // Unlinking actors that aren't linked should succeed (idempotent)
-    node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap();
+    node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap();
 }
 
 /// Helper to wait for an actor to die (or verify it's alive)
@@ -193,7 +193,7 @@ async fn test_exit_condition_cascading() {
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
+        node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
 
         // Verify both actors are alive before termination
@@ -230,7 +230,7 @@ async fn test_exit_condition_cascading() {
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
+        node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
 
         // Verify both actors are alive before termination
@@ -266,8 +266,8 @@ async fn test_exit_condition_cascading() {
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
-        node.link(actor2.id(), actor3.id(), &ctx).await.unwrap();
+        node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
+        node.link(&ctx, actor2.id(), actor3.id()).await.unwrap();
 
         // Give links time to register
         tokio::task::yield_now().await;
@@ -319,9 +319,9 @@ async fn test_exit_condition_cascading() {
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        node.link(actor1.id(), actor2.id(), &ctx).await.unwrap();
-        node.link(actor1.id(), actor3.id(), &ctx).await.unwrap();
-        node.unlink(actor1.id(), actor2.id(), &ctx).await.unwrap(); // Unlink actor2
+        node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
+        node.link(&ctx, actor1.id(), actor3.id()).await.unwrap();
+        node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap(); // Unlink actor2
         tokio::task::yield_now().await; // Give unlink time to process
 
         terminate_actor(

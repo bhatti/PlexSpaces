@@ -53,6 +53,7 @@ fn make_spawn_spec(
         role: String::new(),
         namespace: actor_id.namespace().to_string(),
         tenant_id: String::new(),
+        visibility: 0,
         behavior_kind: String::new(),
         args: HashMap::new(),
         facets: vec![],
@@ -136,7 +137,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
 
     // Verify we can send messages
     let message = create_test_message(vec![1, 2, 3]);
-    let result = message_sender.tell(message).await;
+    let result = message_sender.tell(&ctx, message).await;
     assert!(result.is_ok(), "Should be able to send message");
 }
 
@@ -162,7 +163,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
 
     // Verify MessageSender works
     let message = create_test_message(vec![1, 2, 3]);
-    let result = message_sender.tell(message).await;
+    let result = message_sender.tell(&ctx, message).await;
     assert!(result.is_ok(), "Should be able to send message");
 }
 

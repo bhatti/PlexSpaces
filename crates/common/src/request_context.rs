@@ -180,10 +180,10 @@ impl RequestContext {
         })
     }
 
-    /// Create a new RequestContext (convenience method for backward compatibility)
+    /// Create a new `RequestContext` with authentication disabled (`auth_enabled = false`).
     ///
     /// ## Note
-    /// This assumes auth is disabled. For production, use `new()` with explicit auth_enabled.
+    /// For production with auth enabled, use [`Self::new`] so tenant validation applies.
     pub fn new_without_auth(tenant_id: String, namespace: String) -> Self {
         Self::new(tenant_id, namespace, false).unwrap()
     }

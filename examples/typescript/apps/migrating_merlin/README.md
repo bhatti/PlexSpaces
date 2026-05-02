@@ -24,7 +24,7 @@
 # Terminal 2
 cd examples/typescript/apps/migrating_merlin
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

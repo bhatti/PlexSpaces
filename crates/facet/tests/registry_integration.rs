@@ -163,6 +163,10 @@ const REGISTRY_FACET_CASES: &[RegistryFacetCase] = &[
 
 async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case_ulid: &str) {
     let (actor_ref, _) = spawn_registry_facet_actor(node).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "test-tenant".to_string(),
+        "test-namespace".to_string(),
+    );
 
     match case {
         RegistryFacetCase::RegisterLookup => {
@@ -179,7 +183,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "register_object",
             );
             let reply = actor_ref
-                .ask(register_msg, ASK_TIMEOUT)
+                .ask(&ctx, register_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} register: {e}"));
             let response: serde_json::Value =
@@ -194,7 +198,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "lookup_object",
             );
             let reply = actor_ref
-                .ask(lookup_msg, ASK_TIMEOUT)
+                .ask(&ctx, lookup_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} lookup: {e}"));
             let response: serde_json::Value =
@@ -215,7 +219,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "register_object",
             );
             actor_ref
-                .ask(register_msg, ASK_TIMEOUT)
+                .ask(&ctx, register_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} register: {e}"));
 
@@ -227,7 +231,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "unregister_object",
             );
             let reply = actor_ref
-                .ask(unregister_msg, ASK_TIMEOUT)
+                .ask(&ctx, unregister_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} unregister: {e}"));
             let response: serde_json::Value =
@@ -242,7 +246,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "lookup_object",
             );
             let reply = actor_ref
-                .ask(lookup_msg, ASK_TIMEOUT)
+                .ask(&ctx, lookup_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} lookup after unregister: {e}"));
             let response: serde_json::Value =
@@ -267,7 +271,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                     "register_object",
                 );
                 actor_ref
-                    .ask(register_msg, ASK_TIMEOUT)
+                    .ask(&ctx, register_msg, ASK_TIMEOUT)
                     .await
                     .unwrap_or_else(|e| panic!("case={case:?} register {object_id}: {e}"));
             }
@@ -281,7 +285,7 @@ async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case
                 "discover_objects",
             );
             let reply = actor_ref
-                .ask(discover_msg, ASK_TIMEOUT)
+                .ask(&ctx, discover_msg, ASK_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("case={case:?} discover: {e}"));
             let response: serde_json::Value =
@@ -351,6 +355,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
                 String::new(), // Test namespace
                 mailbox_for_ref,
                 node.service_locator().clone(),
+                plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

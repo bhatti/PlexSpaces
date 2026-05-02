@@ -29,7 +29,7 @@ default = ["grpc"]
 grpc = ["dep:async-trait", "dep:tokio", "dep:tonic"]
 
 [build-dependencies]
-tonic-build = { version = "0.10", features = ["prost"] }
+tonic-build = { version = "0.12", features = ["prost"] }
 prost-build = { workspace = true }
 
 [lib]

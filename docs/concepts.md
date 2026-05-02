@@ -86,22 +86,27 @@ impl Counter {
 
 - **Location Transparency**: Same API for local and remote actors
 - **Cloneable**: Share references safely across threads
-- **Message Passing**: `tell()` and `ask()` methods
+- **Message Passing**: `tell(&RequestContext, …)` and `ask(&RequestContext, …)` (tenant/namespace and visibility come from the context, not from ad hoc message headers)
 - **Automatic Routing**: Handles local vs remote communication automatically
 
 ### Example
 
 ```rust
+use plexspaces_core::RequestContext;
 use plexspaces_sdk::{call_message, cast_message, json};
 use std::time::Duration;
 
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
+
 // Fire-and-forget (tell) - use cast_message()
 let event = cast_message(json!({ "event": "user_login" }));
-actor_ref.tell(event).await?;
+actor_ref.tell(&ctx, event).await?;
 
 // Request-reply (ask) - use call_message()
 let request = call_message(json!({ "action": "get_balance" }));
-let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+let reply = actor_ref
+    .ask(&ctx, request, Duration::from_secs(5))
+    .await?;
 ```
 
 ## Behaviors
@@ -359,7 +364,7 @@ supervisor.add_child(ChildSpec::new("worker")
 
 **Location Transparency** means actors work the same whether they're local or remote:
 
-- **Same API**: `tell()` and `ask()` work identically for local and remote actors
+- **Same API**: `tell` and `ask` work identically for local and remote actors once you pass the caller `RequestContext`
 - **Automatic Routing**: System handles local vs remote communication
 - **Actor IDs**: Canonical format `name//actor_type::namespace@node_id` enables location transparency without reparsing ambiguous legacy strings
 - **Service Discovery**: Automatic actor location via ObjectRegistry
@@ -367,13 +372,17 @@ supervisor.add_child(ChildSpec::new("worker")
 ### Example
 
 ```rust
+use plexspaces_core::RequestContext;
+
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
+
 // Local actor
 let local_ref = node.get_actor_ref("counter").await?;
-local_ref.tell(message).await?;
+local_ref.tell(&ctx, message).await?;
 
 // Remote actor (same API!)
 let remote_ref = node.get_actor_ref("counter-remote").await?;
-remote_ref.tell(message).await?;
+remote_ref.tell(&ctx, message).await?;
 ```
 
 ## Message Passing
@@ -388,16 +397,24 @@ remote_ref.tell(message).await?;
 ### Example
 
 ```rust
-use plexspaces_sdk::{cast_message, call_message, json};
+use plexspaces_core::RequestContext;
+use plexspaces_sdk::{call_message, cast_message, json};
+
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
 
 // Tell (fire-and-forget) - use cast_message()
-actor_ref.tell(cast_message(json!({ "action": "increment" }))).await?;
+actor_ref
+    .tell(&ctx, cast_message(json!({ "action": "increment" })))
+    .await?;
 
 // Ask (request-reply) - use call_message()
-let reply = actor_ref.ask(
-    call_message(json!({ "action": "get" })),
-    Duration::from_secs(5)
-).await?;
+let reply = actor_ref
+    .ask(
+        &ctx,
+        call_message(json!({ "action": "get" })),
+        Duration::from_secs(5),
+    )
+    .await?;
 ```
 
 ## Durability

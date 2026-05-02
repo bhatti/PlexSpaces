@@ -218,14 +218,21 @@ Actors are the fundamental unit of computation in PlexSpaces:
 An `ActorRef` is a lightweight handle to an actor:
 
 ```rust
+use plexspaces_core::RequestContext;
+
+// Caller scope (JWT / gateway / in-process tests)
+let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
+
 // Get actor reference by logical actor name
 let actor_ref = node.get_actor_ref("counter").await?;
 
 // Fire-and-forget (tell)
-actor_ref.tell(message).await?;
+actor_ref.tell(&ctx, message).await?;
 
 // Request-reply (ask)
-let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
+let reply = actor_ref
+    .ask(&ctx, request, Duration::from_secs(5))
+    .await?;
 ```
 
 ### Behaviors
@@ -490,7 +497,7 @@ If you see connection errors:
 5. **Multi-node connection**: SDK handles partial success gracefully
    ```rust
    let resp = node_client.connect_nodes(
-       vec!["http://localhost:8001".to_string()],
+       vec!["http://localhost:8092".to_string()],
        None,
        30,
    ).await?;

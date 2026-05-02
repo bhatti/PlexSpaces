@@ -56,11 +56,11 @@ addresses in the final report.
 # From repo root; requires wasm32-wasip1, wasm-tools, WASI adapter (see other rust/apps examples)
 cd examples/rust/apps/data_parallel_worker
 ./build.sh
-# With cluster nodes listening on HTTP (e.g. 8092, 8094):
+# With cluster nodes listening on HTTP (e.g. 8091, 8094):
 ./test.sh
 ```
 
-Single-node smoke: `./test.sh 8092`
+Single-node smoke: `./test.sh 8091`
 
 Prerequisite: PlexSpaces nodes running (e.g. `./scripts/server.sh` from repo root).
 

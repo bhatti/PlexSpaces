@@ -789,163 +789,20 @@ pub struct ActorMetrics {
     #[prost(double, tag="7")]
     pub cpu_usage_percent: f64,
 }
-/// Request to spawn an actor on a specific remote node (Erlang spawn/4 equivalent)
-///
-/// ## Purpose
-/// Spawns an actor on a specified remote node using pre-deployed actor type.
-/// Returns an ActorRef for location-transparent messaging.
-///
-/// ## Erlang Philosophy
-/// In Erlang:
-/// ```erlang
-/// % Local spawn (current node)
-/// Pid = spawn(Module, Function, Args)
-///
-/// % Remote spawn (specific node)
-/// Pid = spawn(Node, Module, Function, Args)
-/// ```
-/// - Node: Target node (atom, e.g., 'worker@host1')
-/// - Module: Pre-compiled module on remote node (e.g., 'gen_server')
-/// - Function: Exported function to run (e.g., 'start_link')
-/// - Args: Arguments to function (e.g., \[initial_state\])
-/// - Returns: Pid that works for local and remote sends (location transparent)
-///
-/// ## PlexSpaces Approach
-/// ```rust
-/// // Local spawn (current node)
-/// let actor = node.spawn_actor("worker", state, config).await?;
-///
-/// // Remote spawn (specific node)
-/// let actor_ref = node.spawn_remote("node2", "worker", state, config).await?;
-/// ```
-/// - target_node_id: Target node (string, e.g., "node2")
-/// - actor_type: Pre-deployed actor type on remote node (string, e.g., "worker")
-/// - initial_state: Serialized initial state (bytes)
-/// - config: Actor configuration
-/// - Returns: ActorRef in format "actor_id@node_id" for location-transparent messaging
-///
-/// ## Key Assumptions (Erlang-Compatible)
-/// 1. **Code Pre-Deployed**: The actor_type must already exist on the target node
-///     - Like Erlang: Module must be loaded on remote node
-///     - Use CreateActor first to deploy actor type, or ensure it's in node's registry
-/// 2. **Location Transparency**: Returned ActorRef works the same for local and remote sends
-///     - Like Erlang: Pid works for both local send (Pid ! Msg) and remote send
-///     - ActorRef.tell() / ActorRef.ask() automatically routes to correct node
-///
-/// ## Extensibility for WASM (Future - Week 11-12)
-/// Phase 6 will add dynamic WASM deployment support via reserved fields:
-/// ```protobuf
-/// oneof code_source {
-///    string actor_type = 2;        // Pre-deployed type (current)
-///    WasmModule wasm_module = 10;  // Deploy WASM on-the-fly (future)
-///    string wasm_url = 11;         // Fetch WASM from URL (future)
-/// }
-/// ```
-/// This enables:
-/// - **Pre-deployed**: spawn_remote("node2", "worker", ...) - code already on node2
-/// - **Dynamic WASM**: spawn_remote_wasm("node2", wasm_bytes, ...) - deploy code + spawn
-/// - **URL-based**: spawn_remote_url("node2", "<https://cdn/worker.wasm",> ...) - fetch + deploy + spawn
-///
-/// ## Use Cases
-/// 1. **Distributed Testing**: Spawn Byzantine generals on specific nodes
-///     ```rust
-///     for (i, node) in nodes.iter().enumerate() {
-///         node.spawn_remote(&node.id, "general", state, config).await?;
-///     }
-///     ```
-/// 2. **Load Distribution**: Explicitly place workers across cluster
-///     ```rust
-///     let worker_node = pick_least_loaded_node();
-///     worker_node.spawn_remote(&worker_node.id, "worker", state, config).await?;
-///     ```
-/// 3. **Data Locality**: Spawn actor near data source
-///     ```rust
-///     let db_node = find_node_with_shard(shard_id);
-///     db_node.spawn_remote(&db_node.id, "processor", state, config).await?;
-///     ```
-/// 4. **Affinity**: Co-locate related actors on same node
-///     ```rust
-///     let parent_node = get_actor_node(&parent_id);
-///     parent_node.spawn_remote(&parent_node.id, "child", state, config).await?;
-///     ```
-///
-/// ## Comparison to CreateActor
-/// | Feature | CreateActor | SpawnActor |
-/// |---------|-------------|------------------|
-/// | Node selection | Placement strategy / current node | Explicit target node |
-/// | Use case | General actor creation | Explicit remote placement |
-/// | Fallback | Can fall back to other nodes | Fails if target unavailable |
-/// | Erlang equivalent | spawn/3 (local) | spawn/4 (remote) |
-/// | Code deployment | Any node can have code | Target node must have code |
-///
-/// ## Implementation Flow
-/// When node1 calls SpawnRemoteActor targeting node2:
-/// 1. node1 validates target_node_id exists in registry
-/// 2. node1 sends gRPC SpawnRemoteActor request to node2
-/// 3. node2 validates actor_type exists in local registry
-/// 4. node2 spawns actor locally: Actor::spawn(actor_type, state, config)
-/// 5. node2 returns ActorRef with format "actor-123@node2"
-/// 6. node1 caches remote ActorRef for future messaging
-/// 7. Subsequent tell/ask automatically routes via gRPC to node2
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SpawnActorRequest {
-    /// Pre-deployed actor type name (REQUIRED)
-    /// Must exist in target node's actor registry
-    /// Examples: "worker", "general", "counter", "session"
-    ///
-    /// Future (Week 11-12): Will become part of `oneof code_source` to support WASM:
-    /// - actor_type: Use pre-deployed type (current)
-    /// - wasm_module: Deploy WASM bytecode on-the-fly
-    /// - wasm_url: Fetch WASM from URL
-    #[prost(string, tag="1")]
-    pub actor_type: ::prost::alloc::string::String,
-    /// Optional: Client-specified actor ID (for virtual actors)
-    /// If provided: Use this ID (must be unique, format: "{actor_type}/{key}" or "{actor_type}@{key}")
-    /// If not provided: Server generates ULID
-    /// Examples: "user/123", "session/abc-xyz", "counter@node1"
-    /// Industry standard: Client-specified IDs for virtual actors (Orleans pattern)
+    /// Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
+    #[prost(message, optional, tag="1")]
+    pub spec: ::core::option::Option<ActorSpawnSpec>,
+    /// Optional namespace override for this RPC only.
+    /// If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
     #[prost(string, tag="2")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Optional serialized initial state for actor
-    /// Format depends on actor type (actor deserializes)
-    #[prost(bytes="vec", tag="3")]
-    pub initial_state: ::prost::alloc::vec::Vec<u8>,
-    /// Optional actor configuration
-    /// If not provided, target node uses default config for actor_type
-    #[prost(message, optional, tag="4")]
-    pub config: ::core::option::Option<ActorConfig>,
-    /// Optional labels for tagging and filtering
-    /// Examples: {"env": "prod", "team": "platform", "version": "v2"}
-    #[prost(map="string, string", tag="5")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Optional facets to attach during spawn
-    /// Facets are attached in priority order (high priority first) before actor.init() is called
-    /// Examples:
-    /// - VirtualActorFacet: Makes actor virtual (Orleans-style grain)
-    /// - DurabilityFacet: Enables state persistence
-    /// - MetricsFacet: Adds metrics collection
-    #[prost(message, repeated, tag="6")]
-    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
-    /// Namespace for actor isolation (REQUIRED for multi-tenant deployments)
-    /// Tenant ID comes from gRPC auth (JWT middleware), not from request
-    /// Namespace provides sub-isolation within a tenant (e.g., different apps)
-    /// Examples: "production", "staging", "app-v1", "team-platform"
-    #[prost(string, tag="7")]
     pub namespace: ::prost::alloc::string::String,
-    /// Number of identical replicas to spawn (default: 1)
-    /// When > 1, spawns N identical actors of this type with auto-generated IDs.
-    /// The actor_id field is used as a prefix (e.g. "worker" → "worker-0", "worker-1", ...).
-    /// If actor_id is empty, server generates ULID-based IDs for each replica.
-    /// Use case: data-parallel workloads, shard groups, worker pools.
-    #[prost(uint32, tag="8")]
+    /// Number of identical replicas to spawn (default: 1 when 0).
+    /// When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
+    #[prost(uint32, tag="3")]
     pub instances_count: u32,
-    /// Role of the actor within its application (e.g. "worker", "leader").
-    /// Maps 1:1 to ChildSpec.role (TOML `role` field in \[[supervisor.children]\]).
-    /// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-    /// If empty, falls back to actor_id.name() for dispatch.
-    #[prost(string, tag="9")]
-    pub role: ::prost::alloc::string::String,
 }
 /// Response from SpawnActor
 ///
@@ -2051,27 +1908,31 @@ pub struct ActorSpawnSpec {
     /// Overridden from JWT claims at request time when auth is enabled.
     #[prost(string, tag="4")]
     pub tenant_id: ::prost::alloc::string::String,
+    /// Tell/ask isolation for cross-tenant/cross-namespace callers (see ActorVisibility).
+    /// UNSPECIFIED is treated as PUBLIC.
+    #[prost(enumeration="ActorVisibility", tag="5")]
+    pub visibility: i32,
     /// OTP-style behavior kind for logging and observability.
     /// Examples: "GenServer", "GenEvent", "GenStateMachine", "Workflow".
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub behavior_kind: ::prost::alloc::string::String,
     /// User-supplied initialization arguments.
     /// These become the "args" field in the WASM init() payload so TypeScript/Python/Go
     /// actors can read them via host.config("initial_count"), etc.
     /// Also used by Rust embedded actors as configuration.
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="7")]
     pub args: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Facet declarations attached to this actor.
     /// Carries virtual_actor, durability, timer, etc. facets verbatim from ChildSpec.
     /// ActorFactory instantiates these at spawn time via create_facets_from_config().
-    #[prost(message, repeated, tag="7")]
+    #[prost(message, repeated, tag="8")]
     pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
     /// Observability labels propagated to metrics and traces.
-    #[prost(map="string, string", tag="8")]
+    #[prost(map="string, string", tag="9")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Actor runtime configuration (mailbox, restart policy, etc.).
     /// Optional — defaults apply when absent.
-    #[prost(message, optional, tag="9")]
+    #[prost(message, optional, tag="10")]
     pub config: ::core::option::Option<ActorConfig>,
 }
 /// Actor lifecycle states.
@@ -2686,6 +2547,142 @@ impl SupervisionStrategy {
         }
     }
 }
+/// Request to spawn an actor on a specific remote node (Erlang spawn/4 equivalent)
+///
+/// ## Purpose
+/// Spawns an actor on a specified remote node using pre-deployed actor type.
+/// Returns an ActorRef for location-transparent messaging.
+///
+/// ## Erlang Philosophy
+/// In Erlang:
+/// ```erlang
+/// % Local spawn (current node)
+/// Pid = spawn(Module, Function, Args)
+///
+/// % Remote spawn (specific node)
+/// Pid = spawn(Node, Module, Function, Args)
+/// ```
+/// - Node: Target node (atom, e.g., 'worker@host1')
+/// - Module: Pre-compiled module on remote node (e.g., 'gen_server')
+/// - Function: Exported function to run (e.g., 'start_link')
+/// - Args: Arguments to function (e.g., \[initial_state\])
+/// - Returns: Pid that works for local and remote sends (location transparent)
+///
+/// ## PlexSpaces Approach
+/// ```rust
+/// // Local spawn (current node)
+/// let actor = node.spawn_actor("worker", state, config).await?;
+///
+/// // Remote spawn (specific node)
+/// let actor_ref = node.spawn_remote("node2", "worker", state, config).await?;
+/// ```
+/// - target_node_id: Target node (string, e.g., "node2")
+/// - actor_type: Pre-deployed actor type on remote node (string, e.g., "worker")
+/// - initial_state: Serialized initial state (bytes)
+/// - config: Actor configuration
+/// - Returns: ActorRef in format "actor_id@node_id" for location-transparent messaging
+///
+/// ## Key Assumptions (Erlang-Compatible)
+/// 1. **Code Pre-Deployed**: The actor_type must already exist on the target node
+///     - Like Erlang: Module must be loaded on remote node
+///     - Use CreateActor first to deploy actor type, or ensure it's in node's registry
+/// 2. **Location Transparency**: Returned ActorRef works the same for local and remote sends
+///     - Like Erlang: Pid works for both local send (Pid ! Msg) and remote send
+///     - ActorRef.tell() / ActorRef.ask() automatically routes to correct node
+///
+/// ## Extensibility for WASM (Future - Week 11-12)
+/// Phase 6 will add dynamic WASM deployment support via reserved fields:
+/// ```protobuf
+/// oneof code_source {
+///    string actor_type = 2;        // Pre-deployed type (current)
+///    WasmModule wasm_module = 10;  // Deploy WASM on-the-fly (future)
+///    string wasm_url = 11;         // Fetch WASM from URL (future)
+/// }
+/// ```
+/// This enables:
+/// - **Pre-deployed**: spawn_remote("node2", "worker", ...) - code already on node2
+/// - **Dynamic WASM**: spawn_remote_wasm("node2", wasm_bytes, ...) - deploy code + spawn
+/// - **URL-based**: spawn_remote_url("node2", "<https://cdn/worker.wasm",> ...) - fetch + deploy + spawn
+///
+/// ## Use Cases
+/// 1. **Distributed Testing**: Spawn Byzantine generals on specific nodes
+///     ```rust
+///     for (i, node) in nodes.iter().enumerate() {
+///         node.spawn_remote(&node.id, "general", state, config).await?;
+///     }
+///     ```
+/// 2. **Load Distribution**: Explicitly place workers across cluster
+///     ```rust
+///     let worker_node = pick_least_loaded_node();
+///     worker_node.spawn_remote(&worker_node.id, "worker", state, config).await?;
+///     ```
+/// 3. **Data Locality**: Spawn actor near data source
+///     ```rust
+///     let db_node = find_node_with_shard(shard_id);
+///     db_node.spawn_remote(&db_node.id, "processor", state, config).await?;
+///     ```
+/// 4. **Affinity**: Co-locate related actors on same node
+///     ```rust
+///     let parent_node = get_actor_node(&parent_id);
+///     parent_node.spawn_remote(&parent_node.id, "child", state, config).await?;
+///     ```
+///
+/// ## Comparison to CreateActor
+/// | Feature | CreateActor | SpawnActor |
+/// |---------|-------------|------------------|
+/// | Node selection | Placement strategy / current node | Explicit target node |
+/// | Use case | General actor creation | Explicit remote placement |
+/// | Fallback | Can fall back to other nodes | Fails if target unavailable |
+/// | Erlang equivalent | spawn/3 (local) | spawn/4 (remote) |
+/// | Code deployment | Any node can have code | Target node must have code |
+///
+/// ## Implementation Flow
+/// When node1 calls SpawnRemoteActor targeting node2:
+/// 1. node1 validates target_node_id exists in registry
+/// 2. node1 sends gRPC SpawnRemoteActor request to node2
+/// 3. node2 validates actor_type exists in local registry
+/// 4. node2 spawns actor locally: Actor::spawn(actor_type, state, config)
+/// 5. node2 returns ActorRef with format "actor-123@node2"
+/// 6. node1 caches remote ActorRef for future messaging
+/// 7. Subsequent tell/ask automatically routes via gRPC to node2
+///
+/// Who may invoke tell/ask on the spawned actor (enforced in ActorRef).
+/// UNSPECIFIED is treated as PUBLIC by the runtime.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ActorVisibility {
+    ActorVisibilityUnspecified = 0,
+    /// Any tenant and namespace may message this actor.
+    ActorVisibilityPublic = 1,
+    /// Only callers in the same tenant_id may message; namespace may differ within the tenant.
+    ActorVisibilityProtected = 2,
+    /// Only callers matching both tenant_id and namespace may message.
+    ActorVisibilityPrivate = 3,
+}
+impl ActorVisibility {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ActorVisibility::ActorVisibilityUnspecified => "ACTOR_VISIBILITY_UNSPECIFIED",
+            ActorVisibility::ActorVisibilityPublic => "ACTOR_VISIBILITY_PUBLIC",
+            ActorVisibility::ActorVisibilityProtected => "ACTOR_VISIBILITY_PROTECTED",
+            ActorVisibility::ActorVisibilityPrivate => "ACTOR_VISIBILITY_PRIVATE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ACTOR_VISIBILITY_UNSPECIFIED" => Some(Self::ActorVisibilityUnspecified),
+            "ACTOR_VISIBILITY_PUBLIC" => Some(Self::ActorVisibilityPublic),
+            "ACTOR_VISIBILITY_PROTECTED" => Some(Self::ActorVisibilityProtected),
+            "ACTOR_VISIBILITY_PRIVATE" => Some(Self::ActorVisibilityPrivate),
+            _ => None,
+        }
+    }
+}
 // ==================== Link Semantics (Erlang Pattern) ====================
 
 /// / Monitor type (distinguishes Monitor from Link)
@@ -2986,6 +2983,68 @@ impl ActorHealthStatus {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

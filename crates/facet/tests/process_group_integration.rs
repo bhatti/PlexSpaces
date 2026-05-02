@@ -213,6 +213,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
                 String::new(),
                 mailbox_for_ref,
                 node.service_locator().clone(),
+                plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
             );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -264,6 +265,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
             let group_name = format!("tbl-{run_id}-g1");
             let reply = actor_ref
                 .ask(
+                    &ctx,
                     json_message(&json!(group_name), "create_group"),
                     ASK_TIMEOUT,
                 )
@@ -282,7 +284,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
                 "join_group",
             );
             let reply = actor_ref
-                .ask(join_msg, ASK_TIMEOUT)
+                .ask(&ctx, join_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to join group");
             let response: serde_json::Value =
@@ -291,7 +293,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
 
             let get_members_msg = json_message(&json!(group_name), "get_members");
             let reply = actor_ref
-                .ask(get_members_msg, ASK_TIMEOUT)
+                .ask(&ctx, get_members_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to get members");
             let response: serde_json::Value =
@@ -309,6 +311,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
             let group_name = format!("tbl-{run_id}-g2");
             actor_ref
                 .ask(
+                    &ctx,
                     json_message(&json!(group_name), "create_group"),
                     ASK_TIMEOUT,
                 )
@@ -324,7 +327,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
                 "join_group",
             );
             actor_ref
-                .ask(join_msg, ASK_TIMEOUT)
+                .ask(&ctx, join_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to join group");
 
@@ -337,7 +340,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
                 "publish_to_group",
             );
             let reply = actor_ref
-                .ask(publish_msg, ASK_TIMEOUT)
+                .ask(&ctx, publish_msg, ASK_TIMEOUT)
                 .await
                 .expect("Failed to publish");
             let response: serde_json::Value =

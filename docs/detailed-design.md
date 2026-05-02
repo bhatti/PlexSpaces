@@ -2401,57 +2401,49 @@ Actors can use this for custom routing (e.g., `/metrics`, `/health`, `/actions/{
 
 #### HTTP Gateway Implementation
 
-The HTTP gateway is implemented as a separate Axum server running concurrently with the Tonic gRPC server:
+gRPC and HTTP share a **single TCP port** via `GrpcHttpServerBuilder` (in `crates/grpc-middleware`). Tonic services are merged into Axum using `Routes::into_axum_router()`; modular HTTP route handlers are composed by `all_http_routes()` under `crates/node/src/http_routes/`:
 
 ```rust
 // In crates/node/src/mod.rs
-tokio::spawn(async move {
-    let http_addr = SocketAddr::from(([0, 0, 0, 0], grpc_port + 1));
-    
-    // Create Axum router
-    let app = Router::new()
-        .route("/api/v1/actors/:namespace/:actor_type", 
-            get(actor_http_request).post(actor_http_request).put(actor_http_request))
-        .route("/api/v1/actors/:namespace/:actor_type/ask",
-            get(actor_http_request).post(actor_http_request).put(actor_http_request));
-    
-    // Start HTTP server
-    axum::Server::bind(&http_addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-});
+use plexspaces_grpc_middleware::GrpcHttpServerBuilder;
+use crate::http_routes::all_http_routes;
+
+let http_routes = all_http_routes(
+    actor_service.clone(),
+    service_locator.clone(),
+    node_connectivity.clone(),
+    auth_disabled,
+    jwt_secret.clone(),
+);
+
+let (listener, app) = GrpcHttpServerBuilder::new(addr)
+    .grpc_service(tonic_web::enable(ActorServiceServer::new(...)))
+    // ... more grpc services ...
+    .http_routes(http_routes)
+    .build()
+    .await?;
+
+// Single select loop — one server for both gRPC and HTTP
+tokio::select! {
+    result = axum::serve(listener, app) => { ... }
+    _ = shutdown_signal => {}
+}
 ```
 
 **Key Implementation Details**:
 
-1. **Concurrent Servers**: Both HTTP and gRPC servers run using `tokio::select!`:
-   ```rust
-   tokio::select! {
-       _ = grpc_server => {},
-       _ = http_server => {},
-   }
-   ```
+1. **Single Port**: `GrpcHttpServerBuilder::build()` binds one `TcpListener`; tonic's `Routes::into_axum_router()` converts all gRPC services to an Axum router which is then merged with the HTTP routes.
 
-2. **Shared Service Instance**: HTTP gateway creates its own `ActorServiceImpl` instance:
-   ```rust
-   let actor_service_http = Arc::new(ActorServiceImpl::new(
-       service_locator.clone(),
-       node_id.clone(),
-   ));
-   ```
+2. **Modular HTTP Routes**: `actor_routes`, `node_routes`, and `deploy_routes` are independent modules composed by `all_http_routes()` — each owns its state and handlers.
 
-3. **Direct Service Calls**: HTTP handlers invoke the service directly (not via gRPC):
+3. **Direct Service Calls**: HTTP handlers invoke `ActorServiceImpl` directly (no internal gRPC round-trip):
    ```rust
    async fn actor_http_request(...) -> Result<Json<Value>, StatusCode> {
-       let grpc_req = Request::new(invoke_req);
-       let grpc_resp = ActorServiceTrait::ask_reply(
-           &*actor_service_http, 
-           grpc_req
-       ).await?;
-       // Convert response to JSON
+       crate::http_gateway::actor_http_request(
+           tenant_id, method, path, query, body, headers, actor_service
+       ).await
    }
-```
+   ```
 
 #### Request Parsing and Translation
 
@@ -3056,9 +3048,49 @@ let udp_config = UdpConfig {
 };
 ```
 
-### Channel as Mailbox
+### Mailbox Dual-Queue Architecture
 
-Channels can serve as actor mailboxes, providing durable message processing:
+Every actor mailbox maintains **two independent queues** to guarantee that lifecycle signals are never buried under application load:
+
+```
+Mailbox
+ ├─ ctrl_queue  (unbounded, no back-pressure)
+ │    __DOWN__, __EXIT__, __PING__, __PONG__, __INFO__, …
+ └─ data_queue  (bounded, back-pressure applies)
+      call, cast, timer, …
+```
+
+**Routing rule**: a message whose `message_type` starts with `"__"` is a *control message* and is routed to the ctrl queue.  All other messages go to the data queue.
+
+**Dequeue priority**: on every `dequeue()` call, the ctrl queue is checked first via a single `Relaxed` atomic load (`ctrl_size`).  When empty (steady state) this is one branch — zero mutex cost.
+
+```rust
+use plexspaces_core::{is_ctrl_message, CTRL_MSG_PREFIX, create_ping_message};
+
+// Check classification
+assert!(is_ctrl_message("__DOWN__"));
+assert!(!is_ctrl_message("call"));
+
+// Liveness probe — auto-replied as __PONG__ by the actor run loop
+let ping = create_ping_message(my_id, target_id);
+let pong = target.ask(ping, Duration::from_millis(100)).await?;
+```
+
+**`__PING__` / `__PONG__`**: the actor run loop handles `__PING__` automatically before dispatching to actor code.  A `__PONG__` reply with the same `correlation_id` is sent back, allowing the caller's `ask()` future to complete without any actor-level handler.
+
+**Observability** (`MailboxObservabilityStats`):
+
+| Field | Meaning |
+|-------|---------|
+| `data_queue_size` | Pending data messages |
+| `ctrl_queue_size` | Pending control messages |
+| `total_size()` | `data_queue_size + ctrl_queue_size` |
+
+**Metrics**: `plexspaces_mailbox_ctrl_enqueued_total`, `plexspaces_mailbox_ctrl_dequeued_total` (labeled by `mailbox_id` and `message_type`).
+
+### Channel as Mailbox Backend
+
+The data queue is backed by a pluggable `Channel` trait:
 
 ```rust
 use plexspaces_mailbox::MailboxBuilder;
@@ -3075,9 +3107,6 @@ let mailbox = MailboxBuilder::new()
 
 **Mailbox Graceful Shutdown**:
 ```rust
-// Stop accepting new messages (for non-memory channels)
-// Complete in-progress messages
-// Close channel
 mailbox.graceful_shutdown(Some(Duration::from_secs(30))).await?;
 ```
 

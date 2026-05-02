@@ -149,6 +149,7 @@ mod tests {
             None,
             Some(svc),
             None, // No outbound HTTP client
+            None, // No shared timer pool
         ));
         SimpleHostImpl::new(
             ActorId::from("test-actor".to_string()),

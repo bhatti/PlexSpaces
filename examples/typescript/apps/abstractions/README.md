@@ -23,7 +23,7 @@ Then in a second shell:
 ```bash
 cd /Users/shahzadbhatti/workspace/myspaces/examples/typescript/apps/abstractions
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 `test.sh` refuses to run against a node that was not started by the current repo's

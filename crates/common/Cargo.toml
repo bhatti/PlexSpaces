@@ -13,7 +13,7 @@ description = "Common types shared across PlexSpaces crates"
 plexspaces-proto = { workspace = true }
 chrono = { workspace = true }
 ulid = { workspace = true }
-prost-types = "0.12"
+prost-types = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { version = "1", features = ["time", "fs", "net"] }

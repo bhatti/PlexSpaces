@@ -49,7 +49,7 @@ Demonstrates a **GenServer-style microservice** for payment processing with idem
 
 # Terminal 2: Run tests
 cd examples/python/apps/payment_handler
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## Operations

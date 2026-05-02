@@ -9,6 +9,7 @@ use plexspaces_core::{
     ServiceLocator,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
 use tokio::time;
@@ -187,6 +188,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
         "default", // namespace
         "remote-node",
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     assert!(actor_ref.is_remote());
@@ -244,13 +246,17 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
         "default", // namespace
         "remote-node",
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Send message (will fail to connect, but should use ServiceLocator)
     // Use timeout to prevent hanging
     let message = create_test_message(b"test".to_vec());
-    let result =
-        tokio::time::timeout(std::time::Duration::from_secs(5), actor_ref.tell(message)).await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        actor_ref.tell(&ctx, message),
+    )
+    .await;
 
     // Should fail with timeout or connection error (no server), but should have used ServiceLocator
     match result {
@@ -323,6 +329,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
         "default", // namespace
         "remote-node",
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     // Send ask request (will fail to connect, but should use ServiceLocator)
@@ -330,7 +337,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     let message = create_test_message(b"test".to_vec());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        actor_ref.ask(message, std::time::Duration::from_secs(1)),
+        actor_ref.ask(&ctx, message, std::time::Duration::from_secs(1)),
     )
     .await;
 
@@ -376,6 +383,7 @@ async fn test_actor_ref_local_unchanged() {
         "test",
         mailbox.clone(),
         service_locator.clone(),
+        ActorVisibility::ActorVisibilityPublic,
     );
 
     assert!(actor_ref.is_local());
@@ -383,13 +391,13 @@ async fn test_actor_ref_local_unchanged() {
 
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};
+    let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
-        let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         registry
             .register_actor(
-                &ctx,
+                &tell_ctx,
                 actor_id,
                 sender,
                 "test_actor".to_string(),
@@ -402,7 +410,7 @@ async fn test_actor_ref_local_unchanged() {
 
     // Send message should work
     let message = create_test_message(b"test".to_vec());
-    actor_ref.tell(message).await.unwrap();
+    actor_ref.tell(&tell_ctx, message).await.unwrap();
 
     // Verify message was delivered
     let received = mailbox.dequeue().await;

@@ -1029,31 +1029,38 @@ Actors receive full HTTP path information for custom routing:
 
 #### HTTP Gateway Architecture
 
-The HTTP gateway (Axum) runs as a separate server alongside the gRPC server:
+gRPC and HTTP/REST share a **single TCP port**. `GrpcHttpServerBuilder` (in `crates/grpc-middleware`) uses tonic's `Routes::into_axum_router()` to merge all gRPC services into an Axum router; modular HTTP route handlers are merged on top before `axum::serve` is called.
 
 ```mermaid
 graph TB
-    subgraph Node["PlexSpaces Node"]
-        HTTP["HTTP Gateway<br/>(Axum, Port 8001)"]
-        GRPC["gRPC Server<br/>(Tonic, Port 8000)"]
+    subgraph Node["PlexSpaces Node (single port)"]
+        Router["Axum Router<br/>(gRPC + HTTP merged)"]
+        GRPC["gRPC Services<br/>(tonic Routes)"]
+        HTTP["HTTP Routes<br/>(actor · node · deploy)"]
         Service["ActorService<br/>(Shared State)"]
     end
-    
-    Client["HTTP Client"] -->|"HTTP/JSON"| HTTP
-    HTTP -->|"AskReplyRequest / SendMessageRequest"| Service
-    Service -->|"gRPC"| GRPC
-    GRPC -->|"Actor Messages"| Actors["Actors"]
-    
-    style HTTP fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
+
+    GRPCClient["gRPC Client"] -->|"HTTP/2 + Protobuf"| Router
+    HTTPClient["HTTP/JSON Client"] -->|"HTTP/1.1 or HTTP/2"| Router
+    Router --> GRPC
+    Router --> HTTP
+    GRPC --> Service
+    HTTP --> Service
+    Service -->|"tell()/ask()"| Actors["Actors"]
+
+    style Router fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
     style GRPC fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style HTTP fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#fff
     style Service fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
 ```
 
 **Key Design Decisions**:
-- **Separate Servers**: HTTP gateway and gRPC server run concurrently using `tokio::select!`
-- **Shared State**: Both servers share the same `ActorServiceImpl` instance
-- **Port Configuration**: HTTP gateway listens on `grpc_port + 1` (e.g., 8001 if gRPC is 8000)
-- **Direct Service Calls**: HTTP handlers directly invoke `ActorServiceTrait::ask_reply` or `ActorServiceTrait::send_message` rather than making gRPC calls
+- **Single Port**: gRPC (HTTP/2 + Protobuf) and REST (HTTP/1.1 or HTTP/2 + JSON) share one TCP listener — simpler firewall rules, one load-balancer target
+- **`GrpcHttpServerBuilder`**: Owned by `crates/grpc-middleware`; calls `.grpc_service(svc)` for each tonic service, `.http_routes(router)` for REST, then `.build()` returns `(TcpListener, axum::Router<()>)`
+- **Modular HTTP Routes**: Each domain has its own handler module under `crates/node/src/http_routes/` (`actor_routes`, `node_routes`, `deploy_routes`) composed by `all_http_routes()`
+- **Shared State**: All handlers share the same `ActorServiceImpl` / `ServiceLocator` instances via `Arc`
+- **Direct Service Calls**: HTTP handlers call `ActorServiceImpl` directly — no internal gRPC round-trip
+- **Deploy stays HTTP-only**: WASM binaries can exceed the 5 MB gRPC message limit; deploy/undeploy endpoints are REST-only with a 100 MB body limit
 
 #### Request Flow
 

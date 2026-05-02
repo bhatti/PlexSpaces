@@ -23,7 +23,7 @@ Real-time bidding using **TupleSpace** (bids as tuples), **process group** (broa
 # Terminal 2
 cd examples/go/apps/migrating_mozartspaces
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

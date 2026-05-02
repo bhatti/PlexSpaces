@@ -32,12 +32,13 @@ uuid = { workspace = true }
 ulid = { workspace = true }  # For request_id generation
 metrics = { workspace = true }
 chrono = { workspace = true }  # For lease timestamps and health service timestamps
-prost-types = "0.12"  # For proto Duration/Timestamp types
+prost-types = { workspace = true }  # For proto Duration/Timestamp types
 tracing = { workspace = true }  # Always enabled, feature kept for compatibility
 futures = "0.3"  # For BoxStream in ChannelService
 tonic = { workspace = true }  # For gRPC client in ServiceLocator
 tonic-health = { workspace = true }  # For health reporting
 once_cell = "1.19"  # For lazy static initialization of discovery cache
+rand = "0.8"  # For random selection among multiple live actors of same type
 sysinfo = { workspace = true }
 
 [dev-dependencies]
@@ -51,7 +52,7 @@ plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }  # F
 plexspaces-locks = { path = "../locks" }  # For facet factory tests
 plexspaces-process-groups = { workspace = true }  # For facet factory tests
 chrono = { workspace = true }  # For timestamp in integration tests
-prost-types = "0.12"  # For proto types in integration tests
+prost-types = { workspace = true }  # For proto types in integration tests
 async-trait = { workspace = true }  # For trait implementations in tests
 plexspaces-mailbox = { workspace = true }  # For Mailbox in virtual actor LRU eviction tests
 plexspaces-actor = { workspace = true }  # For ActorRef in virtual actor LRU eviction tests

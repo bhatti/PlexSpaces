@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/storefront_actor.wasm"
 NODE_ADDR="${1:-localhost:8090}"
-HTTP_PORT="${2:-8092}"
+HTTP_PORT="${2:-8091}"
 
 export CARGO_TARGET_DIR="$WORKSPACE_DIR/target"
 GREEN='\033[0;32m'

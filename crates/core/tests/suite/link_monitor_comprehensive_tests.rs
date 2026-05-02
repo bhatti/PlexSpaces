@@ -35,8 +35,8 @@
 
 use plexspaces_core::actor_trait::MessageSender;
 use plexspaces_core::{
-    Actor, ActorContext, ActorError, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    ExitAction, ExitReason, Message, RequestContext,
+    Actor, ActorContext, ActorError, ActorId, ActorRegistry, ActorRegistryError, BehaviorError,
+    BehaviorType, ExitAction, ExitReason, Message, RequestContext,
 };
 // Note: Message is now unified proto Message from plexspaces_proto::common::v1
 
@@ -208,7 +208,11 @@ struct MockMessageSender {
 
 #[async_trait]
 impl MessageSender for MockMessageSender {
-    async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn tell(
+        &self,
+        _ctx: &RequestContext,
+        message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.tx
             .send(message)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
@@ -225,12 +229,20 @@ async fn register_mock_actor(
     registry: &Arc<ActorRegistry>,
     actor_id: ActorId,
 ) -> mpsc::UnboundedReceiver<Message> {
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+    register_mock_actor_with_ctx(registry, actor_id, &ctx).await
+}
+
+async fn register_mock_actor_with_ctx(
+    registry: &Arc<ActorRegistry>,
+    actor_id: ActorId,
+    ctx: &RequestContext,
+) -> mpsc::UnboundedReceiver<Message> {
     let (tx, rx) = mpsc::unbounded_channel();
     let sender = Arc::new(MockMessageSender { tx });
-    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
     registry
         .register_actor(
-            &ctx,
+            ctx,
             actor_id,
             sender,
             "MockActor".to_string(),
@@ -352,7 +364,7 @@ async fn test_link_normal_exit_no_propagation() {
     let actor2_id = test_actor_id("actor2");
 
     // Link actor1 and actor2
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
 
     // Verify link is bidirectional
     let links1 = registry.get_links(&actor1_id).await;
@@ -384,7 +396,7 @@ async fn test_link_error_exit_propagates() {
     let actor2_id = test_actor_id("actor2");
 
     // Link actor1 and actor2
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
 
     // Verify links are bidirectional
     let links1 = registry.get_links(&actor1_id).await;
@@ -437,11 +449,11 @@ async fn test_monitor_receives_down_message() {
 
     // Register monitor
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -481,20 +493,20 @@ async fn test_multiple_monitors_receive_down() {
 
     // Register both monitors
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor1_id,
             "monitor-ref-1".to_string(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor2_id,
             "monitor-ref-2".to_string(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -529,11 +541,11 @@ async fn test_unlink_removes_link() {
     let actor2_id = test_actor_id("actor2");
 
     // Link actors
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
     assert!(registry.get_links(&actor1_id).await.contains(&actor2_id));
 
     // Unlink actors
-    registry.unlink(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_unlink(&actor1_id, &actor2_id).await.unwrap();
     assert!(!registry.get_links(&actor1_id).await.contains(&actor2_id));
     assert!(!registry.get_links(&actor2_id).await.contains(&actor1_id));
 }
@@ -549,18 +561,18 @@ async fn test_demonitor_removes_monitor() {
 
     // Register monitor (no channel needed since we only test registration/removal)
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
 
     // Demonitor
     registry
-        .demonitor(&actor_id, &monitor_id, &monitor_ref)
+        .local_demonitor(&actor_id, &monitor_id, &monitor_ref)
         .await
         .unwrap();
 
@@ -597,7 +609,7 @@ async fn test_shutdown_exit_no_link_propagation() {
     let actor1_id = test_actor_id("actor1");
     let actor2_id = test_actor_id("actor2");
 
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
 
     // Terminate actor1 with shutdown exit
     registry
@@ -629,8 +641,8 @@ async fn test_linked_exit_reason_nesting() {
     let actor_c = test_actor_id("actor-c");
 
     // Link A -> B -> C
-    registry.link(&actor_a, &actor_b).await.unwrap();
-    registry.link(&actor_b, &actor_c).await.unwrap();
+    registry.local_link(&actor_a, &actor_b).await.unwrap();
+    registry.local_link(&actor_b, &actor_c).await.unwrap();
 
     // Verify links
     assert!(registry.get_links(&actor_a).await.contains(&actor_b));
@@ -670,7 +682,7 @@ async fn test_link_to_nonexistent_actor() {
     let actor2_id = test_actor_id("actor2");
 
     // Link to non-existent actor should still work
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
 
     // Verify link is registered
     assert!(registry.get_links(&actor1_id).await.contains(&actor2_id));
@@ -688,11 +700,11 @@ async fn test_monitor_nonexistent_actor() {
 
     // Monitor non-existent actor should still work (no channel needed for this test)
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -711,7 +723,13 @@ async fn test_self_link_prevention() {
     let actor_id = test_actor_id("actor1");
 
     // Attempting to link actor to itself should fail
-    let result = registry.link(&actor_id, &actor_id).await;
+    let result = registry
+        .link(
+            &monitoring_request_context_for_tests(),
+            &actor_id,
+            &actor_id,
+        )
+        .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("itself"));
 }
@@ -726,8 +744,8 @@ async fn test_multiple_links_same_actor() {
     let actor3_id = test_actor_id("actor3");
 
     // Link actor1 to both actor2 and actor3
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
-    registry.link(&actor1_id, &actor3_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor3_id).await.unwrap();
 
     // Verify both links exist
     let links1 = registry.get_links(&actor1_id).await;
@@ -753,7 +771,9 @@ async fn test_unlink_nonexistent_link() {
     let actor2_id = test_actor_id("actor2");
 
     // Unlink non-existent link should succeed (idempotent)
-    let result = registry.unlink(&actor1_id, &actor2_id).await;
+    let result = registry
+        .local_unlink(&actor1_id, &actor2_id)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -768,7 +788,7 @@ async fn test_demonitor_nonexistent_monitor() {
 
     // Demonitor non-existent monitor should succeed (idempotent)
     let result = registry
-        .demonitor(&actor_id, &monitor_id, &monitor_ref)
+        .local_demonitor(&actor_id, &monitor_id, &monitor_ref)
         .await;
     assert!(result.is_ok());
 }
@@ -786,11 +806,11 @@ async fn test_monitor_receives_down_normal_exit() {
     let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
 
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -828,11 +848,11 @@ async fn test_monitor_receives_down_shutdown_exit() {
     let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
 
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -870,11 +890,11 @@ async fn test_monitor_receives_down_killed_exit() {
     let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
 
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -912,11 +932,11 @@ async fn test_monitor_receives_down_linked_exit() {
     let mut rx = register_mock_actor(&registry, monitor_id.clone()).await;
 
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor_id,
             monitor_ref.clone(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -961,8 +981,8 @@ async fn test_link_cleanup_removes_all_references() {
     let actor3_id = test_actor_id("actor3");
 
     // Create links: actor1 <-> actor2, actor1 <-> actor3
-    registry.link(&actor1_id, &actor2_id).await.unwrap();
-    registry.link(&actor1_id, &actor3_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor2_id).await.unwrap();
+    registry.local_link(&actor1_id, &actor3_id).await.unwrap();
 
     // Terminate actor1
     registry
@@ -1003,20 +1023,20 @@ async fn test_monitor_cleanup_on_termination() {
     let mut rx2 = register_mock_actor(&registry, monitor2_id.clone()).await;
 
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor1_id,
             "monitor-ref-1".to_string(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
     registry
-        .monitor(
+        .local_monitor(
+            &monitoring_request_context_for_tests(),
             &actor_id,
             &monitor2_id,
             "monitor-ref-2".to_string(),
-            &monitoring_request_context_for_tests(),
         )
         .await
         .unwrap();
@@ -1036,4 +1056,47 @@ async fn test_monitor_cleanup_on_termination() {
 
     // Monitors should be cleaned up (no longer registered)
     // Note: This is verified by the fact that monitors are removed in handle_actor_termination
+}
+
+#[tokio::test]
+async fn link_rejects_request_namespace_mismatch() {
+    let registry = create_test_registry().await;
+    let a = test_actor_id("scoped-a");
+    let b = test_actor_id("scoped-b");
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "wrong-ns".into());
+    let err = registry.link(&ctx, &a, &b).await.unwrap_err();
+    assert!(
+        matches!(err, ActorRegistryError::LinkMonitorDenied(_)),
+        "expected LinkMonitorDenied, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn link_rejects_when_auth_enabled_wrong_tenant() {
+    let registry = create_test_registry().await;
+    let a = test_actor_id("tenant-a");
+    let b = test_actor_id("tenant-b");
+    let ctx_ok = RequestContext::new("tenant-ok".into(), "default".into(), true).expect("ctx");
+    let _rxa = register_mock_actor_with_ctx(&registry, a.clone(), &ctx_ok).await;
+    let _rxb = register_mock_actor_with_ctx(&registry, b.clone(), &ctx_ok).await;
+    let ctx_other = RequestContext::new("other-tenant".into(), "default".into(), true).expect("ctx");
+    let err = registry
+        .link(&ctx_other, &a, &b)
+        .await
+        .expect_err("wrong tenant should deny");
+    assert!(
+        matches!(err, ActorRegistryError::LinkMonitorDenied(_)),
+        "expected LinkMonitorDenied, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn link_succeeds_when_auth_enabled_matching_scope() {
+    let registry = create_test_registry().await;
+    let a = test_actor_id("tenant-match-a");
+    let b = test_actor_id("tenant-match-b");
+    let ctx = RequestContext::new("tenant-ok".into(), "default".into(), true).expect("ctx");
+    let _rxa = register_mock_actor_with_ctx(&registry, a.clone(), &ctx).await;
+    let _rxb = register_mock_actor_with_ctx(&registry, b.clone(), &ctx).await;
+    registry.link(&ctx, &a, &b).await.expect("link in scope");
 }

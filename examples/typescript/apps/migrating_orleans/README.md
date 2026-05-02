@@ -40,7 +40,7 @@ cd ../../../../ && ./scripts/server.sh
 
 # Terminal 2: Run test (from example directory)
 cd examples/typescript/apps/migrating_orleans
-./test.sh 8092  # HTTP port (default: 8092)
+./test.sh 8091  # HTTP port (default: 8091)
 ```
 
 ---
@@ -464,7 +464,7 @@ dotnet publish
 ./build.sh  # tsc → esbuild bundle → jco componentize
 
 # Deploy WASM component via HTTP API
-curl -X POST http://localhost:8092/api/v1/applications/deploy \
+curl -X POST http://localhost:8091/api/v1/applications/deploy \
   -F "application_id=orleans-batch-predictor" \
   -F "name=orleans-batch-predictor" \
   -F "version=1.0.0" \

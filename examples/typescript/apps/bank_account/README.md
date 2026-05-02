@@ -15,14 +15,14 @@ This example mirrors the Python app: same API and operations. **Verification** r
 ## Prerequisites
 
 - **Node.js** (v18+) and **npm** (TypeScript and jco; run `npm install` in this directory).
-- **PlexSpaces repo** for E2E: `scripts/server.sh` starts a node (HTTP 8092, gRPC 8091). Run `make build` at repo root first.
+- **PlexSpaces repo** for E2E: `scripts/server.sh` starts a node (HTTP 8091, gRPC 8091). Run `make build` at repo root first.
 
 ## Quick Start (E2E)
 
 From the **repo root** (so `scripts/server.sh` and `make build` are available):
 
 ```bash
-# Terminal 1: node (HTTP 8092 by default)
+# Terminal 1: node (HTTP 8091 by default)
 ./scripts/server.sh
 
 # Terminal 2: example

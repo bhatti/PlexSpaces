@@ -119,76 +119,6 @@
 
 use async_trait::async_trait;
 
-fn parse_spawn_init_state(
-    initial_state: &[u8],
-) -> (Option<String>, std::collections::HashMap<String, String>) {
-    let init_payload = serde_json::from_slice::<serde_json::Value>(initial_state).ok();
-    let requested_role = init_payload.as_ref().and_then(|value| {
-        value
-            .get("role")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                value
-                    .get("declaration_name")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            })
-            .or_else(|| {
-                value
-                    .get("config")
-                    .and_then(|cfg| cfg.get("role"))
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            })
-    });
-    let args = init_payload
-        .as_ref()
-        .and_then(|value| {
-            value
-                .get("args")
-                .and_then(|args| args.as_object())
-                .map(|args| {
-                    args.iter()
-                        .map(|(k, v)| {
-                            let s = match v {
-                                serde_json::Value::String(s) => s.clone(),
-                                _ => v.to_string(),
-                            };
-                            (k.clone(), s)
-                        })
-                        .collect()
-                })
-                .or_else(|| {
-                    value.as_object().map(|obj| {
-                        obj.iter()
-                            .filter(|(k, _)| {
-                                !matches!(
-                                    k.as_str(),
-                                    "actor_id"
-                                        | "actor_type"
-                                        | "declaration_name"
-                                        | "behavior_kind"
-                                        | "args"
-                                        | "config"
-                                ) && !k.starts_with("__")
-                            })
-                            .filter_map(|(k, v)| match v {
-                                serde_json::Value::String(s) => Some((k.clone(), s.clone())),
-                                serde_json::Value::Number(n) => Some((k.clone(), n.to_string())),
-                                serde_json::Value::Bool(b) => Some((k.clone(), b.to_string())),
-                                _ => None,
-                            })
-                            .collect()
-                    })
-                })
-        })
-        .unwrap_or_default();
-    (requested_role, args)
-}
 use futures::future::join_all;
 use serde::Deserialize;
 use std::pin::Pin;
@@ -286,6 +216,7 @@ use plexspaces_proto::actor::v1::{
     UnlinkActorResponse,
 };
 use plexspaces_proto::common::v1::Empty;
+use plexspaces_proto::ActorServiceClient;
 
 /// ActorService implementation - gRPC gateway for actor messaging
 ///
@@ -805,80 +736,58 @@ impl ActorServiceImpl {
         Ok(())
     }
 
-    /// Spawn a new actor locally on this node - Public API for ActorContext
+    /// Spawn a new actor locally from an [`plexspaces_core::ActorSpawnSpec`].
     ///
-    /// ## Design Principle
-    /// ActorService ALWAYS creates actors locally on the node where it's called.
-    /// There is no remote spawning - to spawn on a remote node, call that node's ActorService directly.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Canonical actor ID string at the service boundary. Client-facing builders
-    ///   should pass only the actor name and let the runtime construct this value.
-    /// * `actor_type` - Type of actor to spawn (must be registered in BehaviorFactory if using factory)
-    /// * `initial_state` - Initial state bytes (passed to BehaviorFactory if available)
-    /// * `config` - Optional actor configuration
-    /// * `labels` - Optional labels for the actor
-    ///
-    /// ## Returns
-    /// ActorRef for the spawned actor using the canonical actor ID format.
-    ///
-    /// ## Implementation
-    /// Delegates to Node::spawn_actor() via ServiceLocator. Creates Actor using ActorBuilder
-    /// and BehaviorFactory (if available) or a simple default behavior.
-    /// Spawn a new actor locally on this node - Public API for ActorContext
-    ///
-    /// ## Design Principle
-    /// ActorService ALWAYS creates actors locally on the node where it's called.
-    /// This method delegates to Node::spawn_actor() via ServiceLocator.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Canonical actor ID string at the service boundary. Client-facing builders
-    ///   should pass only the actor name and let the runtime construct this value.
-    /// * `actor_type` - Type of actor to spawn (used by BehaviorFactory if available)
-    /// * `initial_state` - Initial state bytes (passed to BehaviorFactory if available)
-    /// * `config` - Optional actor configuration
-    /// * `labels` - Optional labels for the actor
-    ///
-    /// ## Returns
-    /// ActorRef for the spawned actor using the canonical actor ID format.
-    ///
-    /// ## Implementation
-    /// Delegates to Node::spawn_actor() via ServiceLocator. The actual implementation
-    /// is in Node's CreateActor gRPC handler which has full access to Node.
-    ///
-    /// ## Note
-    /// This method is primarily for ActorContext compatibility. For direct spawning,
-    /// use Node::spawn_actor() or the CreateActor gRPC RPC.
-    pub async fn spawn_actor(
+    /// Always materializes on this node via [`ActorFactory`]. Callers targeting another node must
+    /// use that node's service.
+    pub async fn spawn_actor_local_from_spec(
         &self,
         ctx: &plexspaces_core::RequestContext,
-        actor_id: &str,
-        actor_type: &str,
-        initial_state: Vec<u8>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        labels: std::collections::HashMap<String, String>,
+        input_spec: &plexspaces_core::ActorSpawnSpec,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
-        let requested_actor_type = actor_type.to_string();
-        let (requested_role, mut init_args) = parse_spawn_init_state(&initial_state);
+        use plexspaces_actor::ActorFactory;
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+
+        let identity = input_spec
+            .identity
+            .as_ref()
+            .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+                "spawn_actor_local_from_spec: spec.identity is required".into()
+            })?;
+        if identity.actor_type.is_empty() {
+            return Err("spawn_actor_local_from_spec: spec.identity.actor_type is required".into());
+        }
+
+        let effective_namespace = if input_spec.namespace.is_empty() {
+            ctx.namespace().to_string()
+        } else {
+            input_spec.namespace.clone()
+        };
+
+        let requested_actor_type = identity.actor_type.clone();
         let resolved_actor_type =
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 manager
-                    .resolve_actor_type_for_name(ctx.namespace(), &requested_actor_type)
+                    .resolve_actor_type_for_name(&effective_namespace, &requested_actor_type)
                     .await
             } else {
                 requested_actor_type.clone()
             };
-        let role = if let Some(role) = requested_role {
-            role
+
+        let role = if !input_spec.role.is_empty() {
+            input_spec.role.clone()
         } else if resolved_actor_type != requested_actor_type {
             requested_actor_type.clone()
         } else {
             String::new()
         };
+
+        let mut init_args = input_spec.args.clone();
         if init_args.is_empty() && !role.is_empty() {
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 if let Some(definition) = manager
-                    .get_virtual_actor_definition(ctx.namespace(), &role)
+                    .get_virtual_actor_definition(&effective_namespace, &role)
                     .await
                 {
                     init_args = definition.spec.args;
@@ -886,77 +795,127 @@ impl ActorServiceImpl {
             }
         }
 
-        // Public/client-facing spawn takes a base actor id.
-        // The framework owns canonical actor-id construction so callers do not have to
-        // assemble `{id}//{actor_type}::{namespace}@{node_id}` themselves.
-        let local_actor_id = if let Ok(parsed) = ActorId::from_canonical(actor_id) {
-            if parsed.node_id() != self.local_node_id {
-                return Err(format!(
-                    "Cannot spawn actor on remote node '{}' via local ActorService. ActorService always creates actors locally. To spawn on '{}', call that node's ActorService directly.",
-                    parsed.node_id(), parsed.node_id()
+        let name_for_id = identity.name.as_str();
+        let local_actor_id = if !name_for_id.is_empty() {
+            if let Ok(parsed) = ActorId::from_canonical(name_for_id) {
+                if parsed.node_id() != self.local_node_id {
+                    return Err(format!(
+                        "Cannot spawn actor on remote node '{}' via local ActorService. ActorService always creates actors locally. To spawn on '{}', call that node's ActorService directly.",
+                        parsed.node_id(), parsed.node_id()
+                    )
+                    .into());
+                }
+                self.build_canonical_actor_id(
+                    parsed.name(),
+                    &resolved_actor_type,
+                    if parsed.namespace().is_empty() {
+                        effective_namespace.as_str()
+                    } else {
+                        parsed.namespace()
+                    },
+                    &self.local_node_id,
                 )
-                .into());
+                .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> {
+                    e.to_string().into()
+                })?
+            } else {
+                self.build_canonical_actor_id(
+                    name_for_id,
+                    &resolved_actor_type,
+                    &effective_namespace,
+                    &self.local_node_id,
+                )
+                .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> {
+                    e.to_string().into()
+                })?
             }
-            self.build_canonical_actor_id(
-                parsed.name(),
-                &resolved_actor_type,
-                if parsed.namespace().is_empty() {
-                    ctx.namespace()
-                } else {
-                    parsed.namespace()
-                },
-                &self.local_node_id,
-            )
-            .map_err(|e| e.to_string())?
         } else {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
             self.build_canonical_actor_id(
-                actor_id,
+                &format!("actor-{}", timestamp),
                 &resolved_actor_type,
-                ctx.namespace(),
+                &effective_namespace,
                 &self.local_node_id,
             )
-            .map_err(|e| e.to_string())?
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?
         };
 
-        // Use ActorFactory from ServiceLocatorImpl (direct access to inherent method)
-        use plexspaces_actor::ActorFactory;
         let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
-            .ok_or_else(|| format!(
-                "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called and ActorFactory is registered. Actor ID would be: {}",
-                local_actor_id
-            ))?;
+            .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+                format!(
+                    "ActorFactory not found in ServiceLocator. Ensure Node::start() has been called and ActorFactory is registered. Actor ID would be: {}",
+                    local_actor_id
+                )
+                .into()
+            })?;
 
-        // Use ActorFactory to spawn actor via ActorSpawnSpec
-        let spawn_spec = {
-            use plexspaces_core::ActorSpawnSpec;
-            use plexspaces_proto::common::v1::ActorIdentity;
-            ActorSpawnSpec {
-                identity: Some(ActorIdentity {
-                    name: local_actor_id.name().to_string(),
-                    actor_type: resolved_actor_type.clone(),
-                }),
-                role,
-                namespace: ctx.namespace().to_string(),
-                tenant_id: ctx.tenant_id().to_string(),
-                behavior_kind: String::new(),
-                args: init_args,
-                facets: vec![],
-                config,
-                labels,
+        let facets_proto = input_spec.facets.clone();
+        let mut facet_boxes: Vec<Box<dyn plexspaces_facet::Facet>> = Vec::new();
+        if !facets_proto.is_empty() {
+            if let Some(facet_registry_wrapper) = self.service_locator.get_facet_registry().await {
+                let facet_registry = facet_registry_wrapper.inner();
+                for proto_facet in &facets_proto {
+                    match plexspaces_actor::create_facet_from_proto(proto_facet, facet_registry).await
+                    {
+                        Ok(facet_box) => facet_boxes.push(facet_box),
+                        Err(e) => {
+                            tracing::warn!(
+                                actor_id = %local_actor_id,
+                                facet_type = %proto_facet.r#type,
+                                error = %e,
+                                "spawn_actor_local_from_spec: skip facet"
+                            );
+                        }
+                    }
+                }
             }
-        };
-        actor_factory.spawn_actor(ctx, &spawn_spec, vec![]).await?;
+        }
 
-        // Actor is now spawned and registered - try to create ActorRefImpl::local() if mailbox available
+        let effective_tenant = if input_spec.tenant_id.is_empty() {
+            ctx.tenant_id().to_string()
+        } else {
+            input_spec.tenant_id.clone()
+        };
+
+        let spawn_spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: local_actor_id.name().to_string(),
+                actor_type: resolved_actor_type.clone(),
+            }),
+            role,
+            namespace: effective_namespace.clone(),
+            tenant_id: effective_tenant,
+            visibility: input_spec.visibility,
+            behavior_kind: input_spec.behavior_kind.clone(),
+            args: init_args,
+            facets: facets_proto,
+            config: input_spec.config.clone(),
+            labels: input_spec.labels.clone(),
+        };
+
+        actor_factory
+            .spawn_actor(ctx, &spawn_spec, facet_boxes)
+            .await?;
+
         let registry = self.get_actor_registry().await;
-        Ok(Self::create_actor_ref_for_local_actor(
-            &ctx,
-            &registry,
-            &local_actor_id,
-            &self.local_node_id,
-            self.service_locator.clone(),
+        let routing_ctx = plexspaces_core::RequestContext::new_without_auth(
+            ctx.tenant_id().to_string(),
+            effective_namespace,
+        );
+        Ok(
+            Self::create_actor_ref_for_local_actor(
+                &routing_ctx,
+                &registry,
+                &local_actor_id,
+                &self.local_node_id,
+                self.service_locator.clone(),
+            )
+            .await,
         )
-        .await)
     }
 
     /// Send a message to an actor (local or remote) - Public API for ActorContext
@@ -1017,8 +976,13 @@ impl ActorServiceImpl {
                             message_id, correlation_id
                         );
                     }
+                    let ctx = routing_ctx.ok_or_else(|| {
+                        Status::internal(
+                            "send_message: missing RequestContext for local reply routing (MessageSender::tell)",
+                        )
+                    })?;
                     sender
-                        .tell(message)
+                        .tell(ctx, message)
                         .await
                         .map_err(|e| Status::internal(format!("Failed to send reply: {}", e)))?;
                     if tracing::enabled!(tracing::Level::TRACE) {
@@ -1139,11 +1103,12 @@ impl ActorServiceImpl {
             let result = registry
                 .ask(&ctx, &target_actor_id, message, timeout_duration)
                 .await
-                .map_err(|e| {
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                     use plexspaces_core::ActorRegistryError;
                     match e {
                         ActorRegistryError::ActorNotFound(_) => "Actor not found".into(),
                         ActorRegistryError::Timeout => "Request timed out".into(),
+                        ActorRegistryError::VisibilityDenied(m) => m.into(),
                         _ => format!("Failed to send ask request: {}", e).into(),
                     }
                 });
@@ -1192,6 +1157,7 @@ impl ActorServiceImpl {
             ctx.namespace().to_string(),
             local_node_id.to_string(),
             service_locator,
+            plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
         )
     }
 
@@ -1244,6 +1210,9 @@ impl ActorServiceImpl {
             plexspaces_actor::ActorRefError::InvalidActorId(msg) => Status::invalid_argument(msg),
             plexspaces_actor::ActorRefError::SendFailed(msg) => {
                 Status::internal(format!("Failed to send message: {}", msg))
+            }
+            plexspaces_actor::ActorRefError::VisibilityDenied(msg) => {
+                Status::permission_denied(msg)
             }
             _ => Status::internal(format!("Routing error: {}", e)),
         })
@@ -1304,19 +1273,10 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
-        actor_id: &str,
-        actor_type: &str,
-        initial_state: Vec<u8>,
+        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
     ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ref_impl = self
-            .spawn_actor(
-                ctx,
-                actor_id,
-                actor_type,
-                initial_state,
-                None,
-                std::collections::HashMap::new(),
-            )
+            .spawn_actor_local_from_spec(ctx, spec)
             .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
         plexspaces_core::ActorRef::new(actor_ref_impl.id().clone())
@@ -1469,13 +1429,40 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
 
         let mut results = Vec::new();
         for spawn_req in req.requests {
-            let actor_type = spawn_req.actor_type.clone();
-            let namespace = if spawn_req.namespace.is_empty() {
+            let mut base_spec = match spawn_req.spec {
+                Some(s) => s,
+                None => {
+                    results.push(plexspaces_proto::actor::v1::SpawnActorResult {
+                        success: false,
+                        error: "spec is required".to_string(),
+                        response: None,
+                    });
+                    continue;
+                }
+            };
+            if !spawn_req.namespace.is_empty() {
+                base_spec.namespace = spawn_req.namespace.clone();
+            }
+            let namespace = if base_spec.namespace.is_empty() {
                 ctx.namespace().to_string()
             } else {
-                spawn_req.namespace.clone()
+                base_spec.namespace.clone()
             };
-            // instances_count == 0 or 1 means spawn one actor
+
+            let (actor_type, name_prefix) = match base_spec.identity.as_ref() {
+                Some(id) if !id.actor_type.is_empty() => {
+                    (id.actor_type.clone(), id.name.clone())
+                }
+                _ => {
+                    results.push(plexspaces_proto::actor::v1::SpawnActorResult {
+                        success: false,
+                        error: "spec.identity.actor_type is required".to_string(),
+                        response: None,
+                    });
+                    continue;
+                }
+            };
+
             let count = if spawn_req.instances_count <= 1 {
                 1
             } else {
@@ -1483,33 +1470,40 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             };
 
             for i in 0..count {
-                let actor_name = if spawn_req.actor_id.is_empty() {
+                let actor_name = if name_prefix.is_empty() {
                     Ulid::new().to_string()
                 } else if count > 1 {
-                    format!("{}-{}", spawn_req.actor_id, i)
+                    format!("{}-{}", name_prefix, i)
                 } else {
-                    spawn_req.actor_id.clone()
+                    name_prefix.clone()
                 };
-                let actor_id = self
-                    .build_canonical_actor_id(
-                        &actor_name,
-                        &actor_type,
-                        &namespace,
-                        &self.local_node_id,
-                    )
-                    .map_err(|e| e.to_string())?;
 
-                match self
-                    .spawn_actor(
-                        ctx,
-                        actor_id.as_str(),
-                        &actor_type,
-                        spawn_req.initial_state.clone(),
-                        spawn_req.config.clone(),
-                        spawn_req.labels.clone(),
-                    )
-                    .await
-                {
+                let actor_id = match self.build_canonical_actor_id(
+                    &actor_name,
+                    &actor_type,
+                    &namespace,
+                    &self.local_node_id,
+                ) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        results.push(plexspaces_proto::actor::v1::SpawnActorResult {
+                            success: false,
+                            error: e.to_string(),
+                            response: None,
+                        });
+                        continue;
+                    }
+                };
+
+                let mut spec_instance = base_spec.clone();
+                spec_instance.identity = Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: actor_name,
+                    actor_type: actor_type.clone(),
+                });
+                spec_instance.namespace = namespace.clone();
+                spec_instance.tenant_id = ctx.tenant_id().to_string();
+
+                match self.spawn_actor_local_from_spec(ctx, &spec_instance).await {
                     Ok(_actor_ref) => {
                         results.push(plexspaces_proto::actor::v1::SpawnActorResult {
                             success: true,
@@ -1531,6 +1525,130 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             }
         }
         Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { results })
+    }
+
+    async fn monitor_actor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        supervisor_id: &str,
+        supervisor_callback: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let target = self
+            .parse_canonical_actor_id(actor_id)
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let node_id = target.node_id();
+        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let channel = sl
+            .get_actor_service_client(node_id)
+            .await
+            .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
+        let mut client = ActorServiceClient::new(channel);
+        let mut req = tonic::Request::new(MonitorActorRequest {
+            actor_id: actor_id.to_string(),
+            supervisor_id: supervisor_id.to_string(),
+            supervisor_callback: supervisor_callback.to_string(),
+        });
+        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        let resp = client
+            .monitor_actor(req)
+            .await
+            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("monitor_actor failed: {}", e.message()).into()
+            })?;
+        Ok(resp.into_inner().monitor_ref)
+    }
+
+    async fn demonitor_actor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        supervisor_id: &str,
+        monitor_ref: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let target = self
+            .parse_canonical_actor_id(actor_id)
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let node_id = target.node_id();
+        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let channel = sl
+            .get_actor_service_client(node_id)
+            .await
+            .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
+        let mut client = ActorServiceClient::new(channel);
+        let mut req = tonic::Request::new(DemonitorActorRequest {
+            actor_id: actor_id.to_string(),
+            supervisor_id: supervisor_id.to_string(),
+            monitor_ref: monitor_ref.to_string(),
+        });
+        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        client
+            .demonitor_actor(req)
+            .await
+            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("demonitor_actor failed: {}", e.message()).into()
+            })?;
+        Ok(())
+    }
+
+    async fn link_actor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let target = self
+            .parse_canonical_actor_id(actor_id)
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let node_id = target.node_id();
+        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let channel = sl
+            .get_actor_service_client(node_id)
+            .await
+            .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
+        let mut client = ActorServiceClient::new(channel);
+        let mut req = tonic::Request::new(LinkActorRequest {
+            actor_id: actor_id.to_string(),
+            linked_actor_id: linked_actor_id.to_string(),
+        });
+        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        client
+            .link_actor(req)
+            .await
+            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("link_actor failed: {}", e.message()).into()
+            })?;
+        Ok(())
+    }
+
+    async fn unlink_actor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &str,
+        linked_actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let target = self
+            .parse_canonical_actor_id(actor_id)
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let node_id = target.node_id();
+        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let channel = sl
+            .get_actor_service_client(node_id)
+            .await
+            .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
+        let mut client = ActorServiceClient::new(channel);
+        let mut req = tonic::Request::new(UnlinkActorRequest {
+            actor_id: actor_id.to_string(),
+            linked_actor_id: linked_actor_id.to_string(),
+        });
+        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        client
+            .unlink_actor(req)
+            .await
+            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("unlink_actor failed: {}", e.message()).into()
+            })?;
+        Ok(())
     }
 }
 
@@ -1690,8 +1808,13 @@ impl ActorServiceTrait for ActorServiceImpl {
         // gRPC is already remote, so "remote" in the name was redundant
         // The actor is spawned locally on THIS node (the one receiving the gRPC request)
 
-        // Extract labels from request before consuming it (needed for context creation)
-        let labels_for_ctx = request.get_ref().labels.clone();
+        // Labels for JWT/context derivation live on spec.labels (proto-first spawn contract).
+        let labels_for_ctx = request
+            .get_ref()
+            .spec
+            .as_ref()
+            .map(|s| s.labels.clone())
+            .unwrap_or_default();
 
         // Create RequestContext from request metadata (before consuming request)
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
@@ -1704,37 +1827,49 @@ impl ActorServiceTrait for ActorServiceImpl {
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
 
-        // Now consume request to get inner data
         let req = request.into_inner();
 
-        // Validate actor_type
-        if req.actor_type.is_empty() {
-            return Err(Status::invalid_argument("Missing actor_type"));
+        if req.instances_count > 1 {
+            return Err(Status::invalid_argument(
+                "instances_count > 1 is not supported on SpawnActor; use SpawnActorsRequest",
+            ));
         }
 
-        // Determine actor ID: client-specified or server-generated; use full actor-id format
+        let mut spec = req
+            .spec
+            .ok_or_else(|| Status::invalid_argument("spec is required"))?;
+        if !req.namespace.is_empty() {
+            spec.namespace = req.namespace.clone();
+        }
+
+        let identity = spec
+            .identity
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("spec.identity is required"))?;
+        if identity.actor_type.is_empty() {
+            return Err(Status::invalid_argument(
+                "spec.identity.actor_type is required",
+            ));
+        }
+        let actor_type = identity.actor_type.clone();
+
         let node_id = self.local_node_id.clone();
-        let ctx_namespace = ctx.namespace();
-        let effective_namespace = if !req.namespace.is_empty() {
-            req.namespace.as_str()
+        let effective_namespace = if spec.namespace.is_empty() {
+            ctx.namespace().to_string()
         } else {
-            ctx_namespace
-        };
-        let namespace = if effective_namespace.is_empty() {
-            None
-        } else {
-            Some(effective_namespace)
+            spec.namespace.clone()
         };
         let effective_ctx = RequestContext::new_without_auth(
             ctx.tenant_id().to_string(),
-            effective_namespace.to_string(),
+            effective_namespace.clone(),
         );
-        let actor_id = if !req.actor_id.is_empty() {
-            if let Ok(parsed) = ActorId::from_canonical(&req.actor_id) {
-                if parsed.node_id() != node_id {
+
+        let actor_id = if !identity.name.is_empty() {
+            if let Ok(parsed) = ActorId::from_canonical(&identity.name) {
+                if parsed.node_id() != node_id.as_str() {
                     return Err(Status::invalid_argument(format!(
                         "Actor '{}' targets node '{}' but this service only spawns on local node '{}'",
-                        req.actor_id,
+                        identity.name,
                         parsed.node_id(),
                         node_id
                     )));
@@ -1742,9 +1877,9 @@ impl ActorServiceTrait for ActorServiceImpl {
                 parsed
             } else {
                 self.build_canonical_actor_id(
-                    &req.actor_id,
-                    &req.actor_type,
-                    effective_namespace,
+                    &identity.name,
+                    &actor_type,
+                    &effective_namespace,
                     &node_id,
                 )?
             }
@@ -1756,34 +1891,28 @@ impl ActorServiceTrait for ActorServiceImpl {
                 .as_nanos();
             self.build_canonical_actor_id(
                 &format!("actor-{}", timestamp),
-                &req.actor_type,
-                effective_namespace,
+                &actor_type,
+                &effective_namespace,
                 &node_id,
             )?
         };
 
-        // Clone values before using them (needed for both spawn_actor and proto_actor)
-        let actor_type = req.actor_type.clone();
-        let initial_state = req.initial_state.clone();
-        let (requested_role_from_init, mut init_args) = parse_spawn_init_state(&initial_state);
-        let config = req.config.clone();
-        let labels = req.labels.clone();
-        let facets = req.facets.clone();
-        let effective_role = if req.role.is_empty() {
-            requested_role_from_init.unwrap_or_default()
-        } else {
-            req.role.clone()
-        };
+        let mut init_args = spec.args.clone();
+        let effective_role = spec.role.clone();
         if init_args.is_empty() && !effective_role.is_empty() {
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 if let Some(definition) = manager
-                    .get_virtual_actor_definition(effective_namespace, &effective_role)
+                    .get_virtual_actor_definition(effective_ctx.namespace(), &effective_role)
                     .await
                 {
                     init_args = definition.spec.args;
                 }
             }
         }
+
+        let config = spec.config.clone();
+        let labels = spec.labels.clone();
+        let facets = spec.facets.clone();
 
         // Log facets for observability
         let facet_count = facets.len();
@@ -1827,29 +1956,29 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         // Use ActorFactory to spawn the actor locally
         use plexspaces_actor::ActorFactory;
+        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_proto::common::v1::ActorIdentity;
+
+        let spawn_spec = ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: actor_id.name().to_string(),
+                actor_type: actor_type.clone(),
+            }),
+            role: effective_role,
+            namespace: effective_ctx.namespace().to_string(),
+            tenant_id: effective_ctx.tenant_id().to_string(),
+            visibility: spec.visibility,
+            behavior_kind: spec.behavior_kind.clone(),
+            args: init_args,
+            facets: facets.clone(),
+            config: config.clone(),
+            labels: labels.clone(),
+        };
+
         let actor_factory_opt: Option<Arc<dyn ActorFactory>> =
             self.service_locator.get_actor_factory().await;
 
         let spawned_actor_ref = if let Some(factory) = actor_factory_opt {
-            // Spawn actor using ActorFactory via ActorSpawnSpec
-            let spawn_spec = {
-                use plexspaces_core::ActorSpawnSpec;
-                use plexspaces_proto::common::v1::ActorIdentity;
-                ActorSpawnSpec {
-                    identity: Some(ActorIdentity {
-                        name: actor_id.name().to_string(),
-                        actor_type: actor_type.clone(),
-                    }),
-                    role: effective_role,
-                    namespace: effective_ctx.namespace().to_string(),
-                    tenant_id: effective_ctx.tenant_id().to_string(),
-                    behavior_kind: String::new(),
-                    args: init_args,
-                    facets: facets.clone(),
-                    config: config.clone(),
-                    labels: labels.clone(),
-                }
-            };
             let spawned_actor_ref = factory
                 .spawn_actor(&effective_ctx, &spawn_spec, facet_boxes)
                 .await
@@ -1871,6 +2000,8 @@ impl ActorServiceTrait for ActorServiceImpl {
             .actor_id()
             .unwrap_or_else(|| actor_id.to_string());
 
+        let actor_state_bytes = plexspaces_core::wasm_init_payload(&spawn_spec, &actor_id);
+
         // Build proto Actor message for response
         use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
         let proto_actor = ProtoActor {
@@ -1880,7 +2011,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             state: ActorState::ActorStateActive as i32,
             node_id: node_id.clone(),
             vm_id: String::new(),
-            actor_state: initial_state,
+            actor_state: actor_state_bytes,
             metadata: None,
             config,
             metrics: None,
@@ -2018,18 +2149,20 @@ impl ActorServiceTrait for ActorServiceImpl {
             .parse_canonical_actor_id(&req.supervisor_id)
             .map_err(|_| Status::invalid_argument("Invalid supervisor_id"))?;
 
-        let monitor_ref = ulid::Ulid::new().to_string();
         let registry = self.get_actor_registry().await;
 
-        registry
-            .monitor(
-                &target_id,
-                &supervisor_id,
-                monitor_ref.clone(),
-                &routing_ctx,
-            )
+        let monitor_ref = registry
+            .monitor(&routing_ctx, &target_id, &supervisor_id)
             .await
-            .map_err(|e| Status::internal(format!("monitor failed: {}", e)))?;
+            .map_err(|e| match e {
+                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                other => Status::internal(format!("monitor failed: {}", other)),
+            })?;
 
         Ok(Response::new(MonitorActorResponse { monitor_ref }))
     }
@@ -2042,7 +2175,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let metadata = request.metadata().clone();
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
             self.service_locator.clone();
-        let _ctx = crate::request_context_from_grpc_request(
+        let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
             &HashMap::new(),
             &service_locator_trait,
@@ -2067,9 +2200,17 @@ impl ActorServiceTrait for ActorServiceImpl {
         }
 
         registry
-            .demonitor(&target_id, &supervisor_id, &req.monitor_ref)
+            .demonitor(&routing_ctx, &target_id, &supervisor_id, &req.monitor_ref)
             .await
-            .map_err(|e| Status::internal(format!("demonitor failed: {}", e)))?;
+            .map_err(|e| match e {
+                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                other => Status::internal(format!("demonitor failed: {}", other)),
+            })?;
 
         Ok(Response::new(Empty {}))
     }
@@ -2079,6 +2220,9 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<ActorDownNotification>,
     ) -> Result<Response<Empty>, Status> {
         self.check_accepting_requests().await?;
+        let metadata = request.metadata().clone();
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
         let req = request.into_inner();
 
         let supervisor_id = self
@@ -2087,6 +2231,20 @@ impl ActorServiceTrait for ActorServiceImpl {
         let terminated_id = self
             .parse_canonical_actor_id(&req.actor_id)
             .map_err(|_| Status::invalid_argument("Invalid actor_id"))?;
+
+        let routing_ctx = crate::request_context_from_grpc_request(
+            &metadata,
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .unwrap_or_else(|_| {
+            plexspaces_core::RequestContext::new_without_auth(
+                "system".into(),
+                supervisor_id.namespace().to_string(),
+            )
+            .with_internal(true)
+        });
 
         let registry = self.get_actor_registry().await;
 
@@ -2107,9 +2265,14 @@ impl ActorServiceTrait for ActorServiceImpl {
                 &req.reason,
             );
             registry
-                .tell(&supervisor_id, down_msg)
+                .tell(&routing_ctx, &supervisor_id, down_msg)
                 .await
-                .map_err(|e| Status::internal(format!("tell failed: {}", e)))?;
+                .map_err(|e| match e {
+                    plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                        Status::permission_denied(m)
+                    }
+                    other => Status::internal(format!("tell failed: {}", other)),
+                })?;
         }
 
         Ok(Response::new(Empty {}))
@@ -2123,7 +2286,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let metadata = request.metadata().clone();
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
             self.service_locator.clone();
-        let _ctx = crate::request_context_from_grpc_request(
+        let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
             &HashMap::new(),
             &service_locator_trait,
@@ -2137,9 +2300,17 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         self.get_actor_registry()
             .await
-            .link(&a, &b)
+            .link(&routing_ctx, &a, &b)
             .await
-            .map_err(|e| Status::internal(format!("link failed: {}", e)))?;
+            .map_err(|e| match e {
+                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                other => Status::internal(format!("link failed: {}", other)),
+            })?;
 
         Ok(Response::new(LinkActorResponse { success: true }))
     }
@@ -2152,7 +2323,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let metadata = request.metadata().clone();
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
             self.service_locator.clone();
-        let _ctx = crate::request_context_from_grpc_request(
+        let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
             &HashMap::new(),
             &service_locator_trait,
@@ -2166,9 +2337,17 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         self.get_actor_registry()
             .await
-            .unlink(&a, &b)
+            .unlink(&routing_ctx, &a, &b)
             .await
-            .map_err(|e| Status::internal(format!("unlink failed: {}", e)))?;
+            .map_err(|e| match e {
+                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                    Status::permission_denied(m)
+                }
+                other => Status::internal(format!("unlink failed: {}", other)),
+            })?;
 
         Ok(Response::new(UnlinkActorResponse { success: true }))
     }
@@ -2941,6 +3120,10 @@ impl ActorServiceImpl {
                         role: declaration_name.clone(),
                         namespace: ctx.namespace().to_string(),
                         tenant_id: ctx.tenant_id().to_string(),
+                        visibility: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.visibility)
+                            .unwrap_or_default(),
                         behavior_kind: definition_spec
                             .as_ref()
                             .map(|spec| spec.behavior_kind.clone())
@@ -2995,6 +3178,10 @@ impl ActorServiceImpl {
                         role: declaration_name.clone(),
                         namespace: ctx.namespace().to_string(),
                         tenant_id: ctx.tenant_id().to_string(),
+                        visibility: definition_spec
+                            .as_ref()
+                            .map(|spec| spec.visibility)
+                            .unwrap_or_default(),
                         behavior_kind: definition_spec
                             .as_ref()
                             .map(|spec| spec.behavior_kind.clone())
@@ -3008,8 +3195,6 @@ impl ActorServiceImpl {
                         labels: std::collections::HashMap::new(),
                     }
                 };
-                let remote_initial_state =
-                    plexspaces_core::wasm_init_payload(&remote_spawn_spec, &remote_actor_id);
                 let channel = self
                     .service_locator
                     .get_actor_service_client(target_node)
@@ -3017,15 +3202,9 @@ impl ActorServiceImpl {
                     .map_err(|e| format!("Failed to get client for node {}: {}", target_node, e))?;
                 let mut client = plexspaces_proto::ActorServiceClient::new(channel);
                 let spawn_req = SpawnActorRequest {
-                    actor_type: resolved_actor_type.clone(),
-                    actor_id: actor_id_base.clone(),
-                    initial_state: remote_initial_state,
-                    config: Some(shard_config),
-                    labels: std::collections::HashMap::new(),
-                    facets: vec![],
-                    namespace: ctx.namespace().to_string(),
+                    spec: Some(remote_spawn_spec),
+                    namespace: String::new(),
                     instances_count: 1,
-                    role: declaration_name.clone(),
                 };
                 let spawn_response = client
                     .spawn_actor(tonic::Request::new(spawn_req))
@@ -4147,7 +4326,15 @@ impl ActorServiceImpl {
                                 if let Ok(receiver_id) =
                                     ActorId::from_canonical(&message.receiver_id)
                                 {
-                                    if registry.tell(&receiver_id, message).await.is_ok() {
+                                    let tell_ctx = RequestContext::new_without_auth(
+                                        String::new(),
+                                        receiver_id.namespace().to_string(),
+                                    );
+                                    if registry
+                                        .tell(&tell_ctx, &receiver_id, message)
+                                        .await
+                                        .is_ok()
+                                    {
                                         succeeded += 1;
                                     } else {
                                         failed += 1;
@@ -4195,7 +4382,15 @@ impl ActorServiceImpl {
                                         failed += 1;
                                     }
                                 } else {
-                                    if registry.tell(&receiver_id, message).await.is_ok() {
+                                    let tell_ctx = RequestContext::new_without_auth(
+                                        String::new(),
+                                        receiver_id.namespace().to_string(),
+                                    );
+                                    if registry
+                                        .tell(&tell_ctx, &receiver_id, message)
+                                        .await
+                                        .is_ok()
+                                    {
                                         succeeded += 1;
                                     } else {
                                         failed += 1;
@@ -4882,6 +5077,7 @@ mod tests {
             namespace.to_string(),
             mailbox,
             service_locator,
+            plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
         ));
         // Tenant comes from auth, not config - use empty strings for test actor registration
         use plexspaces_core::RequestContext;
@@ -5239,6 +5435,7 @@ mod tests {
                 role: String::new(),
                 namespace: "app-ns".to_string(),
                 tenant_id: String::new(),
+                visibility: 0,
                 behavior_kind: "GenServer".to_string(),
                 args: Default::default(),
                 facets: vec![],
@@ -5279,6 +5476,7 @@ mod tests {
                 role: "worker".to_string(),
                 namespace: "audit-log-test".to_string(),
                 tenant_id: String::new(),
+                visibility: 0,
                 behavior_kind: "GenEvent".to_string(),
                 args: Default::default(),
                 facets: vec![],

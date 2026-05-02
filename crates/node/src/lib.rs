@@ -50,8 +50,8 @@ pub mod http_jwt;
 // HTTP gateway module (types, helpers, middleware for actor ask/tell via HTTP)
 pub mod http_gateway;
 
-// HTTP router for gRPC-Gateway routes.
-// pub mod http_router;
+// Modular HTTP REST bridge route handlers
+pub mod http_routes;
 
 // Node registry removed - replaced by object-registry
 

@@ -447,13 +447,21 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let result = ActorServiceTrait::spawn_actor(
         &service,
         Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
-            actor_id: String::new(),
-            actor_type: String::new(),
-            role: String::new(),
-            initial_state: vec![],
-            config: None,
-            labels: std::collections::HashMap::new(),
-            facets: vec![],
+            spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
+                identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: String::new(),
+                    actor_type: String::new(),
+                }),
+                role: String::new(),
+                namespace: String::new(),
+                tenant_id: String::new(),
+                visibility: 0,
+                behavior_kind: String::new(),
+                args: std::collections::HashMap::new(),
+                facets: vec![],
+                config: None,
+                labels: std::collections::HashMap::new(),
+            }),
             namespace: "default".to_string(),
             instances_count: 1,
         }),

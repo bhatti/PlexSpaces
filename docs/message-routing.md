@@ -15,6 +15,26 @@ This document describes the message routing design for the PlexSpaces actor syst
 7. **Tenant ID Propagation**: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext for proper multi-tenancy
 8. **Parallel Operations**: `ask_helper()` returns Futures enabling true parallel map/reduce operations
 9. **Scoped Lookup**: Runtime paths use `(tenant_id, namespace, actor_id)` when scope is available and fail closed on ambiguous flat IDs
+10. **Link and monitor**: `ActorRegistry::{link, unlink, monitor, demonitor}` are **location-transparent**: **local** targets run **`validate_link_monitor_operand_scope`** then **`ActorMonitor`** updates; **remote** targets use **`ActorService`** gRPC only (no local validate; metadata carries `RequestContext`, peer validates locals). Scope for each **local** operand: **`ActorId::namespace`** must match **`RequestContext::namespace`**; when **`auth_enabled`**, the actor must exist in this node’s registry under **`(tenant_id, namespace, actor_id)`** (live `lookup_actor_in_scope` or **`registered_actor_entries`** for indexed passivated actors). **`Node::{link, unlink, monitor, demonitor}`** delegate to the registry. **Spawn visibility** (`ActorVisibility`) is **not** used for link/monitor; messaging visibility stays on **`ActorRef::tell` / `ask`** (and remote send paths that use it).
+
+## gRPC spawn contract (`SpawnActorRequest`)
+
+- **Single source of truth**: `SpawnActorRequest` carries **`spec`** (`ActorSpawnSpec` in `proto/plexspaces/v1/actors/actor_runtime.proto`) — identity, role, args, facets, labels, config, **`visibility`**, etc. Legacy top-level fields (`actor_type`, `actor_id`, `initial_state`, …) are removed; clients must populate `spec`.
+- **Namespace merge**: If `SpawnActorRequest.namespace` is non-empty, the server merges it into `spec.namespace` for that RPC only (override). Otherwise `spec.namespace` is used. For HTTP/gRPC boundaries, namespace typically comes from the route or query parameter; for WASM deployments it is aligned with the **application id / app namespace** from `application-spec.toml` and deploy metadata.
+- **Tenant**: **`tenant_id`** on the spec may be set by the client, but when **authentication is enabled**, the authoritative tenant is taken from **JWT claims** via `request_context_from_grpc_request` / metadata — same rule as other ActorService RPCs. Use `RequestContext` from the gateway, not ad-hoc string formatting.
+- **Replicas**: `instances_count > 1` on a single `SpawnActor` RPC is rejected; use **`SpawnActors`** (batch) for N identical instances with prefix naming derived from `spec.identity.name`.
+- **Canonical IDs**: Construct and compare actors with **`ActorId::new`**, **`ActorId::from_canonical`**, and **`to_string()`** — do not concatenate `name//type::ns@node` by hand in new code.
+
+## `ActorVisibility` (tell / ask)
+
+Spawn-time **`ActorVisibility`** on `ActorSpawnSpec` constrains who may **tell** and **ask** via **`ActorRef`** (and the same rules apply when delivery ultimately uses that path).
+
+- Call sites pass **`RequestContext`** into **`ActorRef::tell` / `ask`**; enforcement uses **`enforce_visibility_for_actor_ref_messaging`** (tenant/namespace from the context vs spawn-time fields on the ref). **`RequestContext::internal`** bypasses visibility for documented system paths.
+- **`ActorRegistry::tell` / `ask`** do not duplicate visibility checks; local delivery goes through registered senders (typically **`ActorRef`**) which enforce on send. **`ActorService`** remote sends rely on the peer node’s **`ActorRef`** path after routing.
+- **Link / monitor / unlink / demonitor** use **`validate_link_monitor_operand_scope`** on **`ActorRegistry`** for **local-hosted operands only** (namespace vs `RequestContext`, and tenant+scope when auth is enabled); not **`ActorVisibility`**.
+- **`ActorVisibilityUnspecified`** is treated like **public** for messaging decisions.
+
+Legacy JSON init bytes (used only by narrow programmatic bridges) are normalized into `spec.role` / `spec.args` via **`plexspaces_core::legacy_spawn_init_json_to_role_and_args`**; the factory still derives runtime init using **`wasm_init_payload(&spec, &actor_id)`**.
 
 ## Core Concepts
 
@@ -79,6 +99,10 @@ Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → R
 - Message serialization/deserialization handled automatically
 - Location-transparent (caller doesn't know it's remote)
 
+### Registry `tell` and `RequestContext`
+
+`ActorRegistry::tell(ctx, actor_id, message)` requires an explicit `RequestContext` so remote sends attach the same tenant and namespace metadata as `ask`. Prefer `ActorRef::tell` from application code when you already hold a ref; use the registry path for virtual-actor activation and internal routing that has a context in scope. Framework paths that only know the target namespace (for example shard fan-out) use `RequestContext::new_without_auth` with an empty tenant when auth is disabled at that layer.
+
 ## ask() Pattern
 
 ### Overview
@@ -108,14 +132,14 @@ Temporary Sender ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWai
 ```
 
 **Flow:**
-1. Actor A calls `actor_ref.ask(request_message, timeout)`
+1. Actor A calls `actor_ref.ask(caller_ctx, request_message, timeout)` (caller scope from JWT / gateway / actor context)
 2. `ask()` generates `correlation_id` (ULID)
 3. `ask()` creates `ReplyWaiter` and registers in `ReplyWaiterRegistry` with `correlation_id`
 4. `ask()` always creates a temporary sender ActorRef with a canonical `ActorId`
 5. Temporary sender ActorRef is registered in `ActorRegistry`
 6. `ask()` sets `message.sender = temporary_sender_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
-8. `ask()` calls `target_actor_ref.tell(request_message)`
+8. `ask()` calls `target_actor_ref.tell(caller_ctx, request_message)`
 9. Actor B receives the request through its local runtime, processes it
 10. Actor B calls `ctx.send_reply(correlation_id, current_actor_id, temporary_sender_id, reply_message)`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
@@ -145,7 +169,7 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 ```
 
 **Flow:**
-1. Actor A (Node1) calls `actor_ref.ask(request_message, timeout)` where `actor_ref` points to remote node
+1. Actor A (Node1) calls `actor_ref.ask(caller_ctx, request_message, timeout)` where `actor_ref` points to remote node
 2. `ask()` always creates temporary sender ActorRef on Node1 (local node, where ask() is called)
 3. `ask()` registers temporary sender ActorRef in Node1's `ActorRegistry`
 4. `ask()` registers `ReplyWaiter` in `ReplyWaiterRegistry`
@@ -204,14 +228,14 @@ Temporary ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWaiter::no
 ```
 
 **Flow:**
-1. Non-actor code calls `actor_ref.ask(request_message, timeout)`
+1. Non-actor code calls `actor_ref.ask(caller_ctx, request_message, timeout)`
 2. `ask()` generates `correlation_id` (ULID)
 3. `ask()` creates `ReplyWaiter` and registers in `ReplyWaiterRegistry` with `correlation_id`
 4. `ask()` creates a temporary ActorRef with a canonical temporary-sender `ActorId`
 5. Temporary ActorRef is registered in `ActorRegistry` (so it can be looked up)
 6. `ask()` sets `message.sender = temporary_actor_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
-8. `ask()` calls `target_actor_ref.tell(request_message)`
+8. `ask()` calls `target_actor_ref.tell(caller_ctx, request_message)`
 9. Target actor receives the request through its local runtime, processes it
 10. Target actor calls `ctx.send_reply(correlation_id, current_actor_id, temporary_actor_id, reply_message)`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
@@ -240,7 +264,7 @@ Node1 → ActorRegistry lookup → Temporary ActorRef::tell(reply) → ReplyWait
 ```
 
 **Flow:**
-1. Non-actor code (Node1) calls `actor_ref.ask(request_message, timeout)` where target is on Node2
+1. Non-actor code (Node1) calls `actor_ref.ask(caller_ctx, request_message, timeout)` where target is on Node2
 2. `ask()` creates temporary ActorRef on Node1 (local node, where ask() is called)
 3. `ask()` registers temporary ActorRef in Node1's `ActorRegistry`
 4. `ask()` registers `ReplyWaiter` in `ReplyWaiterRegistry`

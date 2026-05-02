@@ -5,6 +5,7 @@
 
 use super::test_helpers::{spawn_actor_helper, test_actor_id};
 
+use plexspaces_core::ServiceLocator;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 
@@ -38,13 +39,15 @@ async fn test_04_node_arc_clone() {
     assert_eq!(node_clone.id().as_str(), "test-node");
 }
 
-/// Test 5: Access facet_storage via get_facets - should not hang
+/// Test 5: Access facet storage via facet manager - should not hang
 #[tokio::test]
 async fn test_05_facet_storage_access() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id = test_actor_id("test-actor", "local");
-    let facets: Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> =
-        node.get_facets(&actor_id).await;
+    let facets: Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> = node
+        .service_locator()
+        .facet_container_for_actor(actor_id.as_str())
+        .await;
     assert!(facets.is_none()); // No facets stored yet
 }
 

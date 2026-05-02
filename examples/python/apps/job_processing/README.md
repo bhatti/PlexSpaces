@@ -73,7 +73,7 @@ Demonstrates **distributed job processing** using TupleSpace for scatter/gather 
 
 # Terminal 2: Run tests
 cd examples/python/apps/job_processing
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## Operations

@@ -25,10 +25,10 @@ cd examples/python/apps/migrating_eflows4hpc && ./build.sh && cd -
 # Run test from Rust example dir (uses Python WASM)
 cd examples/rust/apps/migrating_eflows4hpc
 cp ../../../python/apps/migrating_eflows4hpc/ensemble_actor.wasm .  # optional: use Python WASM
-./test.sh 8092
+./test.sh 8091
 ```
 
-Or use the TypeScript/Go-built WASM: copy `ensemble_actor.wasm` from the respective example into this dir, then `./test.sh 8092`.
+Or use the TypeScript/Go-built WASM: copy `ensemble_actor.wasm` from the respective example into this dir, then `./test.sh 8091`.
 
 ## References
 

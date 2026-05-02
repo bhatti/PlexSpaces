@@ -2,18 +2,18 @@
 # Test Read State Tracker - Discord-style Read State Tracking (TypeScript WASM)
 #
 # Usage: ./test.sh [HTTP_PORT]
-#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8092)
+#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8091)
 #
 # Prerequisites: Start PlexSpaces node first:
 #   ./scripts/server.sh (from repo root)
-# (HTTP gateway will be on 8092)
+# (HTTP gateway will be on 8091)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/read_state_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-8092}"
+HTTP_PORT="${1:-8091}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

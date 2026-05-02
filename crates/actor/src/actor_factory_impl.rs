@@ -34,6 +34,7 @@ use plexspaces_core::{
     VirtualActorManager,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
 use std::collections::{HashMap, HashSet};
@@ -59,7 +60,7 @@ async fn debug_log_attached_facets(actor: &Actor, actor_id: &ActorId) {
             facets = %facet_str,
             mailbox_backend = %st.backend_type,
             mailbox_is_durable = st.is_durable,
-            mailbox_size = st.current_size,
+            mailbox_size = st.total_size(),
             "Attached facets"
         );
     } else {
@@ -111,6 +112,7 @@ impl ActorFactoryImpl {
         ctx: &RequestContext,
         registry: &Arc<ActorRegistry>,
         facet_manager: &Arc<plexspaces_facet::FacetManager>,
+        spawn_visibility: ActorVisibility,
     ) -> Result<(Arc<Actor>, ActorRef), Box<dyn std::error::Error + Send + Sync>> {
         let facets_clone = actor.facets().clone();
         let mailbox = actor.mailbox().clone();
@@ -139,7 +141,9 @@ impl ActorFactoryImpl {
         facet_manager
             .store_facets(actor_id.to_string(), facets_clone)
             .await;
-        actor_arc.register_started(registry).await;
+        actor_arc
+            .register_started(registry, spawn_visibility.clone())
+            .await;
 
         let actor_ref = ActorRef::local(
             actor_id.clone(),
@@ -147,6 +151,7 @@ impl ActorFactoryImpl {
             ctx.namespace().to_string(),
             mailbox,
             self.service_locator.clone(),
+            spawn_visibility,
         );
 
         registry
@@ -221,6 +226,7 @@ impl ActorFactoryImpl {
             ctx.namespace().to_string(),
             dummy_mailbox,
             self.service_locator.clone(),
+            ActorVisibility::ActorVisibilityPublic,
         ));
 
         // Register temporary sender ActorRef in ActorRegistry (so it can be looked up)
@@ -791,6 +797,7 @@ impl ActorFactory for ActorFactoryImpl {
                     role: metadata.spec.role.clone(),
                     namespace: namespace.clone(),
                     tenant_id: tenant_id.clone(),
+                    visibility: metadata.spec.visibility,
                     behavior_kind: String::new(),
                     args: metadata.spec.args.clone(),
                     facets: vec![],
@@ -878,8 +885,8 @@ impl ActorFactory for ActorFactoryImpl {
                         pending_messages.len()
                     );
                 }
-                for message in pending_messages {
-                    if let Err(e) = actor_ref.tell(message).await {
+                for (message, pending_ctx) in pending_messages {
+                    if let Err(e) = actor_ref.tell(&pending_ctx, message).await {
                         tracing::warn!(
                             actor_id = %actor_id,
                             error = %e,
@@ -896,19 +903,19 @@ impl ActorFactory for ActorFactoryImpl {
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
-        spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
+        spawn_spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_core::{behavior_factory::BehaviorFactory, Actor as ActorTrait};
 
-        let actor_type = spec
+        let actor_type = spawn_spec
             .identity
             .as_ref()
             .map(|id| id.actor_type.as_str())
             .unwrap_or("");
 
         // If actor name is empty, assign a ULID so every actor has a stable unique identity.
-        let actor_name_raw = spec
+        let actor_name_raw = spawn_spec
             .identity
             .as_ref()
             .map(|id| id.name.as_str())
@@ -919,11 +926,11 @@ impl ActorFactory for ActorFactoryImpl {
             std::borrow::Cow::Borrowed(actor_name_raw)
         };
 
-        // Namespace: prefer spec.namespace, fall back to ctx.namespace()
-        let namespace = if spec.namespace.is_empty() {
+        // Namespace: prefer spawn_spec.namespace, fall back to ctx.namespace()
+        let namespace = if spawn_spec.namespace.is_empty() {
             ctx.namespace().to_string()
         } else {
-            spec.namespace.clone()
+            spawn_spec.namespace.clone()
         };
 
         let registry: Arc<ActorRegistry> = self
@@ -943,7 +950,7 @@ impl ActorFactory for ActorFactoryImpl {
         .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
 
         // Derive init payload from spec (deterministic; no stale state)
-        let initial_state = plexspaces_core::wasm_init_payload(spec, &actor_id);
+        let initial_state = plexspaces_core::wasm_init_payload(spawn_spec, &actor_id);
 
         // Create behavior via BehaviorRegistry using actor_type + init payload
         let behavior: Box<dyn ActorTrait> = {
@@ -968,7 +975,7 @@ impl ActorFactory for ActorFactoryImpl {
         // Build actor directly from spec fields — no ActorBuilder intermediate.
         // Actor::new creates a stub context; spawn_built_actor_impl replaces it with the real one.
         use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        let mailbox_config = spec
+        let mailbox_config = spawn_spec
             .config
             .as_ref()
             .map(|c| {
@@ -983,10 +990,10 @@ impl ActorFactory for ActorFactoryImpl {
             .await
             .map_err(|e| format!("Failed to create mailbox: {}", e))?;
 
-        let tenant_id = if spec.tenant_id.is_empty() {
+        let tenant_id = if spawn_spec.tenant_id.is_empty() {
             ctx.tenant_id().to_string()
         } else {
-            spec.tenant_id.clone()
+            spawn_spec.tenant_id.clone()
         };
 
         let mut actor = crate::Actor::new(
@@ -999,7 +1006,7 @@ impl ActorFactory for ActorFactoryImpl {
         );
 
         // Apply ActorConfig if present (wraps actor with a config-carrying context)
-        if let Some(cfg) = spec.config.clone() {
+        if let Some(cfg) = spawn_spec.config.clone() {
             use crate::TestServiceLocatorStub;
             use plexspaces_core::ActorContext;
             let sl: Arc<dyn plexspaces_core::ServiceLocator> =
@@ -1026,7 +1033,7 @@ impl ActorFactory for ActorFactoryImpl {
             debug_log_attached_facets(&actor, &actor_id).await;
         }
 
-        let labels: HashMap<String, String> = spec.labels.clone();
+        let labels: HashMap<String, String> = spawn_spec.labels.clone();
         let actor_ref = self
             .spawn_built_actor_impl(
                 ctx,
@@ -1395,6 +1402,10 @@ impl ActorFactoryImpl {
                         .unwrap_or_default(),
                     namespace: ctx.namespace().to_string(),
                     tenant_id: ctx.tenant_id().to_string(),
+                    visibility: existing_spec
+                        .as_ref()
+                        .map(|s| s.visibility)
+                        .unwrap_or_default(),
                     behavior_kind: behavior_kind.unwrap_or_default(),
                     args: existing_spec
                         .as_ref()
@@ -1432,6 +1443,10 @@ impl ActorFactoryImpl {
                         .unwrap_or_default(),
                     namespace: ctx.namespace().to_string(),
                     tenant_id: ctx.tenant_id().to_string(),
+                    visibility: instance_metadata
+                        .as_ref()
+                        .map(|m| m.spec.visibility)
+                        .unwrap_or_default(),
                     behavior_kind: String::new(), // merge picks up from existing instance/type spec
                     args: Default::default(),     // merge picks up from existing instance/type spec
                     facets: Default::default(),   // merge picks up from existing instance/type spec
@@ -1444,13 +1459,28 @@ impl ActorFactoryImpl {
                     .map_err(|e| format!("Failed to update virtual actor metadata: {}", e))?;
             }
 
+            let spawn_vis_i32 = manager
+                .get_metadata(&actor_id)
+                .await
+                .map(|m| m.spec.visibility)
+                .unwrap_or(ActorVisibility::ActorVisibilityPublic as i32);
+            let spawn_visibility = ActorVisibility::try_from(spawn_vis_i32)
+                .unwrap_or(ActorVisibility::ActorVisibilityPublic);
+
             // Handle eager vs lazy activation
             if should_activate_eagerly {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
                 }
                 let (actor_arc, actor_ref) = self
-                    .start_registered_local_actor(actor, &actor_id, &ctx, &registry, &facet_manager)
+                    .start_registered_local_actor(
+                        actor,
+                        &actor_id,
+                        &ctx,
+                        &registry,
+                        &facet_manager,
+                        spawn_visibility,
+                    )
                     .await?;
 
                 // Mark as activated
@@ -1472,8 +1502,8 @@ impl ActorFactoryImpl {
                             pending_messages.len()
                         );
                     }
-                    for message in pending_messages {
-                        if let Err(e) = actor_ref.tell(message).await {
+                    for (message, pending_ctx) in pending_messages {
+                        if let Err(e) = actor_ref.tell(&pending_ctx, message).await {
                             tracing::warn!(
                                 actor_id = %actor_id,
                                 error = %e,
@@ -1491,6 +1521,7 @@ impl ActorFactoryImpl {
                     ctx.namespace().to_string(),
                     actor.mailbox().clone(),
                     self.service_locator.clone(),
+                    spawn_visibility,
                 );
 
                 // Lazy activation keeps only metadata in the registry and virtual manager.
@@ -1539,8 +1570,23 @@ impl ActorFactoryImpl {
             "Actor spawned"
         );
 
+        let spawn_vis_i32 = manager
+            .get_metadata(&actor_id)
+            .await
+            .map(|m| m.spec.visibility)
+            .unwrap_or(ActorVisibility::ActorVisibilityPublic as i32);
+        let spawn_vis = ActorVisibility::try_from(spawn_vis_i32)
+            .unwrap_or(ActorVisibility::ActorVisibilityPublic);
+
         let (_actor_arc, actor_ref) = self
-            .start_registered_local_actor(actor, &actor_id, &ctx, &registry, &facet_manager)
+            .start_registered_local_actor(
+                actor,
+                &actor_id,
+                &ctx,
+                &registry,
+                &facet_manager,
+                spawn_vis,
+            )
             .await?;
 
         Ok(actor_ref)

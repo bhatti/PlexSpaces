@@ -1255,13 +1255,15 @@ impl NodeServiceImpl {
                         let node_address = registration.node_address.clone();
                         match node_registry.register_node(&ctx, registration).await {
                             Ok(()) => {
-                                trace!(
-                                    node_id = %node_id,
-                                    node_address = %node_address,
-                                    entry = %entry,
-                                    local_node_id = %self.local_node_id,
-                                    "Registered seed node for background probe"
-                                );
+                                if tracing::enabled!(tracing::Level::TRACE) {
+                                    trace!(
+                                        node_id = %node_id,
+                                        node_address = %node_address,
+                                        entry = %entry,
+                                        local_node_id = %self.local_node_id,
+                                        "Registered seed node for background probe"
+                                    );
+                                }
                                 let _ = node_registry
                                     .kickoff_seed_reconcile_ping(
                                         node_id.clone(),
@@ -1301,12 +1303,14 @@ impl NodeServiceImpl {
             }
         }
 
-        trace!(
-            local_node_id = %self.local_node_id,
-            connected_count = connected.len(),
-            failed_count = failed.len(),
-            "Connect to nodes completed"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                local_node_id = %self.local_node_id,
+                connected_count = connected.len(),
+                failed_count = failed.len(),
+                "Connect to nodes completed"
+            );
+        }
         Ok(ConnectNodesResult { connected, failed })
     }
 }

@@ -32,7 +32,7 @@ thiserror = { workspace = true }
 ulid = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
-prost-types = "0.12"  # For proto Duration/Timestamp types
+prost-types = { workspace = true }  # For proto Duration/Timestamp types
 prost = { workspace = true }  # For protobuf decoding
 metrics = "0.23"  # For observability
 chrono = { workspace = true }  # For timestamps

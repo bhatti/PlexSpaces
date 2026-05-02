@@ -18,7 +18,7 @@ E-commerce order saga: **reserve_payment** → **reserve_inventory** → **check
 # Terminal 2 (with venv that has plexspaces-py)
 cd examples/python/apps/migrating_conductor
 ./build.sh
-./test.sh 8092
+./test.sh 8091
 ```
 
 ## API

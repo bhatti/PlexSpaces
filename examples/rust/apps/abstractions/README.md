@@ -23,7 +23,7 @@ Run it against a local server:
 ```bash
 ./scripts/server.sh
 cd examples/rust/apps/abstractions
-./test.sh 8092
+./test.sh 8091
 ```
 
 The verifier uses the actor `/ask` endpoint for steps that inspect returned payloads. The plain actor POST endpoint is tell/cast-only and returns an acknowledgement envelope, not the handler response body.

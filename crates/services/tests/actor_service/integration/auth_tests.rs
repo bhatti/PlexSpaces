@@ -18,6 +18,8 @@
 use super::TestHarness;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use plexspaces_grpc_middleware::cert_gen::CertificateGenerator;
+use plexspaces_proto::actor::v1::ActorSpawnSpec;
+use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::actor::SpawnActorRequest;
 use plexspaces_proto::ActorServiceClient;
 use serde::{Deserialize, Serialize};
@@ -150,15 +152,23 @@ async fn test_jwt_grpc_auth() {
     // Create gRPC request with JWT token in metadata
     let mut client = node.client.clone();
     let mut request = Request::new(SpawnActorRequest {
-        actor_type: "test".to_string(),
-        actor_id: "test-actor@jwt-test-node".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        facets: vec![],
+        spec: Some(ActorSpawnSpec {
+            identity: Some(ActorIdentity {
+                name: "test-actor@jwt-test-node".to_string(),
+                actor_type: "test".to_string(),
+            }),
+            role: String::new(),
+            namespace: String::new(),
+            tenant_id: String::new(),
+            visibility: 0,
+            behavior_kind: String::new(),
+            args: std::collections::HashMap::new(),
+            facets: vec![],
+            config: None,
+            labels: std::collections::HashMap::new(),
+        }),
         namespace: "default".to_string(),
         instances_count: 1,
-        role: String::new(),
     });
 
     // Add JWT token to request metadata

@@ -27,10 +27,9 @@
 
 use super::test_helpers::app_request_with_tenant;
 use async_trait::async_trait;
-use plexspaces_core::JournalStorage as _;
-use plexspaces_core::{
-    ActorId, ActorStateHandle, ApplicationManager, Message, MessageSender, ServiceLocator,
-};
+use plexspaces_actor::JournalStorage as _;
+use plexspaces_actor::{
+    ActorId, ActorStateHandle, ApplicationManager, Message, MessageSender, ServiceLocator, RequestContextExt};
 use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeId};
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
@@ -38,10 +37,10 @@ use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, AskReplyRequest,
 };
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest, RestartPolicy,
-    ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
+    DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest, ShutdownStrategy,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::{ActorIdentity, Facet, Metadata};
 use plexspaces_proto::v1::journaling::Checkpoint;
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -92,6 +91,7 @@ async fn create_test_node() -> Arc<Node> {
         NodeBuilder::new("test-node")
             .with_listen_addr("127.0.0.1:0")
             .with_in_memory_backends()
+            .with_auth_disabled()
             .build()
             .await,
     )
@@ -174,7 +174,7 @@ impl TestMessageSender {
 impl MessageSender for TestMessageSender {
     async fn tell(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
@@ -260,6 +260,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -1006,6 +1007,7 @@ fn create_wasm_module_from_fixture_with_supervisor(
             }),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -1132,6 +1134,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     let wasm_module = WasmModule {
@@ -1524,7 +1527,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     let actor_type = "abstractions";
     let actor_id = ActorId::new("cart-1", actor_type, app_id, "test-node")
         .expect("test actor id should be valid");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         tenant_id.to_string(),
         app_id.to_string(),
     );
@@ -1754,6 +1757,7 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -1796,7 +1800,7 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
         .actor_registry()
         .await
         .expect("ActorRegistry should be registered");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         tenant_id.to_string(),
         app_id.to_string(),
     );
@@ -1810,7 +1814,7 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
         "controller child should be registered once"
     );
     let controller_id =
-        plexspaces_core::ActorId::from_canonical(&controllers[0]).expect("controller id");
+        plexspaces_actor::ActorId::from_canonical(&controllers[0]).expect("controller id");
     assert_eq!(controller_id.name(), "controller");
     assert_eq!(controller_id.actor_type(), "controller");
     assert_eq!(controller_id.namespace(), app_id);
@@ -1890,6 +1894,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -1953,7 +1958,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new(
+            plexspaces_actor::ActorId::new(
                 "session-1",
                 "abstractions_wasm",
                 app_id,
@@ -1962,10 +1967,10 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
             .unwrap()
             .to_string()
         });
-    let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
+    let session_actor_id = plexspaces_actor::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
     let stop_ctx =
-        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2053,6 +2058,7 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
             behavior_kind: Some("GenServer".to_string()),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -2116,7 +2122,7 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new(
+            plexspaces_actor::ActorId::new(
                 "session-1",
                 "abstractions_wasm",
                 app_id,
@@ -2125,10 +2131,10 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
             .unwrap()
             .to_string()
         });
-    let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
+    let session_actor_id = plexspaces_actor::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
     let stop_ctx =
-        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2215,6 +2221,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
             behavior_kind: Some("GenServer".to_string()),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     let app_spec = ApplicationSpec {
@@ -2278,7 +2285,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new(
+            plexspaces_actor::ActorId::new(
                 "session-1",
                 "abstractions_wasm",
                 app_id,
@@ -2287,10 +2294,10 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
             .unwrap()
             .to_string()
         });
-    let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
+    let session_actor_id = plexspaces_actor::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
     let stop_ctx =
-        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2384,10 +2391,10 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         .as_str()
         .expect("durable actor should report self_id")
         .to_string();
-    let durable_actor_id = plexspaces_core::ActorId::from_canonical(&durable_self_id)
+    let durable_actor_id = plexspaces_actor::ActorId::from_canonical(&durable_self_id)
         .expect("durable self_id must be a valid canonical actor ID");
     let stop_ctx =
-        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await
@@ -2437,7 +2444,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         .as_str()
         .expect("ephemeral actor should report self_id")
         .to_string();
-    let ephemeral_actor_id = plexspaces_core::ActorId::from_canonical(&ephemeral_self_id)
+    let ephemeral_actor_id = plexspaces_actor::ActorId::from_canonical(&ephemeral_self_id)
         .expect("ephemeral self_id must be a valid canonical actor ID");
     node.service_locator()
         .get_actor_factory()
@@ -2545,7 +2552,7 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| {
-            plexspaces_core::ActorId::new(
+            plexspaces_actor::ActorId::new(
                 "session-1",
                 "abstractions_wasm",
                 app_id,
@@ -2554,11 +2561,11 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
             .unwrap()
             .to_string()
         });
-    let session_actor_id = plexspaces_core::ActorId::from_canonical(&session_id_str)
+    let session_actor_id = plexspaces_actor::ActorId::from_canonical(&session_id_str)
         .expect("self_id must be a valid canonical actor ID");
     // Use empty tenant_id to match how the TOML config deploys (tenant_id = "")
     let stop_ctx =
-        plexspaces_core::RequestContext::new_without_auth(String::new(), app_id.to_string());
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
     node.service_locator()
         .get_actor_factory()
         .await

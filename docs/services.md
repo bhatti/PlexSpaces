@@ -218,7 +218,7 @@ When `ApplicationSpec.required_service_links` is non-empty, deploy merges the ap
 
 | Layer | Responsibility |
 |-------|----------------|
-| `plexspaces_core::OutboundHttpClient` | Trait, request/response types, errors |
+| `plexspaces_actor::OutboundHttpClient` | Trait, request/response types, errors |
 | `plexspaces_http_client::ResilientOutboundHttpClient` | reqwest, retries (idempotent methods by default), per-link circuit breaker, metrics, tracing |
 | `ServiceLocator` | Register / lookup outbound client after `RuntimeConfig` is loaded |
 
@@ -622,7 +622,7 @@ The KeyValueStore has a layered trait design:
 
 - **`plexspaces_common::KeyValueStore`**: Base trait for actors, facets, and WASM host (CRUD + TTL + CAS + increment). Defined in `common` crate to avoid circular dependencies.
 - **`plexspaces_keyvalue::KeyValueStore`**: Extended trait for backend implementations (adds watch, multi_get, stats). Defined in the `keyvalue` crate.
-- **`plexspaces_core`** re-exports the base trait from `common` for convenience.
+- **`plexspaces_actor`** re-exports the base trait from `common` for convenience.
 
 Backends: SQLite (`:memory:` or file), PostgreSQL, Redis, DynamoDB, S3/Blob (all via feature flags).
 

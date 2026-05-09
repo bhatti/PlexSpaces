@@ -4,7 +4,7 @@
 // Integration test for WASM application deployment with facets from TOML config
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::ApplicationManager;
+use plexspaces_actor::ApplicationManager;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::application_service_server::ApplicationService;
 use plexspaces_proto::application::v1::DeployApplicationRequest;
@@ -26,7 +26,7 @@ use tonic::Request;
 #[tokio::test]
 async fn test_wasm_deployment_with_facets_from_toml() {
     // ARRANGE: Create node
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
     node.initialize_services()
         .await
         .expect("Failed to initialize services");
@@ -110,8 +110,8 @@ facets = [
     );
 
     // Verify actor was spawned (facets should be attached during spawn)
-    use plexspaces_core::ActorRegistry;
-    let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+    use plexspaces_actor::ActorRegistry;
+    let actor_registry: Arc<plexspaces_actor::ActorRegistry> = node
         .service_locator()
         .actor_registry()
         .await

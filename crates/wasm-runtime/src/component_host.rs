@@ -22,7 +22,7 @@
 
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
-use plexspaces_core::{ActorId, RequestContext, TupleSpaceProvider};
+use plexspaces_actor::{ActorId, RequestContext, RequestContextExt, TupleSpaceProvider};
 use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
 
@@ -1141,14 +1141,14 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
 
 #[cfg(feature = "component-model")]
 pub struct TuplespaceImpl {
-    pub tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
+    pub tuplespace_provider: Option<Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
     pub actor_id: ActorId,
 }
 
 #[cfg(feature = "component-model")]
 impl TuplespaceImpl {
     pub fn new(
-        tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
+        tuplespace_provider: Option<Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
         actor_id: ActorId,
     ) -> Self {
         Self {
@@ -4694,7 +4694,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_core::AcquireLockOptions {
+        let options = plexspaces_actor::AcquireLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             lease_duration_secs,
@@ -4780,7 +4780,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_core::RenewLockOptions {
+        let options = plexspaces_actor::RenewLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             version: version.clone(),
@@ -4866,7 +4866,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
 
         let request_ctx = context_to_request_context(&ctx);
 
-        let options = plexspaces_core::ReleaseLockOptions {
+        let options = plexspaces_actor::ReleaseLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             version: version.clone(),
@@ -4930,7 +4930,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
         let request_ctx = context_to_request_context(&ctx);
         let lease_duration_secs = (lease_duration_ms / 1000) as u32;
 
-        let options = plexspaces_core::AcquireLockOptions {
+        let options = plexspaces_actor::AcquireLockOptions {
             lock_key: lock_key.clone(),
             holder_id: holder_id.clone(),
             lease_duration_secs,

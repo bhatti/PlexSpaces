@@ -8,7 +8,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
         channels::Host as ChannelsHost,
         durability::Host as DurabilityHost,

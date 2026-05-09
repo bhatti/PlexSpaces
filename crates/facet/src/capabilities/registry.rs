@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::{Facet, FacetError, InterceptResult};
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use tracing::{debug, error, instrument, warn};
 

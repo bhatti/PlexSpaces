@@ -5,7 +5,7 @@
 
 use super::test_helpers::{spawn_actor_helper, test_actor_id};
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
 
@@ -55,8 +55,8 @@ async fn test_05_facet_storage_access() {
 #[tokio::test]
 async fn test_06_spawn_actor_no_facets() {
     use plexspaces_actor::ActorBuilder;
-    use plexspaces_core::Message;
-    use plexspaces_core::{Actor, ActorContext};
+    use plexspaces_actor::Message;
+    use plexspaces_actor::{Actor, ActorContext};
 
     struct TestBehavior;
 
@@ -66,12 +66,12 @@ async fn test_06_spawn_actor_no_facets() {
             &mut self,
             _ctx: &ActorContext,
             _message: Message,
-        ) -> Result<(), plexspaces_core::BehaviorError> {
+        ) -> Result<(), plexspaces_actor::BehaviorError> {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 

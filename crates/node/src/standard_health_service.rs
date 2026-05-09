@@ -29,7 +29,7 @@
 //! - Integrates with PlexSpacesHealthReporter for status tracking
 //! - Rejects requests during shutdown
 
-use plexspaces_core::PlexSpacesHealthReporter;
+use plexspaces_actor::PlexSpacesHealthReporter;
 use plexspaces_proto::system::v1::ServingStatus;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

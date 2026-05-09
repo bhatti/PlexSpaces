@@ -58,8 +58,8 @@ use aws_sdk_sqs::{
     Client as SqsClient,
 };
 use futures::stream::BoxStream;
-use plexspaces_common::AWSConfig;
 use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
+use plexspaces_proto::config::v1::{DlqConfig, SqsConfig};
 use plexspaces_proto::common::v1::Message as ChannelMessage;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -71,34 +71,76 @@ use tracing::{debug, error, instrument, warn};
 #[cfg(feature = "sqs-backend")]
 use base64::{engine::general_purpose, Engine as _};
 
+/// Load SQS config from environment variables with defaults.
+fn sqs_config_from_env() -> SqsConfig {
+    let dlq_enabled: bool = std::env::var("PLEXSPACES_SQS_DLQ_ENABLED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(true);
+    let dlq_max_receive_count: u32 = std::env::var("PLEXSPACES_SQS_DLQ_MAX_RECEIVE_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3);
+    SqsConfig {
+        region: std::env::var("AWS_REGION")
+            .or_else(|_| std::env::var("PLEXSPACES_AWS_REGION"))
+            .unwrap_or_else(|_| "us-east-1".to_string()),
+        queue_prefix: std::env::var("PLEXSPACES_SQS_QUEUE_PREFIX")
+            .unwrap_or_else(|_| "plexspaces-".to_string()),
+        endpoint_url: std::env::var("SQS_ENDPOINT_URL")
+            .or_else(|_| std::env::var("PLEXSPACES_SQS_ENDPOINT_URL"))
+            .unwrap_or_default(),
+        visibility_timeout_seconds: std::env::var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30),
+        message_retention_seconds: std::env::var("PLEXSPACES_SQS_MESSAGE_RETENTION")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(345600),
+        dlq: if dlq_enabled {
+            Some(DlqConfig {
+                enabled: true,
+                max_receive_count: dlq_max_receive_count,
+            })
+        } else {
+            None
+        },
+        receive_message_wait_time_seconds: std::env::var("PLEXSPACES_SQS_RECEIVE_WAIT_TIME")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20),
+    }
+}
+
 /// SQS channel implementation with DLQ support.
 ///
 /// ## Example
 /// ```rust,no_run
 /// use plexspaces_channel::{Channel, SQSChannel};
-/// use plexspaces_proto::channel::v1::*;
+/// use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider};
+/// use plexspaces_proto::config::v1::{DlqConfig, SqsConfig};
+/// use plexspaces_proto::common::v1::Message;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = ChannelConfig {
 ///     name: "my-channel".to_string(),
 ///     provider: ChannelProvider::ChannelProviderSqs as i32,
-///     backend_config: Some(channel_config::BackendConfig::SqsConfig(
-///         channel_config::SqsConfig {
+///     backend_config: Some(channel_config::BackendConfig::Sqs(
+///         SqsConfig {
 ///             region: "us-east-1".to_string(),
 ///             queue_prefix: "plexspaces-".to_string(),
-///             endpoint_url: "".to_string(), // Empty for production
+///             endpoint_url: "".to_string(),
 ///             visibility_timeout_seconds: 30,
-///             message_retention_period_seconds: 345600,
-///             dlq_enabled: true,
-///             dlq_max_receive_count: 3,
+///             message_retention_seconds: 345600,
+///             dlq: Some(DlqConfig { enabled: true, max_receive_count: 3 }),
 ///             receive_message_wait_time_seconds: 20,
 ///         },
 ///     )),
 ///     ..Default::default()
 /// };
-///
 /// let channel = SQSChannel::new(config).await?;
-/// let msg = ChannelMessage {
+/// let msg = Message {
 ///     id: ulid::Ulid::new().to_string(),
 ///     channel: "my-channel".to_string(),
 ///     payload: b"test".to_vec(),
@@ -108,20 +150,6 @@ use base64::{engine::general_purpose, Engine as _};
 /// # Ok(())
 /// # }
 /// ```
-// Temporary SQS config struct until proto is regenerated
-// TODO: Remove this once proto is regenerated and use channel_config::SqsConfig
-#[derive(Clone, Debug)]
-struct SqsConfig {
-    region: String,
-    queue_prefix: String,
-    endpoint_url: String,
-    visibility_timeout_seconds: u32,
-    message_retention_period_seconds: u32,
-    dlq_enabled: bool,
-    dlq_max_receive_count: u32,
-    receive_message_wait_time_seconds: u32,
-}
-
 pub struct SQSChannel {
     config: ChannelConfig,
     sqs_config: SqsConfig,
@@ -160,42 +188,13 @@ impl SQSChannel {
     pub async fn new(config: ChannelConfig) -> ChannelResult<Self> {
         let start_time = std::time::Instant::now();
 
-        // Extract SQS config
-        // NOTE: Proto needs to be regenerated after adding SqsConfig to channel.proto
-        // For now, we'll use a workaround to extract config from environment
-        let sqs_config = SqsConfig {
-            region: std::env::var("AWS_REGION")
-                .or_else(|_| std::env::var("PLEXSPACES_AWS_REGION"))
-                .unwrap_or_else(|_| "us-east-1".to_string()),
-            queue_prefix: std::env::var("PLEXSPACES_SQS_QUEUE_PREFIX")
-                .unwrap_or_else(|_| "plexspaces-".to_string()),
-            endpoint_url: std::env::var("SQS_ENDPOINT_URL")
-                .or_else(|_| std::env::var("PLEXSPACES_SQS_ENDPOINT_URL"))
-                .unwrap_or_default(),
-            visibility_timeout_seconds: std::env::var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(30),
-            message_retention_period_seconds: std::env::var("PLEXSPACES_SQS_MESSAGE_RETENTION")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(345600),
-            dlq_enabled: std::env::var("PLEXSPACES_SQS_DLQ_ENABLED")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(true),
-            dlq_max_receive_count: std::env::var("PLEXSPACES_SQS_DLQ_MAX_RECEIVE_COUNT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(3),
-            receive_message_wait_time_seconds: std::env::var("PLEXSPACES_SQS_RECEIVE_WAIT_TIME")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(20),
+        // Extract SQS config from proto ChannelConfig or fall back to environment variables
+        let sqs_config = match &config.backend_config {
+            Some(channel_config::BackendConfig::Sqs(c)) => c.clone(),
+            _ => sqs_config_from_env(),
         };
 
         // Build AWS config
-        let aws_config = AWSConfig::from_env();
         let mut config_builder = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_config::Region::new(sqs_config.region.clone()));
 
@@ -215,7 +214,8 @@ impl SQSChannel {
         };
 
         let queue_name = format!("{}{}", queue_prefix, config.name);
-        let dlq_name = if sqs_config.dlq_enabled {
+        let dlq_enabled = sqs_config.dlq.as_ref().map(|d| d.enabled).unwrap_or(true);
+        let dlq_name = if dlq_enabled {
             Some(format!("{}{}-dlq", queue_prefix, config.name))
         } else {
             None
@@ -231,9 +231,10 @@ impl SQSChannel {
         // Create main queue with redrive policy if DLQ enabled
         let redrive_policy = if let Some(ref dlq_url) = dlq_url {
             let dlq_arn = Self::get_queue_arn(&client, dlq_url).await?;
+            let max_receive_count = sqs_config.dlq.as_ref().map(|d| d.max_receive_count).unwrap_or(3);
             Some(format!(
                 r#"{{"deadLetterTargetArn":"{}","maxReceiveCount":{}}}"#,
-                dlq_arn, sqs_config.dlq_max_receive_count
+                dlq_arn, max_receive_count
             ))
         } else {
             None
@@ -252,7 +253,7 @@ impl SQSChannel {
         debug!(
             channel_name = %config.name,
             queue_url = %queue_url,
-            dlq_enabled = sqs_config.dlq_enabled,
+            dlq_enabled = dlq_enabled,
             duration_ms = duration.as_millis(),
             "SQS channel initialized"
         );

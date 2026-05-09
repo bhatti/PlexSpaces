@@ -31,7 +31,7 @@
 
 use async_trait::async_trait;
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_proto::scheduling::v1::SchedulingRequest;
 use plexspaces_proto::storage::v1::SharedDbConfig;
 use std::error::Error;

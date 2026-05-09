@@ -15,7 +15,8 @@
 //!   node_runner node1 9001
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorRegistry, ObjectRegistration, ObjectRegistry as CoreObjectRegistry};
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::{ActorRegistry, InitializableServiceLocator, ObjectRegistration, ObjectRegistry as CoreObjectRegistry, RequestContextExt};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::{
     ObjectRegistration as ProtoObjectRegistration, ObjectType,
@@ -34,7 +35,7 @@ struct ObjectRegistryAdapter {
 impl CoreObjectRegistry for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -53,7 +54,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn lookup_full(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -70,7 +71,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn register(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
@@ -83,7 +84,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn discover(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         object_category: Option<String>,
         capabilities: Option<Vec<String>>,
@@ -114,7 +115,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn unregister(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _object_type: plexspaces_proto::object_registry::v1::ObjectType,
         _object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -124,7 +125,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
 
     async fn heartbeat(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _object_type: plexspaces_proto::object_registry::v1::ObjectType,
         _object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -151,7 +152,7 @@ async fn register_node(
         ..Default::default()
     };
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     registry.register(&ctx, registration).await?;
 
     println!("Registered node {} at {}", node_id, node_address);
@@ -197,13 +198,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create ServiceLocator and register services manually
     // Note: For binaries, we can't use create_default_service_locator from node crate
     // So we create a minimal ServiceLocator and register services manually
-    use plexspaces_core::GrpcConnectionManager;
-    use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
+    use plexspaces_actor::GrpcConnectionManager;
+    use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
     use plexspaces_services::ServiceLocatorImpl;
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
 
     // Register ObjectRegistry (required for get_actor_service_client)
-    let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> =
+    let object_registry_trait: Arc<dyn plexspaces_actor::ObjectRegistry> =
         object_registry_impl.clone();
     service_locator_impl
         .register_object_registry(object_registry_trait)
@@ -219,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register services using service_locator_impl directly (not trait object)
     // because register_service has `where Self: Sized` constraint
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator_impl
         .register_service(actor_registry.clone())
         .await;
@@ -228,19 +229,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     // Register VirtualActorManager
-    use plexspaces_core::VirtualActorManager;
+    use plexspaces_actor::VirtualActorManager;
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     service_locator_impl
         .register_service(virtual_actor_manager)
         .await;
 
     // Register FacetManager (from ActorRegistry) - use wrapper since FacetManager doesn't implement Service
-    use plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetManagerServiceWrapper;
     let facet_manager = actor_registry.facet_manager().clone();
     let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager));
     service_locator_impl
         .register_service_by_name(
-            plexspaces_core::service_names::FACET_MANAGER,
+            plexspaces_actor::ServiceName::ServiceNameFacetManager.as_str(),
             facet_manager_wrapper,
         )
         .await;
@@ -253,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use service_locator_impl for registration (has Sized constraint)
     service_locator_impl
         .register_service_by_name(
-            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            plexspaces_actor::ServiceName::ServiceNameActorFactoryImpl.as_str(),
             actor_factory.clone(),
         )
         .await;

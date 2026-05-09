@@ -39,8 +39,8 @@ use crate::external_dependency_checkers::{
     DynamoDBHealthChecker, MinIOHealthChecker, SQSHealthChecker,
 };
 use crate::health::circuit_breaker::CircuitBreakerHealthChecker;
-use plexspaces_core::ObjectRegistry;
-use plexspaces_core::{
+use plexspaces_actor::ObjectRegistry;
+use plexspaces_actor::{
     HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
     PlexSpacesHealthReporter,
 };
@@ -243,7 +243,7 @@ pub async fn register_dependencies(
     let mut registered_count = 0;
 
     // Create RequestContext for dependency lookup (tenant comes from auth, not config)
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
     for dep_spec in &config.dependencies {

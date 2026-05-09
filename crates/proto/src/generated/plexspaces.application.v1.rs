@@ -70,7 +70,7 @@ pub struct ApplicationSpec {
     pub env: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Supervision tree (only for active applications)
     #[prost(message, optional, tag="9")]
-    pub supervisor: ::core::option::Option<SupervisorSpec>,
+    pub supervisor: ::core::option::Option<super::super::supervision::v1::SupervisorSpec>,
     // ==================== DEPLOYMENT CONFIGURATION ====================
     // (Merged from ApplicationConfig)
 
@@ -116,77 +116,6 @@ pub struct ApplicationServiceLinkRequirement {
     pub link_name: ::prost::alloc::string::String,
     #[prost(string, optional, tag="2")]
     pub policy_template: ::core::option::Option<::prost::alloc::string::String>,
-}
-/// Supervisor specification (Erlang/OTP supervisor)
-///
-/// ## Purpose
-/// Defines a supervision tree node. Supervisors manage child processes
-/// (workers or other supervisors) with fault tolerance strategies.
-///
-/// ## Why This Exists
-/// - Fault tolerance (automatic restarts)
-/// - Organized process hierarchy
-/// - Declarative restart strategies
-/// - Local supervision only (simpler than distributed)
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SupervisorSpec {
-    /// Supervision strategy
-    #[prost(enumeration="SupervisionStrategy", tag="1")]
-    pub strategy: i32,
-    /// Maximum restarts allowed
-    #[prost(uint32, tag="2")]
-    pub max_restarts: u32,
-    /// Time window for restart counting (seconds)
-    #[prost(message, optional, tag="3")]
-    pub max_restart_window: ::core::option::Option<::prost_types::Duration>,
-    /// Child processes
-    #[prost(message, repeated, tag="4")]
-    pub children: ::prost::alloc::vec::Vec<ChildSpec>,
-}
-/// Child process specification
-///
-/// ## Purpose
-/// Defines a child process (worker or supervisor) managed by a supervisor.
-///
-/// ## Why This Exists
-/// - Clear child identity and lifecycle
-/// - Restart policy per child
-/// - Shutdown timeout specification
-/// - Support for nested supervisors
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ChildSpec {
-    /// Instance name + behavior class (canonical ActorId is derived at deploy time).
-    #[prost(message, optional, tag="1")]
-    pub actor_identity: ::core::option::Option<super::super::common::v1::ActorIdentity>,
-    /// Role of this child within the application (e.g. "worker", "leader", "supervisor").
-    /// Maps 1:1 to the TOML `role` field in \[[supervisor.children]\].
-    /// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-    #[prost(string, tag="2")]
-    pub role: ::prost::alloc::string::String,
-    /// Arguments to pass to start function
-    #[prost(map="string, string", tag="3")]
-    pub args: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Restart policy
-    #[prost(enumeration="RestartPolicy", tag="4")]
-    pub restart: i32,
-    /// Shutdown timeout
-    #[prost(message, optional, tag="5")]
-    pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
-    /// Nested supervisor (if type=SUPERVISOR)
-    #[prost(message, optional, tag="6")]
-    pub supervisor: ::core::option::Option<SupervisorSpec>,
-    /// Facet configuration (for automatic attachment during actor creation)
-    /// Facets are attached in priority order (high priority first) before actor.init() is called
-    /// All facets are automatically restored during supervisor restart
-    /// Phase 1: Unified Lifecycle - Multiple facets support
-    #[prost(message, repeated, tag="7")]
-    pub facets: ::prost::alloc::vec::Vec<super::super::common::v1::Facet>,
-    /// OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
-    /// When set, process_message spans and actor registration logs show this instead of the child id.
-    #[prost(string, optional, tag="8")]
-    pub behavior_kind: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Application instance (runtime representation).
 ///
@@ -292,7 +221,7 @@ pub struct DeployApplicationRequest {
     pub config: ::core::option::Option<ApplicationSpec>,
     /// Initial state (optional, for stateful applications)
     /// Passed to application's start() method.
-    #[prost(bytes="vec", tag="7")]
+    #[prost(bytes="vec", tag="6")]
     pub initial_state: ::prost::alloc::vec::Vec<u8>,
 }
 /// Deploy application response
@@ -483,87 +412,6 @@ impl ApplicationType {
             "APPLICATION_TYPE_UNSPECIFIED" => Some(Self::ApplicationTypeUnspecified),
             "APPLICATION_TYPE_LIBRARY" => Some(Self::ApplicationTypeLibrary),
             "APPLICATION_TYPE_ACTIVE" => Some(Self::ApplicationTypeActive),
-            _ => None,
-        }
-    }
-}
-/// Supervision strategy (Erlang/OTP)
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum SupervisionStrategy {
-    /// Unspecified (default to one_for_one)
-    SupervisionStrategyUnspecified = 0,
-    /// One-for-One: Only restart failed child
-    /// If child A crashes, restart only A
-    SupervisionStrategyOneForOne = 1,
-    /// One-for-All: Restart all children if one fails
-    /// If child A crashes, restart A, B, C
-    SupervisionStrategyOneForAll = 2,
-    /// Rest-for-One: Restart failed child and those started after it
-    /// If child B crashes (started after A), restart B, C (not A)
-    SupervisionStrategyRestForOne = 3,
-}
-impl SupervisionStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            SupervisionStrategy::SupervisionStrategyUnspecified => "SUPERVISION_STRATEGY_UNSPECIFIED",
-            SupervisionStrategy::SupervisionStrategyOneForOne => "SUPERVISION_STRATEGY_ONE_FOR_ONE",
-            SupervisionStrategy::SupervisionStrategyOneForAll => "SUPERVISION_STRATEGY_ONE_FOR_ALL",
-            SupervisionStrategy::SupervisionStrategyRestForOne => "SUPERVISION_STRATEGY_REST_FOR_ONE",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "SUPERVISION_STRATEGY_UNSPECIFIED" => Some(Self::SupervisionStrategyUnspecified),
-            "SUPERVISION_STRATEGY_ONE_FOR_ONE" => Some(Self::SupervisionStrategyOneForOne),
-            "SUPERVISION_STRATEGY_ONE_FOR_ALL" => Some(Self::SupervisionStrategyOneForAll),
-            "SUPERVISION_STRATEGY_REST_FOR_ONE" => Some(Self::SupervisionStrategyRestForOne),
-            _ => None,
-        }
-    }
-}
-/// Restart policy (Erlang/OTP)
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum RestartPolicy {
-    /// Unspecified (default to permanent)
-    RestartPolicyUnspecified = 0,
-    /// Permanent: Always restart on failure
-    /// Use for critical long-running processes
-    RestartPolicyPermanent = 1,
-    /// Transient: Restart only if abnormal exit (error)
-    /// Don't restart if normal exit (shutdown)
-    /// Use for tasks that may complete successfully
-    RestartPolicyTransient = 2,
-    /// Temporary: Never restart
-    /// Use for one-shot tasks
-    RestartPolicyTemporary = 3,
-}
-impl RestartPolicy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            RestartPolicy::RestartPolicyUnspecified => "RESTART_POLICY_UNSPECIFIED",
-            RestartPolicy::RestartPolicyPermanent => "RESTART_POLICY_PERMANENT",
-            RestartPolicy::RestartPolicyTransient => "RESTART_POLICY_TRANSIENT",
-            RestartPolicy::RestartPolicyTemporary => "RESTART_POLICY_TEMPORARY",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "RESTART_POLICY_UNSPECIFIED" => Some(Self::RestartPolicyUnspecified),
-            "RESTART_POLICY_PERMANENT" => Some(Self::RestartPolicyPermanent),
-            "RESTART_POLICY_TRANSIENT" => Some(Self::RestartPolicyTransient),
-            "RESTART_POLICY_TEMPORARY" => Some(Self::RestartPolicyTemporary),
             _ => None,
         }
     }
@@ -802,82 +650,57 @@ impl ApplicationStatus {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
+/// Error codes for ApplicationError
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ApplicationErrorCode {
+    ApplicationErrorUnspecified = 0,
+    ApplicationErrorStartupFailed = 1,
+    ApplicationErrorShutdownFailed = 2,
+    ApplicationErrorNotFound = 3,
+    ApplicationErrorDependencyFailed = 4,
+    ApplicationErrorConfigError = 5,
+    ApplicationErrorShutdownTimeout = 6,
+    ApplicationErrorActorSpawnFailed = 7,
+    ApplicationErrorActorStopFailed = 8,
+    ApplicationErrorOther = 9,
+}
+impl ApplicationErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ApplicationErrorCode::ApplicationErrorUnspecified => "APPLICATION_ERROR_UNSPECIFIED",
+            ApplicationErrorCode::ApplicationErrorStartupFailed => "APPLICATION_ERROR_STARTUP_FAILED",
+            ApplicationErrorCode::ApplicationErrorShutdownFailed => "APPLICATION_ERROR_SHUTDOWN_FAILED",
+            ApplicationErrorCode::ApplicationErrorNotFound => "APPLICATION_ERROR_NOT_FOUND",
+            ApplicationErrorCode::ApplicationErrorDependencyFailed => "APPLICATION_ERROR_DEPENDENCY_FAILED",
+            ApplicationErrorCode::ApplicationErrorConfigError => "APPLICATION_ERROR_CONFIG_ERROR",
+            ApplicationErrorCode::ApplicationErrorShutdownTimeout => "APPLICATION_ERROR_SHUTDOWN_TIMEOUT",
+            ApplicationErrorCode::ApplicationErrorActorSpawnFailed => "APPLICATION_ERROR_ACTOR_SPAWN_FAILED",
+            ApplicationErrorCode::ApplicationErrorActorStopFailed => "APPLICATION_ERROR_ACTOR_STOP_FAILED",
+            ApplicationErrorCode::ApplicationErrorOther => "APPLICATION_ERROR_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "APPLICATION_ERROR_UNSPECIFIED" => Some(Self::ApplicationErrorUnspecified),
+            "APPLICATION_ERROR_STARTUP_FAILED" => Some(Self::ApplicationErrorStartupFailed),
+            "APPLICATION_ERROR_SHUTDOWN_FAILED" => Some(Self::ApplicationErrorShutdownFailed),
+            "APPLICATION_ERROR_NOT_FOUND" => Some(Self::ApplicationErrorNotFound),
+            "APPLICATION_ERROR_DEPENDENCY_FAILED" => Some(Self::ApplicationErrorDependencyFailed),
+            "APPLICATION_ERROR_CONFIG_ERROR" => Some(Self::ApplicationErrorConfigError),
+            "APPLICATION_ERROR_SHUTDOWN_TIMEOUT" => Some(Self::ApplicationErrorShutdownTimeout),
+            "APPLICATION_ERROR_ACTOR_SPAWN_FAILED" => Some(Self::ApplicationErrorActorSpawnFailed),
+            "APPLICATION_ERROR_ACTOR_STOP_FAILED" => Some(Self::ApplicationErrorActorStopFailed),
+            "APPLICATION_ERROR_OTHER" => Some(Self::ApplicationErrorOther),
+            _ => None,
+        }
+    }
+}
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

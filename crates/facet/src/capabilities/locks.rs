@@ -58,7 +58,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::{Facet, FacetError, InterceptResult};
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::locks::prv::{
     AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
 };

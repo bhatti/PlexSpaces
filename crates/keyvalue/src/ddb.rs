@@ -73,7 +73,7 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::Utc;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
@@ -84,7 +84,7 @@ use tracing::{debug, error, instrument, warn};
 /// ## Example
 /// ```rust,no_run
 /// use plexspaces_keyvalue::{KeyValueStore, DynamoDBKVStore};
-/// use plexspaces_common::RequestContext;
+/// use plexspaces_common::{RequestContext, RequestContextExt};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let kv = DynamoDBKVStore::new(

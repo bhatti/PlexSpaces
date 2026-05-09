@@ -38,7 +38,10 @@ use tokio::sync::RwLock;
 
 use crate::executor::WorkflowExecutor;
 use crate::storage::WorkflowStorage;
-use crate::types::{ExecutionStatus, WorkflowError};
+use crate::types::{
+    ExecutionStatus, WorkflowError, WorkflowExecutionExt, WorkflowExecutionOutputExt,
+};
+
 
 /// Message types for workflow control
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +78,8 @@ pub enum WorkflowResponse {
 
     /// Workflow status query response
     Status {
-        status: ExecutionStatus,
+        /// Execution status as i32 (proto enum value)
+        status_code: i32,
         output: Option<Value>,
     },
 
@@ -90,6 +94,17 @@ pub enum WorkflowResponse {
 
     /// Error occurred
     Error { message: String },
+}
+
+impl WorkflowResponse {
+    /// Get the execution status from a Status response
+    pub fn execution_status(&self) -> Option<ExecutionStatus> {
+        if let WorkflowResponse::Status { status_code, .. } = self {
+            ExecutionStatus::try_from(*status_code).ok()
+        } else {
+            None
+        }
+    }
 }
 
 /// Workflow Actor - executes workflows as an actor behavior
@@ -212,8 +227,8 @@ impl WorkflowActor {
         let execution = self.storage.get_execution(&execution_id).await?;
 
         Ok(WorkflowResponse::Status {
-            status: execution.status,
-            output: execution.output,
+            status_code: execution.status,
+            output: execution.output_value(),
         })
     }
 
@@ -224,7 +239,7 @@ impl WorkflowActor {
     ) -> Result<WorkflowResponse, WorkflowError> {
         // Update execution status to cancelled
         self.storage
-            .update_execution_status(&execution_id, ExecutionStatus::Cancelled)
+            .update_execution_status(&execution_id, ExecutionStatus::ExecutionStatusCancelled)
             .await?;
 
         // Cancel the execution task if it's running
@@ -273,7 +288,8 @@ impl WorkflowActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Step, StepType, WorkflowDefinition};
+    use crate::storage::sql::{make_step, make_workflow_definition};
+    use crate::types::{ExecutionStatus, StepType, WorkflowExecutionExt};
     use serde_json::json;
 
     #[tokio::test]
@@ -287,27 +303,16 @@ mod tests {
     async fn test_workflow_actor_start_simple() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create simple workflow
-        let definition = WorkflowDefinition {
-            id: "test-workflow".to_string(),
-            name: "Test Workflow".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "step1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({"action": "succeed"}),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let definition = make_workflow_definition(
+            "test-workflow", "Test Workflow", "1.0",
+            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None)],
+        );
         storage.save_definition(&definition).await.unwrap();
 
         let actor = WorkflowActor::new("test-actor", storage.clone())
             .await
             .unwrap();
 
-        // Start workflow
         let msg = WorkflowMessage::Start {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
@@ -316,14 +321,12 @@ mod tests {
 
         let response = actor.handle_message(msg).await.unwrap();
 
-        // Verify started
         match response {
             WorkflowResponse::Started { execution_id } => {
                 assert!(!execution_id.is_empty());
 
-                // Verify execution exists
                 let execution = storage.get_execution(&execution_id).await.unwrap();
-                assert_eq!(execution.status, ExecutionStatus::Completed);
+                assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
             }
             _ => panic!("Expected Started response"),
         }
@@ -333,27 +336,16 @@ mod tests {
     async fn test_workflow_actor_query() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow
-        let definition = WorkflowDefinition {
-            id: "test-workflow".to_string(),
-            name: "Test Workflow".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "step1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({"action": "succeed", "output": {"result": "done"}}),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let definition = make_workflow_definition(
+            "test-workflow", "Test Workflow", "1.0",
+            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed", "output": {"result": "done"}}), None, None, None)],
+        );
         storage.save_definition(&definition).await.unwrap();
 
         let actor = WorkflowActor::new("test-actor", storage.clone())
             .await
             .unwrap();
 
-        // Start workflow
         let start_msg = WorkflowMessage::Start {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
@@ -363,14 +355,12 @@ mod tests {
         let start_response = actor.handle_message(start_msg).await.unwrap();
 
         if let WorkflowResponse::Started { execution_id } = start_response {
-            // Query status
             let query_msg = WorkflowMessage::Query { execution_id };
             let query_response = actor.handle_message(query_msg).await.unwrap();
 
-            // Verify status
             match query_response {
-                WorkflowResponse::Status { status, output } => {
-                    assert_eq!(status, ExecutionStatus::Completed);
+                WorkflowResponse::Status { status_code, output } => {
+                    assert_eq!(ExecutionStatus::try_from(status_code).unwrap(), ExecutionStatus::ExecutionStatusCompleted);
                     assert!(output.is_some());
                 }
                 _ => panic!("Expected Status response"),
@@ -382,27 +372,16 @@ mod tests {
     async fn test_workflow_actor_cancel() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create simple workflow
-        let definition = WorkflowDefinition {
-            id: "test-workflow".to_string(),
-            name: "Test Workflow".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "step1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({"action": "succeed"}),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let definition = make_workflow_definition(
+            "test-workflow", "Test Workflow", "1.0",
+            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None)],
+        );
         storage.save_definition(&definition).await.unwrap();
 
         let actor = WorkflowActor::new("test-actor", storage.clone())
             .await
             .unwrap();
 
-        // Start workflow
         let start_msg = WorkflowMessage::Start {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
@@ -412,18 +391,15 @@ mod tests {
         let start_response = actor.handle_message(start_msg).await.unwrap();
 
         if let WorkflowResponse::Started { execution_id } = start_response {
-            // Cancel workflow
             let cancel_msg = WorkflowMessage::Cancel {
                 execution_id: execution_id.clone(),
             };
             let cancel_response = actor.handle_message(cancel_msg).await.unwrap();
 
-            // Verify cancelled
             match cancel_response {
                 WorkflowResponse::Cancelled => {
-                    // Check execution status
                     let execution = storage.get_execution(&execution_id).await.unwrap();
-                    assert_eq!(execution.status, ExecutionStatus::Cancelled);
+                    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCancelled);
                 }
                 _ => panic!("Expected Cancelled response"),
             }
@@ -434,36 +410,22 @@ mod tests {
     async fn test_workflow_actor_signal() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with signal step
-        let definition = WorkflowDefinition {
-            id: "signal-workflow".to_string(),
-            name: "Signal Workflow".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "wait-signal".to_string(),
-                name: "Wait Signal".to_string(),
-                step_type: StepType::Signal,
-                config: json!({
-                    "signal_name": "approval",
-                    "timeout_ms": 5000
-                }),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let definition = make_workflow_definition(
+            "signal-workflow", "Signal Workflow", "1.0",
+            vec![make_step("wait-signal", "Wait Signal", StepType::StepTypeSignal,
+                json!({"signal_name": "approval", "timeout_ms": 5000}), None, None, None)],
+        );
         storage.save_definition(&definition).await.unwrap();
 
         let actor = WorkflowActor::new("test-actor", storage.clone())
             .await
             .unwrap();
 
-        // Create execution manually (don't start yet)
         let execution_id = storage
             .create_execution("signal-workflow", "1.0", json!({}), HashMap::new())
             .await
             .unwrap();
 
-        // Send signal
         let signal_msg = WorkflowMessage::Signal {
             execution_id: execution_id.clone(),
             signal_name: "approval".to_string(),
@@ -472,10 +434,8 @@ mod tests {
 
         let signal_response = actor.handle_message(signal_msg).await.unwrap();
 
-        // Verify signal sent
         match signal_response {
             WorkflowResponse::SignalSent => {
-                // Verify signal stored
                 let signal = storage
                     .check_signal(&execution_id, "approval")
                     .await

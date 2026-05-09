@@ -31,8 +31,9 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use plexspaces_core::actor_context::TupleSpaceProvider;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::actor_context::TupleSpaceProvider;
+use plexspaces_actor::RequestContext;
+use plexspaces_actor::RequestContextExt;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 
 /// Wrapper that adapts TupleSpace to TupleSpaceProvider trait
@@ -65,7 +66,7 @@ impl TupleSpaceProviderWrapper {
     }
 }
 
-impl plexspaces_core::Service for TupleSpaceProviderWrapper {
+impl plexspaces_actor::Service for TupleSpaceProviderWrapper {
     fn service_name(&self) -> String {
         "TupleSpaceProviderWrapper".to_string()
     }

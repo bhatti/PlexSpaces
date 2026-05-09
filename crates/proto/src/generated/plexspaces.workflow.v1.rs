@@ -157,6 +157,9 @@ pub struct WorkflowExecution {
     /// User-defined labels
     #[prost(map="string, string", tag="14")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Last heartbeat timestamp (set by update_heartbeat, tracks node liveness)
+    #[prost(message, optional, tag="15")]
+    pub last_heartbeat: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Step execution (metadata)
 ///
@@ -528,7 +531,10 @@ pub enum WorkflowError {
     /// Invalid workflow definition
     WorkflowErrorInvalidDefinition = 4,
     /// Execution error (runtime failure)
+    /// Execution error (runtime failure)
     WorkflowErrorExecution = 5,
+    /// Concurrent update conflict (optimistic locking failure)
+    WorkflowErrorConcurrentUpdate = 6,
 }
 impl WorkflowError {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -543,6 +549,7 @@ impl WorkflowError {
             WorkflowError::WorkflowErrorNotFound => "WORKFLOW_ERROR_NOT_FOUND",
             WorkflowError::WorkflowErrorInvalidDefinition => "WORKFLOW_ERROR_INVALID_DEFINITION",
             WorkflowError::WorkflowErrorExecution => "WORKFLOW_ERROR_EXECUTION",
+            WorkflowError::WorkflowErrorConcurrentUpdate => "WORKFLOW_ERROR_CONCURRENT_UPDATE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -554,86 +561,11 @@ impl WorkflowError {
             "WORKFLOW_ERROR_NOT_FOUND" => Some(Self::WorkflowErrorNotFound),
             "WORKFLOW_ERROR_INVALID_DEFINITION" => Some(Self::WorkflowErrorInvalidDefinition),
             "WORKFLOW_ERROR_EXECUTION" => Some(Self::WorkflowErrorExecution),
+            "WORKFLOW_ERROR_CONCURRENT_UPDATE" => Some(Self::WorkflowErrorConcurrentUpdate),
             _ => None,
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

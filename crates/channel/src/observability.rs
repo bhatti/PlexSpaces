@@ -23,7 +23,7 @@
 //! that can be used both within channel implementations and by external consumers.
 //!
 //! ## Usage
-//! ```rust
+//! ```rust,ignore
 //! use plexspaces_channel::observability::*;
 //!
 //! // In channel ack implementation
@@ -236,10 +236,10 @@ pub fn record_channel_latency(
 /// Helper to measure and record operation latency
 ///
 /// ## Usage
-/// ```rust
+/// ```rust,ignore
 /// let start = Instant::now();
 /// // ... perform operation ...
-/// record_channel_latency_from_start(&channel_name, "ack", start, &backend);
+/// record_channel_latency_from_start("my-channel", "ack", start, "redis");
 /// ```
 pub fn record_channel_latency_from_start(
     channel_name: &str,

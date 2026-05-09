@@ -23,7 +23,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
+    use plexspaces_actor::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use ulid::Ulid;
@@ -146,7 +146,7 @@ mod tests {
         mut message: Message,
         correlation_id: Option<String>,
     ) -> (Arc<ActorContext>, Message, Arc<plexspaces_mailbox::Mailbox>) {
-        use plexspaces_core::{ActorRegistry, ServiceLocator};
+        use plexspaces_actor::{ActorId, ActorRef, ServiceLocator};
         use plexspaces_mailbox::{Mailbox, MailboxConfig};
 
         // Create a mailbox for the reply channel
@@ -156,24 +156,35 @@ mod tests {
                 .expect("Failed to create mailbox"),
         );
 
-        // Create ServiceLocator with ActorRegistry for envelope.send_reply() to work
-        use plexspaces_core::ObjectRegistry;
+        // Create ServiceLocator so ActorContext helpers behave like a spawned actor context.
         use plexspaces_node::create_default_service_locator;
         let service_locator =
             create_default_service_locator(Some("test-node".to_string()), None).await;
-        // Create a stub ObjectRegistry for ActorRegistry (from actor_context module)
-        // Note: We can't easily create a real ObjectRegistry in tests, so we'll skip ActorRegistry for now
-        // and handle the case where envelope.send_reply() fails gracefully in tests
-        // For production, ActorRegistry will be properly registered
 
-        // Create context with ServiceLocator
+        let node_id = ServiceLocator::get_node_config(service_locator.as_ref())
+            .await
+            .map(|config| config.id)
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| "test-node".to_string());
+        let actor_id = ActorId::new(
+            "test-genserver".to_string(),
+            "genserver-test".to_string(),
+            "test-ns".to_string(),
+            node_id.clone(),
+        )
+        .expect("genserver test actor id should be valid");
+        let self_ref =
+            ActorRef::new(actor_id).expect("genserver test ActorContext self_ref should be valid");
+
+        // Create context with ServiceLocator and spawned-actor self_ref.
         let ctx = Arc::new(ActorContext::new(
-            "test-node".to_string(),
+            node_id,
             String::new(), // tenant_id (empty if auth disabled)
             "test-ns".to_string(),
             service_locator,
             None,
-        ));
+        )
+        .with_self_ref(self_ref));
 
         // Set sender_id so envelope can send replies (required for GenServer handle_request)
         message.sender_id = "test-sender@test-node".to_string();
@@ -245,36 +256,33 @@ mod tests {
         assert_eq!(behavior.call_count, 1); // State was still mutated
     }
 
-    // Test 4: Event rejection (Phase 2 cleanup)
+    // Test 4: Cast support
     #[tokio::test]
-    async fn test_genserver_rejects_events() {
+    async fn test_genserver_accepts_cast_messages() {
         let mut behavior = Counter::new();
 
-        // GenServer should accept cast messages (for HTTP POST/PUT support)
         let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
         let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
-        assert!(result.is_ok()); // Cast messages are now accepted
+        assert!(result.is_ok());
 
-        // State should be mutated (cast message was processed)
         assert_eq!(behavior.value, 10);
     }
 
-    // Test 5: Multiple cast messages - all should be accepted
+    // Test 5: Sequential cast messages
     #[tokio::test]
-    async fn test_genserver_rejects_multiple_events() {
+    async fn test_genserver_sequential_cast_messages() {
         let mut behavior = Counter::new();
 
-        // Send 5 cast messages - all should be accepted (for HTTP POST/PUT support)
-        for _ in 0..5 {
+        for expected_value in [10, 20, 30, 40, 50] {
             let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
             let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
             let result = behavior.handle_message(&*ctx, msg_actual).await;
-            assert!(result.is_ok()); // Cast messages are now accepted
+            assert!(result.is_ok());
+            assert_eq!(behavior.value, expected_value);
         }
 
-        // State should be mutated (5 * 10 = 50)
         assert_eq!(behavior.value, 50);
     }
 
@@ -290,8 +298,6 @@ mod tests {
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
 
-        // Note: Correlation ID preservation will be tested in integration tests
-        // For now, we verify that handle_request was called
         assert_eq!(behavior.call_count, 1);
     }
 
@@ -306,7 +312,6 @@ mod tests {
             let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
             behavior.handle_message(&*ctx, msg_actual).await.unwrap();
 
-            // Verify state incrementally (reply handling via ActorService will be tested in integration tests)
             assert_eq!(behavior.value, i * 10);
         }
 
@@ -324,38 +329,20 @@ mod tests {
         let (ctx1, msg1_actual, _mailbox1) = create_test_context_and_message(msg1, None).await;
         behavior.handle_message(&*ctx1, msg1_actual).await.unwrap();
 
-        // Cast message should be accepted (GenServer now supports Cast for HTTP POST/PUT)
         let msg2 = create_test_message_with_type(b"inc".to_vec(), "cast");
         let (ctx2, msg2_actual, _) = create_test_context_and_message(msg2, None).await;
         let result = behavior.handle_message(&*ctx2, msg2_actual).await;
-        assert!(result.is_ok()); // Cast messages are now accepted
+        assert!(result.is_ok());
 
         // Request again (adds 10)
         let msg3 = create_test_message_with_type(b"inc".to_vec(), "call");
         let (ctx3, msg3_actual, _mailbox3) = create_test_context_and_message(msg3, None).await;
         behavior.handle_message(&*ctx3, msg3_actual).await.unwrap();
 
-        // Final state: 10 + 10 + 10 = 30 (cast message was processed)
         assert_eq!(behavior.value, 30);
     }
 
-    // Test 9: Cast message acceptance (GenServer now supports Cast for HTTP POST/PUT)
-    #[tokio::test]
-    async fn test_genserver_rejects_cast_messages() {
-        let mut behavior = Counter::new();
-
-        // GenServer should accept cast messages (for HTTP POST/PUT support)
-        let msg = create_test_message_with_type(b"inc".to_vec(), "cast");
-        let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, None).await;
-
-        let result = behavior.handle_message(&*ctx, msg_actual).await;
-        assert!(result.is_ok()); // Cast messages are now accepted
-
-        // State should be mutated (cast message was processed)
-        assert_eq!(behavior.value, 10);
-    }
-
-    // Test 10: Unknown message type (should be ignored)
+    // Test 9: Unknown message type (should be ignored)
     #[tokio::test]
     async fn test_genserver_unknown_message_type() {
         let mut behavior = Counter::new();

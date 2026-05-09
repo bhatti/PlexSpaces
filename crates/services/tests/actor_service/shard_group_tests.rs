@@ -15,11 +15,13 @@
 
 use async_trait::async_trait;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::{
+use plexspaces_actor::Message;
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, behavior_factory::BehaviorFactory,
     Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType,
-    NodeRegistryTrait, RequestContext, ServiceLocator,
+    InitializableServiceLocator, NodeRegistryTrait, RequestContext, ServiceLocator,
+    RequestContextExt,
 };
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
@@ -36,6 +38,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::Request;
 use ulid::Ulid;
+
+fn test_request<T>(inner: T) -> Request<T> {
+    test_request_with_ns(inner, "test")
+}
+
+fn test_request_with_ns<T>(inner: T, namespace: &str) -> Request<T> {
+    let mut req = Request::new(inner);
+    req.metadata_mut().insert("x-tenant-id", "test-tenant".parse().unwrap());
+    req.metadata_mut().insert("x-namespace", namespace.parse().unwrap());
+    req
+}
 
 fn spawn_actor_request_for_test(
     namespace: &str,
@@ -435,7 +448,7 @@ async fn create_test_actor_service(
     Arc<ActorRegistry>,
     Arc<plexspaces_services::ServiceLocatorImpl>,
 ) {
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_node::create_default_service_locator;
 
     let object_repo = Arc::new(
@@ -457,7 +470,7 @@ async fn create_test_actor_service(
 
     // Register ActorFactory (required for spawn_actor to work)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
+    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
@@ -467,12 +480,12 @@ async fn create_test_actor_service(
         .await;
     service_locator.register_service(facet_manager).await;
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator
         .register_service_by_name(
-            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            plexspaces_actor::ServiceName::ServiceNameActorFactoryImpl.as_str(),
             actor_factory.clone(),
         )
         .await;
@@ -481,12 +494,12 @@ async fn create_test_actor_service(
 
     // Register BehaviorRegistry and behavior for "counter" actor type
     // Note: BehaviorRegistry needs to be registered so ActorFactory can create actors
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("counter", || {
             Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;
@@ -519,7 +532,7 @@ async fn create_test_actor_service(
 async fn test_create_shard_group_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(new_create_shard_group_request(
+    let req = test_request(new_create_shard_group_request(
         "test-group",
         "counter",
         4,
@@ -545,7 +558,7 @@ async fn test_create_shard_group_with_labels() {
     labels.insert("zone".to_string(), "us-west-1".to_string());
     labels.insert("tier".to_string(), "compute".to_string());
 
-    let req = Request::new(new_create_shard_group_request(
+    let req = test_request(new_create_shard_group_request(
         "labeled-group",
         "counter",
         2,
@@ -568,7 +581,7 @@ async fn test_create_shard_group_with_labels() {
 async fn test_create_shard_group_duplicate_id() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req1 = Request::new(new_create_shard_group_request(
+    let req1 = test_request(new_create_shard_group_request(
         "duplicate-group",
         "counter",
         2,
@@ -576,7 +589,7 @@ async fn test_create_shard_group_duplicate_id() {
     ));
     let _ = service.create_shard_group(req1).await;
 
-    let req2 = Request::new(new_create_shard_group_request(
+    let req2 = test_request(new_create_shard_group_request(
         "duplicate-group",
         "counter",
         2,
@@ -590,7 +603,7 @@ async fn test_create_shard_group_duplicate_id() {
 async fn test_create_shard_group_invalid_shard_count() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(CreateShardGroupRequest {
+    let req = test_request(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "invalid-group".to_string(),
             shard_count: 0, // Invalid: must be >= 1
@@ -617,7 +630,7 @@ async fn test_get_shard_group_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group first
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "get-test-group",
         "counter",
         3,
@@ -626,7 +639,7 @@ async fn test_get_shard_group_success() {
     let _ = service.create_shard_group(create_req).await;
 
     // Get group
-    let get_req = Request::new(GetShardGroupRequest {
+    let get_req = test_request(GetShardGroupRequest {
         group_id: "get-test-group".to_string(),
     });
     let result = service.get_shard_group(get_req).await;
@@ -642,7 +655,7 @@ async fn test_get_shard_group_success() {
 async fn test_get_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(GetShardGroupRequest {
+    let req = test_request(GetShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
     });
     let result = service.get_shard_group(req).await;
@@ -657,7 +670,7 @@ async fn test_get_shard_group_not_found() {
 async fn test_list_shard_groups_empty() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(ListShardGroupsRequest {
+    let req = test_request(ListShardGroupsRequest {
         actor_type: String::new(),
         state: ShardGroupState::ShardGroupStateUnspecified as i32,
         page: Some(plexspaces_proto::common::v1::PageRequest {
@@ -679,7 +692,7 @@ async fn test_list_shard_groups_with_filter() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create two groups with different actor types
-    let req1 = Request::new(new_create_shard_group_request(
+    let req1 = test_request(new_create_shard_group_request(
         "group-counter",
         "counter",
         2,
@@ -687,7 +700,7 @@ async fn test_list_shard_groups_with_filter() {
     ));
     let _ = service.create_shard_group(req1).await;
 
-    let req2 = Request::new(new_create_shard_group_request(
+    let req2 = test_request(new_create_shard_group_request(
         "group-cache",
         "cache",
         2,
@@ -696,7 +709,7 @@ async fn test_list_shard_groups_with_filter() {
     let _ = service.create_shard_group(req2).await;
 
     // List filtered by actor_type
-    let list_req = Request::new(ListShardGroupsRequest {
+    let list_req = test_request(ListShardGroupsRequest {
         actor_type: "counter".to_string(),
         state: ShardGroupState::ShardGroupStateUnspecified as i32,
         page: Some(plexspaces_proto::common::v1::PageRequest {
@@ -723,7 +736,7 @@ async fn test_delete_shard_group_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "delete-test-group",
         "counter",
         2,
@@ -732,7 +745,7 @@ async fn test_delete_shard_group_success() {
     let _ = service.create_shard_group(create_req).await;
 
     // Delete group
-    let delete_req = Request::new(DeleteShardGroupRequest {
+    let delete_req = test_request(DeleteShardGroupRequest {
         group_id: "delete-test-group".to_string(),
         force: false,
         shutdown_timeout: None,
@@ -741,7 +754,7 @@ async fn test_delete_shard_group_success() {
     assert!(result.is_ok());
 
     // Verify deleted
-    let get_req = Request::new(GetShardGroupRequest {
+    let get_req = test_request(GetShardGroupRequest {
         group_id: "delete-test-group".to_string(),
     });
     let result = service.get_shard_group(get_req).await;
@@ -752,7 +765,7 @@ async fn test_delete_shard_group_success() {
 async fn test_delete_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(DeleteShardGroupRequest {
+    let req = test_request(DeleteShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
         force: false,
         shutdown_timeout: None,
@@ -771,7 +784,7 @@ async fn test_send_to_shard_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "send-test-group",
         "counter",
         4,
@@ -780,7 +793,7 @@ async fn test_send_to_shard_success() {
     let _ = service.create_shard_group(create_req).await;
 
     // Send message to shard
-    let send_req = Request::new(SendToShardRequest {
+    let send_req = test_request(SendToShardRequest {
         group_id: "send-test-group".to_string(),
         partition_key: b"user-123".to_vec(),
         message: Some(create_test_proto_message(b"increment".to_vec())),
@@ -800,7 +813,7 @@ async fn test_send_to_shard_same_key_routes_to_same_shard() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "consistent-routing-group",
         "counter",
         4,
@@ -809,7 +822,7 @@ async fn test_send_to_shard_same_key_routes_to_same_shard() {
     let _ = service.create_shard_group(create_req).await;
 
     let partition_key = b"user-456".to_vec();
-    let send_req1 = Request::new(SendToShardRequest {
+    let send_req1 = test_request(SendToShardRequest {
         group_id: "consistent-routing-group".to_string(),
         partition_key: partition_key.clone(),
         message: Some(create_test_proto_message(b"test".to_vec())),
@@ -819,7 +832,7 @@ async fn test_send_to_shard_same_key_routes_to_same_shard() {
     let result1 = service.send_to_shard(send_req1).await.unwrap().into_inner();
     let shard_id1 = result1.shard_id;
 
-    let send_req2 = Request::new(SendToShardRequest {
+    let send_req2 = test_request(SendToShardRequest {
         group_id: "consistent-routing-group".to_string(),
         partition_key: partition_key.clone(),
         message: Some(create_test_proto_message(b"test".to_vec())),
@@ -839,7 +852,7 @@ async fn test_send_to_shard_same_key_routes_to_same_shard() {
 async fn test_send_to_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(SendToShardRequest {
+    let req = test_request(SendToShardRequest {
         group_id: "nonexistent-group".to_string(),
         partition_key: b"key".to_vec(),
         message: Some(create_test_proto_message(b"test".to_vec())),
@@ -860,7 +873,7 @@ async fn test_scatter_gather_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "scatter-test-group",
         "counter",
         3,
@@ -869,7 +882,7 @@ async fn test_scatter_gather_success() {
     let _ = service.create_shard_group(create_req).await;
 
     // Scatter-gather query
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "scatter-test-group".to_string(),
         query: Some(create_test_proto_message(b"get_count".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -892,7 +905,7 @@ async fn test_scatter_gather_success() {
 async fn test_scatter_gather_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(ScatterGatherRequest {
+    let req = test_request(ScatterGatherRequest {
         group_id: "nonexistent-group".to_string(),
         query: Some(create_test_proto_message(b"test".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1120,7 +1133,7 @@ async fn test_scatter_gather_partial_failures() {
         .await;
 
     // Create group with 4 shards
-    let create_req = Request::new(CreateShardGroupRequest {
+    let create_req = test_request(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "partial-fail-group".to_string(),
             shard_count: 4,
@@ -1136,7 +1149,7 @@ async fn test_scatter_gather_partial_failures() {
     let _ = service.create_shard_group(create_req).await;
 
     // Scatter-gather with query "fail" so all FailingActor shards fail
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "partial-fail-group".to_string(),
         query: Some(create_test_proto_message(b"fail".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1179,7 +1192,7 @@ async fn test_scatter_gather_timeout() {
         .await;
 
     // Create group
-    let create_req = Request::new(CreateShardGroupRequest {
+    let create_req = test_request(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "timeout-group".to_string(),
             shard_count: 3,
@@ -1195,7 +1208,7 @@ async fn test_scatter_gather_timeout() {
     let _ = service.create_shard_group(create_req).await;
 
     // Scatter-gather with short timeout (500ms)
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "timeout-group".to_string(),
         query: Some(create_test_proto_message(b"get_count".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1246,7 +1259,7 @@ async fn test_scatter_gather_min_responses_threshold() {
         .await;
 
     // Create group with 4 shards
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "min-responses-group",
         "failing-counter-2",
         4,
@@ -1255,7 +1268,7 @@ async fn test_scatter_gather_min_responses_threshold() {
     let _ = service.create_shard_group(create_req).await;
 
     // Scatter-gather with min_responses = 4 (all must succeed)
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "min-responses-group".to_string(),
         query: Some(create_test_proto_message(b"fail".to_vec())), // All will fail
         timeout: Some(prost_types::Duration {
@@ -1302,7 +1315,7 @@ async fn test_map_shard_group_partial_failures() {
         .await;
 
     // Create group
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "map-partial-fail-group",
         "failing-counter-3",
         3,
@@ -1311,7 +1324,7 @@ async fn test_map_shard_group_partial_failures() {
     let _ = service.create_shard_group(create_req).await;
 
     // Map query
-    let map_req = Request::new(MapShardGroupRequest {
+    let map_req = test_request(MapShardGroupRequest {
         group_id: "map-partial-fail-group".to_string(),
         map_function: Some(create_test_proto_message(b"fail".to_vec())), // All will fail
         timeout: Some(prost_types::Duration {
@@ -1341,7 +1354,7 @@ async fn test_scatter_gather_concat_aggregation_edge_cases() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Create group with counter actors
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "concat-edge-group",
         "counter",
         2,
@@ -1350,7 +1363,7 @@ async fn test_scatter_gather_concat_aggregation_edge_cases() {
     let _ = service.create_shard_group(create_req).await;
 
     // Scatter-gather with Concat aggregation
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "concat-edge-group".to_string(),
         query: Some(create_test_proto_message(b"get_count".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1424,7 +1437,7 @@ async fn test_create_shard_group_multi_node_scatter_gather() {
         .await
         .expect("register node2");
 
-    let create_req = Request::new(new_create_shard_group_request_with_node_ids(
+    let create_req = test_request(new_create_shard_group_request_with_node_ids(
         "multi-node-group",
         "counter",
         2,
@@ -1445,7 +1458,7 @@ async fn test_create_shard_group_multi_node_scatter_gather() {
     assert!(has_node2, "one shard should be on node2");
 
     // ScatterGather from node1 must collect replies from both local and remote shards.
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "multi-node-group".to_string(),
         query: Some(create_test_proto_message(b"get_count".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1502,12 +1515,10 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
 
     let requested_base_id = "remote-counter".to_string();
     let response = client
-        .spawn_actor(Request::new(spawn_actor_request_for_test(
+        .spawn_actor(test_request_with_ns(
+            spawn_actor_request_for_test("heat-diffusion-rust", "counter", &requested_base_id, 1),
             "heat-diffusion-rust",
-            "counter",
-            &requested_base_id,
-            1,
-        )))
+        ))
         .await
         .expect("remote spawn should succeed")
         .into_inner();
@@ -1612,7 +1623,7 @@ async fn test_create_shard_group_from_registry_ignores_stale_node_ids() {
     });
     node1_locator.register_node_registry(mock_registry).await;
 
-    let create_req = Request::new(new_create_shard_group_request_from_registry(
+    let create_req = test_request(new_create_shard_group_request_from_registry(
         "from-registry-group",
         "counter",
         2,
@@ -1645,7 +1656,7 @@ async fn test_create_shard_group_from_registry_ignores_stale_node_ids() {
         "registry placement should include node2"
     );
 
-    let scatter_req = Request::new(ScatterGatherRequest {
+    let scatter_req = test_request(ScatterGatherRequest {
         group_id: "from-registry-group".to_string(),
         query: Some(create_test_proto_message(b"get_count".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1732,7 +1743,7 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         .await
         .expect("register node2");
 
-    let create_req = Request::new(new_create_shard_group_request_with_node_ids(
+    let create_req = test_request(new_create_shard_group_request_with_node_ids(
         "bulk-update-remote-init-group",
         "init-aware-metrics",
         2,
@@ -1762,7 +1773,7 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
     updates.insert("1".to_string(), init_message(1));
 
     let bulk_resp = node1_service
-        .bulk_update_shard_group(Request::new(BulkUpdateShardGroupRequest {
+        .bulk_update_shard_group(test_request(BulkUpdateShardGroupRequest {
             group_id: "bulk-update-remote-init-group".to_string(),
             updates,
             consistency_level: ConsistencyLevel::ConsistencyLevelLinearizable as i32,
@@ -1781,7 +1792,7 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
     );
 
     let scatter_resp = node1_service
-        .scatter_gather(Request::new(ScatterGatherRequest {
+        .scatter_gather(test_request(ScatterGatherRequest {
             group_id: "bulk-update-remote-init-group".to_string(),
             query: Some(create_test_proto_message(
                 serde_json::to_vec(&serde_json::json!({ "op": "compute" }))
@@ -1840,7 +1851,7 @@ use plexspaces_proto::actor::v1::{
 async fn test_broadcast_shard_group_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "broadcast-group",
         "counter",
         3,
@@ -1848,7 +1859,7 @@ async fn test_broadcast_shard_group_success() {
     ));
     let _ = service.create_shard_group(create_req).await;
 
-    let req = Request::new(BroadcastShardGroupRequest {
+    let req = test_request(BroadcastShardGroupRequest {
         group_id: "broadcast-group".to_string(),
         message: Some(create_test_proto_message(
             serde_json::to_vec(&serde_json::json!({"action": "ping"})).unwrap(),
@@ -1876,7 +1887,7 @@ async fn test_broadcast_shard_group_success() {
 async fn test_broadcast_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(BroadcastShardGroupRequest {
+    let req = test_request(BroadcastShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
         message: Some(create_test_proto_message(b"test".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1894,7 +1905,7 @@ async fn test_broadcast_shard_group_not_found() {
 async fn test_reduce_shard_group_no_reducible_values() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "reduce-group",
         "counter",
         3,
@@ -1904,7 +1915,7 @@ async fn test_reduce_shard_group_no_reducible_values() {
 
     // CounterActor's handle_request returns Ok(()) without an explicit reply payload,
     // so reduce cannot extract numeric values from shard responses.
-    let req = Request::new(ReduceShardGroupRequest {
+    let req = test_request(ReduceShardGroupRequest {
         group_id: "reduce-group".to_string(),
         map_function: Some(create_test_proto_message(
             serde_json::to_vec(&serde_json::json!({"action": "get_count"})).unwrap(),
@@ -1939,7 +1950,7 @@ async fn test_reduce_shard_group_no_reducible_values() {
 async fn test_reduce_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(ReduceShardGroupRequest {
+    let req = test_request(ReduceShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
         map_function: Some(create_test_proto_message(b"test".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -1959,7 +1970,7 @@ async fn test_reduce_shard_group_not_found() {
 async fn test_all_reduce_shard_group_no_reducible_values() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "allreduce-group",
         "counter",
         2,
@@ -1968,7 +1979,7 @@ async fn test_all_reduce_shard_group_no_reducible_values() {
     let _ = service.create_shard_group(create_req).await;
 
     // All-reduce fails at the reduce step when actors don't return reducible payloads
-    let req = Request::new(AllReduceShardGroupRequest {
+    let req = test_request(AllReduceShardGroupRequest {
         group_id: "allreduce-group".to_string(),
         map_function: Some(create_test_proto_message(
             serde_json::to_vec(&serde_json::json!({"action": "get_count"})).unwrap(),
@@ -1999,7 +2010,7 @@ async fn test_all_reduce_shard_group_no_reducible_values() {
 async fn test_all_reduce_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(AllReduceShardGroupRequest {
+    let req = test_request(AllReduceShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
         map_function: Some(create_test_proto_message(b"test".to_vec())),
         timeout: Some(prost_types::Duration {
@@ -2019,7 +2030,7 @@ async fn test_all_reduce_shard_group_not_found() {
 async fn test_barrier_shard_group_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let create_req = Request::new(new_create_shard_group_request(
+    let create_req = test_request(new_create_shard_group_request(
         "barrier-group",
         "counter",
         3,
@@ -2027,7 +2038,7 @@ async fn test_barrier_shard_group_success() {
     ));
     let _ = service.create_shard_group(create_req).await;
 
-    let req = Request::new(BarrierShardGroupRequest {
+    let req = test_request(BarrierShardGroupRequest {
         group_id: "barrier-group".to_string(),
         barrier_id: "barrier-1".to_string(),
         round: 1,
@@ -2050,7 +2061,7 @@ async fn test_barrier_shard_group_success() {
 async fn test_barrier_shard_group_not_found() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(BarrierShardGroupRequest {
+    let req = test_request(BarrierShardGroupRequest {
         group_id: "nonexistent-group".to_string(),
         barrier_id: "b1".to_string(),
         round: 1,
@@ -2069,7 +2080,7 @@ async fn test_barrier_shard_group_not_found() {
 async fn test_spawn_actors_success() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(SpawnActorsRequest {
+    let req = test_request(SpawnActorsRequest {
         requests: vec![
             spawn_actor_request_for_test("default", "counter", "", 1),
             spawn_actor_request_for_test("default", "counter", "", 1),
@@ -2091,7 +2102,7 @@ async fn test_spawn_actors_success() {
 async fn test_spawn_actors_empty_request() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    let req = Request::new(SpawnActorsRequest { requests: vec![] });
+    let req = test_request(SpawnActorsRequest { requests: vec![] });
 
     let result = service.spawn_actors(req).await;
     assert!(result.is_ok(), "Empty SpawnActors should succeed");
@@ -2104,7 +2115,7 @@ async fn test_spawn_actors_instances_count_replicas() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // Spawn 3 replicas of the same actor type with a single request
-    let req = Request::new(SpawnActorsRequest {
+    let req = test_request(SpawnActorsRequest {
         requests: vec![spawn_actor_request_for_test("default", "counter", "worker", 3)],
     });
 
@@ -2140,7 +2151,7 @@ async fn test_spawn_actors_instances_count_zero_spawns_one() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // instances_count=0 should behave as 1
-    let req = Request::new(SpawnActorsRequest {
+    let req = test_request(SpawnActorsRequest {
         requests: vec![spawn_actor_request_for_test("default", "counter", "", 0)],
     });
 
@@ -2160,7 +2171,7 @@ async fn test_spawn_actors_instances_count_auto_id() {
     let (service, _registry, _locator) = create_test_actor_service("test-node").await;
 
     // No actor_id + instances_count=2 should generate ULID-based IDs
-    let req = Request::new(SpawnActorsRequest {
+    let req = test_request(SpawnActorsRequest {
         requests: vec![spawn_actor_request_for_test("default", "counter", "", 2)],
     });
 

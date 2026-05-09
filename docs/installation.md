@@ -128,7 +128,7 @@ The compose file includes:
   ```
 - To enable debug logs (similar to `scripts/server.sh`):
   ```bash
-  RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_actor=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
   docker-compose up
   ```
 - See [Security Configuration](#security-configuration) for production setup
@@ -195,7 +195,7 @@ docker run -d \
   -e PLEXSPACES_DISABLE_AUTH=1 \
   -e PLEXSPACES_JWT_SECRET=test-secret \
   -e WASMTIME_BACKTRACE_DETAILS=1 \
-  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_actor=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
   -v $(pwd)/release.yaml:/app/config/release.yaml:ro \
   plexobject/plexspaces:latest
 
@@ -211,12 +211,12 @@ curl http://localhost:8000/api/v1/health
 ```bash
 # Start with auth disabled and debug logs
 PLEXSPACES_DISABLE_AUTH=1 \
-RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_actor=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
 docker-compose up
 
 # Or run a one-off container with overrides
 docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 \
-  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_actor=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
   plexspaces-node
 ```
 
@@ -1464,7 +1464,7 @@ docker run -d \
   --name plexspaces-node \
   -p 8000:8000 \
   -e PLEXSPACES_DISABLE_AUTH=1 \
-  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
+  -e RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_actor=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug \
   plexobject/plexspaces:latest
 
 # Run with docker-compose (auth enabled by default)

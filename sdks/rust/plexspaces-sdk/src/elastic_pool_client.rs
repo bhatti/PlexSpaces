@@ -5,7 +5,7 @@
 // gRPC support can be added later for remote pool access.
 
 use anyhow::Context;
-use plexspaces_core::{ElasticPoolService, PoolServiceError};
+use plexspaces_actor::{ElasticPoolService, PoolServiceError};
 use plexspaces_proto::pool::v1::{ActorHandle, PoolConfig, PoolMetrics};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,12 +21,12 @@ use std::time::Duration;
 /// - **Metrics**: Get pool stats (size, busy, available, load).
 /// - **Scale**: Manually scale pool size.
 pub struct ElasticPoolClient {
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 }
 
 impl ElasticPoolClient {
     /// Create a client that uses the given ServiceLocator for pool operations.
-    pub fn from_service_locator(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Self {
+    pub fn from_service_locator(service_locator: Arc<dyn plexspaces_actor::ServiceLocator>) -> Self {
         Self { service_locator }
     }
 

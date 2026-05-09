@@ -3,7 +3,7 @@
 //
 // Integration tests for Link Semantics (Erlang link/1 pattern)
 
-use plexspaces_core::ExitReason;
+use plexspaces_actor::ExitReason;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeConfig, NodeId};
 use std::sync::Arc;
@@ -28,18 +28,18 @@ async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor:
     struct TestBehavior;
 
     #[async_trait::async_trait]
-    impl plexspaces_core::Actor for TestBehavior {
+    impl plexspaces_actor::Actor for TestBehavior {
         async fn handle_message(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
-            _msg: plexspaces_core::Message,
-        ) -> Result<(), plexspaces_core::BehaviorError> {
+            _ctx: &plexspaces_actor::ActorContext,
+            _msg: plexspaces_actor::Message,
+        ) -> Result<(), plexspaces_actor::BehaviorError> {
             // Just consume the message - no processing needed for link tests
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 
@@ -66,9 +66,9 @@ async fn test_link_basic() {
     let actor2 = create_test_actor_ref(&node, "actor-2").await;
 
     // Link actor1 to actor2 (use test context for tenant isolation)
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
     node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
 
     // Verify bidirectional linking: unlink should work from either direction
@@ -87,9 +87,9 @@ async fn test_link_self_fails() {
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
 
     // Linking actor to itself should fail
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
     let result = node.link(&ctx, actor1.id(), actor1.id()).await;
     assert!(result.is_err());
 }
@@ -100,9 +100,9 @@ async fn test_unlink_nonexistent() {
 
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
     let actor2 = create_test_actor_ref(&node, "actor-2").await;
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
     // Unlinking actors that aren't linked should succeed (idempotent)
     node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap();
@@ -169,8 +169,7 @@ async fn terminate_actor(node: &Node, actor_id: &str, reason: ExitReason) {
     unregister_actor_helper(node, &actor_id_parsed)
         .await
         .unwrap();
-    use plexspaces_core::service_names;
-    use plexspaces_core::ActorRegistry;
+    use plexspaces_actor::ActorRegistry;
     let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     actor_registry
         .handle_actor_termination(&actor_id_parsed, reason)
@@ -188,10 +187,10 @@ async fn test_exit_condition_cascading() {
         let actor1 = create_test_actor_ref(&node, "exit-test-1").await;
         let actor2 = create_test_actor_ref(&node, "exit-test-2").await;
 
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::{RequestContext, RequestContextExt};
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
-            "test-namespace".to_string(),
+            "default".to_string(),
         );
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
@@ -225,10 +224,10 @@ async fn test_exit_condition_cascading() {
         let actor1 = create_test_actor_ref(&node, "normal-test-1").await;
         let actor2 = create_test_actor_ref(&node, "normal-test-2").await;
 
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::{RequestContext, RequestContextExt};
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
-            "test-namespace".to_string(),
+            "default".to_string(),
         );
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
@@ -261,10 +260,10 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "chain-2").await;
         let actor3 = create_test_actor_ref(&node, "chain-3").await;
 
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::{RequestContext, RequestContextExt};
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
-            "test-namespace".to_string(),
+            "default".to_string(),
         );
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         node.link(&ctx, actor2.id(), actor3.id()).await.unwrap();
@@ -314,10 +313,10 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "multi-2").await;
         let actor3 = create_test_actor_ref(&node, "multi-3").await;
 
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::{RequestContext, RequestContextExt};
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
-            "test-namespace".to_string(),
+            "default".to_string(),
         );
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         node.link(&ctx, actor1.id(), actor3.id()).await.unwrap();

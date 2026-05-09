@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// Configuration contracts for AWS backends, node infrastructure, and security.
+// Extension traits in crates provide Rust-specific helpers (from_env(), etc.).
+
+syntax = "proto3";
+
+package plexspaces.config.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/config;plexspaces_config_v1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.config.v1";
+
+// DynamoDB backend configuration
+message DynamoDbConfig {
+  // AWS region (e.g., "us-east-1")
+  string region = 1 [(buf.validate.field).string.max_len = 64];
+
+  // Table name prefix (default: "plexspaces-")
+  string table_prefix = 2 [(buf.validate.field).string.max_len = 128];
+
+  // Optional endpoint URL for local/test overrides (e.g., "http://localhost:8000")
+  string endpoint_url = 3 [(buf.validate.field).string.max_len = 512];
+}
+
+// DLQ (Dead Letter Queue) configuration
+message DlqConfig {
+  // Enable DLQ routing for failed messages
+  bool enabled = 1;
+
+  // Max receive count before routing to DLQ
+  uint32 max_receive_count = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1000
+  }];
+}
+
+// SQS backend configuration
+message SqsConfig {
+  // AWS region (e.g., "us-east-1")
+  string region = 1 [(buf.validate.field).string.max_len = 64];
+
+  // Queue name prefix (default: "plexspaces-")
+  string queue_prefix = 2 [(buf.validate.field).string.max_len = 128];
+
+  // Optional endpoint URL for local/test overrides (e.g., "http://localhost:4566")
+  string endpoint_url = 3 [(buf.validate.field).string.max_len = 512];
+
+  // Visibility timeout in seconds (how long a message is hidden after receive)
+  uint32 visibility_timeout_seconds = 4 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 43200
+  }];
+
+  // Message retention period in seconds
+  uint32 message_retention_seconds = 5 [(buf.validate.field).uint32 = {
+    gte: 60
+    lte: 1209600
+  }];
+
+  // Dead letter queue configuration
+  DlqConfig dlq = 6;
+
+  // Receive message wait time in seconds for long polling (0 = short polling, default: 20)
+  uint32 receive_message_wait_time_seconds = 7;
+}
+
+// S3 backend configuration
+message S3Config {
+  // AWS region (e.g., "us-east-1")
+  string region = 1 [(buf.validate.field).string.max_len = 64];
+
+  // S3 bucket name
+  string bucket = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Optional endpoint URL for local/test overrides (e.g., "http://localhost:9000")
+  string endpoint_url = 3 [(buf.validate.field).string.max_len = 512];
+
+  // Use path-style URLs (required for MinIO and some S3-compatible stores)
+  bool use_path_style = 4;
+}
+
+// Unified AWS backend configuration
+message AwsConfig {
+  DynamoDbConfig dynamodb = 1;
+  SqsConfig sqs = 2;
+  S3Config s3 = 3;
+}
+
+// Configuration error codes
+enum ConfigErrorCode {
+  CONFIG_ERROR_UNSPECIFIED = 0;
+  CONFIG_ERROR_IO = 1;
+  CONFIG_ERROR_PARSE = 2;
+  CONFIG_ERROR_ENV = 3;
+  CONFIG_ERROR_NOT_FOUND = 4;
+  CONFIG_ERROR_SECURITY = 5;
+  CONFIG_ERROR_ENV_SUBSTITUTION = 6;
+}

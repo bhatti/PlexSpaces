@@ -24,6 +24,7 @@
 #![warn(clippy::all)]
 
 // Main facet module - contains core facet traits and FacetContainer
+
 mod r#mod;
 pub use r#mod::*;
 
@@ -38,6 +39,10 @@ pub mod capabilities;
 // Event emitter
 pub mod event_emitter;
 pub use event_emitter::{EventEmitterFacet, EVENT_EMITTER_FACET_DEFAULT_PRIORITY};
+
+// Virtual actor lifecycle facet trait (moved from core to break journaling→core dep)
+pub mod virtual_actor_lifecycle_facet;
+pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 
 // Facet helpers for proto extraction
 pub mod facet_helpers;

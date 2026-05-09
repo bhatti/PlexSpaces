@@ -20,7 +20,7 @@
 //!
 //! ## Purpose
 //! Provides adapter implementations that wrap Node's services to implement
-//! the traits defined in `plexspaces_core::actor_context`.
+//! the traits defined in `plexspaces_actor::actor_context`.
 //!
 //! ## Design Decision
 //! These wrappers are in the `node` crate (not `core`) to avoid circular dependencies:
@@ -32,10 +32,11 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
-use plexspaces_core::actor_context::{
+use plexspaces_actor::actor_context::{
     ActorService, ChannelService, FacetService, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_core::Service;
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::Service;
 use plexspaces_facet::Facet;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
@@ -163,7 +164,7 @@ impl Default for ChannelServiceWrapper {
 
 impl Service for ChannelServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::CHANNEL_SERVICE.to_string()
+        plexspaces_actor::ServiceName::ServiceNameChannelService.as_str().to_string()
     }
 }
 
@@ -301,7 +302,7 @@ impl ProcessGroupServiceWrapper {
 
 impl Service for ProcessGroupServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::PROCESS_GROUP_REGISTRY.to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
     }
 }
 
@@ -309,7 +310,7 @@ impl Service for ProcessGroupServiceWrapper {
 impl ProcessGroupService for ProcessGroupServiceWrapper {
     async fn create_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.registry
@@ -321,7 +322,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn delete_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.registry
@@ -332,7 +333,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn join_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         actor_id: &str,
         topics: Vec<String>,
@@ -342,7 +343,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         let _ = self.registry.create_group(ctx, group_name).await;
 
         // Process-group storage keeps canonical strings; service boundaries parse them once.
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
         let actor_id = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid canonical actor id '{}': {}", actor_id, e))?;
 
@@ -354,11 +355,11 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn leave_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
         let actor_id = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid canonical actor id '{}': {}", actor_id, e))?;
 
@@ -370,7 +371,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn get_members(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ids = self
@@ -385,7 +386,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn get_local_members(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ids = self
@@ -400,7 +401,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn list_groups(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         self.registry
             .list_groups(ctx)
@@ -410,7 +411,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn publish_to_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         topic: Option<&str>,
         message: Message,
@@ -434,19 +435,19 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 /// Allows FacetManager from ServiceLocator to be used as Arc<dyn FacetService> in ActorContext.
 /// This replaces the previous Node-based wrapper with a ServiceLocator-based approach.
 pub struct FacetServiceWrapper {
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 }
 
 impl FacetServiceWrapper {
     /// Create a new wrapper from ServiceLocator
-    pub fn new(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn plexspaces_actor::ServiceLocator>) -> Self {
         Self { service_locator }
     }
 }
 
 impl Service for FacetServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::FACET_SERVICE.to_string()
+        plexspaces_actor::ServiceName::ServiceNameFacetService.as_str().to_string()
     }
 }
 
@@ -454,7 +455,7 @@ impl Service for FacetServiceWrapper {
 impl FacetService for FacetServiceWrapper {
     async fn get_facet(
         &self,
-        actor_id: &plexspaces_core::ActorId,
+        actor_id: &plexspaces_actor::ActorId,
         facet_type: &str,
     ) -> Result<
         std::sync::Arc<tokio::sync::RwLock<Box<dyn Facet>>>,
@@ -495,7 +496,7 @@ pub struct FirecrackerVmServiceWrapper {
 #[cfg(feature = "firecracker")]
 impl Service for FirecrackerVmServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::FIRECRACKER_VM_SERVICE.to_string()
+        plexspaces_actor::ServiceName::ServiceNameFirecrackerVmService.as_str().to_string()
     }
 }
 
@@ -515,19 +516,19 @@ impl NodeConnectionInfoWrapper {
     }
 }
 
-impl plexspaces_core::Service for NodeConnectionInfoWrapper {
+impl plexspaces_actor::Service for NodeConnectionInfoWrapper {
     fn service_name(&self) -> String {
         "NodeConnectionInfo".to_string()
     }
 }
 
 #[async_trait::async_trait]
-impl plexspaces_core::NodeConnectionInfo for NodeConnectionInfoWrapper {
+impl plexspaces_actor::NodeConnectionInfo for NodeConnectionInfoWrapper {
     async fn connected_nodes(&self) -> Vec<String> {
         // Get connected nodes from NodeRegistry
         let service_locator = self.node.service_locator();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         if let Some(node_registry) = service_locator_trait.get_node_registry().await {
             let ctx = service_locator_trait
                 .request_context_for_system_operations()

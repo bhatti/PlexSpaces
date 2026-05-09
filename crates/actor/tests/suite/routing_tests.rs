@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 
 use plexspaces_actor::{routing::is_actor_local, routing::route_message, ActorRefError};
-use plexspaces_core::{ActorId, RequestContext, ServiceLocator};
+use plexspaces_actor::{ActorId, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
 

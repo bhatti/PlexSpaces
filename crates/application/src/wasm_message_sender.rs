@@ -18,7 +18,7 @@
 
 use async_trait::async_trait;
 use plexspaces_common::dialable_node_address;
-use plexspaces_core::ActorService;
+use plexspaces_actor::ActorService;
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
@@ -42,7 +42,7 @@ use tracing::{debug, instrument, trace, warn};
 /// Thread-safe: all fields are Arc-wrapped.
 pub struct ActorServiceMessageSender {
     actor_service: Arc<dyn ActorService + Send + Sync>,
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     /// Monitor reference mapping: monitor_ref_u64 -> (target_id, monitor_ref_string).
     /// Used to convert between WIT u64 refs and framework string refs.
     monitor_refs: Arc<tokio::sync::RwLock<std::collections::HashMap<u64, (String, String)>>>,
@@ -59,7 +59,7 @@ impl ActorServiceMessageSender {
     /// New ActorServiceMessageSender instance
     pub fn new(
         actor_service: Arc<dyn ActorService + Send + Sync>,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     ) -> Self {
         Self {
             actor_service,
@@ -94,13 +94,13 @@ impl ActorServiceMessageSender {
     }
 
     /// Resolve tenant/namespace for a WASM caller from the registered sender actor (same rules as
-    /// [`Self::stop_actor`]). Used so monitor registration stores a real [`plexspaces_core::RequestContext`]
+    /// [`Self::stop_actor`]). Used so monitor registration stores a real [`plexspaces_actor::RequestContext`]
     /// for cross-node `__DOWN__` routing instead of ad hoc parallel fields.
     async fn request_context_from_registered_sender_actor(
         &self,
         from: &str,
-    ) -> Result<plexspaces_core::RequestContext, String> {
-        use plexspaces_core::{ActorId, RequestContext};
+    ) -> Result<plexspaces_actor::RequestContext, String> {
+        use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
 
         let registry = self
             .service_locator
@@ -249,7 +249,7 @@ impl MessageSender for ActorServiceMessageSender {
         message_type: &str,
         message: &[u8],
     ) -> Result<(), String> {
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
 
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
@@ -314,7 +314,7 @@ impl MessageSender for ActorServiceMessageSender {
             .request_context_from_registered_sender_actor(from)
             .await?;
 
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
 
         let registry: Arc<ActorRegistry> = self
             .service_locator
@@ -380,7 +380,7 @@ impl MessageSender for ActorServiceMessageSender {
             labels.into_iter().collect();
         // WASM host still supplies legacy JSON bytes for `initial_state`; map into spec fields.
         let (role_hint, args_map) =
-            plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+            plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
         use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
@@ -409,7 +409,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     #[instrument(skip(self), fields(from = %from, actor_id = %actor_id))]
     async fn stop_actor(&self, from: &str, actor_id: &str, _timeout_ms: u64) -> Result<(), String> {
-        use plexspaces_core::{ActorFactory, ActorId};
+        use plexspaces_actor::{ActorFactory, ActorId};
 
         let actor_factory: Arc<dyn ActorFactory> =
             self.service_locator
@@ -436,9 +436,9 @@ impl MessageSender for ActorServiceMessageSender {
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), String> {
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
 
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
 
         let actor_registry: Arc<ActorRegistry> = self
             .service_locator
@@ -469,9 +469,9 @@ impl MessageSender for ActorServiceMessageSender {
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), String> {
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
 
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
 
         let actor_registry: Arc<ActorRegistry> = self
             .service_locator
@@ -497,8 +497,8 @@ impl MessageSender for ActorServiceMessageSender {
     }
 
     async fn monitor_actor(&self, from: &str, actor_id: &str) -> Result<u64, String> {
-        use plexspaces_core::ActorId;
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorId;
+        use plexspaces_actor::ActorRegistry;
 
         let actor_registry: Arc<ActorRegistry> = self
             .service_locator
@@ -542,9 +542,9 @@ impl MessageSender for ActorServiceMessageSender {
         actor_id: &str,
         monitor_ref: u64,
     ) -> Result<(), String> {
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
 
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
 
         // Look up the monitor_ref_string from our mapping
         let monitor_info = {
@@ -595,7 +595,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn create_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: CreateShardGroupRequest,
     ) -> Result<CreateShardGroupResponse, String> {
         self.actor_service
@@ -606,7 +606,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn bulk_update_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: BulkUpdateShardGroupRequest,
     ) -> Result<BulkUpdateShardGroupResponse, String> {
         self.actor_service
@@ -617,7 +617,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn scatter_gather(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: ScatterGatherRequest,
     ) -> Result<ScatterGatherResponse, String> {
         self.actor_service
@@ -628,7 +628,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn broadcast_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: BroadcastShardGroupRequest,
     ) -> Result<BroadcastShardGroupResponse, String> {
         self.actor_service
@@ -639,7 +639,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn reduce_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: ReduceShardGroupRequest,
     ) -> Result<ReduceShardGroupResponse, String> {
         self.actor_service
@@ -650,7 +650,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn all_reduce_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: AllReduceShardGroupRequest,
     ) -> Result<AllReduceShardGroupResponse, String> {
         self.actor_service
@@ -661,7 +661,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn barrier_shard_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: BarrierShardGroupRequest,
     ) -> Result<BarrierShardGroupResponse, String> {
         self.actor_service
@@ -672,7 +672,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn spawn_actors(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         req: SpawnActorsRequest,
     ) -> Result<SpawnActorsResponse, String> {
         self.actor_service
@@ -683,7 +683,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn merge_application_metrics(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         application_id: &str,
         metrics: ApplicationMetrics,
     ) -> Result<ApplicationMetrics, String> {
@@ -703,7 +703,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn get_application_metrics(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         application_id: &str,
         target_node: &str,
     ) -> Result<ApplicationMetrics, String> {
@@ -764,7 +764,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn get_application_status(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         application_id: &str,
         target_node: &str,
     ) -> Result<(ApplicationInfo, String), String> {
@@ -824,13 +824,13 @@ impl MessageSender for ActorServiceMessageSender {
 mod tests {
     use super::ActorServiceMessageSender;
     use async_trait::async_trait;
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
-    use plexspaces_core::{ActorId, ActorRegistry, ActorService as ActorServiceTrait};
+    use plexspaces_common::RequestContextExt;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::{ActorId, ActorRegistry, ActorService as ActorServiceTrait};
     use plexspaces_proto::common::v1::Message;
     use plexspaces_proto::node::v1::NodeRegistration;
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
     use std::sync::Arc;
-    use std::sync::RwLock;
 
     struct RecordingActorService {
         reply_payload: Vec<u8>,
@@ -843,7 +843,7 @@ mod tests {
     impl ObjectRegistryTrait for NoopObjectRegistry {
         async fn lookup(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_id: &str,
             _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -852,7 +852,7 @@ mod tests {
 
         async fn lookup_full(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: plexspaces_proto::object_registry::v1::ObjectType,
             _object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -861,7 +861,7 @@ mod tests {
 
         async fn register(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
@@ -869,7 +869,7 @@ mod tests {
 
         async fn discover(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
             _object_category: Option<String>,
             _capabilities: Option<Vec<String>>,
@@ -883,7 +883,7 @@ mod tests {
 
         async fn unregister(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: plexspaces_proto::object_registry::v1::ObjectType,
             _object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -892,7 +892,7 @@ mod tests {
 
         async fn heartbeat(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: plexspaces_proto::object_registry::v1::ObjectType,
             _object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -900,110 +900,19 @@ mod tests {
         }
     }
 
-    struct TestFrameworkSender {
-        actor_id: ActorId,
-        tenant_id: String,
-        namespace: String,
-        actor_type: RwLock<Option<String>>,
-        behavior_kind: RwLock<Option<String>>,
-        local_state_handle: RwLock<Option<Arc<dyn plexspaces_core::ActorStateHandle>>>,
-    }
-
-    impl TestFrameworkSender {
-        fn new(
-            actor_id: ActorId,
-            tenant_id: impl Into<String>,
-            namespace: impl Into<String>,
-        ) -> Self {
-            Self {
-                actor_id,
-                tenant_id: tenant_id.into(),
-                namespace: namespace.into(),
-                actor_type: RwLock::new(None),
-                behavior_kind: RwLock::new(None),
-                local_state_handle: RwLock::new(None),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl plexspaces_core::MessageSender for TestFrameworkSender {
-        async fn tell(
-            &self,
-            _message: Message,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            Ok(())
-        }
-
-        fn actor_id(&self) -> Option<String> {
-            Some(self.actor_id.to_string())
-        }
-
-        fn tenant_id(&self) -> Option<&str> {
-            Some(&self.tenant_id)
-        }
-
-        fn namespace(&self) -> Option<&str> {
-            Some(&self.namespace)
-        }
-
-        fn actor_type(&self) -> Option<String> {
-            self.actor_type.read().ok().and_then(|guard| guard.clone())
-        }
-
-        async fn set_actor_type(&self, actor_type: Option<String>) {
-            if let Ok(mut guard) = self.actor_type.write() {
-                *guard = actor_type;
-            }
-        }
-
-        fn behavior_kind(&self) -> Option<String> {
-            self.behavior_kind
-                .read()
-                .ok()
-                .and_then(|guard| guard.clone())
-        }
-
-        async fn set_behavior_kind(&self, behavior_kind: Option<String>) {
-            if let Ok(mut guard) = self.behavior_kind.write() {
-                *guard = behavior_kind;
-            }
-        }
-
-        fn local_state_handle(&self) -> Option<Arc<dyn plexspaces_core::ActorStateHandle>> {
-            self.local_state_handle
-                .read()
-                .ok()
-                .and_then(|guard| guard.clone())
-        }
-
-        async fn set_local_state_handle(
-            &self,
-            handle: Option<Arc<dyn plexspaces_core::ActorStateHandle>>,
-        ) {
-            if let Ok(mut guard) = self.local_state_handle.write() {
-                *guard = handle;
-            }
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-
     #[async_trait]
     impl ActorServiceTrait for RecordingActorService {
         async fn spawn_actor(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<plexspaces_actor::ServiceTraitsActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("not needed for this test".into())
         }
 
         async fn send(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -1014,7 +923,7 @@ mod tests {
 
         async fn send_and_wait(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             actor_id: &str,
             _message: Message,
             _timeout: Option<std::time::Duration>,
@@ -1029,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_node_registration_supports_node_id_and_address() {
+    fn node_endpoint_helpers_normalize_and_match_registrations() {
         let registrations = vec![
             NodeRegistration {
                 node_id: "test-node-8093".to_string(),
@@ -1054,10 +963,6 @@ mod tests {
         )
         .expect("canonical address should resolve");
         assert_eq!(by_address.node_id, "test-node-8093");
-    }
-
-    #[test]
-    fn normalize_node_address_returns_dialable_loopback_endpoint() {
         assert_eq!(
             ActorServiceMessageSender::normalize_node_address("http://0.0.0.0:8093"),
             "http://localhost:8093"
@@ -1069,10 +974,10 @@ mod tests {
     }
 
     /// send_message must route through ActorRegistry::tell so that passivated virtual
-    /// actors are reactivated. The sender does NOT need to be registered in the registry
-    /// (send_after fires from a background task when the actor may be passivated).
+    /// actors are reactivated. A passivated sender still needs scoped registry metadata
+    /// so the host bridge can rebuild the RequestContext used for routing.
     #[tokio::test]
-    async fn send_message_routes_via_registry_without_requiring_registered_sender() {
+    async fn send_message_routes_via_registry_for_passivated_virtual_sender() {
         let sent = Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let actor_service = Arc::new(RecordingActorService {
             reply_payload: vec![],
@@ -1080,26 +985,54 @@ mod tests {
         });
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(NoopObjectRegistry);
+        let sender_id = ActorId::from_canonical(
+            "health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091",
+        )
+        .expect("sender actor id should be valid");
+        let sender_ctx = plexspaces_actor::RequestContext::new_without_auth(
+            "tenant-go".to_string(),
+            sender_id.namespace().to_string(),
+        );
         // ActorRegistry with local node test-node-8091. The target is on test-node-8093
         // (remote), so tell routes through actor_service.send.
         let actor_registry = Arc::new(ActorRegistry::new(
             object_registry,
             "test-node-8091".to_string(),
         ));
+        let virtual_actor_manager = Arc::new(plexspaces_actor::VirtualActorManager::new(
+            actor_registry.clone(),
+        ));
         actor_registry
             .set_actor_service(actor_service.clone())
+            .await;
+        actor_registry
+            .set_virtual_actor_manager(virtual_actor_manager.clone())
             .await;
         service_locator
             .register_actor_registry(actor_registry.clone())
             .await;
+        virtual_actor_manager
+            .register_virtual_actor_type(
+                sender_id.actor_type().to_string(),
+                None,
+                sender_ctx.namespace().to_string(),
+                serde_json::json!({
+                    "virtual_actor": {
+                        "activation_strategy": "lazy"
+                    }
+                }),
+                Some(sender_ctx.tenant_id().to_string()),
+                None,
+            )
+            .await
+            .expect("virtual actor type registration should succeed");
 
         let wasm_sender = ActorServiceMessageSender::new(actor_service, service_locator);
 
-        // from actor is NOT registered — simulates a passivated virtual actor sending via
-        // send_after. Previously this would fail with "Registered sender actor scope not found".
+        // The sender has only passivated virtual-actor metadata, not a live sender.
         let result = plexspaces_wasm_runtime::MessageSender::send_message(
             &wasm_sender,
-            "health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091",
+            &sender_id.to_string(),
             "worker//miniclaw_wasm::go-miniclaw@test-node-8093",
             "tick",
             b"{}",

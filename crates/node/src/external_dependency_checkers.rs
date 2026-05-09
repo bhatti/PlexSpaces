@@ -26,7 +26,7 @@
 //! These checkers are used by the health service to monitor external dependencies
 //! and update node readiness status accordingly.
 
-use plexspaces_core::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
+use plexspaces_actor::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
 use std::time::Duration;
 use tokio::time::timeout;
 

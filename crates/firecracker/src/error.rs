@@ -19,6 +19,7 @@
 //! Firecracker-specific error types
 
 /// Firecracker error type
+
 #[derive(Debug, thiserror::Error)]
 pub enum FirecrackerError {
     /// VM creation failed

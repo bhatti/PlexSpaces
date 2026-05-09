@@ -25,7 +25,7 @@ mod sql_tests {
     use plexspaces_blob::{
         repository::sql::SqlBlobRepository, repository::ListFilters, BlobRepository,
     };
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use plexspaces_proto::storage::v1::BlobMetadata;
     use std::sync::Arc;
     use std::sync::Once;

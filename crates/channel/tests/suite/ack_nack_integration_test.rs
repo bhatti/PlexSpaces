@@ -323,6 +323,10 @@ mod redis_tests {
     use super::*;
     use plexspaces_channel::RedisChannel;
 
+    fn redis_url() -> String {
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
+    }
+
     // Helper to check if Redis is available
     // Uses cached async check from test_helpers for fast availability check
     pub async fn is_redis_available() -> bool {
@@ -332,17 +336,23 @@ mod redis_tests {
         }
         #[cfg(not(feature = "test-helpers"))]
         {
-            // Fallback: fast TCP connection check
-            use std::time::Duration;
-            use tokio::net::TcpStream;
-            use tokio::time::timeout;
-            timeout(
-                Duration::from_millis(500),
-                TcpStream::connect("localhost:6379"),
-            )
+            tokio::task::spawn_blocking(|| {
+                redis::Client::open(redis_url())
+                    .ok()
+                    .and_then(|client| client.get_connection().ok())
+                    .is_some()
+            })
             .await
-            .is_ok()
+            .unwrap_or(false)
         }
+    }
+
+    pub async fn skip_if_redis_unavailable() -> bool {
+        if is_redis_available().await {
+            return false;
+        }
+        eprintln!("Skipping test: Redis not available");
+        true
     }
 
     // Helper to create Redis config
@@ -362,7 +372,7 @@ mod redis_tests {
                 String::new()
             },
             backend_config: Some(channel_config::BackendConfig::Redis(RedisConfig {
-                url: "redis://localhost:6379".to_string(),
+                url: redis_url(),
                 stream_key: format!("test-stream:{}", name),
                 max_length: 1000,
                 consumer_group: "test-group".to_string(),
@@ -379,7 +389,7 @@ mod redis_tests {
 
     // Helper to cleanup Redis
     pub async fn cleanup_redis(stream_name: &str) {
-        if let Ok(client) = redis::Client::open("redis://localhost:6379") {
+        if let Ok(client) = redis::Client::open(redis_url()) {
             if let Ok(mut conn) = client.get_connection() {
                 let _: Result<(), redis::RedisError> =
                     redis::cmd("DEL").arg(stream_name).query(&mut conn);
@@ -389,8 +399,7 @@ mod redis_tests {
 
     #[tokio::test]
     async fn test_redis_ack_nack_flow() {
-        if !is_redis_available().await {
-            eprintln!("Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -419,8 +428,7 @@ mod redis_tests {
 
     #[tokio::test]
     async fn test_redis_nack_requeue() {
-        if !is_redis_available().await {
-            eprintln!("Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -834,10 +842,9 @@ async fn test_sqlite_ack_message_not_found() {
 #[tokio::test]
 async fn test_redis_ack_message_not_found() {
     use plexspaces_channel::RedisChannel;
-    use redis_tests::{cleanup_redis, create_redis_config, is_redis_available};
+    use redis_tests::{cleanup_redis, create_redis_config, skip_if_redis_unavailable};
 
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 

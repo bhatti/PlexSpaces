@@ -5,7 +5,7 @@
 // example without needing `--bin skypilot-comparison`.
 
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, RequestContextExt};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -276,7 +276,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating SkyPilot scheduler (multi-cloud resource scheduling)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "skypilot".to_string(),
         "scheduling".to_string(),
     );
@@ -395,7 +395,7 @@ mod tests {
     async fn test_skypilot_scheduler() {
         let node = NodeBuilder::new("test-node").build_started().await;
 
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(
             "skypilot".to_string(),
             "scheduling".to_string(),
         );

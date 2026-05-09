@@ -11,7 +11,7 @@ mod postgres_integration_tests {
     use async_trait::async_trait;
     use plexspaces_common::skip_if_unavailable;
     use plexspaces_common::test_helpers::postgres_available;
-    use plexspaces_core::{ActorContext, Message, ServiceLocator};
+    use plexspaces_actor::Message;
     use plexspaces_facet::Facet;
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_journaling::*;
@@ -87,7 +87,6 @@ mod postgres_integration_tests {
         async fn replay_message(
             &self,
             message: Message,
-            _context: &ActorContext,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if message.message_type == "increment" {
                 let mut counter = self.counter.write().await;
@@ -163,18 +162,8 @@ mod postgres_integration_tests {
         };
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        // Create test ActorContext for replay
-        use plexspaces_services::ServiceLocatorImpl;
-        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
-        let test_context = Arc::new(ActorContext::new(
-            "local".to_string(),
-            "default".to_string(),
-            "default".to_string(),
-            service_locator,
-            None,
-        ));
         new_facet
-            .set_replay_handler(Box::new(handler), test_context)
+            .set_replay_handler(Box::new(handler))
             .await;
         new_facet
             .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))

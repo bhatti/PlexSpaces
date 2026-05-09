@@ -5,7 +5,7 @@
 
 #[cfg(feature = "sql-backend")]
 mod sqlite_tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
     use std::time::Duration;
 
@@ -27,6 +27,10 @@ mod sqlite_tests {
 
     fn empty_namespace_ctx() -> RequestContext {
         RequestContext::new_without_auth("tenant1".to_string(), "".to_string())
+    }
+
+    fn admin_empty_namespace_ctx() -> RequestContext {
+        RequestContext::new_without_auth("tenant1".to_string(), "".to_string()).with_admin(true)
     }
 
     #[tokio::test]
@@ -287,11 +291,12 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
-    async fn test_empty_namespace_list_returns_all_namespaces() {
+    async fn test_empty_namespace_requires_admin_for_cross_namespace_listing() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
         let ctx_ns1 = namespace1_ctx();
         let ctx_ns2 = namespace2_ctx();
         let ctx_empty = empty_namespace_ctx();
+        let admin_ctx = admin_empty_namespace_ctx();
 
         // Put keys in different namespaces
         kv.put(&ctx_ns1, "key:ns1", b"value1".to_vec())
@@ -301,11 +306,15 @@ mod sqlite_tests {
             .await
             .unwrap();
 
-        // List with empty namespace should return keys from all namespaces
+        // Empty namespace alone should not skip namespace filtering.
         let keys = kv.list(&ctx_empty, "key:").await.unwrap();
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains(&"key:ns1".to_string()));
-        assert!(keys.contains(&"key:ns2".to_string()));
+        assert_eq!(keys.len(), 0);
+
+        // Admin context with empty namespace should return keys from all namespaces.
+        let admin_keys = kv.list(&admin_ctx, "key:").await.unwrap();
+        assert_eq!(admin_keys.len(), 2);
+        assert!(admin_keys.contains(&"key:ns1".to_string()));
+        assert!(admin_keys.contains(&"key:ns2".to_string()));
 
         // List with specific namespace should only return that namespace's keys
         let keys_ns1 = kv.list(&ctx_ns1, "key:").await.unwrap();
@@ -318,10 +327,10 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
-    async fn test_empty_namespace_list_with_multiple_tenants() {
+    async fn test_admin_empty_namespace_remains_tenant_scoped() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
         let ctx1_ns1 = namespace1_ctx();
-        let ctx1_empty = empty_namespace_ctx();
+        let ctx1_admin = admin_empty_namespace_ctx();
         let ctx2_ns1 = tenant2_ctx(); // tenant2, namespace "default"
 
         // Put keys in tenant1, namespace1
@@ -334,8 +343,8 @@ mod sqlite_tests {
             .await
             .unwrap();
 
-        // Empty namespace in tenant1 should only see tenant1's keys across all namespaces
-        let keys = kv.list(&ctx1_empty, "key:").await.unwrap();
+        // Admin empty namespace in tenant1 should only see tenant1's keys across all namespaces.
+        let keys = kv.list(&ctx1_admin, "key:").await.unwrap();
         assert_eq!(keys.len(), 1);
         assert!(keys.contains(&"key:1".to_string()));
 

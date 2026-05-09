@@ -11,7 +11,8 @@ description = "Process groups for distributed pub/sub and broadcast messaging (E
 
 [dependencies]
 # Core types and dependencies
-plexspaces-core = { workspace = true }
+plexspaces-actor = { workspace = true }
+plexspaces-common = { workspace = true }
 plexspaces-proto = { workspace = true }
 plexspaces-keyvalue = { workspace = true }
 

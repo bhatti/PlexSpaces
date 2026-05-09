@@ -21,7 +21,7 @@
 //! Provides convenient wrappers for common object-registry operations
 //! to simplify registration and discovery of different object types.
 
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost_types::Timestamp;
 use std::time::SystemTime;
@@ -38,7 +38,7 @@ use std::time::SystemTime;
 /// ## Returns
 /// Result indicating success or failure
 pub async fn register_node(
-    object_registry: &dyn plexspaces_core::ObjectRegistry,
+    object_registry: &dyn plexspaces_actor::ObjectRegistry,
     ctx: &RequestContext,
     node_id: &str,
     grpc_address: &str,
@@ -217,7 +217,7 @@ pub async fn discover_workflow_nodes(
 /// ## Returns
 /// Result indicating success or failure
 pub async fn heartbeat_node(
-    object_registry: &dyn plexspaces_core::ObjectRegistry,
+    object_registry: &dyn plexspaces_actor::ObjectRegistry,
     ctx: &RequestContext,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

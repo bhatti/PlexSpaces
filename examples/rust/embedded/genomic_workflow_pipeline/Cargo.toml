@@ -9,7 +9,7 @@ edition = "2021"
 [dependencies]
 # PlexSpaces workflow orchestration - THE KEY DEPENDENCY
 plexspaces-workflow = { path = "../../../../crates/workflow" }
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-application = { path = "../../../../crates/application" }
 plexspaces-node = { path = "../../../../crates/node" }

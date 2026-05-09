@@ -24,8 +24,9 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use plexspaces_workflow::*;
+    use plexspaces_workflow::types::{ExecutionStatus, StepStatus, StepExecutionExt, WorkflowExecutionExt};
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -279,8 +280,7 @@ mod ddb_tests {
 
         assert_eq!(execution.execution_id, execution_id);
         assert_eq!(execution.definition_id, "test-workflow");
-        assert_eq!(execution.status, ExecutionStatus::Pending);
-        assert_eq!(execution.version, 1);
+        assert_eq!(execution.status, ExecutionStatus::ExecutionStatusPending as i32);
     }
 
     #[tokio::test]
@@ -313,7 +313,7 @@ mod ddb_tests {
             .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        assert_eq!(execution.node_id, Some("node-1".to_string()));
+        assert_eq!(execution.node_id, "node-1".to_string());
     }
 
     #[tokio::test]
@@ -339,13 +339,12 @@ mod ddb_tests {
             .unwrap();
 
         storage
-            .update_execution_status(&ctx, &execution_id, ExecutionStatus::Running)
+            .update_execution_status(&ctx, &execution_id, ExecutionStatus::ExecutionStatusRunning)
             .await
             .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Running);
-        assert_eq!(execution.version, 2); // Version should increment
+        assert_eq!(execution.status, ExecutionStatus::ExecutionStatusRunning as i32);
     }
 
     #[tokio::test]
@@ -375,7 +374,7 @@ mod ddb_tests {
             .update_execution_status_with_version(
                 &ctx,
                 &execution_id,
-                ExecutionStatus::Running,
+                ExecutionStatus::ExecutionStatusRunning,
                 Some(1),
             )
             .await
@@ -386,7 +385,7 @@ mod ddb_tests {
             .update_execution_status_with_version(
                 &ctx,
                 &execution_id,
-                ExecutionStatus::Completed,
+                ExecutionStatus::ExecutionStatusCompleted,
                 Some(1),
             )
             .await;
@@ -425,7 +424,7 @@ mod ddb_tests {
             .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        assert_eq!(execution.output, Some(json!({"result": "success"})));
+        assert_eq!(execution.output_value(), Some(json!({"result": "success"})));
     }
 
     #[tokio::test]
@@ -457,16 +456,13 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        let version = execution.version;
-
         storage
-            .transfer_ownership(&ctx, &execution_id, "node-2", version)
+            .transfer_ownership(&ctx, &execution_id, "node-2", 1)
             .await
             .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        assert_eq!(execution.node_id, Some("node-2".to_string()));
+        assert_eq!(execution.node_id, "node-2".to_string());
     }
 
     #[tokio::test]
@@ -502,7 +498,7 @@ mod ddb_tests {
         let initial_heartbeat = initial_execution
             .last_heartbeat
             .expect("Initial heartbeat should be set when creating execution with node");
-        let initial_timestamp = initial_heartbeat.timestamp();
+        let initial_timestamp = initial_heartbeat.seconds;
 
         // Sleep long enough to ensure timestamp difference (at least 1 second for Unix timestamps)
         tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -515,7 +511,7 @@ mod ddb_tests {
         // Retry getting execution in case of eventual consistency
         let mut execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         let mut retries = 0;
-        while execution.last_heartbeat.map(|h| h.timestamp()) == Some(initial_timestamp)
+        while execution.last_heartbeat.map(|h| h.seconds) == Some(initial_timestamp)
             && retries < 5
         {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -526,7 +522,7 @@ mod ddb_tests {
         let updated_heartbeat = execution
             .last_heartbeat
             .expect("Heartbeat should be updated");
-        let updated_timestamp = updated_heartbeat.timestamp();
+        let updated_timestamp = updated_heartbeat.seconds;
         assert!(
             updated_timestamp > initial_timestamp,
             "Heartbeat should be updated after sleep and update_heartbeat call (initial: {}, updated: {})",
@@ -573,7 +569,7 @@ mod ddb_tests {
         assert_eq!(step_exec.step_execution_id, step_exec_id);
         assert_eq!(step_exec.execution_id, execution_id);
         assert_eq!(step_exec.step_id, "step-1");
-        assert_eq!(step_exec.status, StepExecutionStatus::Running);
+        assert_eq!(step_exec.status, StepStatus::StepStatusRunning as i32);
         assert_eq!(step_exec.attempt, 1);
     }
 
@@ -608,7 +604,7 @@ mod ddb_tests {
             .complete_step_execution(
                 &ctx,
                 &step_exec_id,
-                StepExecutionStatus::Completed,
+                StepStatus::StepStatusCompleted,
                 Some(json!({"result": "success"})),
                 None,
             )
@@ -619,8 +615,9 @@ mod ddb_tests {
             .get_step_execution(&ctx, &step_exec_id)
             .await
             .unwrap();
-        assert_eq!(step_exec.status, StepExecutionStatus::Completed);
-        assert_eq!(step_exec.output, Some(json!({"result": "success"})));
+        assert_eq!(step_exec.status, StepStatus::StepStatusCompleted as i32);
+        let output_val = step_exec.output_value();
+        assert_eq!(output_val, Some(json!({"result": "success"})));
     }
 
     #[tokio::test]
@@ -740,23 +737,23 @@ mod ddb_tests {
             .unwrap();
 
         storage
-            .update_execution_status(&ctx, &exec1, ExecutionStatus::Running)
+            .update_execution_status(&ctx, &exec1, ExecutionStatus::ExecutionStatusRunning)
             .await
             .unwrap();
         storage
-            .update_execution_status(&ctx, &exec2, ExecutionStatus::Completed)
+            .update_execution_status(&ctx, &exec2, ExecutionStatus::ExecutionStatusCompleted)
             .await
             .unwrap();
 
         let running = storage
-            .list_executions_by_status(&ctx, vec![ExecutionStatus::Running], None)
+            .list_executions_by_status(&ctx, vec![ExecutionStatus::ExecutionStatusRunning], None)
             .await
             .unwrap();
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].execution_id, exec1);
 
         let completed = storage
-            .list_executions_by_status(&ctx, vec![ExecutionStatus::Completed], None)
+            .list_executions_by_status(&ctx, vec![ExecutionStatus::ExecutionStatusCompleted], None)
             .await
             .unwrap();
         assert_eq!(completed.len(), 1);
@@ -793,7 +790,7 @@ mod ddb_tests {
             .unwrap();
 
         storage
-            .update_execution_status(&ctx, &execution_id, ExecutionStatus::Running)
+            .update_execution_status(&ctx, &execution_id, ExecutionStatus::ExecutionStatusRunning)
             .await
             .unwrap();
 
@@ -802,7 +799,7 @@ mod ddb_tests {
 
         // List stale executions (threshold = 1 second, but we only waited 100ms, so should be empty)
         let stale = storage
-            .list_stale_executions(&ctx, 1, vec![ExecutionStatus::Running])
+            .list_stale_executions(&ctx, 1, vec![ExecutionStatus::ExecutionStatusRunning])
             .await
             .unwrap();
         assert_eq!(stale.len(), 0);
@@ -812,7 +809,7 @@ mod ddb_tests {
 
         // Now should be stale
         let stale = storage
-            .list_stale_executions(&ctx, 1, vec![ExecutionStatus::Running])
+            .list_stale_executions(&ctx, 1, vec![ExecutionStatus::ExecutionStatusRunning])
             .await
             .unwrap();
         assert_eq!(stale.len(), 1);
@@ -899,14 +896,14 @@ mod ddb_tests {
 
         // Each tenant should only see their own executions
         let running1 = storage
-            .list_executions_by_status(&ctx1, vec![ExecutionStatus::Pending], None)
+            .list_executions_by_status(&ctx1, vec![ExecutionStatus::ExecutionStatusPending], None)
             .await
             .unwrap();
         assert_eq!(running1.len(), 1);
         assert_eq!(running1[0].execution_id, exec1);
 
         let running2 = storage
-            .list_executions_by_status(&ctx2, vec![ExecutionStatus::Pending], None)
+            .list_executions_by_status(&ctx2, vec![ExecutionStatus::ExecutionStatusPending], None)
             .await
             .unwrap();
         assert_eq!(running2.len(), 1);

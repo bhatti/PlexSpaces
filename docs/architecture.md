@@ -908,6 +908,32 @@ struct Tuple {
 }
 ```
 
+## Proto-First Data Model
+
+All data contracts in PlexSpaces are defined in Protocol Buffers first, then implemented in Rust. This ensures polyglot consistency across Rust, Python, TypeScript, and Go.
+
+### Consolidated Type Locations
+
+| Domain | Proto file | Rust crate |
+|--------|------------|------------|
+| Actor types, error codes | `proto/plexspaces/v1/actors/types.proto` | `plexspaces_actor` |
+| Actor runtime RPCs | `proto/plexspaces/v1/actors/actor_runtime.proto` | `plexspaces_actor` |
+| Supervision types | `proto/plexspaces/v1/supervision/supervision.proto` | `plexspaces_actor` |
+| Application types | `proto/plexspaces/v1/application/application.proto` | `plexspaces_application` |
+| Workflow types | `proto/plexspaces/v1/workflow/workflow.proto` | `plexspaces_workflow` |
+| Config (AWS, SQS, node) | `proto/plexspaces/v1/config.proto` | `plexspaces_node` |
+| Request context | `proto/plexspaces/v1/common.proto` | `plexspaces_actor` (via `RequestContextExt`) |
+| Node/scheduler errors | `proto/plexspaces/v1/node/types.proto` | `plexspaces_node`, `plexspaces_scheduler` |
+| Service names | `proto/plexspaces/prv/services/services.proto` | `plexspaces_actor` |
+
+### Crate Authority
+
+After the Phase 9 consolidation, `crates/core` has been merged into `crates/actor`. The `plexspaces_actor` crate is now the single authority for:
+- `ActorId`, `ActorContext`, `ActorRef`, `Actor` trait
+- `BehaviorError`, `ActorError`, `ActorIdError`
+- `ServiceLocator`, `RequestContext`, `RequestContextExt`
+- All service traits (`ChannelService`, `ProcessGroupService`, `ActorService`, etc.)
+
 ## Observability
 
 ### Metrics
@@ -1337,7 +1363,7 @@ graph LR
 All API responses containing sensitive data use the `SecretMasker` utility:
 
 ```rust
-use plexspaces_core::{mask_release_spec, SecretMasker};
+use plexspaces_actor::{mask_release_spec, SecretMasker};
 
 // Mask all secrets in ReleaseSpec before returning via API
 let masked_spec = mask_release_spec(release_spec);

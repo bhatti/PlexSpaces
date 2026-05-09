@@ -11,6 +11,7 @@ from datetime import (
 from typing import (
     Dict,
     List,
+    Optional,
 )
 
 import betterproto
@@ -25,7 +26,7 @@ class SupervisionStrategy(betterproto.Enum):
 
     UNSPECIFIED = 0
     ONE_FOR_ONE = 1
-    """Restart only the failed child"""
+    """Restart only the failed child (default, most common)"""
 
     ONE_FOR_ALL = 2
     """Restart all children if one fails"""
@@ -34,27 +35,29 @@ class SupervisionStrategy(betterproto.Enum):
     """Restart failed child and all children started after it"""
 
     SIMPLE_ONE_FOR_ONE = 4
-    """Simple one-for-one: all children are identical"""
+    """Simple one-for-one: all children are identical (worker pools)"""
+
+    ADAPTIVE = 5
+    """
+    Adaptive: learns from failure patterns and adapts strategy automatically
+    """
 
 
-class RestartStrategy(betterproto.Enum):
-    """Restart strategy for individual children"""
+class RestartPolicy(betterproto.Enum):
+    """Restart policy for individual children"""
 
     UNSPECIFIED = 0
     PERMANENT = 1
-    """Always restart child on failure"""
+    """Always restart child on failure (critical long-running processes)"""
 
     TRANSIENT = 2
-    """Restart only on abnormal termination"""
+    """Restart only on abnormal termination (tasks that may complete)"""
 
     TEMPORARY = 3
-    """Never restart child"""
+    """Never restart child (one-shot tasks)"""
 
-
-class ChildType(betterproto.Enum):
-    UNSPECIFIED = 0
-    ACTOR = 1
-    SUPERVISOR = 2
+    EXPONENTIAL_BACKOFF = 4
+    """Exponential backoff: delay restarts with increasing intervals"""
 
 
 class ChildStatus(betterproto.Enum):
@@ -122,6 +125,18 @@ class EventPropagation(betterproto.Enum):
     """
 
 
+class SupervisorEventType(betterproto.Enum):
+    """Event type emitted by a running supervisor"""
+
+    SUPERVISOR_EVENT_UNSPECIFIED = 0
+    SUPERVISOR_EVENT_CHILD_STARTED = 1
+    SUPERVISOR_EVENT_CHILD_STOPPED = 2
+    SUPERVISOR_EVENT_CHILD_RESTARTED = 3
+    SUPERVISOR_EVENT_CHILD_FAILED = 4
+    SUPERVISOR_EVENT_MAX_RESTARTS_EXCEEDED = 5
+    SUPERVISOR_EVENT_STRATEGY_ADAPTED = 6
+
+
 class SupervisionErrorCode(betterproto.Enum):
     """
     / Supervision error types
@@ -156,6 +171,23 @@ class SupervisionErrorCode(betterproto.Enum):
 
 
 @dataclass(eq=False, repr=False)
+class AdaptiveConfig(betterproto.Message):
+    """Configuration for adaptive supervision strategy"""
+
+    learning_rate: float = betterproto.double_field(1)
+    """Learning rate (0.0–1.0): how quickly to adapt to failure patterns"""
+
+
+@dataclass(eq=False, repr=False)
+class ExponentialBackoffConfig(betterproto.Message):
+    """Configuration for exponential backoff restart policy"""
+
+    initial_delay_ms: int = betterproto.uint64_field(1)
+    max_delay_ms: int = betterproto.uint64_field(2)
+    factor: float = betterproto.double_field(3)
+
+
+@dataclass(eq=False, repr=False)
 class ChildSpec(betterproto.Message):
     """
     Child specification
@@ -173,15 +205,29 @@ class ChildSpec(betterproto.Message):
 
      Identity uses `ActorIdentity` (name + actor_type). The canonical `ActorId`
      string is derived at runtime when namespace and node_id are known.
+
+     This is the canonical merged definition covering both supervision (metadata)
+     and application-level deployment (role, args, behavior_kind, nested supervisor).
     """
 
     actor_identity: "__common_v1__.ActorIdentity" = betterproto.message_field(1)
     """Instance name + behavior class for this supervised process."""
 
-    restart_strategy: "RestartStrategy" = betterproto.enum_field(2)
+    role: str = betterproto.string_field(2)
+    """
+    Role of this child within the application (e.g. "worker", "leader", "supervisor").
+     Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+    """
+
+    args: Dict[str, str] = betterproto.map_field(
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """Arguments to pass to start function"""
+
+    restart: "RestartPolicy" = betterproto.enum_field(4)
     """How to handle child failures"""
 
-    shutdown_timeout: timedelta = betterproto.message_field(3)
+    shutdown_timeout: timedelta = betterproto.message_field(5)
     """
     Shutdown timeout for graceful termination
      - None/0 = brutal_kill (immediate)
@@ -189,32 +235,46 @@ class ChildSpec(betterproto.Message):
      - For supervisors: typically set high or infinity to allow children to shutdown
     """
 
-    child_type: "ChildType" = betterproto.enum_field(4)
-    """Child type: actor (worker) or supervisor"""
+    supervisor: Optional["SupervisorSpec"] = betterproto.message_field(6, optional=True)
+    """Nested supervisor spec (when role = "supervisor")"""
 
-    metadata: Dict[str, str] = betterproto.map_field(
-        5, betterproto.TYPE_STRING, betterproto.TYPE_STRING
-    )
-    """
-    Metadata for child configuration
-     Can include:
-     - "start_module": Module name for recreation
-     - "start_function": Function to call
-     - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
-    """
-
-    facets: List["__common_v1__.Facet"] = betterproto.message_field(6)
+    facets: List["__common_v1__.Facet"] = betterproto.message_field(7)
     """
     Facet configuration (for automatic attachment during actor creation)
      Facets are attached in priority order (high priority first) before actor.init() is called
      All facets are automatically restored during supervisor restart
-     Phase 1: Unified Lifecycle - Multiple facets support
+    """
+
+    behavior_kind: Optional[str] = betterproto.string_field(8, optional=True)
+    """
+    OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent").
+     When set, process_message spans and actor registration logs show this instead of the child id.
+    """
+
+    metadata: Dict[str, str] = betterproto.map_field(
+        10, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """
+    Metadata for child configuration
+     Can include: "start_module", "start_function", "supervisor_strategy"
+    """
+
+    exponential_backoff: Optional["ExponentialBackoffConfig"] = (
+        betterproto.message_field(11, optional=True)
+    )
+    """
+    Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
     """
 
 
 @dataclass(eq=False, repr=False)
-class SupervisorConfig(betterproto.Message):
-    """Supervisor configuration"""
+class SupervisorSpec(betterproto.Message):
+    """
+    Supervisor specification (canonical definition)
+
+     Used everywhere supervision trees are configured: application deployment,
+     runtime supervisor creation, and gRPC supervisor management API.
+    """
 
     strategy: "SupervisionStrategy" = betterproto.enum_field(1)
     """Supervision strategy"""
@@ -222,8 +282,8 @@ class SupervisorConfig(betterproto.Message):
     max_restarts: int = betterproto.uint32_field(2)
     """Maximum restart intensity (max restarts in period)"""
 
-    within_period: timedelta = betterproto.message_field(3)
-    """Time period for max_restarts"""
+    max_restart_window: timedelta = betterproto.message_field(3)
+    """Time window for restart counting"""
 
     children: List["ChildSpec"] = betterproto.message_field(4)
     """Child specifications"""
@@ -233,6 +293,11 @@ class SupervisorConfig(betterproto.Message):
     )
     """Supervisor metadata"""
 
+    adaptive: Optional["AdaptiveConfig"] = betterproto.message_field(6, optional=True)
+    """
+    Adaptive strategy configuration (when strategy = SUPERVISION_STRATEGY_ADAPTIVE)
+    """
+
 
 @dataclass(eq=False, repr=False)
 class SupervisorState(betterproto.Message):
@@ -241,8 +306,8 @@ class SupervisorState(betterproto.Message):
     supervisor_id: str = betterproto.string_field(1)
     """Supervisor ID"""
 
-    config: "SupervisorConfig" = betterproto.message_field(2)
-    """Configuration"""
+    spec: "SupervisorSpec" = betterproto.message_field(2)
+    """Specification"""
 
     children: List["ChildState"] = betterproto.message_field(3)
     """Current children"""
@@ -423,82 +488,33 @@ class SupervisorStats(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
-class CreateSupervisorRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-    config: "SupervisorConfig" = betterproto.message_field(2)
+class SupervisorEvent(betterproto.Message):
+    """Supervisor event with associated data (emitted to the event channel)"""
+
+    event_type: "SupervisorEventType" = betterproto.enum_field(1)
+    actor_id: str = betterproto.string_field(2)
+    restart_count: int = betterproto.uint32_field(3)
+    reason: str = betterproto.string_field(4)
+    new_strategy: "SupervisionStrategy" = betterproto.enum_field(5)
 
 
 @dataclass(eq=False, repr=False)
-class CreateSupervisorResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    supervisor_id: str = betterproto.string_field(2)
-    error_message: str = betterproto.string_field(3)
+class ChildInfo(betterproto.Message):
+    """Child information returned by which_children()"""
+
+    child_id: str = betterproto.string_field(1)
+    role: str = betterproto.string_field(2)
+    status: "ChildStatus" = betterproto.enum_field(3)
+    restart_count: int = betterproto.uint32_field(4)
 
 
 @dataclass(eq=False, repr=False)
-class AddChildRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-    child_spec: "ChildSpec" = betterproto.message_field(2)
+class ChildCount(betterproto.Message):
+    """Child counts returned by count_children()"""
 
-
-@dataclass(eq=False, repr=False)
-class AddChildResponse(betterproto.Message):
-    success: bool = betterproto.bool_field(1)
-    error_message: str = betterproto.string_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class RemoveChildRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-    child_id: str = betterproto.string_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class StartSupervisorRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class StopSupervisorRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-    timeout: timedelta = betterproto.message_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class GetSupervisorStateRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class GetSupervisorStateResponse(betterproto.Message):
-    state: "SupervisorState" = betterproto.message_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class ListSupervisorsRequest(betterproto.Message):
-    namespace: str = betterproto.string_field(1)
-    """Optional filter"""
-
-
-@dataclass(eq=False, repr=False)
-class ListSupervisorsResponse(betterproto.Message):
-    supervisors: List["SupervisorState"] = betterproto.message_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class RestartChildRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-    child_id: str = betterproto.string_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class GetSupervisorStatsRequest(betterproto.Message):
-    supervisor_id: str = betterproto.string_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class GetSupervisorStatsResponse(betterproto.Message):
-    stats: "SupervisorStats" = betterproto.message_field(1)
+    actors: int = betterproto.uint32_field(1)
+    supervisors: int = betterproto.uint32_field(2)
+    total: int = betterproto.uint32_field(3)
 
 
 @dataclass(eq=False, repr=False)

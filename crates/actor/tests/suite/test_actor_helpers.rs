@@ -2,11 +2,11 @@
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // Shared helpers for integration tests that call [`Actor::start`], which registers the actor
-// via [`plexspaces_core::ServiceLocator::actor_registry`]. Plain [`Actor::new`] installs a stub
+// via [`plexspaces_actor::ServiceLocator::actor_registry`]. Plain [`Actor::new`] installs a stub
 // locator without a registry and causes `register_in_registry` to fail.
 
-use plexspaces_actor::Actor;
-use plexspaces_core::{ActorContext, ActorId, BehaviorType, ServiceLocator};
+use plexspaces_actor::ActorInstance as Actor;
+use plexspaces_actor::{ActorContext, ActorId, BehaviorType, ServiceLocator};
 use plexspaces_mailbox::Mailbox;
 use std::sync::Arc;
 
@@ -68,7 +68,7 @@ fn normalized_test_actor_id(
 /// so [`Actor::start`] can register with [`ActorRegistry`].
 pub async fn actor_with_default_service_locator(
     id: impl Into<TestActorIdentity>,
-    behavior: Box<dyn plexspaces_core::Actor>,
+    behavior: Box<dyn plexspaces_actor::Actor>,
     mailbox: Mailbox,
     tenant_id: String,
     namespace: String,
@@ -95,7 +95,7 @@ pub async fn actor_with_default_service_locator(
         }
     };
     // Set self_ref so ctx.actor_id() works during init()
-    let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+    let self_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone())
         .expect("test actor self_ref should be valid");
     let context_inner = Arc::unwrap_or_clone(context).with_self_ref(self_ref);
     Actor::new(actor_id, behavior, mailbox, tenant_id, namespace, None)

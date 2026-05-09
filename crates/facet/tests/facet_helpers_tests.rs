@@ -6,7 +6,7 @@
 // Tests for facet_helpers::create_facets_from_config
 // Verifies multi-facet object, single virtual_actor key, and legacy flat object formats
 
-use plexspaces_core::service_locator_trait::ServiceLocator;
+use plexspaces_actor::service_locator_trait::ServiceLocator;
 use plexspaces_facet::facet_helpers::create_facets_from_config;
 use plexspaces_node::{Node, NodeBuilder};
 use serde_json::{json, Value};
@@ -51,16 +51,6 @@ async fn get_shared_node() -> Arc<Node> {
             .await,
     );
 
-    {
-        use std::time::Duration;
-        use tokio::task::yield_now;
-        use tokio::time::sleep;
-        for _ in 0..5 {
-            yield_now().await;
-            sleep(Duration::from_millis(10)).await;
-        }
-    }
-
     SHARED_NODE.get_or_init(|| node.clone()).clone()
 }
 
@@ -76,7 +66,7 @@ async fn ensure_facet_helpers_services(node: &Node) {
 #[derive(Clone, Copy)]
 enum FacetHelpersCase {
     MultiFacet,
-    MultiFacetWithProcessGroup,
+    MultiFacetSkipsUnavailableProcessGroup,
     SingleVirtualActor,
     LegacyFlatObject,
     EmptyObject,
@@ -95,7 +85,7 @@ fn case_config(case: FacetHelpersCase) -> Value {
                 "journal_storage": "memory"
             }
         }),
-        FacetHelpersCase::MultiFacetWithProcessGroup => json!({
+        FacetHelpersCase::MultiFacetSkipsUnavailableProcessGroup => json!({
             "virtual_actor": {
                 "idle_timeout": "5m",
                 "activation_strategy": "lazy"
@@ -135,11 +125,14 @@ fn assert_facets(case: FacetHelpersCase, facets: &[Box<dyn plexspaces_facet::Fac
             assert!(types.contains(&"virtual_actor".to_string()), "{types:?}");
             assert!(types.contains(&"durability".to_string()), "{types:?}");
         }
-        FacetHelpersCase::MultiFacetWithProcessGroup => {
-            assert_eq!(facets.len(), 2, "multi_facet_process_group");
+        FacetHelpersCase::MultiFacetSkipsUnavailableProcessGroup => {
+            assert_eq!(facets.len(), 1, "multi_facet_skips_unavailable_process_group");
             let types: Vec<String> = facets.iter().map(|f| f.facet_type().to_string()).collect();
             assert!(types.contains(&"virtual_actor".to_string()), "{types:?}");
-            assert!(types.contains(&"process_group".to_string()), "{types:?}");
+            assert!(
+                !types.contains(&"process_group".to_string()),
+                "{types:?}"
+            );
         }
         FacetHelpersCase::SingleVirtualActor => {
             assert_eq!(facets.len(), 1, "single virtual_actor");
@@ -177,7 +170,7 @@ async fn create_facets_from_config_table() {
 
     for case in [
         FacetHelpersCase::MultiFacet,
-        FacetHelpersCase::MultiFacetWithProcessGroup,
+        FacetHelpersCase::MultiFacetSkipsUnavailableProcessGroup,
         FacetHelpersCase::SingleVirtualActor,
         FacetHelpersCase::LegacyFlatObject,
         FacetHelpersCase::EmptyObject,

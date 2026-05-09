@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 
+use crate::storage::sql::{execution_input_to_value, make_step, step_config_value, step_next, step_type};
 use crate::storage::WorkflowStorage;
 use crate::types::*;
 
@@ -73,13 +74,13 @@ impl WorkflowExecutor {
 
         // Update to RUNNING (no version check on initial start)
         storage
-            .update_execution_status(&execution_id, ExecutionStatus::Running)
+            .update_execution_status(&execution_id, ExecutionStatus::ExecutionStatusRunning)
             .await?;
 
         // Handle empty workflow
         if definition.steps.is_empty() {
             storage
-                .update_execution_status(&execution_id, ExecutionStatus::Completed)
+                .update_execution_status(&execution_id, ExecutionStatus::ExecutionStatusCompleted)
                 .await?;
             return Ok(execution_id);
         }
@@ -120,13 +121,13 @@ impl WorkflowExecutor {
         // Handle empty workflow
         if definition.steps.is_empty() {
             storage
-                .update_execution_status(execution_id, ExecutionStatus::Completed)
+                .update_execution_status(execution_id, ExecutionStatus::ExecutionStatusCompleted)
                 .await?;
             return Ok(());
         }
 
         // Execute workflow starting from current state
-        let initial_input = execution.input.unwrap_or(json!({}));
+        let initial_input = execution_input_to_value(&execution.input).unwrap_or(json!({}));
         Self::execute_workflow_loop(storage, execution_id, &definition, initial_input).await
     }
 
@@ -194,14 +195,14 @@ impl WorkflowExecutor {
                     current_input = step_output.clone();
 
                     // Determine next step based on step type and configuration
-                    if step.step_type == StepType::Choice {
+                    if step_type(step) == StepType::StepTypeChoice {
                         // Choice step: read decision from step execution output
                         let history = storage.get_step_execution_history(execution_id).await?;
                         let choice_execution =
                             history.iter().filter(|s| s.step_id == step.id).last();
 
                         if let Some(exec) = choice_execution {
-                            if let Some(output) = &exec.output {
+                            if let Some(output) = exec.output_value() {
                                 if let Some(choice_taken) = output.get("choice_taken") {
                                     if choice_taken.is_null() {
                                         // No match and no default - workflow ends
@@ -228,22 +229,22 @@ impl WorkflowExecutor {
                         break;
                     } else if choice_path_taken {
                         // On a choice-selected path: only continue if explicit 'next' field
-                        if let Some(next_id) = &step.next {
+                        if let Some(next_id) = step_next(step) {
                             if !step_map.contains_key(next_id) {
                                 break;
                             }
-                            current_step_id = next_id.clone();
+                            current_step_id = next_id.to_string();
                             choice_path_taken = false;
                         } else {
                             // Choice-selected step with no 'next' - workflow ends
                             break;
                         }
-                    } else if let Some(next_id) = &step.next {
+                    } else if let Some(next_id) = step_next(step) {
                         // Custom ordering via 'next' field
                         if !step_map.contains_key(next_id) {
                             break;
                         }
-                        current_step_id = next_id.clone();
+                        current_step_id = next_id.to_string();
                     } else {
                         // Sequential ordering - find next in array
                         current_step_index += 1;
@@ -256,7 +257,7 @@ impl WorkflowExecutor {
                 Err(_e) => {
                     // Step failed - mark workflow as failed
                     storage
-                        .update_execution_status(execution_id, ExecutionStatus::Failed)
+                        .update_execution_status(execution_id, ExecutionStatus::ExecutionStatusFailed)
                         .await?;
                     return Ok(());
                 }
@@ -268,7 +269,7 @@ impl WorkflowExecutor {
             .update_execution_output(execution_id, current_input)
             .await?;
         storage
-            .update_execution_status(execution_id, ExecutionStatus::Completed)
+            .update_execution_status(execution_id, ExecutionStatus::ExecutionStatusCompleted)
             .await?;
 
         Ok(())
@@ -295,32 +296,32 @@ impl WorkflowExecutor {
         input: Value,
     ) -> Result<Value, WorkflowError> {
         // Handle parallel steps differently
-        if step.step_type == StepType::Parallel {
+        if step_type(step) == StepType::StepTypeParallel {
             return Self::execute_parallel_step(storage, execution_id, step, input).await;
         }
 
         // Handle map steps differently
-        if step.step_type == StepType::Map {
+        if step_type(step) == StepType::StepTypeMap {
             return Self::execute_map_step(storage, execution_id, step, input).await;
         }
 
         // Handle choice steps differently
-        if step.step_type == StepType::Choice {
+        if step_type(step) == StepType::StepTypeChoice {
             return Self::execute_choice_step(storage, execution_id, step, input).await;
         }
 
         // Handle wait steps differently
-        if step.step_type == StepType::Wait {
+        if step_type(step) == StepType::StepTypeWait {
             return Self::execute_wait_step(storage, execution_id, step, input).await;
         }
 
         // Handle signal steps differently
-        if step.step_type == StepType::Signal {
+        if step_type(step) == StepType::StepTypeSignal {
             return Self::execute_signal_step(storage, execution_id, step, input).await;
         }
 
         // Regular task execution with retry logic
-        let retry_policy = step.retry_policy.as_ref();
+        let retry_policy = step.retry.as_ref();
         let max_attempts = retry_policy.map(|p| p.max_attempts).unwrap_or(1);
 
         let mut attempt = 1;
@@ -341,7 +342,7 @@ impl WorkflowExecutor {
                     storage
                         .complete_step_execution(
                             &step_exec_id,
-                            StepExecutionStatus::Completed,
+                            StepStatus::StepStatusCompleted,
                             Some(output.clone()),
                             None,
                         )
@@ -357,7 +358,7 @@ impl WorkflowExecutor {
                         storage
                             .complete_step_execution(
                                 &step_exec_id,
-                                StepExecutionStatus::Failed,
+                                StepStatus::StepStatusFailed,
                                 None,
                                 Some(error_msg.clone()),
                             )
@@ -375,7 +376,7 @@ impl WorkflowExecutor {
                         storage
                             .complete_step_execution(
                                 &step_exec_id,
-                                StepExecutionStatus::Failed,
+                                StepStatus::StepStatusFailed,
                                 None,
                                 Some(error_msg),
                             )
@@ -395,6 +396,12 @@ impl WorkflowExecutor {
         )))
     }
 
+    /// Extract a u64 from a serde_json::Value that may store numbers as f64
+    /// (which happens when values round-trip through prost_types::Struct).
+    fn json_as_u64(v: &Value) -> Option<u64> {
+        v.as_u64().or_else(|| v.as_f64().map(|f| f as u64))
+    }
+
     /// Simulate step execution (TDD minimal implementation)
     ///
     /// ## Purpose
@@ -406,13 +413,13 @@ impl WorkflowExecutor {
     ///
     /// Real implementation will invoke actual actor methods
     fn simulate_step_execution(step: &Step, input: &Value, attempt: u32) -> Result<Value, String> {
-        let action = step.config.get("action").and_then(|v| v.as_str());
+        let config = step_config_value(step);
+        let action = config.get("action").and_then(|v| v.as_str());
 
         match action {
             Some("fail") => {
                 // Intentional failure for testing
-                let error = step
-                    .config
+                let error = config
                     .get("error")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Step failed");
@@ -420,10 +427,9 @@ impl WorkflowExecutor {
             }
             Some("flaky") => {
                 // Fails first N times, then succeeds
-                let fail_count = step
-                    .config
+                let fail_count = config
                     .get("fail_count")
-                    .and_then(|v| v.as_u64())
+                    .and_then(|v| v.as_f64().map(|f| f as u64).or_else(|| v.as_u64()))
                     .unwrap_or(0) as u32;
 
                 if attempt <= fail_count {
@@ -446,8 +452,7 @@ impl WorkflowExecutor {
             }
             Some("transform") => {
                 // Transform input data
-                let operation = step
-                    .config
+                let operation = config
                     .get("operation")
                     .and_then(|v| v.as_str())
                     .unwrap_or("default");
@@ -474,27 +479,21 @@ impl WorkflowExecutor {
             }
             Some("multiply") => {
                 // Multiply input by factor
-                let factor = step
-                    .config
+                let factor = config
                     .get("factor")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(1);
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0) as u64;
 
-                if let Some(n) = input.as_u64() {
-                    Ok(json!({
-                        "result": n * factor
-                    }))
-                } else {
-                    Ok(json!({
-                        "input": input,
-                        "factor": factor,
-                        "result": 0
-                    }))
-                }
+                let n = input.as_f64().map(|f| f as u64).unwrap_or(
+                    input.as_u64().unwrap_or(0)
+                );
+                Ok(json!({
+                    "result": n * factor
+                }))
             }
             Some("succeed") | _ => {
                 // Check if step has custom output defined in config
-                if let Some(custom_output) = step.config.get("output") {
+                if let Some(custom_output) = config.get("output") {
                     // Use custom output from config (for tests)
                     Ok(custom_output.clone())
                 } else if step.id == "say-hello" {
@@ -519,16 +518,15 @@ impl WorkflowExecutor {
     /// ## Formula
     /// backoff = min(initial_backoff * multiplier^(attempt-1), max_backoff)
     /// jittered_backoff = backoff * (1 + random(-jitter, +jitter))
-    fn calculate_backoff(policy: &RetryPolicy, attempt: u32) -> Duration {
-        let base_backoff = policy
-            .initial_backoff
-            .as_millis()
-            .checked_mul(policy.backoff_multiplier.powi((attempt - 1) as i32) as u128)
-            .unwrap_or(policy.max_backoff.as_millis());
+    fn calculate_backoff(policy: &RetryConfig, attempt: u32) -> Duration {
+        let initial_ms = policy.initial_interval_ms as u128;
+        let base_backoff = initial_ms
+            .checked_mul(policy.backoff_rate.powi((attempt - 1) as i32) as u128)
+            .unwrap_or(policy.max_interval_ms as u128);
 
-        let capped_backoff = base_backoff.min(policy.max_backoff.as_millis());
+        let capped_backoff = base_backoff.min(policy.max_interval_ms as u128);
 
-        // Apply jitter (for now, no jitter in tests - jitter=0.0)
+        // Apply jitter (for now, no jitter in tests)
         // In real implementation: jittered = capped * (1.0 + rand(-jitter, +jitter))
         Duration::from_millis(capped_backoff as u64)
     }
@@ -559,8 +557,8 @@ impl WorkflowExecutor {
             .await?;
 
         // Extract branches from config (clone to avoid lifetime issues)
-        let branches = step
-            .config
+        let step_cfg = step_config_value(step);
+        let branches = step_cfg
             .get("branches")
             .and_then(|b| b.as_array())
             .ok_or_else(|| {
@@ -575,7 +573,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &parent_step_exec_id,
-                    StepExecutionStatus::Completed,
+                    StepStatus::StepStatusCompleted,
                     Some(json!({"branches": []})),
                     None,
                 )
@@ -596,15 +594,15 @@ impl WorkflowExecutor {
                 .to_string();
 
             // Create a synthetic Step for the branch
-            let branch_step = Step {
-                id: branch_id.clone(),
-                name: format!("Branch: {}", branch_id),
-                step_type: StepType::Task,
-                config: branch_config.clone(),
-                next: None,
-                on_error: None,
-                retry_policy: None,
-            };
+            let branch_step = make_step(
+                branch_id.clone(),
+                format!("Branch: {}", branch_id),
+                StepType::StepTypeTask,
+                branch_config.clone(),
+                None,
+                None,
+                None,
+            );
 
             // Clone data for async task
             let storage_clone = storage.clone();
@@ -614,7 +612,7 @@ impl WorkflowExecutor {
             // Spawn concurrent branch execution
             let task = tokio::spawn(async move {
                 // Simulate delay if specified
-                if let Some(delay_ms) = branch_config.get("delay_ms").and_then(|v| v.as_u64()) {
+                if let Some(delay_ms) = branch_config.get("delay_ms").and_then(|v| Self::json_as_u64(v)) {
                     sleep(Duration::from_millis(delay_ms)).await;
                 }
 
@@ -664,7 +662,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &parent_step_exec_id,
-                    StepExecutionStatus::Failed,
+                    StepStatus::StepStatusFailed,
                     None,
                     first_error.clone(),
                 )
@@ -682,7 +680,7 @@ impl WorkflowExecutor {
         storage
             .complete_step_execution(
                 &parent_step_exec_id,
-                StepExecutionStatus::Completed,
+                StepStatus::StepStatusCompleted,
                 Some(aggregated_output.clone()),
                 None,
             )
@@ -717,8 +715,8 @@ impl WorkflowExecutor {
             .await?;
 
         // Extract items from config
-        let items = step
-            .config
+        let step_cfg_map = step_config_value(step);
+        let items = step_cfg_map
             .get("items")
             .and_then(|i| i.as_array())
             .ok_or_else(|| {
@@ -734,7 +732,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &parent_step_exec_id,
-                    StepExecutionStatus::Completed,
+                    StepStatus::StepStatusCompleted,
                     Some(empty_result.clone()),
                     None,
                 )
@@ -743,17 +741,16 @@ impl WorkflowExecutor {
         }
 
         // Get iterator config
-        let iterator = step.config.get("iterator").ok_or_else(|| {
+        let iterator = step_cfg_map.get("iterator").ok_or_else(|| {
             WorkflowError::InvalidDefinition(
                 "Map step must have 'iterator' configuration".to_string(),
             )
         })?;
 
         // Get max_concurrency limit (default: no limit)
-        let max_concurrency = step
-            .config
+        let max_concurrency = step_cfg_map
             .get("max_concurrency")
-            .and_then(|v| v.as_u64())
+            .and_then(|v| Self::json_as_u64(v))
             .unwrap_or(items.len() as u64) as usize;
 
         // Process items in batches to respect max_concurrency
@@ -784,15 +781,15 @@ impl WorkflowExecutor {
                     }
                 }
 
-                let item_step = Step {
-                    id: item_step_id.clone(),
-                    name: format!("Map Item {}", item_index),
-                    step_type: StepType::Task,
-                    config: item_config,
-                    next: None,
-                    on_error: None,
-                    retry_policy: None,
-                };
+                let item_step = make_step(
+                    item_step_id.clone(),
+                    format!("Map Item {}", item_index),
+                    StepType::StepTypeTask,
+                    item_config,
+                    None,
+                    None,
+                    None,
+                );
 
                 // Clone data for async task
                 let storage_clone = storage.clone();
@@ -802,8 +799,9 @@ impl WorkflowExecutor {
                 // Spawn task for this item
                 let task = tokio::spawn(async move {
                     // Simulate delay if specified
+                    let item_cfg = step_config_value(&item_step);
                     if let Some(delay_ms) =
-                        item_step.config.get("delay_ms").and_then(|v| v.as_u64())
+                        item_cfg.get("delay_ms").and_then(|v| Self::json_as_u64(v))
                     {
                         sleep(Duration::from_millis(delay_ms)).await;
                     }
@@ -854,7 +852,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &parent_step_exec_id,
-                    StepExecutionStatus::Failed,
+                    StepStatus::StepStatusFailed,
                     None,
                     first_error.clone(),
                 )
@@ -872,7 +870,7 @@ impl WorkflowExecutor {
         storage
             .complete_step_execution(
                 &parent_step_exec_id,
-                StepExecutionStatus::Completed,
+                StepStatus::StepStatusCompleted,
                 Some(map_output.clone()),
                 None,
             )
@@ -907,8 +905,8 @@ impl WorkflowExecutor {
             .await?;
 
         // Extract choices from config
-        let choices = step
-            .config
+        let choice_cfg = step_config_value(step);
+        let choices = choice_cfg
             .get("choices")
             .and_then(|c| c.as_array())
             .unwrap_or(&vec![])
@@ -951,7 +949,7 @@ impl WorkflowExecutor {
                     storage
                         .complete_step_execution(
                             &step_exec_id,
-                            StepExecutionStatus::Completed,
+                            StepStatus::StepStatusCompleted,
                             Some(json!({
                                 "choice_taken": next_step,
                                 "condition": {
@@ -971,11 +969,11 @@ impl WorkflowExecutor {
         }
 
         // No choice matched - check for default
-        if let Some(default_next) = step.config.get("default").and_then(|d| d.as_str()) {
+        if let Some(default_next) = choice_cfg.get("default").and_then(|d| d.as_str()) {
             storage
                 .complete_step_execution(
                     &step_exec_id,
-                    StepExecutionStatus::Completed,
+                    StepStatus::StepStatusCompleted,
                     Some(json!({
                         "choice_taken": default_next,
                         "condition": "default"
@@ -988,7 +986,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &step_exec_id,
-                    StepExecutionStatus::Completed,
+                    StepStatus::StepStatusCompleted,
                     Some(json!({
                         "choice_taken": null,
                         "condition": "no_match_no_default"
@@ -1074,17 +1072,18 @@ impl WorkflowExecutor {
             .await?;
 
         // Calculate wait duration from config
+        let wait_cfg = step_config_value(step);
         let wait_duration = if let Some(duration_ms) =
-            step.config.get("duration_ms").and_then(|v| v.as_u64())
+            wait_cfg.get("duration_ms").and_then(|v| Self::json_as_u64(v))
         {
             // Wait for milliseconds
             Duration::from_millis(duration_ms)
         } else if let Some(duration_secs) =
-            step.config.get("duration_secs").and_then(|v| v.as_f64())
+            wait_cfg.get("duration_secs").and_then(|v| v.as_f64())
         {
             // Wait for seconds (supports fractional seconds)
             Duration::from_secs_f64(duration_secs)
-        } else if let Some(until_str) = step.config.get("until").and_then(|v| v.as_str()) {
+        } else if let Some(until_str) = wait_cfg.get("until").and_then(|v| v.as_str()) {
             // Wait until specific timestamp
             match chrono::DateTime::parse_from_rfc3339(until_str) {
                 Ok(until_time) => {
@@ -1103,7 +1102,7 @@ impl WorkflowExecutor {
                     storage
                         .complete_step_execution(
                             &step_exec_id,
-                            StepExecutionStatus::Failed,
+                            StepStatus::StepStatusFailed,
                             None,
                             Some(format!("Invalid timestamp format: {}", until_str)),
                         )
@@ -1119,7 +1118,7 @@ impl WorkflowExecutor {
             storage
                 .complete_step_execution(
                     &step_exec_id,
-                    StepExecutionStatus::Failed,
+                    StepStatus::StepStatusFailed,
                     None,
                     Some(
                         "Wait step requires 'duration_ms', 'duration_secs', or 'until' config"
@@ -1141,7 +1140,7 @@ impl WorkflowExecutor {
         storage
             .complete_step_execution(
                 &step_exec_id,
-                StepExecutionStatus::Completed,
+                StepStatus::StepStatusCompleted,
                 Some(input.clone()),
                 None,
             )
@@ -1176,8 +1175,8 @@ impl WorkflowExecutor {
             .await?;
 
         // Extract signal name from config
-        let signal_name = step
-            .config
+        let signal_cfg = step_config_value(step);
+        let signal_name = signal_cfg
             .get("signal_name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
@@ -1187,7 +1186,7 @@ impl WorkflowExecutor {
             })?;
 
         // Extract optional timeout
-        let timeout_ms = step.config.get("timeout_ms").and_then(|v| v.as_u64());
+        let timeout_ms = signal_cfg.get("timeout_ms").and_then(|v| Self::json_as_u64(v));
 
         let poll_interval = Duration::from_millis(10); // Poll every 10ms
         let start_time = std::time::Instant::now();
@@ -1203,7 +1202,7 @@ impl WorkflowExecutor {
                 storage
                     .complete_step_execution(
                         &step_exec_id,
-                        StepExecutionStatus::Completed,
+                        StepStatus::StepStatusCompleted,
                         Some(merged_output.clone()),
                         None,
                     )
@@ -1225,7 +1224,7 @@ impl WorkflowExecutor {
                     storage
                         .complete_step_execution(
                             &step_exec_id,
-                            StepExecutionStatus::Failed,
+                            StepStatus::StepStatusFailed,
                             None,
                             Some(error_msg.clone()),
                         )
@@ -1278,7 +1277,7 @@ impl WorkflowExecutor {
         step: &Step,
         input: Value,
     ) -> Result<Value, WorkflowError> {
-        let retry_policy = step.retry_policy.as_ref();
+        let retry_policy = step.retry.as_ref();
         let max_attempts = retry_policy.map(|p| p.max_attempts).unwrap_or(1);
 
         let mut attempt = 1;
@@ -1299,7 +1298,7 @@ impl WorkflowExecutor {
                     storage
                         .complete_step_execution(
                             &step_exec_id,
-                            StepExecutionStatus::Completed,
+                            StepStatus::StepStatusCompleted,
                             Some(output.clone()),
                             None,
                         )
@@ -1315,7 +1314,7 @@ impl WorkflowExecutor {
                         storage
                             .complete_step_execution(
                                 &step_exec_id,
-                                StepExecutionStatus::Failed,
+                                StepStatus::StepStatusFailed,
                                 None,
                                 Some(error_msg.clone()),
                             )
@@ -1333,7 +1332,7 @@ impl WorkflowExecutor {
                         storage
                             .complete_step_execution(
                                 &step_exec_id,
-                                StepExecutionStatus::Failed,
+                                StepStatus::StepStatusFailed,
                                 None,
                                 Some(error_msg),
                             )
@@ -1357,45 +1356,34 @@ impl WorkflowExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::sql::make_workflow_definition;
+    use crate::types::{WorkflowExecutionExt};
     use serde_json::json;
 
     #[tokio::test]
     async fn test_executor_minimal() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create minimal definition
-        let def = WorkflowDefinition {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "step1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({}),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "test", "Test", "1.0",
+            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+        );
 
         storage.save_definition(&def).await.unwrap();
 
-        // Execute
         let execution_id =
             WorkflowExecutor::start_execution(&storage, "test", "1.0", json!({"test": "input"}))
                 .await
                 .unwrap();
 
-        // Verify execution was created
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
     }
 
     #[tokio::test]
     async fn test_workflow_not_found() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Try to execute non-existent workflow
         let result =
             WorkflowExecutor::start_execution(&storage, "non-existent", "1.0", json!({})).await;
 
@@ -1407,20 +1395,10 @@ mod tests {
     async fn test_parallel_step_missing_branches() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with parallel step but no branches config
-        let def = WorkflowDefinition {
-            id: "parallel-invalid".to_string(),
-            name: "Parallel Invalid".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "parallel-step".to_string(),
-                name: "Parallel Step".to_string(),
-                step_type: StepType::Parallel,
-                config: json!({}), // Missing "branches"
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "parallel-invalid", "Parallel Invalid", "1.0",
+            vec![make_step("parallel-step", "Parallel Step", StepType::StepTypeParallel, json!({}), None, None, None)],
+        );
         storage.save_definition(&def).await.unwrap();
 
         let execution_id =
@@ -1428,29 +1406,18 @@ mod tests {
                 .await
                 .unwrap();
 
-        // Should fail due to invalid config
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
     }
 
     #[tokio::test]
     async fn test_map_step_missing_items() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with map step but no items config
-        let def = WorkflowDefinition {
-            id: "map-invalid".to_string(),
-            name: "Map Invalid".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "map-step".to_string(),
-                name: "Map Step".to_string(),
-                step_type: StepType::Map,
-                config: json!({}), // Missing "items"
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "map-invalid", "Map Invalid", "1.0",
+            vec![make_step("map-step", "Map Step", StepType::StepTypeMap, json!({}), None, None, None)],
+        );
         storage.save_definition(&def).await.unwrap();
 
         let execution_id =
@@ -1458,32 +1425,18 @@ mod tests {
                 .await
                 .unwrap();
 
-        // Should fail due to invalid config
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
     }
 
     #[tokio::test]
     async fn test_map_step_missing_iterator() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with map step but no iterator config
-        let def = WorkflowDefinition {
-            id: "map-no-iterator".to_string(),
-            name: "Map No Iterator".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "map-step".to_string(),
-                name: "Map Step".to_string(),
-                step_type: StepType::Map,
-                config: json!({
-                    "items": [1, 2, 3]
-                    // Missing "iterator"
-                }),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "map-no-iterator", "Map No Iterator", "1.0",
+            vec![make_step("map-step", "Map Step", StepType::StepTypeMap, json!({"items": [1, 2, 3]}), None, None, None)],
+        );
         storage.save_definition(&def).await.unwrap();
 
         let execution_id =
@@ -1491,21 +1444,19 @@ mod tests {
                 .await
                 .unwrap();
 
-        // Should fail due to invalid config
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
     }
 
     #[tokio::test]
     async fn test_calculate_backoff() {
-        use std::time::Duration;
-
-        let policy = RetryPolicy {
+        // RetryConfig: initial_interval_ms=100, backoff_rate=2.0, max_interval_ms=10000
+        let policy = RetryConfig {
             max_attempts: 5,
-            initial_backoff: Duration::from_millis(100),
-            backoff_multiplier: 2.0,
-            max_backoff: Duration::from_secs(10),
-            jitter: 0.0,
+            initial_interval_ms: 100,
+            backoff_rate: 2.0,
+            max_interval_ms: 10000,
+            retryable_errors: vec![],
         };
 
         // First retry: 100ms * 2^0 = 100ms
@@ -1527,76 +1478,44 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_backoff_capped() {
-        use std::time::Duration;
-
-        let policy = RetryPolicy {
+        let policy = RetryConfig {
             max_attempts: 10,
-            initial_backoff: Duration::from_secs(1),
-            backoff_multiplier: 2.0,
-            max_backoff: Duration::from_secs(5),
-            jitter: 0.0,
+            initial_interval_ms: 1000,
+            backoff_rate: 2.0,
+            max_interval_ms: 5000,
+            retryable_errors: vec![],
         };
 
-        // Should cap at max_backoff (5s)
+        // Should cap at max_interval_ms (5s)
         let backoff = WorkflowExecutor::calculate_backoff(&policy, 5);
-        assert!(backoff.as_secs() <= 5);
+        assert!(backoff.as_millis() <= 5000);
     }
 
     #[tokio::test]
     async fn test_simulate_step_execution_actions() {
-        let step_succeed = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "succeed"}),
-            ..Default::default()
-        };
+        let step_succeed = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None);
         let result = WorkflowExecutor::simulate_step_execution(&step_succeed, &json!({}), 1);
         assert!(result.is_ok());
 
-        let step_fail = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "fail", "error": "Test error"}),
-            ..Default::default()
-        };
+        let step_fail = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "fail", "error": "Test error"}), None, None, None);
         let result = WorkflowExecutor::simulate_step_execution(&step_fail, &json!({}), 1);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Test error");
 
-        let step_generate = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "generate"}),
-            ..Default::default()
-        };
+        let step_generate = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "generate"}), None, None, None);
         let result = WorkflowExecutor::simulate_step_execution(&step_generate, &json!({}), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.get("generated_data").is_some());
         assert!(output.get("timestamp").is_some());
 
-        let step_transform = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "transform", "operation": "uppercase"}),
-            ..Default::default()
-        };
+        let step_transform = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "transform", "operation": "uppercase"}), None, None, None);
         let result = WorkflowExecutor::simulate_step_execution(&step_transform, &json!("hello"), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.get("result").and_then(|v| v.as_str()), Some("HELLO"));
 
-        let step_multiply = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "multiply", "factor": 3}),
-            ..Default::default()
-        };
+        let step_multiply = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "multiply", "factor": 3}), None, None, None);
         let result = WorkflowExecutor::simulate_step_execution(&step_multiply, &json!(5), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -1605,13 +1524,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simulate_step_execution_flaky() {
-        let step = Step {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            step_type: StepType::Task,
-            config: json!({"action": "flaky", "fail_count": 2}),
-            ..Default::default()
-        };
+        let step = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "flaky", "fail_count": 2}), None, None, None);
 
         // First attempt should fail
         let result = WorkflowExecutor::simulate_step_execution(&step, &json!({}), 1);
@@ -1635,21 +1548,10 @@ mod tests {
     async fn test_step_with_invalid_next_reference() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with step referencing non-existent next step
-        let def = WorkflowDefinition {
-            id: "invalid-next".to_string(),
-            name: "Invalid Next".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "step1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({"action": "succeed"}),
-                next: Some("non-existent-step".to_string()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "invalid-next", "Invalid Next", "1.0",
+            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), Some("non-existent-step".to_string()), None, None)],
+        );
         storage.save_definition(&def).await.unwrap();
 
         let execution_id =
@@ -1657,36 +1559,19 @@ mod tests {
                 .await
                 .unwrap();
 
-        // Should complete successfully (next step doesn't exist, so workflow ends)
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
     }
 
     #[tokio::test]
     async fn test_parallel_branch_missing_id() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
-        // Create workflow with parallel step but branch missing ID
-        let def = WorkflowDefinition {
-            id: "parallel-no-id".to_string(),
-            name: "Parallel No ID".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![Step {
-                id: "parallel-step".to_string(),
-                name: "Parallel Step".to_string(),
-                step_type: StepType::Parallel,
-                config: json!({
-                    "branches": [
-                        {
-                            // Missing "id"
-                            "action": "succeed"
-                        }
-                    ]
-                }),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+        let def = make_workflow_definition(
+            "parallel-no-id", "Parallel No ID", "1.0",
+            vec![make_step("parallel-step", "Parallel Step", StepType::StepTypeParallel,
+                json!({"branches": [{"action": "succeed"}]}), None, None, None)],
+        );
         storage.save_definition(&def).await.unwrap();
 
         let execution_id =
@@ -1694,8 +1579,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        // Should fail due to invalid config
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
     }
 }

@@ -9,7 +9,7 @@
 
 use plexspaces_actor::ActorRef;
 use plexspaces_common::RequestContext;
-use plexspaces_core::{service_locator_trait::ServiceLocator, ActorId};
+use plexspaces_actor::{service_locator_trait::ServiceLocator, ActorId, InitializableServiceLocator, RequestContextExt};
 use plexspaces_facet::capabilities::process_groups::{ProcessGroupFacet, ProcessGroupRegistry};
 use plexspaces_mailbox::{new_message, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -42,17 +42,17 @@ fn json_message(value: &serde_json::Value, message_type: &str) -> Message {
 struct EchoBehavior;
 
 #[async_trait::async_trait]
-impl plexspaces_core::Actor for EchoBehavior {
+impl plexspaces_actor::Actor for EchoBehavior {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
+        _ctx: &plexspaces_actor::ActorContext,
         _message: Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -166,11 +166,11 @@ async fn get_shared_node() -> Arc<Node> {
             .await,
     );
 
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     node.service_locator()
@@ -241,7 +241,7 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
     )
     .expect("test actor id should be valid");
     let actor_id_str = actor_id.to_string();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );

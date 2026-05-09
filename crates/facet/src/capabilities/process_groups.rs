@@ -46,7 +46,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::{Facet, FacetError, InterceptResult};
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use tracing::{debug, error, instrument, warn};
 
 /// Default priority for ProcessGroupFacet

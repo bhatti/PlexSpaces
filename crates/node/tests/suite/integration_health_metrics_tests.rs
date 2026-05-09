@@ -3,7 +3,7 @@
 //
 //! Integration tests for gRPC Health and Metrics endpoints
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 use plexspaces_node::{default_node_config, Node, NodeBuilder, NodeId};
 use plexspaces_proto::system::v1::ServingStatus;
 use std::sync::Arc;
@@ -13,8 +13,8 @@ use tonic_health::pb::health_client::HealthClient;
 use tonic_health::pb::HealthCheckRequest;
 
 /// Test helper to create a health reporter (standalone for testing)
-fn create_health_reporter() -> Arc<plexspaces_core::PlexSpacesHealthReporter> {
-    let (health_reporter, _) = plexspaces_core::PlexSpacesHealthReporter::new();
+fn create_health_reporter() -> Arc<plexspaces_actor::PlexSpacesHealthReporter> {
+    let (health_reporter, _) = plexspaces_actor::PlexSpacesHealthReporter::new();
     Arc::new(health_reporter)
 }
 
@@ -53,7 +53,7 @@ async fn test_health_check_service_specific() {
     assert_eq!(actor_service_status, ServingStatus::ServingStatusServing);
 
     let tuplespace_status = health_reporter
-        .get_service_status("plexspaces.tuplespace.v1.TuplePlexSpaceService")
+        .get_service_status("plexspaces.tuplespace.v1.TupleSpaceService")
         .await;
     assert_eq!(tuplespace_status, ServingStatus::ServingStatusServing);
 
@@ -110,7 +110,7 @@ async fn test_health_check_service_status_updates() {
 
     // Other services should still be SERVING
     let tuplespace_status = health_reporter
-        .get_service_status("plexspaces.tuplespace.v1.TuplePlexSpaceService")
+        .get_service_status("plexspaces.tuplespace.v1.TupleSpaceService")
         .await;
     assert_eq!(tuplespace_status, ServingStatus::ServingStatusServing);
 }
@@ -193,7 +193,7 @@ async fn test_health_check_get_all_service_statuses() {
 
     // Should have at least the default services
     assert!(all_statuses.contains_key("plexspaces.actor.v1.ActorService"));
-    assert!(all_statuses.contains_key("plexspaces.tuplespace.v1.TuplePlexSpaceService"));
+    assert!(all_statuses.contains_key("plexspaces.tuplespace.v1.TupleSpaceService"));
     assert!(all_statuses.contains_key("plexspaces.supervisor.v1.SupervisorService"));
 
     // All should be SERVING
@@ -369,7 +369,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     use plexspaces_services::actor_service::ActorServiceImpl;
 
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
     node.initialize_services().await.unwrap();
     let service_locator = node.service_locator();
 
@@ -378,8 +378,8 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
         node.id().as_str().to_string(),
     ));
 
-    // Begin shutdown via service locator
-    service_locator.request_shutdown();
+    // Set shutdown flag directly (no async task race)
+    service_locator.set_shutdown(true).await;
 
     // Try to create an actor - should be rejected
     let result = plexspaces_proto::actor::v1::actor_service_server::ActorService::spawn_actor(
@@ -419,7 +419,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     use plexspaces_services::actor_service::ActorServiceImpl;
 
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
     node.initialize_services().await.unwrap();
     let _service_locator = node.service_locator();
 
@@ -474,7 +474,7 @@ async fn test_health_status_propagation_on_shutdown() {
     let services = vec![
         "",
         "plexspaces.actor.v1.ActorService",
-        "plexspaces.tuplespace.v1.TuplePlexSpaceService",
+        "plexspaces.tuplespace.v1.TupleSpaceService",
         "plexspaces.supervisor.v1.SupervisorService",
     ];
 

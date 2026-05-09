@@ -120,9 +120,9 @@ impl InMemoryChannel {
     /// - [`ChannelError::InvalidConfiguration`]: Invalid capacity or backend
     ///
     /// ## Examples
-    /// ```rust
+    /// ```rust,no_run
     /// # use plexspaces_channel::*;
-    /// # use plexspaces_proto::plexspaces::channel::v1::*;
+    /// # use plexspaces_proto::channel::v1::*;
     /// # async fn example() -> ChannelResult<()> {
     /// let config = ChannelConfig {
     ///     name: "work-queue".to_string(),

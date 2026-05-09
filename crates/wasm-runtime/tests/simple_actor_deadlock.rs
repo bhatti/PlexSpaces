@@ -25,6 +25,7 @@
 //!
 //! The fix ensures component_state lock is dropped BEFORE acquiring reinstantiation_lock.
 
+
 #[cfg(feature = "component-model")]
 mod tests {
     /// Test that SimpleActor can handle concurrent messages without deadlock

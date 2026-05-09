@@ -365,6 +365,10 @@ mod redis_tests {
     use std::time::Duration;
     use tokio::time::sleep;
 
+    fn redis_url() -> String {
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
+    }
+
     async fn is_redis_available() -> bool {
         #[cfg(feature = "test-helpers")]
         {
@@ -372,17 +376,24 @@ mod redis_tests {
         }
         #[cfg(not(feature = "test-helpers"))]
         {
-            // Fallback: fast TCP connection check
-            use std::time::Duration;
-            use tokio::net::TcpStream;
-            use tokio::time::timeout;
-            timeout(
-                Duration::from_millis(500),
-                TcpStream::connect("localhost:6379"),
-            )
+            tokio::task::spawn_blocking(|| {
+                redis::Client::open(redis_url())
+                    .ok()
+                    .and_then(|client| client.get_connection().ok())
+                    .is_some()
+            })
             .await
-            .is_ok()
+            .unwrap_or(false)
         }
+    }
+
+    async fn skip_if_redis_unavailable() -> bool {
+        if is_redis_available().await {
+            return false;
+        }
+        eprintln!("⚠️  WARNING: Redis is not running. Skipping Redis test.");
+        eprintln!("To run Redis tests, start Redis: docker run -p 6379:6379 redis");
+        true
     }
 
     async fn create_redis_channel(name: &str) -> RedisChannel {
@@ -396,7 +407,7 @@ mod redis_tests {
             dlq_enabled: true,
             dead_letter_queue: format!("{}-dlq", name),
             backend_config: Some(channel_config::BackendConfig::Redis(RedisConfig {
-                url: "redis://localhost:6379".to_string(),
+                url: redis_url(),
                 stream_key: format!("test-stream:{}", name),
                 max_length: 1000,
                 consumer_group: "test-group".to_string(),
@@ -414,7 +425,7 @@ mod redis_tests {
     }
 
     async fn cleanup_redis(stream_name: &str) {
-        if let Ok(client) = redis::Client::open("redis://localhost:6379") {
+        if let Ok(client) = redis::Client::open(redis_url()) {
             if let Ok(mut conn) = client.get_connection() {
                 let _: Result<(), redis::RedisError> =
                     redis::cmd("DEL").arg(stream_name).query(&mut conn);
@@ -425,9 +436,7 @@ mod redis_tests {
     #[tokio::test]
     async fn test_redis_restart_recover_pending_messages() {
         use plexspaces_channel::Channel;
-        if !is_redis_available().await {
-            eprintln!("⚠️  WARNING: Redis is not running. Skipping Redis test.");
-            eprintln!("To run Redis tests, start Redis: docker run -p 6379:6379 redis");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -471,9 +480,7 @@ mod redis_tests {
     #[tokio::test]
     async fn test_redis_shutdown_graceful() {
         use plexspaces_channel::Channel;
-        if !is_redis_available().await {
-            eprintln!("⚠️  WARNING: Redis is not running. Skipping Redis test.");
-            eprintln!("To run Redis tests, start Redis: docker run -p 6379:6379 redis");
+        if skip_if_redis_unavailable().await {
             return;
         }
 

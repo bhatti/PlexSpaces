@@ -53,7 +53,7 @@
 //! ## Example
 //! ```rust,no_run
 //! use plexspaces_journaling::*;
-//! use plexspaces_core::JournalStorage;
+//! use plexspaces_actor::JournalStorage;
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -72,7 +72,8 @@
 
 use async_trait::async_trait;
 use metrics;
-use plexspaces_core::{ActorId, ActorService, JournalStorage, ServiceLocator};
+use plexspaces_common::RequestContextExt;
+use plexspaces_service_traits::{ActorId, ActorService, JournalStorage, ServiceLocatorBase};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
@@ -106,7 +107,7 @@ pub use plexspaces_proto::timer::v1::ReminderFired;
 /// ## Example
 /// ```rust,no_run
 /// use plexspaces_journaling::*;
-/// use plexspaces_core::JournalStorage;
+/// use plexspaces_actor::JournalStorage;
 /// use std::sync::Arc;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,7 +129,7 @@ pub struct ReminderFacet {
     actor_id: Arc<RwLock<Option<String>>>,
 
     /// ServiceLocator for looking up ActorService when sending messages
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 
     /// Journal storage backend (trait object for runtime polymorphism)
     storage: Arc<dyn JournalStorage>,
@@ -161,7 +162,7 @@ impl ReminderFacet {
     /// ## Example
     /// ```rust,no_run
     /// # use plexspaces_journaling::*;
-    /// # use plexspaces_core::{JournalStorage, ServiceLocator};
+    /// # use plexspaces_actor::{JournalStorage, ServiceLocator};
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let storage: Arc<dyn JournalStorage> = Arc::new(
@@ -175,7 +176,7 @@ impl ReminderFacet {
         storage: Arc<dyn JournalStorage>,
         config: Value,
         priority: i32,
-        service_locator: Arc<dyn ServiceLocator>,
+        service_locator: Arc<dyn ServiceLocatorBase>,
     ) -> Self {
         ReminderFacet {
             config,
@@ -199,7 +200,7 @@ impl ReminderFacet {
     /// New ReminderFacet with default priority (50) and empty config
     pub fn with_storage(
         storage: Arc<dyn JournalStorage>,
-        service_locator: Arc<dyn ServiceLocator>,
+        service_locator: Arc<dyn ServiceLocatorBase>,
     ) -> Self {
         Self::new(
             storage,
@@ -393,8 +394,8 @@ impl ReminderFacet {
                         }
                     };
 
-                    if let Some(actor_registry) = service_locator.actor_registry().await {
-                        let is_active = actor_registry.is_actor_state_active(&actor_id).await;
+                    if let Some(checker) = service_locator.get_actor_state_checker().await {
+                        let is_active = checker.is_actor_state_active(&actor_id).await;
                         if !is_active {
                             if let Some(factory) = service_locator.get_actor_factory().await {
                                 let _ = factory.activate_virtual_actor(&actor_id).await;
@@ -432,7 +433,7 @@ impl ReminderFacet {
                         };
 
                         // Use ActorService to send message (handles local/remote routing)
-                        let ctx = plexspaces_core::RequestContext::new_without_auth(
+                        let ctx = plexspaces_common::RequestContext::new_without_auth(
                             String::new(),
                             String::new(),
                         );
@@ -743,7 +744,8 @@ fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemT
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_core::{ActorId, ActorRef, ActorService, ServiceLocator};
+    use plexspaces_service_traits::{ActorId, ActorRef, ActorService};
+    use plexspaces_actor::ServiceLocator;
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;
@@ -754,7 +756,7 @@ mod tests {
     impl ActorService for MockActorService {
         async fn spawn_actor(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_common::RequestContext,
             _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented for tests".into())
@@ -762,7 +764,7 @@ mod tests {
 
         async fn send(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_common::RequestContext,
             _actor_id: &str,
             _message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -770,7 +772,7 @@ mod tests {
         }
     }
 
-    async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
+    async fn create_test_service_locator() -> Arc<dyn ServiceLocatorBase> {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
         service_locator
             .register_actor_service(Arc::new(MockActorService))

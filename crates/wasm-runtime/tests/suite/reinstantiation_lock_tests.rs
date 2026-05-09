@@ -39,6 +39,7 @@
 #[cfg(test)]
 #[cfg(feature = "component-model")]
 mod tests {
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::{ResourceLimits, WasmConfig, WasmRuntime};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -104,7 +105,7 @@ mod tests {
         .expect("Failed to load module");
 
         let config = test_config();
-        let actor_id = "test-actor-1".to_string();
+        let actor_id = ActorId::new("test-actor-1", "wasm", "default", "test-node").unwrap();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
@@ -286,7 +287,13 @@ mod tests {
         let config = test_config();
         let instances: Vec<_> = (0..num_actors)
             .map(|i| {
-                let actor_id = format!("test-actor-{}", i);
+                let actor_id = ActorId::new(
+                    format!("test-actor-{}", i),
+                    "wasm",
+                    "default",
+                    "test-node",
+                )
+                .unwrap();
                 let module = module.clone();
                 runtime.instantiate(
                     module,
@@ -476,7 +483,7 @@ mod tests {
         .expect("Failed to load module");
 
         let config = test_config();
-        let actor_id = "test-actor-lock".to_string();
+        let actor_id = ActorId::new("test-actor-lock", "wasm", "default", "test-node").unwrap();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
@@ -654,7 +661,7 @@ mod tests {
         .expect("Failed to load module");
 
         let config = test_config();
-        let actor_id = "test-actor-order".to_string();
+        let actor_id = ActorId::new("test-actor-order", "wasm", "default", "test-node").unwrap();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(

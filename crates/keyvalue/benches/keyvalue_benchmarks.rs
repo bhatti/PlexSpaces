@@ -53,7 +53,7 @@
 //! - Expect higher latency than a trivial HashMap; tune targets against your baseline.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use plexspaces_core::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
 use std::sync::Arc;
 use std::time::Duration;

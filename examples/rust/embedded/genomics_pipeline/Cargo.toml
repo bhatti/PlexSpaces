@@ -16,7 +16,7 @@ description = "DNA sequencing pipeline demonstrating durable workflows with Plex
 
 [dependencies]
 # PlexSpaces crates
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-proto = { path = "../../../../crates/proto" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }

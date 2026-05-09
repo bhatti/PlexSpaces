@@ -6,14 +6,14 @@
 // crates/services or crates/node.
 
 use plexspaces_actor::TestServiceLocatorStub;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_sdk::leader_worker;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_list_worker_node_ids_fails_when_node_registry_not_registered() {
     let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
-    let sl: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let sl: Arc<dyn plexspaces_actor::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
 
     let err = leader_worker::list_worker_node_ids(&ctx, sl, None, 100)
         .await

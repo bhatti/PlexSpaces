@@ -18,7 +18,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::RwLock;
 
-    /// ChannelService trait - mirrors plexspaces_core::ChannelService
+    /// ChannelService trait - mirrors plexspaces_actor::ChannelService
     /// Defined here to avoid circular dependency with plexspaces-core
     #[async_trait]
     pub trait ChannelService: Send + Sync {

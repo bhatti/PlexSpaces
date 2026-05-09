@@ -12,7 +12,7 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContextExt};
 use plexspaces_node::{Node, NodeBuilder};
 
 /// Helper to create a proto Message with payload
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;
     println!("\nSpawning counter on node1...");
-    let req_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let req_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     )

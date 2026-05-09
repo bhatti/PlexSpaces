@@ -25,6 +25,7 @@
 #![warn(clippy::all)]
 
 // Main node module
+
 mod r#mod;
 pub use r#mod::*;
 
@@ -104,9 +105,10 @@ pub mod service_wrappers;
 pub use node_builder::NodeBuilder;
 
 // Make Node implement Service trait for ServiceLocator
-impl plexspaces_core::Service for Node {
+impl plexspaces_actor::Service for Node {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::NODE.to_string()
+        use plexspaces_common::ServiceNameExt;
+        plexspaces_actor::ServiceName::ServiceNameNode.as_str().to_string()
     }
 }
 

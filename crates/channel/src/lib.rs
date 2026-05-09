@@ -72,9 +72,10 @@
 //! ## Examples
 //!
 //! ### Basic Usage - InMemory Channel
-//! ```rust
+//! ```rust,no_run
 //! use plexspaces_channel::*;
-//! use plexspaces_proto::plexspaces::channel::v1::*;
+//! use plexspaces_proto::channel::v1::*;
+//! use plexspaces_proto::common::v1::Message;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create in-memory channel with FIFO ordering
@@ -106,9 +107,10 @@
 //! ```
 //!
 //! ### Pub/Sub Pattern
-//! ```rust
+//! ```rust,no_run
 //! use plexspaces_channel::*;
-//! use plexspaces_proto::plexspaces::channel::v1::*;
+//! use plexspaces_proto::channel::v1::*;
+//! use plexspaces_proto::common::v1::Message;
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -186,6 +188,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+
 mod channel;
 mod in_memory;
 mod observability;
@@ -213,10 +216,10 @@ mod process_group_backend;
 
 // ChannelServiceImpl — bridges ChannelService trait to Channel backends
 // Enabled when plexspaces-core is available (via process-group-backend or channel-service feature)
-#[cfg(any(feature = "channel-service", feature = "process-group-backend", test))]
+#[cfg(any(feature = "channel-service", feature = "process-group-backend"))]
 pub mod channel_service;
 
-#[cfg(any(feature = "channel-service", feature = "process-group-backend", test))]
+#[cfg(any(feature = "channel-service", feature = "process-group-backend"))]
 pub use channel_service::ChannelServiceImpl;
 
 // Mock backend for testing

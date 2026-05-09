@@ -25,6 +25,7 @@
 //! - GenFSM: Any → handle_transition()
 //! - Fallback: handle_message()
 
+use plexspaces_actor::ActorId;
 use plexspaces_wasm_runtime::{WasmInstance, WasmRuntime};
 use wasmtime::StoreLimitsBuilder;
 
@@ -147,7 +148,7 @@ async fn test_genserver_routes_call_to_handle_request() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "genserver-actor".to_string(),
+        ActorId::new("genserver-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -197,7 +198,7 @@ async fn test_genevent_routes_cast_to_handle_event() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "genevent-actor".to_string(),
+        ActorId::new("genevent-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -246,7 +247,7 @@ async fn test_genevent_routes_info_to_handle_event() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "genevent-actor".to_string(),
+        ActorId::new("genevent-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -294,7 +295,7 @@ async fn test_genfsm_routes_to_handle_transition() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "genfsm-actor".to_string(),
+        ActorId::new("genfsm-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -343,7 +344,7 @@ async fn test_fallback_to_handle_message() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "fallback-actor".to_string(),
+        ActorId::new("fallback-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -391,7 +392,7 @@ async fn test_genserver_fallback_on_missing_handle_request() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "fallback-actor".to_string(),
+        ActorId::new("fallback-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,

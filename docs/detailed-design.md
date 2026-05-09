@@ -97,7 +97,7 @@ Actor IDs follow a standardized format for consistency and proto-first design:
 
 **Factory Methods**:
 ```rust
-use plexspaces_core::ActorId;
+use plexspaces_actor::ActorId;
 
 let actor_id = ActorId::new(
     "user-123",
@@ -244,7 +244,7 @@ let total: u64 = results.iter().map(|r| r.as_ref().map(|m| m.total).unwrap_or(0)
 
 ## Behaviors
 
-**All behaviors are defined in `crates/behavior/src/mod.rs`.** The base actor contract is `plexspaces_core::Actor` (in `crates/core`). Handler dispatching follows the Python SDK: **call** = request-reply (GET/ask), **cast** = fire-and-forget (POST/tell). **GenServer uses call by default** (routes `MessageType::Call` → `handle_request()` with reply expected).
+**All behaviors are defined in `crates/behavior/src/mod.rs`.** The base actor contract is `plexspaces_actor::Actor` (in `crates/actor`). Handler dispatching follows the Python SDK: **call** = request-reply (GET/ask), **cast** = fire-and-forget (POST/tell). **GenServer uses call by default** (routes `MessageType::Call` → `handle_request()` with reply expected).
 
 See [crates/behavior/README.md](../crates/behavior/README.md) for full behavior documentation and tests.
 
@@ -633,12 +633,15 @@ Orleans-style activation/deactivation with automatic instance creation:
 
 1. **Type Registration**: During application deployment (`wasm_application.rs`):
    ```rust
-   // Build ActorSpawnSpec from ChildSpec — single source of truth for spawn + reactivation
+   // Build ActorSpawnSpec from ChildSpec — single source of truth for spawn + reactivation.
+   // role maps 1:1 from ChildSpec.role (TOML `role` field) and is the BehaviorRegistry
+   // dispatch key when multiple children share the same actor_type (WASM module).
    let spawn_spec = ActorSpawnSpec {
        identity: Some(ActorIdentity {
            name: child_spec.actor_identity.name.clone(),
            actor_type: actor_type.clone(),
        }),
+       role: child_spec.role.clone(),   // e.g. "worker", "leader" from app-config.toml
        namespace: namespace.to_string(),
        tenant_id: tenant_id.to_string(),
        behavior_kind: child_spec.behavior_kind.clone(),
@@ -652,12 +655,32 @@ Orleans-style activation/deactivation with automatic instance creation:
    virtual_actor_manager.register_virtual_actor_definition(spawn_spec).await?;
    ```
 
-2. **Auto-Activation**: When message arrives for non-existent virtual actor:
+2. **WASM Init Payload**: At activation time `wasm_init_payload(&spec, &actor_id)` builds the
+   canonical JSON passed to the WASM guest's `init()` function:
+   ```json
+   {
+     "actor_id":      "worker-0//parameter_server_wasm::my-app@node-1",
+     "actor_type":    "parameter_server_wasm",
+     "role":          "worker",
+     "behavior_kind": "GenServer",
+     "args":          { "learning_rate": "0.01" },
+     "learning_rate": 0.01
+   }
+   ```
+   - `role` (from `ActorSpawnSpec.role`, falls back to `identity.name`) is the key used by
+     SDK routers (Go `ActorRouter`, TypeScript `ActorRouter`, Python `_select_class`) to
+     dispatch to the correct actor class when a single WASM module hosts multiple child specs.
+   - `args` is nested for structured access; scalar args are also promoted to the top level
+     for non-WASM behavior factories.
+   - Framework meta-fields (`actor_id`, `actor_type`, `role`, `behavior_kind`, `args`) are
+     excluded from the promoted top-level scalars to prevent shadowing.
+
+3. **Auto-Activation**: When message arrives for non-existent virtual actor:
    - `AskReply` or `SendMessage` discovers no actors match `actor_type`
    - Checks `VirtualActorManager.is_virtual_actor_type(actor_type)`
    - Performs internal activation inside `ActorServiceImpl::ask_reply()` or `ActorServiceImpl::send_message()` which:
      - Reuses suspended instance metadata when a virtual actor id is already known
-     - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)` for type-driven activation
+     - Builds actor_id via `ActorId::new(name, actor_type, namespace, node_id)` for type-driven activation
      - Retrieves `ActorSpawnSpec` from `VirtualActorManager` (stored at registration time)
      - Calls `ActorFactory::spawn_actor(ctx, &spec, facets)` — derives WASM init bytes via `wasm_init_payload(&spec, &actor_id)` from `spec.args` (no stale `initial_state` bytes)
      - Creates runtime facet objects from `spec.facets` via `create_facets_from_config`
@@ -688,7 +711,7 @@ Defaults are provided via `RuntimeConfig.default_virtual_actor_config`:
 These defaults are applied when creating `VirtualActorFacet` instances if not explicitly provided in facet configuration.
 
 **Architecture**:
-- Uses `VirtualActorLifecycleFacet` trait (defined in `plexspaces-core`) for type-safe lifecycle management
+- Uses `VirtualActorLifecycleFacet` trait (defined in `plexspaces-actor`) for type-safe lifecycle management
 - `VirtualActorFacet` (in `plexspaces-journaling`) implements this trait
 - Eliminates `Any` types and unsafe downcasting - all lifecycle operations use trait methods
 - `VirtualActorManager` stores facets as `Box<dyn VirtualActorLifecycleFacet>` for type safety
@@ -711,6 +734,7 @@ These defaults are applied when creating `VirtualActorFacet` instances if not ex
 - Supports both instance-level and type-level registration
 - Applies defaults from `RuntimeConfig.default_virtual_actor_config` when creating facets
 - Each registered actor type/definition stores a single `ActorSpawnSpec` (proto message) as the unified descriptor for spawn and reactivation — eliminates the old `init_config_template`/`initial_state` duality
+- `ActorSpawnSpec.role` carries the `ChildSpec.role` value from the application config; it is the BehaviorRegistry dispatch key written into the `"role"` field of the WASM init payload
 
 **Example (SDK)**:
 ```rust
@@ -1860,7 +1884,7 @@ let pattern = Pattern::new(vec![
 
 Single unified implementation for actor pools with checkout/checkin semantics and optional auto-scaling.
 
-- **Trait**: `ElasticPoolService` in `plexspaces-core` defines the interface (create_pool, checkout, checkin, get_metrics, scale_to, scale_by, pause_scaling, resume_scaling, drain, delete_pool). Errors use `PoolServiceError`.
+- **Trait**: `ElasticPoolService` in `plexspaces-actor` defines the interface (create_pool, checkout, checkin, get_metrics, scale_to, scale_by, pause_scaling, resume_scaling, drain, delete_pool). Errors use `PoolServiceError`.
 - **Implementation**: `crates/elastic-pool` — `ElasticPool` holds workers and implements the pool logic; `PoolRegistry` implements `ElasticPoolService` and holds named `ElasticPool` instances for use via ServiceLocator.
 - **ServiceLocator**: `get_elastic_pool_service` / `register_elastic_pool_service` (implemented in `plexspaces-services`).
 - **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` in the Rust SDK delegates to the registered service; no duplicate business logic.
@@ -3065,7 +3089,7 @@ Mailbox
 **Dequeue priority**: on every `dequeue()` call, the ctrl queue is checked first via a single `Relaxed` atomic load (`ctrl_size`).  When empty (steady state) this is one branch — zero mutex cost.
 
 ```rust
-use plexspaces_core::{is_ctrl_message, CTRL_MSG_PREFIX, create_ping_message};
+use plexspaces_actor::{is_ctrl_message, CTRL_MSG_PREFIX, create_ping_message};
 
 // Check classification
 assert!(is_ctrl_message("__DOWN__"));
@@ -3301,6 +3325,38 @@ WASM components are re-instantiated after each `handle()` call (wasmtime Compone
 | Rust | `sdks/rust/plexspaces-sdk` | cargo (native) | Available |
 
 See [SDK documentation](sdk.md) and [WASM deployment guide](wasm-deployment.md) for details.
+
+### Multi-Actor WASM Modules
+
+A single WASM module can host multiple actor roles (e.g. `leader` and `worker` in a
+parameter-server pattern). The framework distinguishes them via `ActorSpawnSpec.role`, which
+is sourced from the `role` field in `app-config.toml`:
+
+```toml
+[[supervisor.children]]
+name   = "leader"
+actor_type = "parameter_server_wasm"
+role   = "leader"
+
+[[supervisor.children]]
+name   = "worker"
+actor_type = "parameter_server_wasm"
+role   = "worker"
+```
+
+At activation the framework writes `"role"` into the WASM init payload JSON.  Each SDK
+provides a router that reads this field and selects the matching actor class:
+
+| SDK | Router / Dispatch |
+|-----|-------------------|
+| Go | `ActorRouter.Route(role, factory)` in `sdks/go/plexspaces/router.go` |
+| TypeScript | `ActorRouter.route(role, factory)` in `sdks/typescript/src/router.ts` |
+| Python | `select_actor_class(config, class_map, default)` in `sdks/python/plexspaces/runtime.py` |
+
+Dispatch priority in all three SDKs (mirrors Erlang supervisor child-spec semantics):
+1. `config["role"]` — exact match, then suffix match on compound aliases
+2. Normalised `actor_id` name component — longest prefix wins
+3. `config["actor_type"]` — shared behavior class fallback for single-role modules
 
 ## Database Models and ER Diagram
 

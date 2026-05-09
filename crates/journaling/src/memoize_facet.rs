@@ -34,7 +34,8 @@
 //! LRU key list kept at `<key_prefix>__lru` for max_entries eviction.
 
 use async_trait::async_trait;
-use plexspaces_core::{KeyValueStore, RequestContext};
+use plexspaces_common::{RequestContext, RequestContextExt};
+use plexspaces_common::KeyValueStore;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
@@ -412,7 +413,7 @@ impl Facet for MemoizeFacet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::KeyValueStoreError;
+    use plexspaces_actor::KeyValueStoreError;
     use std::collections::HashMap;
     use std::sync::Mutex;
 

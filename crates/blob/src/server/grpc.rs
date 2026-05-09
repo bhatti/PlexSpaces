@@ -24,7 +24,7 @@
 
 use crate::{helpers::datetime_to_timestamp, repository::ListFilters, BlobService};
 use chrono::{Duration, Utc};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::{
     blob_service_server::BlobService as BlobServiceTrait, DeleteBlobRequest, DeleteBlobResponse,
     DownloadBlobRequest, DownloadBlobResponse, GeneratePresignedUrlRequest,

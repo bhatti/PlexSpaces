@@ -178,9 +178,21 @@ pub mod scheduling {
     }
 }
 
+pub mod keyvalue {
+    pub mod v1 {
+        include!("generated/plexspaces.keyvalue.v1.rs");
+    }
+}
+
 pub mod locks {
     pub mod prv {
         include!("generated/plexspaces.locks.prv.rs");
+    }
+}
+
+pub mod services {
+    pub mod prv {
+        include!("generated/plexspaces.services.prv.rs");
     }
 }
 
@@ -200,6 +212,12 @@ pub mod security {
 pub mod object_registry {
     pub mod v1 {
         include!("generated/plexspaces.object_registry.v1.rs");
+    }
+}
+
+pub mod config {
+    pub mod v1 {
+        include!("generated/plexspaces.config.v1.rs");
     }
 }
 
@@ -225,6 +243,7 @@ pub mod v1 {
     pub use super::workflow::v1 as workflow;
     // service_registry removed - use object_registry instead
     // pub use super::service_registry::v1 as service_registry;
+    pub use super::keyvalue::v1 as keyvalue;
     pub use super::scheduling::v1 as scheduling;
     pub use super::storage::v1 as storage;
     pub use super::supervision::v1 as supervision;
@@ -277,6 +296,14 @@ pub use v1::processgroups::{
 };
 #[cfg(not(feature = "grpc"))]
 pub use v1::processgroups::{GroupMembership, ProcessGroup};
+
+// Re-export v1 channel service for convenience
+#[cfg(feature = "grpc")]
+pub use v1::channel::{
+    channel_service_client::ChannelServiceClient,
+    channel_service_server::ChannelService as ChannelServiceTrait,
+    channel_service_server::ChannelServiceServer,
+};
 
 #[cfg(test)]
 mod tests {

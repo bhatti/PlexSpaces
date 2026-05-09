@@ -4,12 +4,11 @@
 use async_trait::async_trait;
 use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::ServiceLocator;
-use plexspaces_core::{
+use plexspaces_actor::Message;
+use plexspaces_actor::{InitializableServiceLocator, ServiceLocator, ServiceLocatorBase};
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    RequestContext,
-};
+    RequestContext, RequestContextExt};
 use plexspaces_journaling::{
     DurabilityFacet, JournalStorage, SqliteJournalStorage, StateLoader, VirtualActorFacet,
 };
@@ -38,12 +37,12 @@ fn messaging_ctx() -> RequestContext {
 /// activation (via dispatch_local_message → activate_virtual_actor → spawn_actor)
 /// can rebuild the actor from its stored actor_type ("GenServer").
 async fn register_counter_behavior(node: &plexspaces_node::Node) {
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("gen_server", || {
             Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;
@@ -53,8 +52,8 @@ async fn register_counter_behavior(node: &plexspaces_node::Node) {
 }
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -62,8 +61,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         message_type: message_type.to_string(),
@@ -191,7 +190,7 @@ async fn test_lazy_activation_concurrent_requests() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -210,19 +209,10 @@ async fn test_lazy_activation_concurrent_requests() {
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
     let _ = registry_tell(&node, &actor_id, activate_msg).await;
 
-    // Wait for activation to complete - poll until actor is active
-    let mut attempts = 0;
-    loop {
-        sleep(Duration::from_millis(100)).await;
-        let (_, is_active, _) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
-        if is_active {
-            break;
-        }
-        attempts += 1;
-        if attempts > 50 {
-            panic!("Actor failed to activate within 5 seconds");
-        }
-    }
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(5)).await,
+        "Actor failed to activate within 5 seconds"
+    );
 
     // Get mailbox for ActorRef
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
@@ -267,7 +257,7 @@ async fn test_lazy_activation_pending_messages_processed() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -315,7 +305,7 @@ async fn test_lazy_activation_activation_failure_handling() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -334,8 +324,10 @@ async fn test_lazy_activation_activation_failure_handling() {
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
     let _ = registry_tell(&node, &actor_id, activate_msg).await;
 
-    // Wait for activation to complete
-    sleep(Duration::from_millis(300)).await;
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(2)).await,
+        "Actor should activate within 2 seconds"
+    );
 
     // Now use ActorRef for ask() pattern (actor is now active)
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
@@ -355,7 +347,7 @@ async fn test_regular_actor_tell_then_ask() {
     // Spawn regular actor (no virtual facet)
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -392,7 +384,7 @@ async fn test_lazy_activation_tell_then_ask() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -411,8 +403,10 @@ async fn test_lazy_activation_tell_then_ask() {
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "cast");
     registry_tell(&node, &actor_id, tell_msg).await.unwrap();
 
-    // Wait for activation and message processing
-    sleep(Duration::from_millis(300)).await;
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(2)).await,
+        "Actor should activate within 2 seconds after tell()"
+    );
 
     // Get fresh ActorRef from registry after activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
@@ -443,7 +437,7 @@ async fn test_eager_activation_immediate_availability() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -480,7 +474,7 @@ async fn test_eager_activation_multiple_actors() {
         let handle = tokio::spawn(async move {
             let behavior = Box::new(CounterActor::new());
             let mut actor = ActorBuilder::new(behavior)
-                .with_id(actor_id.clone())
+                .with_name(actor_id.name().to_string())
                 .build()
                 .await
                 .unwrap();
@@ -534,7 +528,7 @@ async fn test_passivation_idle_timeout_expiration() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -554,7 +548,10 @@ async fn test_passivation_idle_timeout_expiration() {
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
     let _ = registry_tell(&node, &actor_id, msg).await;
 
-    sleep(Duration::from_millis(500)).await;
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(2)).await,
+        "Actor should activate within 2 seconds after registry message"
+    );
 
     // Verify actor is active
     let (_, is_active, _) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
@@ -582,7 +579,7 @@ async fn test_passivation_reactivation_after_timeout() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -601,7 +598,10 @@ async fn test_passivation_reactivation_after_timeout() {
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
     let _ = registry_tell(&node, &actor_id, activate_msg).await;
 
-    sleep(Duration::from_millis(500)).await;
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(2)).await,
+        "Actor should activate within 2 seconds before manual deactivation"
+    );
 
     // Get ActorRef after activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
@@ -640,7 +640,10 @@ async fn test_passivation_reactivation_after_timeout() {
     let result = registry_tell(&node, &actor_id, reactivate_msg).await;
     assert!(result.is_ok(), "Actor should reactivate");
 
-    sleep(Duration::from_millis(500)).await;
+    assert!(
+        wait_for_virtual_actor_activation(&node, &actor_id, Duration::from_secs(2)).await,
+        "Actor should activate within 2 seconds after first message"
+    );
 
     // Get ActorRef again (new actor after reactivation)
     let actor_ref2 = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
@@ -672,7 +675,7 @@ async fn test_passivation_message_resets_idle_timer() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -726,7 +729,7 @@ async fn test_mixed_lazy_eager_actors() {
     let lazy_id = runtime_actor_id("counter-lazy-mixed");
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(lazy_id.clone())
+        .with_name(lazy_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -744,7 +747,7 @@ async fn test_mixed_lazy_eager_actors() {
     let eager_id = runtime_actor_id("counter-eager-mixed");
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(eager_id.clone())
+        .with_name(eager_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -791,7 +794,7 @@ async fn test_virtual_actor_state_preservation() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -881,7 +884,7 @@ async fn test_virtual_actor_manual_deactivation() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -941,7 +944,7 @@ async fn test_virtual_actor_full_lifecycle() {
     // 1. Create virtual actor (lazy)
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1018,7 +1021,7 @@ async fn test_virtual_actor_high_throughput() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1254,12 +1257,12 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register behavior for actor recreation
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
             Box::pin(async move {
-                Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+                Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;
@@ -1283,7 +1286,7 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     // Register eager virtual actor with DurabilityFacet
     let behavior = Box::new(DurableCounterActor::with_shared_state(shared_state.clone()));
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1438,12 +1441,12 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Register behavior for actor recreation
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
             Box::pin(async move {
-                Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+                Ok(Box::new(DurableCounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;
@@ -1466,7 +1469,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     // Register lazy virtual actor with DurabilityFacet
     let behavior = Box::new(DurableCounterActor::with_shared_state(shared_state.clone()));
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1618,7 +1621,7 @@ async fn test_eager_activation_tell_then_ask() {
     // Register eager virtual actor
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1665,7 +1668,7 @@ async fn test_lazy_activation_ask_directly() {
     // Register lazy virtual actor
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1699,7 +1702,7 @@ async fn test_lazy_activation_multiple_messages() {
     // Register lazy virtual actor
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -1762,7 +1765,7 @@ async fn test_virtual_actor_implicit_activation() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id.clone(),
         Box::new(behavior),
         mailbox,
@@ -1821,7 +1824,7 @@ async fn test_virtual_actor_idle_deactivation() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id2.clone(),
         Box::new(behavior),
         mailbox,
@@ -1884,7 +1887,7 @@ async fn test_virtual_actor_pending_messages() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id3.clone(),
         Box::new(behavior),
         mailbox,
@@ -1936,7 +1939,7 @@ async fn test_activate_actor_manual() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id4.clone(),
         Box::new(behavior),
         mailbox,
@@ -1981,7 +1984,7 @@ async fn test_deactivate_actor_manual() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id5.clone(),
         Box::new(behavior),
         mailbox,
@@ -2047,7 +2050,7 @@ async fn test_check_actor_exists() {
         .await
         .unwrap();
 
-    let actor = plexspaces_actor::Actor::new(
+    let actor = plexspaces_actor::ActorInstance::new(
         actor_id6.clone(),
         Box::new(behavior),
         mailbox,
@@ -2095,7 +2098,7 @@ async fn test_tell_with_virtual_actor_eager() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -2142,7 +2145,7 @@ async fn test_ask_with_virtual_actor_eager() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -2185,7 +2188,7 @@ async fn test_tell_with_virtual_actor_lazy() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -2236,7 +2239,7 @@ async fn test_ask_with_virtual_actor_lazy() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -2275,7 +2278,7 @@ async fn test_multiple_ask_with_virtual_actor_lazy() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -2328,7 +2331,7 @@ async fn test_ask_with_virtual_actor_lazy_reproduce_issue() {
 
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();

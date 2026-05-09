@@ -6,8 +6,8 @@
 //! Helpers for `application.v1.ChildSpec` identity (`ActorIdentity`).
 
 use crate::ApplicationError;
-use plexspaces_core::ActorId;
-use plexspaces_proto::application::v1::ChildSpec;
+use plexspaces_actor::ActorId;
+use plexspaces_proto::supervision::v1::ChildSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 
 /// Returns `actor_identity` when present and valid (same rules as [`ActorId`] / proto `ActorIdentity`).

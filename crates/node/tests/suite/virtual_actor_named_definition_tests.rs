@@ -11,11 +11,10 @@ use super::test_helpers::{registry_ask, spawn_actor_helper};
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::behavior_factory::BehaviorRegistry;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, Message,
-    ServiceLocator,
-};
+use plexspaces_actor::behavior_factory::BehaviorRegistry;
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
+    Message, ServiceLocator, RequestContextExt};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
@@ -151,7 +150,7 @@ async fn register_counter_behavior(node: &plexspaces_node::Node, actor_type: &st
             let payload = args.to_vec();
             Box::pin(async move {
                 Ok(Box::new(CounterActor::from_init_payload(&payload))
-                    as Box<dyn plexspaces_core::Actor>)
+                    as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;
@@ -235,7 +234,7 @@ async fn test_non_durable_named_actor_reactivates_with_definition_args() {
         .await;
 
     let mut actor_struct = ActorBuilder::new(Box::new(CounterActor::new()))
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -287,7 +286,7 @@ async fn test_non_durable_named_actor_reactivates_with_definition_args() {
 
     // Explicit stop (simulates controller.stop_actor in the abstractions example)
     let factory = node.service_locator().get_actor_factory().await.unwrap();
-    let stop_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let stop_ctx = plexspaces_actor::RequestContext::new_without_auth(
         TENANT.to_string(),
         NAMESPACE.to_string(),
     );
@@ -463,7 +462,7 @@ async fn test_durable_actor_instance_retained_after_stop() {
         .await;
 
     let mut actor_struct = ActorBuilder::new(Box::new(CounterActor::new()))
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -472,7 +471,7 @@ async fn test_durable_actor_instance_retained_after_stop() {
     sleep(Duration::from_millis(100)).await;
 
     let factory = node.service_locator().get_actor_factory().await.unwrap();
-    let req_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let req_ctx = plexspaces_actor::RequestContext::new_without_auth(
         TENANT.to_string(),
         NAMESPACE.to_string(),
     );

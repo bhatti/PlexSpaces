@@ -32,8 +32,7 @@ use plexspaces_sdk::{
     call_message,
     // Storage for durable actors
     JournalStorage,
-    json, Value,
-};
+    json, Value,, RequestContextExt};
 use plexspaces_journaling::SqliteJournalStorage;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,7 +41,7 @@ use tracing::Level;
 use chrono::{DateTime, Utc};
 
 // Required for macro-generated code
-extern crate plexspaces_core;
+
 extern crate plexspaces_behavior;
 
 // =============================================================================

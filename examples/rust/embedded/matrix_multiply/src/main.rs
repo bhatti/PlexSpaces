@@ -11,7 +11,7 @@
 // Use Case: Scientific computing, ML inference, graphics, signal processing
 
 use matrix_multiply::MatrixWorker;
-use plexspaces_sdk::{spawn, GenServerRef, RequestContext, json};
+use plexspaces_sdk::{spawn, GenServerRef, RequestContext, json, RequestContextExt};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
 use std::time::{Duration, Instant};
 use tracing::info;

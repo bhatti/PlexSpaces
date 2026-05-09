@@ -83,6 +83,29 @@ class ExecutionMode(betterproto.Enum):
     """
 
 
+class JournalErrorCode(betterproto.Enum):
+    """Error codes for journal storage operations."""
+
+    JOURNAL_ERROR_UNSPECIFIED = 0
+    JOURNAL_ERROR_STORAGE = 1
+    """Backend storage failure (disk I/O, DB error, etc.)"""
+
+    JOURNAL_ERROR_ENTRY_NOT_FOUND = 2
+    """Requested entry does not exist"""
+
+    JOURNAL_ERROR_CHECKPOINT_NOT_FOUND = 3
+    """No checkpoint exists for the actor"""
+
+    JOURNAL_ERROR_COMPRESSION = 4
+    """Compression or decompression failure"""
+
+    JOURNAL_ERROR_SERIALIZATION = 5
+    """Entry payload failed to serialize/deserialize"""
+
+    JOURNAL_ERROR_CONFLICT = 6
+    """Concurrent write conflict (optimistic concurrency violation)"""
+
+
 @dataclass(eq=False, repr=False)
 class JournalEntry(betterproto.Message):
     """

@@ -23,7 +23,7 @@
 #[cfg(test)]
 mod tests {
     use crate::actor_ref::{ActorRef, ActorRefError};
-    use plexspaces_core::{ActorId, Message, ServiceLocator};
+    use crate::core::{ActorId, Message, ServiceLocator, RequestContextExt};
     use plexspaces_proto::actor::v1::ActorVisibility;
     use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
     use std::sync::Arc;
@@ -90,9 +90,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_ttl_preserved() {
         let mailbox = create_test_mailbox().await;
-        use plexspaces_node::create_default_service_locator;
-        let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+        let service_locator: Arc<dyn ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         let _actor_ref = ActorRef::local(
             test_actor_id("test", "node1"),
             "test".to_string(),
@@ -115,9 +114,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_no_ttl() {
         let mailbox = create_test_mailbox().await;
-        use plexspaces_node::create_default_service_locator;
-        let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+        let service_locator: Arc<dyn ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         let _actor_ref = ActorRef::local(
             test_actor_id("test", "node1"),
             "test".to_string(),
@@ -137,9 +135,8 @@ mod tests {
     #[tokio::test]
     async fn test_actor_ref_expired_message() {
         let mailbox = create_test_mailbox().await;
-        use plexspaces_node::create_default_service_locator;
-        let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+        let service_locator: Arc<dyn ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         let actor_id = ActorId::new("test", "worker", "test", "node1").unwrap();
         let actor_ref = ActorRef::local(
             actor_id.clone(),
@@ -151,11 +148,11 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         let tell_ctx =
             RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         if let Some(registry) = service_locator.actor_registry().await {
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(actor_ref.clone());
             registry
                 .register_actor(
                     &tell_ctx,

@@ -11,7 +11,6 @@ description = "Node management and Firecracker VM support"
 
 [dependencies]
 # Core types and dependencies
-plexspaces-core = { workspace = true }
 plexspaces-journaling = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-mailbox = { workspace = true }
@@ -28,6 +27,7 @@ plexspaces-services = { path = "../services" }
 plexspaces-scheduler = { workspace = true, features = ["sqlite-backend"] }
 plexspaces-locks = { workspace = true }
 plexspaces-common = { path = "../common" }
+plexspaces-service-traits = { path = "../service-traits" }
 plexspaces-wasm-runtime = { workspace = true, features = ["component-model"] }
 plexspaces-blob = { path = "../blob", features = ["sql-backend", "server", "presigned-urls", "s3-backend"] }
 plexspaces-firecracker = { workspace = true, optional = true }

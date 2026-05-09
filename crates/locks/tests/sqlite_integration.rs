@@ -27,7 +27,7 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_locks::{
         sql::SqliteLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions,
         RenewLockOptions,

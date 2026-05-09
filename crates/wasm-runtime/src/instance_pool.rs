@@ -54,6 +54,15 @@ pub struct InstancePool {
     /// WASM configuration
     config: WasmConfig,
 
+    /// Actor type for pool instances (identifies the WASM behavior class)
+    actor_type: String,
+
+    /// Namespace for tenant isolation
+    namespace: String,
+
+    /// Node ID for canonical actor ID construction
+    node_id: String,
+
     /// Pool of available instances
     instances: Arc<Mutex<Vec<WasmInstance>>>,
 
@@ -83,6 +92,9 @@ impl InstancePool {
         module: WasmModule,
         capacity: usize,
         config: WasmConfig,
+        actor_type: impl Into<String>,
+        namespace: impl Into<String>,
+        node_id: impl Into<String>,
     ) -> WasmResult<Self> {
         if capacity == 0 {
             return Err(WasmError::ConfigurationError(
@@ -98,6 +110,9 @@ impl InstancePool {
             engine: Arc::new(engine.clone()),
             module,
             config,
+            actor_type: actor_type.into(),
+            namespace: namespace.into(),
+            node_id: node_id.into(),
             instances,
             semaphore,
             stats,
@@ -116,8 +131,8 @@ impl InstancePool {
         let mut stats = self.stats.lock().await;
 
         for i in 0..count {
-            let actor_id = format!("pooled-instance-{}", stats.total_created + i);
-            let instance = self.create_instance(&actor_id).await?;
+            let name = format!("pooled-{}", stats.total_created + i);
+            let instance = self.create_instance_by_name(&name).await?;
             instances.push(instance);
             stats.total_created += 1;
             stats.available += 1;
@@ -126,8 +141,15 @@ impl InstancePool {
         Ok(())
     }
 
-    /// Create a new instance
-    async fn create_instance(&self, actor_id: &str) -> WasmResult<WasmInstance> {
+    /// Build an ActorId from a name and create a WasmInstance directly.
+    async fn create_instance_by_name(&self, name: &str) -> WasmResult<WasmInstance> {
+        let actor_id = plexspaces_actor::ActorId::new(
+            name,
+            &self.actor_type,
+            &self.namespace,
+            &self.node_id,
+        )
+        .map_err(|e| WasmError::ActorFunctionError(e.to_string()))?;
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.config.limits.max_memory_bytes as usize)
             .build();
@@ -135,7 +157,7 @@ impl InstancePool {
         WasmInstance::new(
             &self.engine,
             self.module.clone(),
-            actor_id.to_string(),
+            actor_id,
             &[],
             self.config.capabilities.clone(),
             limits,
@@ -183,8 +205,8 @@ impl InstancePool {
                     inst
                 } else {
                     drop(instances);
-                    let actor_id = format!("pooled-instance-dynamic-{}", ulid::Ulid::new());
-                    let instance = self.create_instance(&actor_id).await?;
+                    let name = format!("pooled-dyn-{}", ulid::Ulid::new());
+                    let instance = self.create_instance_by_name(&name).await?;
                     let mut stats = self.stats.lock().await;
                     stats.total_created += 1;
                     stats.in_use += 1;
@@ -211,8 +233,8 @@ impl InstancePool {
         };
 
         // We hold a newly-added permit — create a dynamic instance.
-        let actor_id = format!("pooled-instance-dynamic-{}", ulid::Ulid::new());
-        let instance = self.create_instance(&actor_id).await?;
+        let name = format!("pooled-dyn-{}", ulid::Ulid::new());
+        let instance = self.create_instance_by_name(&name).await?;
         let mut stats = self.stats.lock().await;
         stats.total_created += 1;
         stats.in_use += 1;
@@ -325,7 +347,15 @@ mod tests {
             .load_module("test-pool", "1.0.0", &wasm_bytes)
             .await?;
 
-        InstancePool::new(runtime.engine(), module, capacity, WasmConfig::default()).await
+        InstancePool::new(
+            runtime.engine(),
+            module,
+            capacity,
+            WasmConfig::default(),
+            "test-pool",
+            "test-namespace",
+            "test-node",
+        ).await
     }
 
     #[tokio::test]
@@ -444,7 +474,10 @@ mod tests {
             .await
             .unwrap();
 
-        let result = InstancePool::new(runtime.engine(), module, 0, WasmConfig::default()).await;
+        let result = InstancePool::new(
+            runtime.engine(), module, 0, WasmConfig::default(),
+            "test-pool", "test-namespace", "test-node",
+        ).await;
 
         assert!(result.is_err());
         assert!(matches!(result, Err(WasmError::ConfigurationError(_))));

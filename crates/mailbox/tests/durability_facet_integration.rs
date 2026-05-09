@@ -27,8 +27,8 @@
 mod tests {
 
     /// Helper to create a test message
-    fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-        plexspaces_core::Message {
+    fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+        plexspaces_actor::Message {
             id: ulid::Ulid::new().to_string(),
             payload,
             ..Default::default()

@@ -19,11 +19,11 @@
 //! Tests for service wrappers
 //!
 //! These tests verify that service wrappers correctly adapt Node's services
-//! to the traits defined in plexspaces_core::actor_context.
+//! to the traits defined in plexspaces_actor::actor_context.
 
-use plexspaces_core::actor_context::{ActorService, ObjectRegistry, TupleSpaceProvider};
-use plexspaces_core::actor_registry::ActorRegistry;
-use plexspaces_core::Message;
+use plexspaces_actor::actor_context::{ActorService, ObjectRegistry, TupleSpaceProvider};
+use plexspaces_actor::actor_registry::ActorRegistry;
+use plexspaces_actor::{Message, RequestContextExt};
 use plexspaces_node::service_wrappers::TupleSpaceProviderWrapper;
 use plexspaces_node::NodeBuilder;
 use plexspaces_services::actor_service::ActorServiceImpl;
@@ -33,8 +33,8 @@ use std::sync::Arc;
 use super::test_helpers::{find_actor_helper, spawn_actor_helper};
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -110,7 +110,7 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = create_test_message(b"hello".to_vec());
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -151,7 +151,7 @@ async fn test_object_registry_wrapper() {
     let registry = Arc::new(ObjectRegistry::new(object_repo));
 
     // Register an actor
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let registration = ObjectRegistration {
         object_id: "test-actor//gen_server::default@node1".to_string(),

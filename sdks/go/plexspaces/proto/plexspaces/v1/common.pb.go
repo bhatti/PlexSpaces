@@ -332,6 +332,125 @@ func (ResourceState) EnumDescriptor() ([]byte, []int) {
 	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{2}
 }
 
+// RequestContext error codes
+//
+// TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
+// type, these codes will be the single source of truth for all context errors.
+// See plan: Phase 4 — Consolidate RequestContext to proto-only.
+type RequestContextErrorCode int32
+
+const (
+	RequestContextErrorCode_REQUEST_CONTEXT_ERROR_UNSPECIFIED RequestContextErrorCode = 0
+	// tenant_id is required but was not provided (auth enabled)
+	RequestContextErrorCode_REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID RequestContextErrorCode = 1
+	// tenant_id exceeds max length
+	RequestContextErrorCode_REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID RequestContextErrorCode = 2
+	// namespace exceeds max length
+	RequestContextErrorCode_REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE RequestContextErrorCode = 3
+)
+
+// Enum value maps for RequestContextErrorCode.
+var (
+	RequestContextErrorCode_name = map[int32]string{
+		0: "REQUEST_CONTEXT_ERROR_UNSPECIFIED",
+		1: "REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID",
+		2: "REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID",
+		3: "REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE",
+	}
+	RequestContextErrorCode_value = map[string]int32{
+		"REQUEST_CONTEXT_ERROR_UNSPECIFIED":       0,
+		"REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID": 1,
+		"REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID": 2,
+		"REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE": 3,
+	}
+)
+
+func (x RequestContextErrorCode) Enum() *RequestContextErrorCode {
+	p := new(RequestContextErrorCode)
+	*p = x
+	return p
+}
+
+func (x RequestContextErrorCode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RequestContextErrorCode) Descriptor() protoreflect.EnumDescriptor {
+	return file_plexspaces_v1_common_proto_enumTypes[3].Descriptor()
+}
+
+func (RequestContextErrorCode) Type() protoreflect.EnumType {
+	return &file_plexspaces_v1_common_proto_enumTypes[3]
+}
+
+func (x RequestContextErrorCode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RequestContextErrorCode.Descriptor instead.
+func (RequestContextErrorCode) EnumDescriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{3}
+}
+
+// Error codes for outbound HTTP client operations.
+type OutboundHttpClientErrorCode int32
+
+const (
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_UNSPECIFIED    OutboundHttpClientErrorCode = 0
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_UNKNOWN_LINK   OutboundHttpClientErrorCode = 1
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN   OutboundHttpClientErrorCode = 2
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_INVALID_URL    OutboundHttpClientErrorCode = 3
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_REQUEST_FAILED OutboundHttpClientErrorCode = 4
+	OutboundHttpClientErrorCode_OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE OutboundHttpClientErrorCode = 5
+)
+
+// Enum value maps for OutboundHttpClientErrorCode.
+var (
+	OutboundHttpClientErrorCode_name = map[int32]string{
+		0: "OUTBOUND_HTTP_ERROR_UNSPECIFIED",
+		1: "OUTBOUND_HTTP_ERROR_UNKNOWN_LINK",
+		2: "OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN",
+		3: "OUTBOUND_HTTP_ERROR_INVALID_URL",
+		4: "OUTBOUND_HTTP_ERROR_REQUEST_FAILED",
+		5: "OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE",
+	}
+	OutboundHttpClientErrorCode_value = map[string]int32{
+		"OUTBOUND_HTTP_ERROR_UNSPECIFIED":    0,
+		"OUTBOUND_HTTP_ERROR_UNKNOWN_LINK":   1,
+		"OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN":   2,
+		"OUTBOUND_HTTP_ERROR_INVALID_URL":    3,
+		"OUTBOUND_HTTP_ERROR_REQUEST_FAILED": 4,
+		"OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE": 5,
+	}
+)
+
+func (x OutboundHttpClientErrorCode) Enum() *OutboundHttpClientErrorCode {
+	p := new(OutboundHttpClientErrorCode)
+	*p = x
+	return p
+}
+
+func (x OutboundHttpClientErrorCode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OutboundHttpClientErrorCode) Descriptor() protoreflect.EnumDescriptor {
+	return file_plexspaces_v1_common_proto_enumTypes[4].Descriptor()
+}
+
+func (OutboundHttpClientErrorCode) Type() protoreflect.EnumType {
+	return &file_plexspaces_v1_common_proto_enumTypes[4]
+}
+
+func (x OutboundHttpClientErrorCode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OutboundHttpClientErrorCode.Descriptor instead.
+func (OutboundHttpClientErrorCode) EnumDescriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{4}
+}
+
 // Empty message (replacement for plexspaces.common.v1.Empty)
 //
 // Used for RPC methods that don't return a meaningful value.
@@ -1834,6 +1953,196 @@ func (x *Message) GetUriMethod() string {
 	return ""
 }
 
+// A single HTTP header key-value pair.
+type HttpHeader struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HttpHeader) Reset() {
+	*x = HttpHeader{}
+	mi := &file_plexspaces_v1_common_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HttpHeader) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HttpHeader) ProtoMessage() {}
+
+func (x *HttpHeader) ProtoReflect() protoreflect.Message {
+	mi := &file_plexspaces_v1_common_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HttpHeader.ProtoReflect.Descriptor instead.
+func (*HttpHeader) Descriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *HttpHeader) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *HttpHeader) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+// Outbound HTTP request to an external service via a named service link.
+type OutboundHttpRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
+	Method string `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	// Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
+	PathAndQuery string `protobuf:"bytes,2,opt,name=path_and_query,json=pathAndQuery,proto3" json:"path_and_query,omitempty"`
+	// Extra headers merged with link defaults and auth headers
+	Headers []*HttpHeader `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty"`
+	// Request body bytes
+	Body          []byte `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutboundHttpRequest) Reset() {
+	*x = OutboundHttpRequest{}
+	mi := &file_plexspaces_v1_common_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutboundHttpRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutboundHttpRequest) ProtoMessage() {}
+
+func (x *OutboundHttpRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plexspaces_v1_common_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutboundHttpRequest.ProtoReflect.Descriptor instead.
+func (*OutboundHttpRequest) Descriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *OutboundHttpRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *OutboundHttpRequest) GetPathAndQuery() string {
+	if x != nil {
+		return x.PathAndQuery
+	}
+	return ""
+}
+
+func (x *OutboundHttpRequest) GetHeaders() []*HttpHeader {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *OutboundHttpRequest) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+// Outbound HTTP response from an external service call.
+type OutboundHttpResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// HTTP status code
+	Status uint32 `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Response headers
+	Headers []*HttpHeader `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty"`
+	// Response body bytes
+	Body          []byte `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutboundHttpResponse) Reset() {
+	*x = OutboundHttpResponse{}
+	mi := &file_plexspaces_v1_common_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutboundHttpResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutboundHttpResponse) ProtoMessage() {}
+
+func (x *OutboundHttpResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plexspaces_v1_common_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutboundHttpResponse.ProtoReflect.Descriptor instead.
+func (*OutboundHttpResponse) Descriptor() ([]byte, []int) {
+	return file_plexspaces_v1_common_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *OutboundHttpResponse) GetStatus() uint32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *OutboundHttpResponse) GetHeaders() []*HttpHeader {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *OutboundHttpResponse) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
 var File_plexspaces_v1_common_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_common_proto_rawDesc = "" +
@@ -2005,7 +2314,20 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:g\x92Ad\n" +
-	"b*\aMessage2HUniversal message envelope for actor, channel, and pub/sub communication\xd2\x01\x02id\xd2\x01\apayload*\x97\x01\n" +
+	"b*\aMessage2HUniversal message envelope for actor, channel, and pub/sub communication\xd2\x01\x02id\xd2\x01\apayload\"H\n" +
+	"\n" +
+	"HttpHeader\x12\x1a\n" +
+	"\x03key\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03key\x12\x1e\n" +
+	"\x05value\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80@R\x05value\"\xb6\x01\n" +
+	"\x13OutboundHttpRequest\x12\x1f\n" +
+	"\x06method\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18\x10R\x06method\x12.\n" +
+	"\x0epath_and_query\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\fpathAndQuery\x12:\n" +
+	"\aheaders\x18\x03 \x03(\v2 .plexspaces.common.v1.HttpHeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x04 \x01(\fR\x04body\"~\n" +
+	"\x14OutboundHttpResponse\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\rR\x06status\x12:\n" +
+	"\aheaders\x18\x02 \x03(\v2 .plexspaces.common.v1.HttpHeaderR\aheaders\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\fR\x04body*\x97\x01\n" +
 	"\x12ActivationStrategy\x12#\n" +
 	"\x1fACTIVATION_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18ACTIVATION_STRATEGY_LAZY\x10\x01\x12\x1d\n" +
@@ -2024,7 +2346,19 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x17RESOURCE_STATE_UPDATING\x10\x04\x12\x1b\n" +
 	"\x17RESOURCE_STATE_DELETING\x10\x05\x12\x19\n" +
 	"\x15RESOURCE_STATE_FAILED\x10\x06\x12\x1a\n" +
-	"\x16RESOURCE_STATE_UNKNOWN\x10\aB\xa9\x06\x92A\xba\x04\x12Z\n" +
+	"\x16RESOURCE_STATE_UNKNOWN\x10\a*\xc7\x01\n" +
+	"\x17RequestContextErrorCode\x12%\n" +
+	"!REQUEST_CONTEXT_ERROR_UNSPECIFIED\x10\x00\x12+\n" +
+	"'REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID\x10\x01\x12+\n" +
+	"'REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID\x10\x02\x12+\n" +
+	"'REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE\x10\x03*\x83\x02\n" +
+	"\x1bOutboundHttpClientErrorCode\x12#\n" +
+	"\x1fOUTBOUND_HTTP_ERROR_UNSPECIFIED\x10\x00\x12$\n" +
+	" OUTBOUND_HTTP_ERROR_UNKNOWN_LINK\x10\x01\x12$\n" +
+	" OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN\x10\x02\x12#\n" +
+	"\x1fOUTBOUND_HTTP_ERROR_INVALID_URL\x10\x03\x12&\n" +
+	"\"OUTBOUND_HTTP_ERROR_REQUEST_FAILED\x10\x04\x12&\n" +
+	"\"OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE\x10\x05B\xa9\x06\x92A\xba\x04\x12Z\n" +
 	"\x16PlexSpace Common Types\x12;Common data types and utilities for the PlexSpace framework2\x031.0*\x01\x022\x10application/json:\x10application/jsonZ\xa2\x03\n" +
 	"q\n" +
 	"\fApiKeyHeader\x12a\b\x02\x12PAPI key authentication via header. Service-scoped keys with configurable scopes.\x1a\tX-API-Key \x02\n" +
@@ -2050,70 +2384,77 @@ func file_plexspaces_v1_common_proto_rawDescGZIP() []byte {
 	return file_plexspaces_v1_common_proto_rawDescData
 }
 
-var file_plexspaces_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_plexspaces_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_plexspaces_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_plexspaces_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_plexspaces_v1_common_proto_goTypes = []any{
-	(ActivationStrategy)(0),       // 0: plexspaces.common.v1.ActivationStrategy
-	(QoSLevel)(0),                 // 1: plexspaces.common.v1.QoSLevel
-	(ResourceState)(0),            // 2: plexspaces.common.v1.ResourceState
-	(*Empty)(nil),                 // 3: plexspaces.common.v1.Empty
-	(*Metadata)(nil),              // 4: plexspaces.common.v1.Metadata
-	(*ActorId)(nil),               // 5: plexspaces.common.v1.ActorId
-	(*ActorIdentity)(nil),         // 6: plexspaces.common.v1.ActorIdentity
-	(*ErrorDetail)(nil),           // 7: plexspaces.common.v1.ErrorDetail
-	(*RetryPolicy)(nil),           // 8: plexspaces.common.v1.RetryPolicy
-	(*PageRequest)(nil),           // 9: plexspaces.common.v1.PageRequest
-	(*PageResponse)(nil),          // 10: plexspaces.common.v1.PageResponse
-	(*Facet)(nil),                 // 11: plexspaces.common.v1.Facet
-	(*FacetDescriptor)(nil),       // 12: plexspaces.common.v1.FacetDescriptor
-	(*ConfigOption)(nil),          // 13: plexspaces.common.v1.ConfigOption
-	(*SecurityPolicy)(nil),        // 14: plexspaces.common.v1.SecurityPolicy
-	(*ResourceQuota)(nil),         // 15: plexspaces.common.v1.ResourceQuota
-	(*ResourceSpec)(nil),          // 16: plexspaces.common.v1.ResourceSpec
-	(*RequestContext)(nil),        // 17: plexspaces.common.v1.RequestContext
-	(*Message)(nil),               // 18: plexspaces.common.v1.Message
-	nil,                           // 19: plexspaces.common.v1.Metadata.LabelsEntry
-	nil,                           // 20: plexspaces.common.v1.Metadata.AnnotationsEntry
-	nil,                           // 21: plexspaces.common.v1.ErrorDetail.DetailsEntry
-	nil,                           // 22: plexspaces.common.v1.Facet.ConfigEntry
-	nil,                           // 23: plexspaces.common.v1.Facet.StateEntry
-	nil,                           // 24: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	nil,                           // 25: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	nil,                           // 26: plexspaces.common.v1.RequestContext.MetadataEntry
-	nil,                           // 27: plexspaces.common.v1.RequestContext.HeadersEntry
-	nil,                           // 28: plexspaces.common.v1.Message.HeadersEntry
-	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 30: google.protobuf.Duration
-	(*anypb.Any)(nil),             // 31: google.protobuf.Any
+	(ActivationStrategy)(0),          // 0: plexspaces.common.v1.ActivationStrategy
+	(QoSLevel)(0),                    // 1: plexspaces.common.v1.QoSLevel
+	(ResourceState)(0),               // 2: plexspaces.common.v1.ResourceState
+	(RequestContextErrorCode)(0),     // 3: plexspaces.common.v1.RequestContextErrorCode
+	(OutboundHttpClientErrorCode)(0), // 4: plexspaces.common.v1.OutboundHttpClientErrorCode
+	(*Empty)(nil),                    // 5: plexspaces.common.v1.Empty
+	(*Metadata)(nil),                 // 6: plexspaces.common.v1.Metadata
+	(*ActorId)(nil),                  // 7: plexspaces.common.v1.ActorId
+	(*ActorIdentity)(nil),            // 8: plexspaces.common.v1.ActorIdentity
+	(*ErrorDetail)(nil),              // 9: plexspaces.common.v1.ErrorDetail
+	(*RetryPolicy)(nil),              // 10: plexspaces.common.v1.RetryPolicy
+	(*PageRequest)(nil),              // 11: plexspaces.common.v1.PageRequest
+	(*PageResponse)(nil),             // 12: plexspaces.common.v1.PageResponse
+	(*Facet)(nil),                    // 13: plexspaces.common.v1.Facet
+	(*FacetDescriptor)(nil),          // 14: plexspaces.common.v1.FacetDescriptor
+	(*ConfigOption)(nil),             // 15: plexspaces.common.v1.ConfigOption
+	(*SecurityPolicy)(nil),           // 16: plexspaces.common.v1.SecurityPolicy
+	(*ResourceQuota)(nil),            // 17: plexspaces.common.v1.ResourceQuota
+	(*ResourceSpec)(nil),             // 18: plexspaces.common.v1.ResourceSpec
+	(*RequestContext)(nil),           // 19: plexspaces.common.v1.RequestContext
+	(*Message)(nil),                  // 20: plexspaces.common.v1.Message
+	(*HttpHeader)(nil),               // 21: plexspaces.common.v1.HttpHeader
+	(*OutboundHttpRequest)(nil),      // 22: plexspaces.common.v1.OutboundHttpRequest
+	(*OutboundHttpResponse)(nil),     // 23: plexspaces.common.v1.OutboundHttpResponse
+	nil,                              // 24: plexspaces.common.v1.Metadata.LabelsEntry
+	nil,                              // 25: plexspaces.common.v1.Metadata.AnnotationsEntry
+	nil,                              // 26: plexspaces.common.v1.ErrorDetail.DetailsEntry
+	nil,                              // 27: plexspaces.common.v1.Facet.ConfigEntry
+	nil,                              // 28: plexspaces.common.v1.Facet.StateEntry
+	nil,                              // 29: plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	nil,                              // 30: plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	nil,                              // 31: plexspaces.common.v1.RequestContext.MetadataEntry
+	nil,                              // 32: plexspaces.common.v1.RequestContext.HeadersEntry
+	nil,                              // 33: plexspaces.common.v1.Message.HeadersEntry
+	(*timestamppb.Timestamp)(nil),    // 34: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 35: google.protobuf.Duration
+	(*anypb.Any)(nil),                // 36: google.protobuf.Any
 }
 var file_plexspaces_v1_common_proto_depIdxs = []int32{
-	29, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
-	29, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
-	19, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
-	20, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
-	21, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
-	30, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
-	30, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
-	22, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
-	23, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
-	4,  // 9: plexspaces.common.v1.Facet.metadata:type_name -> plexspaces.common.v1.Metadata
-	13, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
-	24, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
-	25, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
-	29, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
-	26, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
-	27, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
-	29, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
-	28, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
-	30, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
-	31, // 19: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
-	31, // 20: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
-	31, // 21: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	34, // 0: plexspaces.common.v1.Metadata.create_time:type_name -> google.protobuf.Timestamp
+	34, // 1: plexspaces.common.v1.Metadata.update_time:type_name -> google.protobuf.Timestamp
+	24, // 2: plexspaces.common.v1.Metadata.labels:type_name -> plexspaces.common.v1.Metadata.LabelsEntry
+	25, // 3: plexspaces.common.v1.Metadata.annotations:type_name -> plexspaces.common.v1.Metadata.AnnotationsEntry
+	26, // 4: plexspaces.common.v1.ErrorDetail.details:type_name -> plexspaces.common.v1.ErrorDetail.DetailsEntry
+	35, // 5: plexspaces.common.v1.RetryPolicy.initial_delay:type_name -> google.protobuf.Duration
+	35, // 6: plexspaces.common.v1.RetryPolicy.max_delay:type_name -> google.protobuf.Duration
+	27, // 7: plexspaces.common.v1.Facet.config:type_name -> plexspaces.common.v1.Facet.ConfigEntry
+	28, // 8: plexspaces.common.v1.Facet.state:type_name -> plexspaces.common.v1.Facet.StateEntry
+	6,  // 9: plexspaces.common.v1.Facet.metadata:type_name -> plexspaces.common.v1.Metadata
+	15, // 10: plexspaces.common.v1.FacetDescriptor.config_options:type_name -> plexspaces.common.v1.ConfigOption
+	29, // 11: plexspaces.common.v1.SecurityPolicy.custom_rules:type_name -> plexspaces.common.v1.SecurityPolicy.CustomRulesEntry
+	30, // 12: plexspaces.common.v1.ResourceQuota.custom_quotas:type_name -> plexspaces.common.v1.ResourceQuota.CustomQuotasEntry
+	34, // 13: plexspaces.common.v1.RequestContext.timestamp:type_name -> google.protobuf.Timestamp
+	31, // 14: plexspaces.common.v1.RequestContext.metadata:type_name -> plexspaces.common.v1.RequestContext.MetadataEntry
+	32, // 15: plexspaces.common.v1.RequestContext.headers:type_name -> plexspaces.common.v1.RequestContext.HeadersEntry
+	34, // 16: plexspaces.common.v1.Message.timestamp:type_name -> google.protobuf.Timestamp
+	33, // 17: plexspaces.common.v1.Message.headers:type_name -> plexspaces.common.v1.Message.HeadersEntry
+	35, // 18: plexspaces.common.v1.Message.ttl:type_name -> google.protobuf.Duration
+	21, // 19: plexspaces.common.v1.OutboundHttpRequest.headers:type_name -> plexspaces.common.v1.HttpHeader
+	21, // 20: plexspaces.common.v1.OutboundHttpResponse.headers:type_name -> plexspaces.common.v1.HttpHeader
+	36, // 21: plexspaces.common.v1.Metadata.AnnotationsEntry.value:type_name -> google.protobuf.Any
+	36, // 22: plexspaces.common.v1.ErrorDetail.DetailsEntry.value:type_name -> google.protobuf.Any
+	36, // 23: plexspaces.common.v1.Facet.StateEntry.value:type_name -> google.protobuf.Any
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_plexspaces_v1_common_proto_init() }
@@ -2126,8 +2467,8 @@ func file_plexspaces_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_common_proto_rawDesc), len(file_plexspaces_v1_common_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   26,
+			NumEnums:      5,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

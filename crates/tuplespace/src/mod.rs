@@ -1062,6 +1062,22 @@ pub enum TupleSpaceError {
     ConnectionError(String),
 }
 
+impl TupleSpaceError {
+    /// Returns the proto error code for this error variant.
+    pub fn code(&self) -> plexspaces_proto::tuplespace::v1::TupleSpaceErrorCode {
+        use plexspaces_proto::tuplespace::v1::TupleSpaceErrorCode;
+        match self {
+            TupleSpaceError::NotFound => TupleSpaceErrorCode::TupleSpaceErrorNotFound,
+            TupleSpaceError::PatternError(_) => TupleSpaceErrorCode::TupleSpaceErrorPatternError,
+            TupleSpaceError::LeaseError(_) => TupleSpaceErrorCode::TupleSpaceErrorLeaseError,
+            TupleSpaceError::IoError(_) | TupleSpaceError::BackendError(_) | TupleSpaceError::ConnectionError(_) => TupleSpaceErrorCode::TupleSpaceErrorIoError,
+            TupleSpaceError::SerializationError(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
+            TupleSpaceError::NotSupported(_) | TupleSpaceError::NotImplemented(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
+            TupleSpaceError::InvalidConfiguration(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
+        }
+    }
+}
+
 /// Helper macro for creating tuples from values
 ///
 /// # Examples

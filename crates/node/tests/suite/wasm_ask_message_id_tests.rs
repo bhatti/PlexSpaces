@@ -21,12 +21,14 @@
 use super::test_helpers::app_request_with_tenant;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
+    DeployApplicationRequest, ShutdownStrategy,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::{Message, Metadata};
 use plexspaces_proto::wasm::v1::WasmModule;
+use plexspaces_actor::RequestContextExt;
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
@@ -102,6 +104,7 @@ async fn test_wasm_ask_single_message_id_flow() {
             nanos: 0,
         }),
         children: vec![child_spec],
+        ..Default::default()
     };
     let app_spec = ApplicationSpec {
         name: "calc-ask-test".to_string(),
@@ -209,7 +212,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         request_id, calc_actor_id
     );
 
-    let ask_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ask_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "default".to_string(),
     );

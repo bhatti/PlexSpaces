@@ -40,7 +40,7 @@ mod handlers {
     use hyper::body::Bytes;
     use hyper::{Method, Request, Response, StatusCode};
     use multer::Multipart;
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use std::sync::Arc;
 
     /// HTTP handler service for blob operations

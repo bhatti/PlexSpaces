@@ -26,11 +26,12 @@
 //! ActorFactoryImpl depends only on ServiceLocator, not Node directly.
 //! It uses ActorRegistry, VirtualActorManager, and other services to spawn actors.
 
-use crate::{Actor, ActorRef};
+use crate::{ActorInstance, ActorRef};
 use async_trait::async_trait;
-use plexspaces_core::{
+use plexspaces_common::ServiceNameExt;
+use crate::core::{
     ActorContext, ActorFactory, ActorId, ActorRegistry, ApplicationManager, ExitReason,
-    MessageSender, RequestContext, Service, ServiceLocator as ServiceLocatorTrait,
+    MessageSender, RequestContext, RequestContextExt, Service, ServiceLocator as ServiceLocatorTrait,
     VirtualActorManager,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -44,7 +45,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 /// Single DEBUG line after facets attach; includes mailbox stats when durability is present.
-async fn debug_log_attached_facets(actor: &Actor, actor_id: &ActorId) {
+async fn debug_log_attached_facets(actor: &ActorInstance, actor_id: &ActorId) {
     if !tracing::enabled!(tracing::Level::DEBUG) {
         return;
     }
@@ -72,14 +73,14 @@ async fn debug_log_attached_facets(actor: &Actor, actor_id: &ActorId) {
     }
 }
 
-async fn actor_behavior_kind(actor: &Actor) -> Option<String> {
+async fn actor_behavior_kind(actor: &ActorInstance) -> Option<String> {
     let behavior = actor.behavior().read().await;
     Some(match behavior.behavior_kind() {
-        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-        plexspaces_core::BehaviorType::Custom(value) => value,
+        crate::core::BehaviorType::GenServer => "GenServer".to_string(),
+        crate::core::BehaviorType::GenEvent => "GenEvent".to_string(),
+        crate::core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+        crate::core::BehaviorType::Workflow => "Workflow".to_string(),
+        crate::core::BehaviorType::Custom(value) => value,
     })
 }
 
@@ -107,13 +108,13 @@ impl ActorFactoryImpl {
 
     async fn start_registered_local_actor(
         &self,
-        mut actor: Actor,
+        mut actor: ActorInstance,
         actor_id: &ActorId,
         ctx: &RequestContext,
         registry: &Arc<ActorRegistry>,
         facet_manager: &Arc<plexspaces_facet::FacetManager>,
         spawn_visibility: ActorVisibility,
-    ) -> Result<(Arc<Actor>, ActorRef), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(Arc<ActorInstance>, ActorRef), Box<dyn std::error::Error + Send + Sync>> {
         let facets_clone = actor.facets().clone();
         let mailbox = actor.mailbox().clone();
 
@@ -633,7 +634,7 @@ impl ActorFactory for ActorFactoryImpl {
             let tenant_id = metadata.spec.tenant_id.clone();
             let namespace = metadata.spec.namespace.clone();
             // Compute initial_state via wasm_init_payload (uses spec.args, injects actor_id).
-            let initial_state = plexspaces_core::wasm_init_payload(&metadata.spec, &actor_id);
+            let initial_state = crate::core::wasm_init_payload(&metadata.spec, &actor_id);
             let labels = metadata.spec.labels.clone();
             let tenant_id_clone = tenant_id.clone();
 
@@ -784,7 +785,7 @@ impl ActorFactory for ActorFactoryImpl {
             // Rebuild actor using spawn_actor with stored actor_type and recreated VirtualActorFacet
             // If BehaviorRegistry fails, try to ensure behavior is registered by re-registering from application
             let rebuild_spec = {
-                use plexspaces_core::ActorSpawnSpec;
+                use crate::core::ActorSpawnSpec;
                 use plexspaces_proto::common::v1::ActorIdentity;
                 // identity.name must be the instance name ("session-1") so spawn_actor
                 // builds the correct ActorId. spec.role carries the declaration name
@@ -906,7 +907,7 @@ impl ActorFactory for ActorFactoryImpl {
         spawn_spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::{behavior_factory::BehaviorFactory, Actor as ActorTrait};
+        use crate::core::{behavior_factory::BehaviorFactory, Actor as ActorTrait};
 
         let actor_type = spawn_spec
             .identity
@@ -941,7 +942,7 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
 
         // Build ActorId directly from spec identity + local node_id
-        let actor_id = plexspaces_core::ActorId::new(
+        let actor_id = crate::core::ActorId::new(
             actor_name.as_ref(),
             actor_type,
             &namespace,
@@ -950,7 +951,7 @@ impl ActorFactory for ActorFactoryImpl {
         .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
 
         // Derive init payload from spec (deterministic; no stale state)
-        let initial_state = plexspaces_core::wasm_init_payload(spawn_spec, &actor_id);
+        let initial_state = crate::core::wasm_init_payload(spawn_spec, &actor_id);
 
         // Create behavior via BehaviorRegistry using actor_type + init payload
         let behavior: Box<dyn ActorTrait> = {
@@ -996,7 +997,7 @@ impl ActorFactory for ActorFactoryImpl {
             spawn_spec.tenant_id.clone()
         };
 
-        let mut actor = crate::Actor::new(
+        let mut actor = crate::ActorInstance::new(
             actor_id.clone(),
             behavior,
             mailbox,
@@ -1008,8 +1009,8 @@ impl ActorFactory for ActorFactoryImpl {
         // Apply ActorConfig if present (wraps actor with a config-carrying context)
         if let Some(cfg) = spawn_spec.config.clone() {
             use crate::TestServiceLocatorStub;
-            use plexspaces_core::ActorContext;
-            let sl: Arc<dyn plexspaces_core::ServiceLocator> =
+            use crate::core::ActorContext;
+            let sl: Arc<dyn crate::core::ServiceLocator> =
                 Arc::new(TestServiceLocatorStub::new());
             let ctx_with_cfg = Arc::new(ActorContext::new(
                 local_node_id.to_string(),
@@ -1083,7 +1084,7 @@ impl ActorFactoryImpl {
     pub async fn spawn_built_actor_impl(
         &self,
         ctx: &RequestContext,
-        actor: Arc<Actor>,
+        actor: Arc<ActorInstance>,
         actor_type: String,
         initial_state: Vec<u8>,
         labels: HashMap<String, String>,
@@ -1153,7 +1154,7 @@ impl ActorFactoryImpl {
         // Extract actor config from context (if available)
         let actor_config = actor.context().config.clone();
 
-        let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+        let self_ref = crate::core::ActorRef::new(actor_id.clone())
             .map_err(|e| format!("Failed to construct actor self_ref: {}", e))?;
 
         // Create ActorContext (actor_id is no longer stored in context)
@@ -1378,14 +1379,14 @@ impl ActorFactoryImpl {
                         .unwrap_or_default()
                 };
 
-                use plexspaces_core::ActorSpawnSpec;
+                use crate::core::ActorSpawnSpec;
                 use plexspaces_proto::common::v1::ActorIdentity;
-                // Use the declaration name from the type/definition-level spec (e.g. "ephemeral")
-                // so wasm_init_payload generates declaration_name that BehaviorRegistry can match.
+                // Use the spec name from the type/definition-level spec (e.g. "ephemeral")
+                // so wasm_init_payload generates the role that BehaviorRegistry can match.
                 // For type-level actors the definition name equals actor_type; for named virtual
                 // actors (name != actor_type) the instance name (e.g. "cart-1") differs from the
-                // declaration name registered in the TOML ("ephemeral").
-                let declaration_name = existing_spec
+                // role registered in the TOML ("ephemeral").
+                let spec_name = existing_spec
                     .as_ref()
                     .and_then(|s| s.identity.as_ref())
                     .map(|id| id.name.clone())
@@ -1393,7 +1394,7 @@ impl ActorFactoryImpl {
                     .unwrap_or_else(|| actor_id.name().to_string());
                 let spec = ActorSpawnSpec {
                     identity: Some(ActorIdentity {
-                        name: declaration_name,
+                        name: spec_name,
                         actor_type: actor_type.clone(),
                     }),
                     role: existing_spec
@@ -1430,7 +1431,7 @@ impl ActorFactoryImpl {
                 // Build a minimal spec whose empty fields will be filled in by the merge
                 // logic inside register(), which falls back to the existing instance spec
                 // then the type-level spec.
-                use plexspaces_core::ActorSpawnSpec;
+                use crate::core::ActorSpawnSpec;
                 use plexspaces_proto::common::v1::ActorIdentity;
                 let spec_update = ActorSpawnSpec {
                     identity: Some(ActorIdentity {
@@ -1835,7 +1836,7 @@ impl ActorFactoryImpl {
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<crate::WorkflowRef, crate::WorkflowRefError>
     where
-        B: plexspaces_core::Actor + Send + 'static,
+        B: crate::core::Actor + Send + 'static,
     {
         let actor_ref = self
             .spawn_behavior(ctx, actor_id, behavior, facets)
@@ -1865,7 +1866,7 @@ impl ActorFactoryImpl {
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<crate::GenServerRef, crate::GenServerError>
     where
-        B: plexspaces_core::Actor + Send + 'static,
+        B: crate::core::Actor + Send + 'static,
     {
         let actor_ref = self
             .spawn_behavior(ctx, actor_id, behavior, facets)
@@ -1896,7 +1897,7 @@ impl ActorFactoryImpl {
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<crate::FsmRef, crate::FsmError>
     where
-        B: plexspaces_core::Actor + Send + 'static,
+        B: crate::core::Actor + Send + 'static,
     {
         let actor_ref = self
             .spawn_behavior(ctx, actor_id, behavior, facets)
@@ -1926,7 +1927,7 @@ impl ActorFactoryImpl {
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<crate::EventRef, crate::EventError>
     where
-        B: plexspaces_core::Actor + Send + 'static,
+        B: crate::core::Actor + Send + 'static,
     {
         let actor_ref = self
             .spawn_behavior(ctx, actor_id, behavior, facets)
@@ -1947,7 +1948,7 @@ impl ActorFactoryImpl {
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
     where
-        B: plexspaces_core::Actor + Send + 'static,
+        B: crate::core::Actor + Send + 'static,
     {
         use crate::ActorBuilder;
 
@@ -1959,7 +1960,7 @@ impl ActorFactoryImpl {
 
         // Build actor with the provided behavior
         let actor = ActorBuilder::new(Box::new(behavior))
-            .with_id(actor_id.clone())
+            .with_name(actor_id.name().to_string())
             .with_namespace(ctx.namespace().to_string())
             .build()
             .await
@@ -1996,6 +1997,6 @@ impl ActorFactoryImpl {
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
 impl Service for ActorFactoryImpl {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::ACTOR_FACTORY_IMPL.to_string()
+        crate::core::ServiceName::ServiceNameActorFactoryImpl.as_str().to_string()
     }
 }

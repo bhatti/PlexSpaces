@@ -54,7 +54,7 @@ use tokio::time::{Duration, Instant};
 use tonic_health::server::{health_reporter, HealthReporter};
 
 // Make PlexSpacesHealthReporter implement Service trait for ServiceLocator registration
-impl plexspaces_core::Service for PlexSpacesHealthReporter {
+impl plexspaces_actor::Service for PlexSpacesHealthReporter {
     fn service_name(&self) -> String {
         "PlexSpacesHealthReporter".to_string()
     }
@@ -130,7 +130,7 @@ pub struct PlexSpacesHealthReporter {
 
     /// ServiceLocator reference (for setting shutdown flag)
     /// This allows HealthService to be the source of truth for shutdown
-    service_locator: Option<Arc<dyn plexspaces_core::ServiceLocator>>,
+    service_locator: Option<Arc<dyn plexspaces_actor::ServiceLocator>>,
 }
 
 impl PlexSpacesHealthReporter {
@@ -165,7 +165,7 @@ impl PlexSpacesHealthReporter {
     /// Prefer using `health_service_helpers::create_and_register_health_service()`
     /// which handles both creation and registration in ServiceLocator.
     pub fn with_service_locator(
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     ) -> (Self, impl tonic::server::NamedService) {
         Self::with_config_and_service_locator(Default::default(), Some(service_locator))
     }
@@ -191,7 +191,7 @@ impl PlexSpacesHealthReporter {
     /// Tuple of health reporter and gRPC service
     pub fn with_config_and_service_locator(
         config: HealthProbeConfig,
-        service_locator: Option<Arc<dyn plexspaces_core::ServiceLocator>>,
+        service_locator: Option<Arc<dyn plexspaces_actor::ServiceLocator>>,
     ) -> (Self, impl tonic::server::NamedService) {
         let (reporter, service) = health_reporter();
 

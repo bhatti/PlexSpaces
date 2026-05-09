@@ -13,7 +13,7 @@
 //! - Recommendations
 
 use crate::models::*;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_sdk::new_message;
 use tracing::info;

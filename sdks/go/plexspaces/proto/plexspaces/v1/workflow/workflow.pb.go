@@ -275,7 +275,10 @@ const (
 	// Invalid workflow definition
 	WorkflowError_WORKFLOW_ERROR_INVALID_DEFINITION WorkflowError = 4
 	// Execution error (runtime failure)
+	// Execution error (runtime failure)
 	WorkflowError_WORKFLOW_ERROR_EXECUTION WorkflowError = 5
+	// Concurrent update conflict (optimistic locking failure)
+	WorkflowError_WORKFLOW_ERROR_CONCURRENT_UPDATE WorkflowError = 6
 )
 
 // Enum value maps for WorkflowError.
@@ -287,6 +290,7 @@ var (
 		3: "WORKFLOW_ERROR_NOT_FOUND",
 		4: "WORKFLOW_ERROR_INVALID_DEFINITION",
 		5: "WORKFLOW_ERROR_EXECUTION",
+		6: "WORKFLOW_ERROR_CONCURRENT_UPDATE",
 	}
 	WorkflowError_value = map[string]int32{
 		"WORKFLOW_ERROR_UNSPECIFIED":        0,
@@ -295,6 +299,7 @@ var (
 		"WORKFLOW_ERROR_NOT_FOUND":          3,
 		"WORKFLOW_ERROR_INVALID_DEFINITION": 4,
 		"WORKFLOW_ERROR_EXECUTION":          5,
+		"WORKFLOW_ERROR_CONCURRENT_UPDATE":  6,
 	}
 )
 
@@ -2220,14 +2225,15 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\x15STEP_STATUS_COMPLETED\x10\x03\x12\x16\n" +
 	"\x12STEP_STATUS_FAILED\x10\x04\x12\x18\n" +
 	"\x14STEP_STATUS_RETRYING\x10\x05\x12\x19\n" +
-	"\x15STEP_STATUS_CANCELLED\x10\x06*\xd0\x01\n" +
+	"\x15STEP_STATUS_CANCELLED\x10\x06*\xf6\x01\n" +
 	"\rWorkflowError\x12\x1e\n" +
 	"\x1aWORKFLOW_ERROR_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16WORKFLOW_ERROR_STORAGE\x10\x01\x12 \n" +
 	"\x1cWORKFLOW_ERROR_SERIALIZATION\x10\x02\x12\x1c\n" +
 	"\x18WORKFLOW_ERROR_NOT_FOUND\x10\x03\x12%\n" +
 	"!WORKFLOW_ERROR_INVALID_DEFINITION\x10\x04\x12\x1c\n" +
-	"\x18WORKFLOW_ERROR_EXECUTION\x10\x052\x84\x19\n" +
+	"\x18WORKFLOW_ERROR_EXECUTION\x10\x05\x12$\n" +
+	" WORKFLOW_ERROR_CONCURRENT_UPDATE\x10\x062\x84\x19\n" +
 	"\x0fWorkflowService\x12\x81\x02\n" +
 	"\x10CreateDefinition\x12/.plexspaces.workflow.v1.CreateDefinitionRequest\x1a0.plexspaces.workflow.v1.CreateDefinitionResponse\"\x89\x01\x92A^\n" +
 	"\vDefinitions\x12\x1aCreate Workflow Definition\x1a3Create a new versioned workflow definition template\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/api/v1/workflows/definitions\x12\x91\x02\n" +

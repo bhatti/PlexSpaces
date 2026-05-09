@@ -21,7 +21,7 @@
 // ```
 
 #[cfg(feature = "native")]
-use plexspaces_core::{
+use plexspaces_actor::{
     OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse, ServiceLocator,
 };
 #[cfg(feature = "native")]
@@ -107,7 +107,7 @@ impl ServiceHttpClient {
     ///
     /// Convenience wrapper around `from_locator` that uses `ctx.service_locator`.
     pub async fn from_context(
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         link_name: impl Into<String>,
     ) -> Result<Self, ServiceHttpClientError> {
         Self::from_locator(ctx.service_locator.clone(), link_name).await
@@ -127,7 +127,10 @@ impl ServiceHttpClient {
         let req = OutboundHttpRequest {
             method: "GET".to_string(),
             path_and_query: path_and_query.to_string(),
-            headers: vec![("Accept".to_string(), "application/json".to_string())],
+            headers: vec![plexspaces_actor::HttpHeader {
+                key: "Accept".to_string(),
+                value: "application/json".to_string(),
+            }],
             body: vec![],
         };
         let resp = self.execute(req).await?;
@@ -156,8 +159,14 @@ impl ServiceHttpClient {
             method: "POST".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("Accept".to_string(), "application/json".to_string()),
+                plexspaces_actor::HttpHeader {
+                    key: "Content-Type".to_string(),
+                    value: "application/json".to_string(),
+                },
+                plexspaces_actor::HttpHeader {
+                    key: "Accept".to_string(),
+                    value: "application/json".to_string(),
+                },
             ],
             body: body_bytes,
         };
@@ -182,8 +191,14 @@ impl ServiceHttpClient {
             method: "PUT".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("Accept".to_string(), "application/json".to_string()),
+                plexspaces_actor::HttpHeader {
+                    key: "Content-Type".to_string(),
+                    value: "application/json".to_string(),
+                },
+                plexspaces_actor::HttpHeader {
+                    key: "Accept".to_string(),
+                    value: "application/json".to_string(),
+                },
             ],
             body: body_bytes,
         };
@@ -228,7 +243,7 @@ impl ServiceHttpClient {
                     let body = String::from_utf8_lossy(&resp.body).into_owned();
                     Err(ServiceHttpClientError::HttpError {
                         link: self.link_name.clone(),
-                        status: resp.status,
+                        status: resp.status as u16,
                         body,
                     })
                 }
@@ -254,7 +269,7 @@ impl ServiceHttpClient {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{OutboundHttpClientError, OutboundHttpRequest, OutboundHttpResponse};
+    use plexspaces_actor::{OutboundHttpClientError, OutboundHttpRequest, OutboundHttpResponse};
     use std::sync::Arc;
 
     /// Mock HTTP client for testing.
@@ -276,8 +291,11 @@ mod tests {
     fn mock_client(status: u16, body: &str) -> Arc<dyn OutboundHttpClient> {
         Arc::new(MockHttpClient {
             response: OutboundHttpResponse {
-                status,
-                headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+                status: status as u32,
+                headers: vec![plexspaces_actor::HttpHeader {
+                    key: "Content-Type".to_string(),
+                    value: "application/json".to_string(),
+                }],
                 body: body.as_bytes().to_vec(),
             },
         })

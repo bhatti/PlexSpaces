@@ -23,8 +23,8 @@
 //!
 //! ## Proto-First Design
 //! All data models and errors are defined in `proto/plexspaces/v1/supervision.proto`:
-//! - `SupervisionStrategy`, `RestartStrategy`, `ChildType` (enums)
-//! - `ChildSpec`, `SupervisorConfig`, `SupervisorState` (messages)
+//! - `SupervisionStrategy`, `ChildType` (enums)
+//! - `ChildSpec`, `SupervisorSpec`, `SupervisorState` (messages)
 //! - `SupervisionErrorCode`, `SupervisionError` (error types)
 
 use async_trait::async_trait;
@@ -37,9 +37,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout as tokio_timeout;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{Actor, ActorRef as ActorActorRef};
+use crate::{ActorInstance, ActorRef as ActorActorRef};
 use plexspaces_proto::actor::v1::ActorVisibility;
-use plexspaces_core::{
+use crate::core::{
     ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait,
 };
 
@@ -49,7 +49,7 @@ use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, Supervis
 // ============================================================================
 // Link Provider Trait (Phase 8.5: Link Semantics Integration)
 // ============================================================================
-pub use plexspaces_core::LinkProvider;
+pub use crate::core::LinkProvider;
 
 // ============================================================================
 // Supervised Child Trait (Rust-side interface, uses proto errors)
@@ -158,7 +158,7 @@ pub struct Supervisor {
 /// Supervised actor wrapper
 struct SupervisedActor {
     /// The actual actor instance
-    actor: Arc<RwLock<Actor>>,
+    actor: Arc<RwLock<ActorInstance>>,
     /// Reference to the actor
     actor_ref: ActorRef,
     /// Actor task handle (for monitoring termination)
@@ -168,7 +168,7 @@ struct SupervisedActor {
     /// Last restart time
     last_restart: Option<tokio::time::Instant>,
     /// Restart history for intensity tracking (timestamp of each restart)
-    restart_history: Vec<tokio::time::Instant>,
+    restart_timestamps: Vec<tokio::time::Instant>,
     /// Child specification for restarts (proto-first, includes facets)
     spec: crate::ChildSpec,
 }
@@ -204,7 +204,7 @@ struct SupervisedSupervisor {
     /// Last restart time
     last_restart: Option<tokio::time::Instant>,
     /// Restart history for intensity tracking
-    restart_history: Vec<tokio::time::Instant>,
+    restart_timestamps: Vec<tokio::time::Instant>,
     /// Restart policy (from spec)
     restart: RestartPolicy,
     /// Shutdown timeout in milliseconds
@@ -259,31 +259,9 @@ pub enum RestartPolicy {
     },
 }
 
-/// Child type (Erlang-inspired)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ChildType {
-    /// Always running, restart if terminated
-    Worker,
-    /// Another supervisor
-    Supervisor,
-}
 
-/// Supervisor events
-#[derive(Debug, Clone)]
-pub enum SupervisorEvent {
-    /// Child started
-    ChildStarted(ActorId),
-    /// Child stopped
-    ChildStopped(ActorId),
-    /// Child restarted
-    ChildRestarted(ActorId, u32), // (id, restart_count)
-    /// Child failed
-    ChildFailed(ActorId, String),
-    /// Max restarts exceeded
-    MaxRestartsExceeded(ActorId),
-    /// Strategy adapted
-    StrategyAdapted(SupervisionStrategy),
-}
+/// Supervisor events — canonical definition lives in proto.
+pub use plexspaces_proto::supervision::v1::SupervisorEvent;
 
 impl Supervisor {
     /// Create a new supervisor with required ServiceLocator
@@ -345,7 +323,7 @@ impl Supervisor {
     ///
     /// ## Example
     /// ```rust,ignore
-    /// use plexspaces_core::{ActorRegistry, ServiceLocator};
+    /// use crate::core::{ActorRegistry, ServiceLocator};
     /// let actor_registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     /// supervisor.with_link_provider(actor_registry as Arc<dyn LinkProvider + Send + Sync>);
     /// ```
@@ -377,9 +355,9 @@ impl Supervisor {
         use crate::child_spec::StartedChild;
 
         // Record facets on span for observability (which facets are attached when creating actor)
-        let facet_count = spec.facets.len();
+        let facet_count = spec.proto.facets.len();
         let facet_list: String = spec
-            .facets
+            .proto.facets
             .iter()
             .map(|f| f.r#type.as_str())
             .collect::<Vec<_>>()
@@ -393,9 +371,9 @@ impl Supervisor {
             trace!(
                 supervisor_id = %self.id,
                 child_id = %spec.actor_id,
-                restart_strategy = ?spec.restart_strategy,
-                child_type = ?spec.child_type,
-                facet_count = spec.facets.len(),
+                restart_policy = ?spec.restart_policy(),
+                role = %spec.role(),
+                facet_count = spec.proto.facets.len(),
                 facets = %facet_list,
                 "Adding child to supervisor"
             );
@@ -448,7 +426,7 @@ impl Supervisor {
             service_locator.clone(),
             ActorVisibility::ActorVisibilityPublic,
         );
-        let self_ref = plexspaces_core::ActorRef::new(child_id.clone())
+        let self_ref = crate::core::ActorRef::new(child_id.clone())
             .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
         let new_ctx = Arc::new(
             ActorContext::new(
@@ -486,7 +464,7 @@ impl Supervisor {
             handle: Some(handle),
             restart_count: 0,
             last_restart: None,
-            restart_history: Vec::new(),
+            restart_timestamps: Vec::new(),
             spec: spec.clone(),
         };
 
@@ -517,7 +495,7 @@ impl Supervisor {
         // System supervision operation - linking supervisor to child for fault tolerance
         // Use NodeConfig defaults for system operations
         if let Some(node) = &self.node {
-            use plexspaces_core::RequestContext;
+            use crate::core::{RequestContext, RequestContextExt};
             let supervisor_id = ActorId::from(self.id.clone());
             // Tenant comes from auth, not config
             let ctx =
@@ -549,7 +527,11 @@ impl Supervisor {
         // Send event
         let _ = self
             .event_tx
-            .send(SupervisorEvent::ChildStarted(child_id.into()))
+            .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted as i32,
+                actor_id: child_id.to_string(),
+                ..Default::default()
+            })
             .await;
 
         Ok(actor_ref)
@@ -568,7 +550,7 @@ impl Supervisor {
             let supervisor_id = ActorId::from(self.id.clone());
             // System supervision operation - unlinking supervisor from child
             // Use NodeConfig defaults for system operations
-            use plexspaces_core::RequestContext;
+            use crate::core::{RequestContext, RequestContextExt};
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
@@ -603,7 +585,11 @@ impl Supervisor {
             }
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildStopped(id.clone()))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                    actor_id: id.to_string(),
+                    ..Default::default()
+                })
                 .await;
             Ok(())
         } else {
@@ -639,7 +625,7 @@ impl Supervisor {
     /// use plexspaces_proto::supervision::v1::EventPropagation;
     /// use std::sync::Arc;
     ///
-    /// # async fn example(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<(), SupervisorError> {
+    /// # async fn example(service_locator: Arc<dyn crate::core::ServiceLocator>) -> Result<(), SupervisorError> {
     /// let (parent, _) = Supervisor::new(
     ///     "parent".to_string(),
     ///     SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 60 },
@@ -692,11 +678,8 @@ impl Supervisor {
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationForwardAll => true,
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationFilterCritical => {
                         // Only forward failures, max restarts exceeded
-                        matches!(
-                            event,
-                            SupervisorEvent::ChildFailed(_, _)
-                                | SupervisorEvent::MaxRestartsExceeded(_)
-                        )
+                        event.event_type == plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32
+                            || event.event_type == plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32
                     }
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationNone => false,
                 };
@@ -715,7 +698,7 @@ impl Supervisor {
             handle: Some(handle),
             restart_count: 0,
             last_restart: None,
-            restart_history: Vec::new(),
+            restart_timestamps: Vec::new(),
             restart: restart,
             shutdown_timeout_ms,
         };
@@ -748,7 +731,7 @@ impl Supervisor {
         // System supervision operation - linking supervisor to child supervisor for fault tolerance
         // Use NodeConfig defaults for system operations
         if let Some(node) = &self.node {
-            use plexspaces_core::RequestContext;
+            use crate::core::{RequestContext, RequestContextExt};
             let supervisor_id = ActorId::from(self.id.clone());
             let child_supervisor_id = ActorId::from(child_id.clone());
             // Tenant comes from auth, not config
@@ -773,7 +756,11 @@ impl Supervisor {
         // Send event (child supervisor started)
         let _ = self
             .event_tx
-            .send(SupervisorEvent::ChildStarted(child_id.into()))
+            .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted as i32,
+                actor_id: child_id.to_string(),
+                ..Default::default()
+            })
             .await;
 
         Ok(())
@@ -804,7 +791,7 @@ impl Supervisor {
         if let Some(node) = &self.node {
             // System supervision operation - unlinking supervisor from child supervisor
             // Use NodeConfig defaults for system operations
-            use plexspaces_core::RequestContext;
+            use crate::core::{RequestContext, RequestContextExt};
             let supervisor_id_actor = ActorId::from(self.id.clone());
             let child_supervisor_id_actor = ActorId::from(supervisor_id.to_string());
             // Tenant comes from auth, not config
@@ -846,9 +833,11 @@ impl Supervisor {
             }
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildStopped(
-                    supervisor_id.to_string().into(),
-                ))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                    actor_id: supervisor_id.to_string(),
+                    ..Default::default()
+                })
                 .await;
             Ok(())
         } else {
@@ -869,17 +858,17 @@ impl Supervisor {
         &self,
         id: &ActorId,
         reason: String,
-        exit_reason: Option<plexspaces_core::ExitReason>,
+        exit_reason: Option<crate::core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         // Parse exit_reason from reason string if not provided
         let exit_reason = exit_reason.or_else(|| {
             // Try to parse from reason string
             if reason == "normal" {
-                Some(plexspaces_core::ExitReason::Normal)
+                Some(crate::core::ExitReason::Normal)
             } else if reason == "shutdown" {
-                Some(plexspaces_core::ExitReason::Shutdown)
+                Some(crate::core::ExitReason::Shutdown)
             } else if reason == "killed" {
-                Some(plexspaces_core::ExitReason::Killed)
+                Some(crate::core::ExitReason::Killed)
             } else if reason.starts_with("linked:") {
                 // Parse linked reason (format: "linked:actor_id:reason")
                 let parts: Vec<&str> = reason.splitn(3, ':').collect();
@@ -887,15 +876,15 @@ impl Supervisor {
                     let linked_id = parts[1].to_string();
                     let linked_reason_str = parts[2];
                     let linked_reason = if linked_reason_str == "normal" {
-                        plexspaces_core::ExitReason::Normal
+                        crate::core::ExitReason::Normal
                     } else if linked_reason_str == "shutdown" {
-                        plexspaces_core::ExitReason::Shutdown
+                        crate::core::ExitReason::Shutdown
                     } else if linked_reason_str == "killed" {
-                        plexspaces_core::ExitReason::Killed
+                        crate::core::ExitReason::Killed
                     } else {
-                        plexspaces_core::ExitReason::Error(linked_reason_str.to_string())
+                        crate::core::ExitReason::Error(linked_reason_str.to_string())
                     };
-                    Some(plexspaces_core::ExitReason::Linked {
+                    Some(crate::core::ExitReason::Linked {
                         actor_id: linked_id.into(),
                         reason: Box::new(linked_reason),
                     })
@@ -903,7 +892,7 @@ impl Supervisor {
                     None
                 }
             } else {
-                Some(plexspaces_core::ExitReason::Error(reason.clone()))
+                Some(crate::core::ExitReason::Error(reason.clone()))
             }
         });
 
@@ -931,7 +920,12 @@ impl Supervisor {
         // Send failure event
         let _ = self
             .event_tx
-            .send(SupervisorEvent::ChildFailed(id.clone(), reason.clone()))
+            .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+                actor_id: id.to_string(),
+                reason: reason.clone(),
+                ..Default::default()
+            })
             .await;
 
         // Apply supervision strategy
@@ -1005,22 +999,24 @@ impl Supervisor {
         let mut child_supervisors = self.child_supervisors.write().await;
 
         if let Some(supervised_supervisor) = child_supervisors.get_mut(supervisor_id) {
-            // Track restart intensity using restart_history
+            // Track restart intensity using restart_timestamps
             let now = tokio::time::Instant::now();
             let window_duration = Duration::from_secs(within_seconds);
 
             // Remove old restarts outside the time window
             supervised_supervisor
-                .restart_history
+                .restart_timestamps
                 .retain(|&restart_time| now.duration_since(restart_time) < window_duration);
 
             // Check if we've exceeded max_restarts within the time window
-            if supervised_supervisor.restart_history.len() >= max_restarts as usize {
+            if supervised_supervisor.restart_timestamps.len() >= max_restarts as usize {
                 let _ = self
                     .event_tx
-                    .send(SupervisorEvent::MaxRestartsExceeded(
-                        supervisor_id.to_string().into(),
-                    ))
+                    .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                        event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
+                        actor_id: supervisor_id.to_string(),
+                        ..Default::default()
+                    })
                     .await;
 
                 // Escalate to parent supervisor if it exists
@@ -1029,7 +1025,7 @@ impl Supervisor {
                         .handle_failure(
                             &self.id.clone().into(),
                             format!("Child supervisor {} exceeded max restarts", supervisor_id),
-                            Some(plexspaces_core::ExitReason::Error(format!(
+                            Some(crate::core::ExitReason::Error(format!(
                                 "Max restarts exceeded"
                             ))),
                         )
@@ -1040,7 +1036,7 @@ impl Supervisor {
             }
 
             // Record this restart attempt in history
-            supervised_supervisor.restart_history.push(now);
+            supervised_supervisor.restart_timestamps.push(now);
 
             // Apply restart policy
             match supervised_supervisor.restart {
@@ -1084,10 +1080,12 @@ impl Supervisor {
             // Send restart event
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildRestarted(
-                    supervisor_id.to_string().into(),
-                    supervised_supervisor.restart_count,
-                ))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+                    actor_id: supervisor_id.to_string(),
+                    restart_count: supervised_supervisor.restart_count,
+                    ..Default::default()
+                })
                 .await;
         }
 
@@ -1141,49 +1139,53 @@ impl Supervisor {
         id: &ActorId,
         max_restarts: u32,
         within_seconds: u64,
-        exit_reason: Option<plexspaces_core::ExitReason>,
+        exit_reason: Option<crate::core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         let mut children = self.children.write().await;
         let mut stats = self.stats.write().await;
 
         if let Some(child) = children.get_mut(id) {
-            // Track restart intensity using restart_history
+            // Track restart intensity using restart_timestamps
             let now = tokio::time::Instant::now();
             let window_duration = Duration::from_secs(within_seconds);
 
             // Remove old restarts outside the time window
             child
-                .restart_history
+                .restart_timestamps
                 .retain(|&restart_time| now.duration_since(restart_time) < window_duration);
 
             // Check if we've exceeded max_restarts within the time window
-            if child.restart_history.len() >= max_restarts as usize {
+            if child.restart_timestamps.len() >= max_restarts as usize {
                 error!(
                     supervisor_id = %self.id,
                     child_id = %id,
-                    restart_count = child.restart_history.len(),
+                    restart_count = child.restart_timestamps.len(),
                     max_restarts = max_restarts,
                     within_seconds = within_seconds,
                     "Max restarts exceeded for child"
                 );
                 let _ = self
                     .event_tx
-                    .send(SupervisorEvent::MaxRestartsExceeded(id.clone()))
+                    .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                        event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
+                        actor_id: id.to_string(),
+                        ..Default::default()
+                    })
                     .await;
                 return Err(SupervisorError::MaxRestartsExceeded);
             }
 
             // Record this restart attempt in history
-            child.restart_history.push(now);
+            child.restart_timestamps.push(now);
 
-            // Apply restart policy (using ChildSpec's RestartStrategy)
-            use crate::child_spec::RestartStrategy;
-            match child.spec.restart_strategy {
-                RestartStrategy::Permanent => {
+            // Apply restart policy
+            use crate::child_spec::ProtoRestartPolicy;
+            match child.spec.restart_policy() {
+                ProtoRestartPolicy::RestartPolicyPermanent | ProtoRestartPolicy::RestartPolicyUnspecified => {
                     // Always restart (regardless of exit reason)
                     self.perform_restart(child, &mut stats).await?;
                 }
-                RestartStrategy::Transient => {
+                ProtoRestartPolicy::RestartPolicyTransient => {
                     // Erlang/OTP semantics: Only restart on abnormal exit
                     // Normal exits: Normal, Shutdown
                     // Abnormal exits: Error, Killed, Linked(abnormal)
@@ -1191,17 +1193,17 @@ impl Supervisor {
                         Some(reason) => {
                             // Check if exit was abnormal
                             match reason {
-                                plexspaces_core::ExitReason::Normal
-                                | plexspaces_core::ExitReason::Shutdown => {
+                                crate::core::ExitReason::Normal
+                                | crate::core::ExitReason::Shutdown => {
                                     // Normal termination - don't restart
                                     false
                                 }
-                                plexspaces_core::ExitReason::Error(_)
-                                | plexspaces_core::ExitReason::Killed => {
+                                crate::core::ExitReason::Error(_)
+                                | crate::core::ExitReason::Killed => {
                                     // Abnormal termination - restart
                                     true
                                 }
-                                plexspaces_core::ExitReason::Linked {
+                                crate::core::ExitReason::Linked {
                                     reason: linked_reason,
                                     ..
                                 } => {
@@ -1210,8 +1212,8 @@ impl Supervisor {
                                     // If linked actor died with error/killed, this is abnormal
                                     matches!(
                                         linked_reason.as_ref(),
-                                        plexspaces_core::ExitReason::Error(_)
-                                            | plexspaces_core::ExitReason::Killed
+                                        crate::core::ExitReason::Error(_)
+                                            | crate::core::ExitReason::Killed
                                     )
                                 }
                             }
@@ -1241,9 +1243,13 @@ impl Supervisor {
                         return Ok(());
                     }
                 }
-                RestartStrategy::Temporary => {
+                ProtoRestartPolicy::RestartPolicyTemporary => {
                     // Don't restart
                     return Ok(());
+                }
+                ProtoRestartPolicy::RestartPolicyExponentialBackoff => {
+                    // Always restart (like Permanent) - backoff is applied by the caller
+                    self.perform_restart(child, &mut stats).await?;
                 }
             }
 
@@ -1252,15 +1258,17 @@ impl Supervisor {
                 supervisor_id = %self.id,
                 child_id = %id,
                 restart_count = child.restart_count,
-                restart_strategy = ?child.spec.restart_strategy,
+                restart_policy = ?child.spec.restart_policy(),
                 "Child restarted successfully"
             );
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildRestarted(
-                    id.clone(),
-                    child.restart_count,
-                ))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+                    actor_id: id.to_string(),
+                    restart_count: child.restart_count,
+                    ..Default::default()
+                })
                 .await;
         }
 
@@ -1272,7 +1280,7 @@ impl Supervisor {
         &self,
         max_restarts: u32,
         within_seconds: u64,
-        exit_reason: Option<plexspaces_core::ExitReason>,
+        exit_reason: Option<crate::core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         let children = self.children.read().await;
         let ids: Vec<ActorId> = children.keys().cloned().collect();
@@ -1292,7 +1300,7 @@ impl Supervisor {
         failed_id: &ActorId,
         max_restarts: u32,
         within_seconds: u64,
-        exit_reason: Option<plexspaces_core::ExitReason>,
+        exit_reason: Option<crate::core::ExitReason>,
     ) -> Result<(), SupervisorError> {
         // IndexMap preserves insertion order, so we can find position of failed actor
         // and restart all actors from that position onwards
@@ -1386,7 +1394,10 @@ impl Supervisor {
             // Emit StrategyAdapted event
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::StrategyAdapted(new_strategy.clone()))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventStrategyAdapted as i32,
+                    ..Default::default()
+                })
                 .await;
         }
 
@@ -1476,7 +1487,7 @@ impl Supervisor {
 
         // Phase 1: Unified Lifecycle - Restore facets from ChildSpec during restart
         // Facets are stored in ChildSpec and restored here to ensure they're reattached
-        if !child.spec.facets.is_empty() {
+        if !child.spec.proto.facets.is_empty() {
             // Get FacetRegistry from ServiceLocator to create facets from proto
             if let Some(service_locator) = &self.service_locator {
                 if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
@@ -1484,7 +1495,7 @@ impl Supervisor {
                     // Use facet_helpers to create facets from proto
                     use crate::create_facets_from_proto;
                     let facets =
-                        create_facets_from_proto(&child.spec.facets, &facet_registry).await;
+                        create_facets_from_proto(&child.spec.proto.facets, &facet_registry).await;
 
                     // Attach facets to the new actor before starting
                     // Phase 2: Supervisor Facet Metrics - Record metrics for facet restoration
@@ -1524,7 +1535,7 @@ impl Supervisor {
                     debug!(
                         supervisor_id = %self.id,
                         child_id = %child_id,
-                        facet_count = child.spec.facets.len(),
+                        facet_count = child.spec.proto.facets.len(),
                         restored_count = restored_count,
                         duration_ms = facet_restore_duration.as_millis(),
                         "Restored facets from ChildSpec during restart"
@@ -1533,7 +1544,7 @@ impl Supervisor {
                     debug!(
                         supervisor_id = %self.id,
                         child_id = %child_id,
-                        facet_count = child.spec.facets.len(),
+                        facet_count = child.spec.proto.facets.len(),
                         "FacetRegistry not available - facets not restored (graceful degradation)"
                     );
                 }
@@ -1544,7 +1555,7 @@ impl Supervisor {
         // restarted actor can be registered in ActorRegistry afterward.
         if let Some(service_locator) = &self.service_locator {
             let existing_ctx = new_actor.context().clone();
-            let self_ref = plexspaces_core::ActorRef::new(new_actor.id().clone())
+            let self_ref = crate::core::ActorRef::new(new_actor.id().clone())
                 .map_err(|e| SupervisorError::RestartFailed(e.to_string()))?;
             let new_ctx = Arc::new(
                 ActorContext::new(
@@ -1721,7 +1732,11 @@ impl Supervisor {
             // Emit ChildStopped event for child supervisor
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildStopped(ActorId::from(id)))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                    actor_id: id.to_string(),
+                    ..Default::default()
+                })
                 .await;
         }
 
@@ -1746,7 +1761,7 @@ impl Supervisor {
         // This prevents deadlocks when actors try to acquire locks during shutdown
         let child_info: Vec<(
             ActorId,
-            Arc<RwLock<Actor>>,
+            Arc<RwLock<ActorInstance>>,
             Option<tokio::task::JoinHandle<()>>,
             Option<u64>,
         )> = {
@@ -1758,7 +1773,7 @@ impl Supervisor {
                     let handle = child.handle.take();
                     // Convert ChildSpec's Duration to Option<u64> milliseconds
                     let shutdown_timeout_ms =
-                        child.spec.shutdown_timeout.map(|d| d.as_millis() as u64);
+                        child.spec.shutdown_timeout().map(|d| d.as_millis() as u64);
                     info.push((id.clone(), child.actor.clone(), handle, shutdown_timeout_ms));
                 }
             }
@@ -1889,7 +1904,11 @@ impl Supervisor {
 
             let _ = self
                 .event_tx
-                .send(SupervisorEvent::ChildStopped(id.clone()))
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                    actor_id: id.to_string(),
+                    ..Default::default()
+                })
                 .await;
         }
 
@@ -2203,7 +2222,7 @@ impl Supervisor {
         debug!(
             supervisor_id = %self.id,
             child_id = %spec.actor_id,
-            child_type = ?spec.child_type,
+            role = %spec.role(),
             "Starting child dynamically"
         );
 
@@ -2220,7 +2239,7 @@ impl Supervisor {
                 // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before starting actor
                 // Facets are attached in priority order (high priority first)
                 // This ensures facets are ready before actor.init() is called
-                if !spec.facets.is_empty() {
+                if !spec.proto.facets.is_empty() {
                     // Get FacetRegistry from ServiceLocator to create facets from proto
                     if let Some(service_locator) = &self.service_locator {
                         if let Some(facet_registry_wrapper) =
@@ -2230,7 +2249,7 @@ impl Supervisor {
                             // Use facet_helpers to create facets from proto
                             use crate::create_facets_from_proto;
                             let facets =
-                                create_facets_from_proto(&spec.facets, &facet_registry).await;
+                                create_facets_from_proto(&spec.proto.facets, &facet_registry).await;
 
                             // Attach facets to the actor before starting
                             // Phase 2: Supervisor Facet Metrics - Record metrics for facet attachment
@@ -2268,7 +2287,7 @@ impl Supervisor {
                             debug!(
                                 supervisor_id = %self.id,
                                 child_id = %spec.actor_id,
-                                facet_count = spec.facets.len(),
+                                facet_count = spec.proto.facets.len(),
                                 attached_count = attached_count,
                                 duration_ms = facet_attach_duration.as_millis(),
                                 "Attached facets from ChildSpec before starting actor"
@@ -2277,7 +2296,7 @@ impl Supervisor {
                             debug!(
                                 supervisor_id = %self.id,
                                 child_id = %spec.actor_id,
-                                facet_count = spec.facets.len(),
+                                facet_count = spec.proto.facets.len(),
                                 "FacetRegistry not available - facets not attached (graceful degradation)"
                             );
                         }
@@ -2299,7 +2318,7 @@ impl Supervisor {
                     handle: Some(handle),
                     restart_count: 0,
                     last_restart: None,
-                    restart_history: Vec::new(),
+                    restart_timestamps: Vec::new(),
                     spec: spec.clone(), // Store ChildSpec directly (includes facets)
                 };
 
@@ -2322,7 +2341,11 @@ impl Supervisor {
                 // Send event
                 let _ = self
                     .event_tx
-                    .send(SupervisorEvent::ChildStarted(spec.actor_id.clone()))
+                    .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                        event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted as i32,
+                        actor_id: spec.actor_id.to_string(),
+                        ..Default::default()
+                    })
                     .await;
 
                 Ok(spec.actor_id.clone())
@@ -2443,17 +2466,9 @@ impl Supervisor {
 
             result.push(ChildInfo {
                 child_id: id.to_string(),
-                child_type: match child.spec.child_type {
-                    crate::child_spec::ChildType::Actor => {
-                        plexspaces_proto::supervision::v1::ChildType::ChildTypeActor
-                    }
-                    crate::child_spec::ChildType::Supervisor => {
-                        plexspaces_proto::supervision::v1::ChildType::ChildTypeSupervisor
-                    }
-                } as i32,
+                role: child.spec.role().to_string(),
                 status: status as i32,
                 restart_count: child.restart_count,
-                pid: id.to_string(), // In Erlang, this would be the Pid
             });
         }
         drop(children);
@@ -2469,11 +2484,9 @@ impl Supervisor {
 
             result.push(ChildInfo {
                 child_id: id.clone(),
-                child_type: plexspaces_proto::supervision::v1::ChildType::ChildTypeSupervisor
-                    as i32,
+                role: "supervisor".to_string(),
                 status: status as i32,
                 restart_count: supervised.restart_count,
-                pid: id.clone(),
             });
         }
 
@@ -2529,98 +2542,65 @@ impl Supervisor {
                 ActorId::new(child_id, "supervisor", "default", "localhost")
                     .expect("placeholder supervisor child id")
             });
-            return Some(crate::child_spec::ChildSpec {
+            return Some(crate::child_spec::ChildSpec::supervisor(
                 actor_id,
-                restart_strategy: crate::child_spec::RestartStrategy::Permanent,
-                shutdown_timeout: None,
-                child_type: crate::child_spec::ChildType::Supervisor,
-                metadata: std::collections::HashMap::new(),
-                facets: Vec::new(),
-                start_fn: Arc::new(|| {
+                Arc::new(|| {
                     Box::pin(async move {
                         Err(ActorError::InvalidState(
                             "get_childspec() returns read-only spec".to_string(),
                         ))
                     })
                 }),
-            });
+            ));
         }
 
         None
     }
 
-    /// Build supervisor from SupervisorConfig (Phase 4)
+    /// Build supervisor from SupervisorSpec
     ///
     /// ## Purpose
-    /// Creates a supervisor from a SupervisorConfig proto message.
+    /// Creates a supervisor from a SupervisorSpec proto message.
     /// This enables declarative supervisor creation from configuration.
-    ///
-    /// ## Arguments
-    /// * `supervisor_id` - ID for the supervisor
-    /// * `config` - SupervisorConfig proto message
-    /// * `service_locator` - ServiceLocator for service access
-    ///
-    /// ## Returns
-    /// Supervisor instance with all children configured
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let config = SupervisorConfig {
-    ///     strategy: SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 60 },
-    ///     max_restarts: 3,
-    ///     within_period: Some(Duration::from_secs(60)),
-    ///     children: vec![...],
-    ///     metadata: HashMap::new(),
-    /// };
-    /// let supervisor = Supervisor::from_config("my-supervisor", config, service_locator).await?;
-    /// ```
     pub async fn from_config(
         supervisor_id: String,
-        config: plexspaces_proto::supervision::v1::SupervisorConfig,
+        config: plexspaces_proto::supervision::v1::SupervisorSpec,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> Result<(Self, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
-        // Convert proto SupervisionStrategy to Rust SupervisionStrategy
-        // Proto enum: ONE_FOR_ONE = 1, ONE_FOR_ALL = 2, REST_FOR_ONE = 3
-        let strategy = match config.strategy() as i32 {
-            1 => {
-                // ONE_FOR_ONE
-                SupervisionStrategy::OneForOne {
-                    max_restarts: config.max_restarts as u32,
-                    within_seconds: config
-                        .within_period
-                        .as_ref()
-                        .map(|d| d.seconds as u64)
-                        .unwrap_or(60),
-                }
-            }
-            2 => {
-                // ONE_FOR_ALL
-                SupervisionStrategy::OneForAll {
-                    max_restarts: config.max_restarts as u32,
-                    within_seconds: config
-                        .within_period
-                        .as_ref()
-                        .map(|d| d.seconds as u64)
-                        .unwrap_or(60),
-                }
-            }
-            3 => {
-                // REST_FOR_ONE
-                SupervisionStrategy::RestForOne {
-                    max_restarts: config.max_restarts as u32,
-                    within_seconds: config
-                        .within_period
-                        .as_ref()
-                        .map(|d| d.seconds as u64)
-                        .unwrap_or(60),
-                }
-            }
-            _ => {
-                return Err(SupervisorError::ActorCreationFailed(format!(
-                    "Unsupported supervision strategy: {:?}",
-                    config.strategy()
-                )));
-            }
+        use plexspaces_proto::supervision::v1::SupervisionStrategy as ProtoStrategy;
+        let window_secs = config
+            .max_restart_window
+            .as_ref()
+            .map(|d| d.seconds as u64)
+            .unwrap_or(60);
+        let strategy = match ProtoStrategy::try_from(config.strategy)
+            .unwrap_or(ProtoStrategy::SupervisionStrategyUnspecified)
+        {
+            ProtoStrategy::SupervisionStrategyUnspecified
+            | ProtoStrategy::SupervisionStrategyOneForOne
+            | ProtoStrategy::SupervisionStrategySimpleOneForOne => SupervisionStrategy::OneForOne {
+                max_restarts: config.max_restarts,
+                within_seconds: window_secs,
+            },
+            ProtoStrategy::SupervisionStrategyOneForAll => SupervisionStrategy::OneForAll {
+                max_restarts: config.max_restarts,
+                within_seconds: window_secs,
+            },
+            ProtoStrategy::SupervisionStrategyRestForOne => SupervisionStrategy::RestForOne {
+                max_restarts: config.max_restarts,
+                within_seconds: window_secs,
+            },
+            ProtoStrategy::SupervisionStrategyAdaptive => SupervisionStrategy::Adaptive {
+                initial_strategy: Box::new(SupervisionStrategy::OneForOne {
+                    max_restarts: config.max_restarts,
+                    within_seconds: window_secs,
+                }),
+                learning_rate: config
+                    .adaptive
+                    .as_ref()
+                    .map(|a| a.learning_rate)
+                    .unwrap_or(0.1),
+            },
         };
 
         // Create supervisor
@@ -2655,21 +2635,6 @@ impl Supervisor {
                     idx
                 )));
             }
-            // Validate child type
-            let child_type =
-                plexspaces_proto::supervision::v1::ChildType::try_from(child_spec_proto.child_type)
-                    .map_err(|_| {
-                        SupervisorError::ActorCreationFailed(format!(
-                            "Child {} has invalid child_type: {}",
-                            id.name, child_spec_proto.child_type
-                        ))
-                    })?;
-            if child_type == plexspaces_proto::supervision::v1::ChildType::ChildTypeUnspecified {
-                return Err(SupervisorError::ActorCreationFailed(format!(
-                    "Child {} has unspecified child_type",
-                    id.name
-                )));
-            }
         }
 
         debug!(
@@ -2682,23 +2647,9 @@ impl Supervisor {
     }
 }
 
-/// Child information for which_children() (Phase 4)
-#[derive(Debug, Clone)]
-pub struct ChildInfo {
-    pub child_id: String,
-    pub child_type: i32, // Proto ChildType enum value
-    pub status: i32,     // Proto ChildStatus enum value
-    pub restart_count: u32,
-    pub pid: String, // Process ID (actor/supervisor ID)
-}
-
-/// Child count for count_children() (Phase 4)
-#[derive(Debug, Clone)]
-pub struct ChildCount {
-    pub actors: u32,
-    pub supervisors: u32,
-    pub total: u32,
-}
+pub use plexspaces_proto::supervision::v1::ChildInfo;
+pub use plexspaces_proto::supervision::v1::ChildCount;
+pub use plexspaces_proto::supervision::v1::SupervisorEventType;
 
 /// Calculate exponential backoff delay
 fn calculate_backoff_delay(
@@ -2787,6 +2738,27 @@ pub enum SupervisorError {
     ConfigError(String),
 }
 
+impl SupervisorError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::actor::v1::SupervisorErrorCode {
+        use plexspaces_proto::actor::v1::SupervisorErrorCode;
+        match self {
+            SupervisorError::ActorCreationFailed(_) => {
+                SupervisorErrorCode::SupervisorErrorChildStartFailed
+            }
+            SupervisorError::ChildNotFound(_) => SupervisorErrorCode::SupervisorErrorChildNotFound,
+            SupervisorError::MaxRestartsExceeded => {
+                SupervisorErrorCode::SupervisorErrorMaxRestartsExceeded
+            }
+            SupervisorError::RestartFailed(_) => {
+                SupervisorErrorCode::SupervisorErrorChildStartFailed
+            }
+            SupervisorError::InvalidStrategy(_) => SupervisorErrorCode::SupervisorErrorConfigError,
+            SupervisorError::ConfigError(_) => SupervisorErrorCode::SupervisorErrorConfigError,
+        }
+    }
+}
+
 /// Supervisor builder for fluent API
 ///
 /// ## Example
@@ -2862,7 +2834,7 @@ impl SupervisorBuilder {
     /// register in the ActorRegistry and access FacetRegistry during restarts.
     pub async fn build(
         self,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn crate::core::ServiceLocator>,
     ) -> Result<(Supervisor, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
         let (mut supervisor, event_rx) = Supervisor::new(self.id, self.strategy, service_locator);
 
@@ -2882,10 +2854,9 @@ impl SupervisorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_behavior::MockBehavior;
-    use plexspaces_core::ActorId;
+    use crate::behavior::MockBehavior;
+    use crate::core::ActorId;
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
-    use plexspaces_node::create_default_service_locator;
 
     fn test_actor_id(name: &str) -> ActorId {
         ActorId::new(name, "worker", "default", "localhost").expect("test actor id must be valid")
@@ -2899,9 +2870,9 @@ mod tests {
     /// Uses async factory pattern (ChildSpec standard)
     async fn create_child_spec(
         id: String,
-        restart: crate::child_spec::RestartStrategy,
+        restart: crate::child_spec::ProtoRestartPolicy,
     ) -> crate::ChildSpec {
-        use crate::child_spec::{ChildSpec, ChildType as CSChildType, StartedChild};
+        use crate::child_spec::{ChildSpec, StartedChild};
 
         let child_actor_id = test_actor_id(&id);
         let id_for_factory = id.clone();
@@ -2912,7 +2883,7 @@ mod tests {
                 let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
                     .await
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
-                let actor = Actor::new(
+                let actor = ActorInstance::new(
                     actor_id.clone(),
                     Box::new(MockBehavior::new()),
                     mailbox,
@@ -2920,17 +2891,26 @@ mod tests {
                     "test".to_string(),
                     None,
                 );
-                let actor_ref = plexspaces_core::ActorRef::new(actor_id)
+                let actor_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+                    .await
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
+                let service_locator: Arc<dyn crate::core::ServiceLocator> =
+                    Arc::new(crate::TestServiceLocatorStub::new());
+                let actor_ref = crate::actor_ref::ActorRef::local(
+                    actor_id,
+                    "test-tenant".to_string(),
+                    "test".to_string(),
+                    Arc::new(actor_mailbox),
+                    service_locator,
+                    plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
+                );
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
         });
 
-        let mut spec = ChildSpec::worker(child_actor_id, start_fn);
-        spec.restart_strategy = restart;
-        spec.shutdown_timeout = Some(Duration::from_secs(5));
-        spec.child_type = CSChildType::Actor;
-        spec
+        ChildSpec::worker(child_actor_id, start_fn)
+            .with_restart(restart)
+            .with_shutdown(crate::child_spec::ShutdownSpec::Timeout(Duration::from_secs(5)))
     }
 
     /// Helper function to create a test supervisor with ServiceLocator
@@ -2938,55 +2918,59 @@ mod tests {
         id: String,
         strategy: SupervisionStrategy,
     ) -> (Supervisor, mpsc::Receiver<SupervisorEvent>) {
-        let service_locator = create_default_service_locator(None, None).await;
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         Supervisor::new(test_actor_id_string(&id), strategy, service_locator)
     }
 
-    /// Helper function to create a ChildSpec with sync factory
-    /// Converts `RestartPolicy` to `RestartStrategy` for the child spec.
+    /// Helper function to create a ChildSpec with an async factory (wraps the sync actor creation).
     fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpec {
-        use crate::child_spec::{ChildSpec, RestartStrategy as CSRestartStrategy};
+        use crate::child_spec::{ChildSpec, ProtoRestartPolicy, StartedChild};
 
+        let child_actor_id = test_actor_id(&id);
         let id_for_factory = id.clone();
-        let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
-            Arc::new(move || {
-                let child_name = id_for_factory.clone();
-                // Create mailbox on a separate thread to avoid blocking async runtime
-                let mailbox = std::thread::spawn(move || {
-                    let actor_id = test_actor_id(&child_name);
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .expect("Failed to create runtime for mailbox");
-                    rt.block_on(Mailbox::new(MailboxConfig::default(), actor_id.to_string()))
-                })
-                .join()
-                .expect("Thread panicked")
-                .expect("Failed to create mailbox in factory");
-                Ok(Actor::new(
-                    test_actor_id(&id_for_factory),
+        let start_fn: crate::child_spec::StartFn = Arc::new(move || {
+            let child_name = id_for_factory.clone();
+            Box::pin(async move {
+                let actor_id = test_actor_id(&child_name);
+                let actor_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+                    .await
+                    .map_err(|e| ActorError::InvalidState(e.to_string()))?;
+                let ref_mailbox = Arc::new(
+                    Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+                        .await
+                        .map_err(|e| ActorError::InvalidState(e.to_string()))?,
+                );
+                let actor = ActorInstance::new(
+                    actor_id.clone(),
                     Box::new(MockBehavior::new()),
-                    mailbox,
+                    actor_mailbox,
                     "test-tenant".to_string(),
                     "test".to_string(),
                     None,
-                ))
-            });
+                );
+                let service_locator: Arc<dyn crate::core::ServiceLocator> =
+                    Arc::new(crate::TestServiceLocatorStub::new());
+                let actor_ref = crate::actor_ref::ActorRef::local(
+                    actor_id,
+                    "test-tenant".to_string(),
+                    "test".to_string(),
+                    ref_mailbox,
+                    service_locator,
+                    plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
+                );
+                Ok(StartedChild::Worker { actor, actor_ref })
+            })
+        });
 
-        // Create ActorRef for the sync factory wrapper
-        let actor_ref =
-            plexspaces_core::ActorRef::new(test_actor_id(&id)).expect("Failed to create actor ref");
-
-        // Convert RestartPolicy to RestartStrategy
-        let restart_strategy = match restart {
-            RestartPolicy::Permanent => CSRestartStrategy::Permanent,
-            RestartPolicy::Transient => CSRestartStrategy::Transient,
-            RestartPolicy::Temporary => CSRestartStrategy::Temporary,
-            RestartPolicy::ExponentialBackoff { .. } => CSRestartStrategy::Permanent,
+        // Map supervisor RestartPolicy to proto RestartPolicy for ChildSpec
+        let restart_policy = match restart {
+            RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => ProtoRestartPolicy::RestartPolicyPermanent,
+            RestartPolicy::Transient => ProtoRestartPolicy::RestartPolicyTransient,
+            RestartPolicy::Temporary => ProtoRestartPolicy::RestartPolicyTemporary,
         };
 
-        ChildSpec::worker_sync(test_actor_id(&id), sync_factory, actor_ref)
-            .with_restart(restart_strategy)
+        ChildSpec::worker(child_actor_id, start_fn).with_restart(restart_policy)
     }
 
     #[tokio::test]
@@ -3008,12 +2992,11 @@ mod tests {
 
         // Check event
         if let Some(event) = event_rx.recv().await {
-            match event {
-                SupervisorEvent::ChildStarted(id) => {
-                    assert_eq!(id, test_actor_id("test-child"));
-                }
-                _ => panic!("Unexpected event"),
-            }
+            assert_eq!(
+                event.event_type,
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted as i32
+            );
+            assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("test-child"));
         }
     }
 
@@ -3029,7 +3012,8 @@ mod tests {
     async fn test_supervisor_builder() {
         let spec = create_child_spec_sync("worker-1".to_string(), RestartPolicy::Transient);
 
-        let service_locator = create_default_service_locator(None, None).await;
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         let (_supervisor, _event_rx) = SupervisorBuilder::new(test_actor_id_string("root"))
             .with_strategy(SupervisionStrategy::OneForAll {
                 max_restarts: 5,
@@ -3066,12 +3050,11 @@ mod tests {
 
         // Check event
         if let Some(event) = event_rx.recv().await {
-            match event {
-                SupervisorEvent::ChildStopped(id) => {
-                    assert_eq!(id, test_actor_id("removable-child"));
-                }
-                _ => panic!("Expected ChildStopped event"),
-            }
+            assert_eq!(
+                event.event_type,
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32
+            );
+            assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("removable-child"));
         }
     }
 
@@ -3124,23 +3107,23 @@ mod tests {
 
         // Check for ChildFailed event
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildFailed(id, reason) => {
-                assert_eq!(id, test_actor_id("failing-child"));
-                assert_eq!(reason, "test error");
-            }
-            _ => panic!("Expected ChildFailed event, got {:?}", event),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            "Expected ChildFailed event, got event_type={}", event.event_type
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("failing-child"));
+        assert_eq!(event.reason, "test error");
 
         // Check for ChildRestarted event
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id, test_actor_id("failing-child"));
-                assert_eq!(count, 1); // First restart
-            }
-            _ => panic!("Expected ChildRestarted event, got {:?}", event),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+            "Expected ChildRestarted event, got event_type={}", event.event_type
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("failing-child"));
+        assert_eq!(event.restart_count, 1); // First restart
     }
 
     #[tokio::test]
@@ -3172,10 +3155,11 @@ mod tests {
 
         // Should get ChildFailed but NOT ChildRestarted
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildFailed(_, _) => (),
-            _ => panic!("Expected ChildFailed event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            "Expected ChildFailed event"
+        );
 
         // No restart event should follow for Temporary (try_recv should fail immediately)
         assert!(
@@ -3222,12 +3206,12 @@ mod tests {
 
                 // Should get MaxRestartsExceeded event
                 let event = event_rx.recv().await.unwrap();
-                match event {
-                    SupervisorEvent::MaxRestartsExceeded(id) => {
-                        assert_eq!(id, test_actor_id("crash-child"));
-                    }
-                    _ => panic!("Expected MaxRestartsExceeded event"),
-                }
+                assert_eq!(
+                    event.event_type,
+                    plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
+                    "Expected MaxRestartsExceeded event"
+                );
+                assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("crash-child"));
             }
         }
     }
@@ -3295,10 +3279,11 @@ mod tests {
         // Should get ChildStopped for all 2 children
         for _ in 0..2 {
             let event = event_rx.recv().await.unwrap();
-            match event {
-                SupervisorEvent::ChildStopped(_) => (),
-                _ => panic!("Expected ChildStopped event"),
-            }
+            assert_eq!(
+                event.event_type,
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                "Expected ChildStopped event"
+            );
         }
     }
 
@@ -3359,16 +3344,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_child_type_serialization() {
-        let worker = ChildType::Worker;
-        let json = serde_json::to_string(&worker).unwrap();
-        let _: ChildType = serde_json::from_str(&json).unwrap();
-
-        let supervisor = ChildType::Supervisor;
-        let json = serde_json::to_string(&supervisor).unwrap();
-        let _: ChildType = serde_json::from_str(&json).unwrap();
-    }
 
     #[tokio::test]
     async fn test_one_for_all_strategy() {
@@ -3397,24 +3372,24 @@ mod tests {
 
         // Should get ChildFailed for child-1
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildFailed(id, _) => {
-                assert_eq!(id, test_actor_id("child-1"));
-            }
-            _ => panic!("Expected ChildFailed event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            "Expected ChildFailed event"
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
 
         // OneForAll should restart ALL children (0, 1, 2)
         // Collect all restart events
         let mut restarted_ids = Vec::new();
         for _ in 0..3 {
             let event = event_rx.recv().await.unwrap();
-            match event {
-                SupervisorEvent::ChildRestarted(id, _) => {
-                    restarted_ids.push(id);
-                }
-                _ => panic!("Expected ChildRestarted event"),
-            }
+            assert_eq!(
+                event.event_type,
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+                "Expected ChildRestarted event"
+            );
+            restarted_ids.push(ActorId::from(event.actor_id.clone()));
         }
 
         // All 3 children should be restarted
@@ -3451,23 +3426,23 @@ mod tests {
 
         // Should get ChildFailed for child-1
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildFailed(id, _) => {
-                assert_eq!(id, test_actor_id("child-1"));
-            }
-            _ => panic!("Expected ChildFailed event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            "Expected ChildFailed event"
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
 
         // RestForOne should restart the failed child (for now, until we implement child ordering)
         // TODO: When child ordering (Vec) is implemented, this will restart child-1 and all after it
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id, test_actor_id("child-1"));
-                assert_eq!(count, 1);
-            }
-            _ => panic!("Expected ChildRestarted event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+            "Expected ChildRestarted event"
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
+        assert_eq!(event.restart_count, 1);
     }
 
     #[tokio::test]
@@ -3502,20 +3477,21 @@ mod tests {
 
         // Should get ChildFailed
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildFailed(_, _) => (),
-            _ => panic!("Expected ChildFailed event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            "Expected ChildFailed event"
+        );
 
         // Should get ChildRestarted (adaptive strategy uses initial OneForOne)
         let event = event_rx.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id, test_actor_id("adaptive-child"));
-                assert_eq!(count, 1);
-            }
-            _ => panic!("Expected ChildRestarted event"),
-        }
+        assert_eq!(
+            event.event_type,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+            "Expected ChildRestarted event"
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("adaptive-child"));
+        assert_eq!(event.restart_count, 1);
     }
 
     #[tokio::test]
@@ -3524,9 +3500,8 @@ mod tests {
         // For now, transient policy restarts on all failures
     }
 
-    // Note: ExponentialBackoff restart policy was removed during ChildSpec migration.
-    // The Erlang/OTP-standard restart strategies (Permanent, Transient, Temporary)
-    // are now the only supported strategies via ChildSpec::RestartStrategy.
+    // Note: ChildSpec uses proto RestartPolicy directly (Permanent, Transient, Temporary).
+    // ExponentialBackoff is only in Supervisor's own RestartPolicy (for supervisor-level behavior).
 
     #[tokio::test]
     async fn test_with_parent_supervisor() {

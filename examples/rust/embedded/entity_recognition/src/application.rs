@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_node::CoordinationComputeTracker;
 use plexspaces_sdk::spawn_with_facets;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;

@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 # PlexSpaces SDK (includes core, actor, macros)
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }
 anyhow = "1.0"

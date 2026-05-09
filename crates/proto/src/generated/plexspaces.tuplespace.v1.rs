@@ -631,82 +631,54 @@ impl TransactionState {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
+/// Error codes for tuple space operations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TupleSpaceErrorCode {
+    TupleSpaceErrorUnspecified = 0,
+    /// Matching tuple was not found
+    TupleSpaceErrorNotFound = 1,
+    /// Pattern is syntactically or semantically invalid
+    TupleSpaceErrorPatternError = 2,
+    /// Lease acquisition, renewal, or expiry failure
+    TupleSpaceErrorLeaseError = 3,
+    /// Underlying I/O or persistence error
+    TupleSpaceErrorIoError = 4,
+    /// Operation timed out
+    TupleSpaceErrorTimeout = 5,
+    /// Tuple space is at capacity
+    TupleSpaceErrorCapacityExceeded = 6,
+}
+impl TupleSpaceErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            TupleSpaceErrorCode::TupleSpaceErrorUnspecified => "TUPLE_SPACE_ERROR_UNSPECIFIED",
+            TupleSpaceErrorCode::TupleSpaceErrorNotFound => "TUPLE_SPACE_ERROR_NOT_FOUND",
+            TupleSpaceErrorCode::TupleSpaceErrorPatternError => "TUPLE_SPACE_ERROR_PATTERN_ERROR",
+            TupleSpaceErrorCode::TupleSpaceErrorLeaseError => "TUPLE_SPACE_ERROR_LEASE_ERROR",
+            TupleSpaceErrorCode::TupleSpaceErrorIoError => "TUPLE_SPACE_ERROR_IO_ERROR",
+            TupleSpaceErrorCode::TupleSpaceErrorTimeout => "TUPLE_SPACE_ERROR_TIMEOUT",
+            TupleSpaceErrorCode::TupleSpaceErrorCapacityExceeded => "TUPLE_SPACE_ERROR_CAPACITY_EXCEEDED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "TUPLE_SPACE_ERROR_UNSPECIFIED" => Some(Self::TupleSpaceErrorUnspecified),
+            "TUPLE_SPACE_ERROR_NOT_FOUND" => Some(Self::TupleSpaceErrorNotFound),
+            "TUPLE_SPACE_ERROR_PATTERN_ERROR" => Some(Self::TupleSpaceErrorPatternError),
+            "TUPLE_SPACE_ERROR_LEASE_ERROR" => Some(Self::TupleSpaceErrorLeaseError),
+            "TUPLE_SPACE_ERROR_IO_ERROR" => Some(Self::TupleSpaceErrorIoError),
+            "TUPLE_SPACE_ERROR_TIMEOUT" => Some(Self::TupleSpaceErrorTimeout),
+            "TUPLE_SPACE_ERROR_CAPACITY_EXCEEDED" => Some(Self::TupleSpaceErrorCapacityExceeded),
+            _ => None,
+        }
+    }
+}
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

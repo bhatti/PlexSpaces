@@ -94,7 +94,7 @@
 //! let mailbox = Mailbox::new(MailboxConfig::default());
 //! let journal = Arc::new(MemoryJournal::new());
 //!
-//! let mut actor = Actor::new(
+//! let mut actor = ActorInstance::new(
 //!     "my-actor",
 //!     behavior,
 //!     mailbox,
@@ -127,7 +127,7 @@
 //! # let mailbox = Mailbox::new(MailboxConfig::default());
 //! # let journal = Arc::new(MemoryJournal::new());
 //! // Create actor with resource profile and contract (Quickwit-inspired)
-//! let actor = Actor::new("cpu-heavy-actor", behavior, mailbox, journal, "default")
+//! let actor = ActorInstance::new("cpu-heavy-actor", behavior, mailbox, journal, "default")
 //!     .with_resource_profile(ResourceProfile::CpuIntensive)
 //!     .with_resource_contract(ResourceContract::cpu_intensive());
 //!
@@ -204,10 +204,10 @@ use std::io::prelude::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
-use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUsage};
+use crate::resource::{ActorHealth, ActorHealthExt, ResourceContract, ResourceContractExt, ResourceProfile, ResourceUsage};
 
 // Import from external crates
-use plexspaces_core::{
+use crate::core::{
     Actor as ActorTrait, ActorContext, ActorError, ActorId, ExitAction, ExitReason,
 };
 
@@ -352,7 +352,7 @@ impl ActorState {
 /// - Journaling for durability
 /// - WASM runtime capability (future)
 /// - Firecracker isolation (future)
-pub struct Actor {
+pub struct ActorInstance {
     /// Unique actor identifier
     id: ActorId,
 
@@ -535,7 +535,7 @@ async fn set_replay_handler_for_facet(
         .downcast_mut::<plexspaces_journaling::DurabilityFacet>()
     {
         durability_facet
-            .set_replay_handler(Box::new(handler), Arc::clone(context))
+            .set_replay_handler(Box::new(handler))
             .await;
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("ReplayHandler set for DurabilityFacet");
@@ -591,11 +591,7 @@ impl ReplayHandler for ActorReplayHandler {
     async fn replay_message(
         &self,
         message: Message,
-        _context: &ActorContext, // Ignored - we use our stored context
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Use the actor's stored context (which has ExecutionContext in REPLAY mode)
-        // The context parameter is ignored - we use self.context which has the proper
-        // ExecutionContext with REPLAY mode set by DurabilityFacet
         let mut behavior = self.behavior.write().await;
         behavior
             .handle_message(&self.context, message)
@@ -633,8 +629,8 @@ impl CheckpointStateAdapter for ActorCheckpointStateAdapter {
     }
 }
 
-impl Actor {
-    fn runtime_handle(&self) -> Arc<dyn plexspaces_core::ActorStateHandle> {
+impl ActorInstance {
+    fn runtime_handle(&self) -> Arc<dyn crate::core::ActorStateHandle> {
         Arc::new(ActorRuntimeHandle {
             id: self.id.clone(),
             state: self.state.clone(),
@@ -667,7 +663,7 @@ impl Actor {
     /// before spawning or when the node_id is known in advance.
     pub fn new(
         id: ActorId,
-        behavior: Box<dyn plexspaces_core::Actor>,
+        behavior: Box<dyn crate::core::Actor>,
         mailbox: Mailbox,
         tenant_id: String,
         namespace: String,
@@ -679,7 +675,7 @@ impl Actor {
         // Note: This is a sync function, so we create a minimal ServiceLocator stub
         // Node will replace it with full services when spawning
         use crate::TestServiceLocatorStub;
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
             Arc::new(TestServiceLocatorStub::new());
         let context = Arc::new(ActorContext::new(
             node_id_str,
@@ -689,7 +685,7 @@ impl Actor {
             None,
         ));
 
-        Actor {
+        ActorInstance {
             id,
             state: Arc::new(RwLock::new(ActorState::Creating)),
             behavior: Arc::new(RwLock::new(behavior)),
@@ -698,7 +694,7 @@ impl Actor {
             context,
             processor_handle: None,
             shutdown_tx: None,
-            resource_profile: ResourceProfile::default(),
+            resource_profile: ResourceProfile::ResourceProfileBalanced,
             resource_contract: None,
             resource_usage: Arc::new(RwLock::new(ResourceUsage::default())),
             last_message_time: Arc::new(RwLock::new(std::time::Instant::now())),
@@ -754,7 +750,7 @@ impl Actor {
         let elapsed = last_message.elapsed();
 
         // Check if stuck (no messages processed for 30 seconds)
-        ActorHealth::check_stuck(elapsed, std::time::Duration::from_secs(30))
+        <ActorHealth as ActorHealthExt>::check_stuck(elapsed, std::time::Duration::from_secs(30))
     }
 
     /// Validate resource usage against contract
@@ -765,6 +761,7 @@ impl Actor {
         }
         Ok(())
     }
+
 
     /// Get the actor's ID
     pub fn id(&self) -> &ActorId {
@@ -793,11 +790,11 @@ impl Actor {
     /// runtime handle with shutdown and processor state attached.
     pub async fn register_started(
         &self,
-        registry: &Arc<plexspaces_core::ActorRegistry>,
+        registry: &Arc<crate::core::ActorRegistry>,
         visibility: plexspaces_proto::actor::v1::ActorVisibility,
     ) {
         use crate::ActorRef;
-        use plexspaces_core::{MessageSender, RequestContext};
+        use crate::core::{MessageSender, RequestContext, RequestContextExt};
 
         let ctx = RequestContext::new_without_auth(
             self.context.tenant_id.clone(),
@@ -869,7 +866,7 @@ impl Actor {
     ///
     /// ## Example
     /// ```ignore
-    /// let mut actor = Actor::new(...);
+    /// let mut actor = ActorInstance::new(...);
     /// let handle = actor.start().await?;
     ///
     /// // Supervisor/Node watches for termination
@@ -1130,11 +1127,11 @@ impl Actor {
                                     // This allows facets to handle EXIT signals (e.g., TimerFacet cancels timers)
                                     let facet_exit_start = std::time::Instant::now();
                                     let facet_exit_reason = match &exit_reason {
-                                        plexspaces_core::ExitReason::Normal => plexspaces_facet::ExitReason::Normal,
-                                        plexspaces_core::ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
-                                        plexspaces_core::ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
-                                        plexspaces_core::ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
-                                        plexspaces_core::ExitReason::Linked { actor_id, reason } => {
+                                        crate::core::ExitReason::Normal => plexspaces_facet::ExitReason::Normal,
+                                        crate::core::ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
+                                        crate::core::ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
+                                        crate::core::ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
+                                        crate::core::ExitReason::Linked { actor_id, reason } => {
                                             plexspaces_facet::ExitReason::Error(format!("Linked: {} -> {:?}", actor_id, reason))
                                         },
                                     };
@@ -1360,7 +1357,7 @@ impl Actor {
                                 "actor_id" => actor_id_for_logging.to_string()
                             ).increment(1);
                             if !message.sender_id.is_empty() {
-                                let pong = plexspaces_core::create_pong_message(&message);
+                                let pong = crate::core::create_pong_message(&message);
                                 if let Err(e) = context
                                     .send_reply(
                                         Some(&message.correlation_id),
@@ -1496,7 +1493,7 @@ impl Actor {
                                 || error_str.to_lowercase().contains("cannotentercomponent");
                             if is_wasm_poisoned {
                                 // Create exit reason - ensure we're not in an active span context
-                                let exit_reason = plexspaces_core::ExitReason::Error(error_str.clone());
+                                let exit_reason = crate::core::ExitReason::Error(error_str.clone());
                                 {
                                     let mut stored = exit_reason_arc.write().await;
                                     *stored = Some(exit_reason.clone());
@@ -2332,11 +2329,11 @@ impl Actor {
         let behavior_owned = {
             let b = behavior.read().await;
             match b.behavior_kind() {
-                plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-                plexspaces_core::BehaviorType::GenEvent => "EventHandler".to_string(),
-                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-                plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-                plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
+                crate::core::BehaviorType::GenServer => "GenServer".to_string(),
+                crate::core::BehaviorType::GenEvent => "EventHandler".to_string(),
+                crate::core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+                crate::core::BehaviorType::Workflow => "Workflow".to_string(),
+                crate::core::BehaviorType::Custom(ref s) => s.clone(),
             }
         };
 
@@ -2576,8 +2573,8 @@ impl Actor {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_behavior::MockBehavior;
-    use plexspaces_core::{
+    use crate::behavior::MockBehavior;
+    use crate::core::{
         ActorContext, ActorStateHandle as CoreActorStateHandle, BehaviorError, ServiceLocator,
     };
     use plexspaces_journaling::{DurabilityFacet, JournalStorage, SqliteJournalStorage};
@@ -2587,25 +2584,16 @@ mod tests {
     use std::time::Duration;
     use ulid::Ulid;
 
-    /// Builds an [`Actor`] whose [`ActorContext`] uses the same default [`ServiceLocator`] as
-    /// production (`create_default_service_locator`), including a registered [`ActorRegistry`].
-    /// Required for [`Actor::start`] / [`Actor::stop`] paths that register and unregister actors.
     async fn actor_with_default_service_locator(
         id: ActorId,
-        behavior: Box<dyn plexspaces_core::Actor>,
+        behavior: Box<dyn crate::core::Actor>,
         mailbox: Mailbox,
         tenant_id: String,
         namespace: String,
-    ) -> Actor {
-        let locator_impl =
-            plexspaces_node::service_locator_helpers::create_default_service_locator(None, None)
-                .await;
-        let node_id = ServiceLocator::get_node_config(locator_impl.as_ref())
-            .await
-            .map(|n| n.id)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "test-node".to_string());
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = locator_impl;
+    ) -> ActorInstance {
+        let node_id = "test-node".to_string();
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         let context = Arc::new(ActorContext::new(
             node_id,
             tenant_id.clone(),
@@ -2613,7 +2601,7 @@ mod tests {
             service_locator,
             None,
         ));
-        Actor::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
+        ActorInstance::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
     }
 
     /// Helper to create a test message
@@ -2647,7 +2635,7 @@ mod tests {
     struct CheckpointTrackingBehavior {
         count: i32,
         observed_count: Arc<tokio::sync::RwLock<i32>>,
-        behavior_type: plexspaces_core::BehaviorType,
+        behavior_type: crate::core::BehaviorType,
     }
 
     impl CheckpointTrackingBehavior {
@@ -2657,7 +2645,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl plexspaces_core::Actor for TerminateTrackingBehavior {
+    impl crate::core::Actor for TerminateTrackingBehavior {
         async fn handle_message(
             &mut self,
             _ctx: &ActorContext,
@@ -2666,22 +2654,22 @@ mod tests {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> crate::core::BehaviorType {
+            crate::core::BehaviorType::GenServer
         }
 
         async fn terminate(
             &mut self,
             _ctx: &ActorContext,
-            _reason: &plexspaces_core::ExitReason,
-        ) -> Result<(), plexspaces_core::ActorError> {
+            _reason: &crate::core::ExitReason,
+        ) -> Result<(), crate::core::ActorError> {
             self.terminated.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
 
     #[async_trait]
-    impl plexspaces_core::Actor for CheckpointTrackingBehavior {
+    impl crate::core::Actor for CheckpointTrackingBehavior {
         async fn handle_message(
             &mut self,
             _ctx: &ActorContext,
@@ -2694,26 +2682,26 @@ mod tests {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> crate::core::BehaviorType {
+            crate::core::BehaviorType::GenServer
         }
 
         async fn capture_checkpoint_state(
             &mut self,
             _ctx: &ActorContext,
-        ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+        ) -> Result<Option<Vec<u8>>, crate::core::ActorError> {
             serde_json::to_vec(&serde_json::json!({ "count": self.count }))
                 .map(Some)
-                .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+                .map_err(|e| crate::core::ActorError::BehaviorError(e.to_string()))
         }
 
         async fn restore_checkpoint_state(
             &mut self,
             _ctx: &ActorContext,
             state_data: &[u8],
-        ) -> Result<bool, plexspaces_core::ActorError> {
+        ) -> Result<bool, crate::core::ActorError> {
             let value: serde_json::Value = serde_json::from_slice(state_data)
-                .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+                .map_err(|e| crate::core::ActorError::BehaviorError(e.to_string()))?;
             self.count = value
                 .get("count")
                 .and_then(|count| count.as_i64())
@@ -2806,7 +2794,7 @@ mod tests {
         let behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenServer,
+            behavior_type: crate::core::BehaviorType::GenServer,
         });
         let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -2862,7 +2850,7 @@ mod tests {
         let restarted_behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenServer,
+            behavior_type: crate::core::BehaviorType::GenServer,
         });
         let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -2899,7 +2887,7 @@ mod tests {
         let behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenServer,
+            behavior_type: crate::core::BehaviorType::GenServer,
         });
         let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -2928,7 +2916,7 @@ mod tests {
         let restarted_behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenServer,
+            behavior_type: crate::core::BehaviorType::GenServer,
         });
         let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -2959,7 +2947,7 @@ mod tests {
         let behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::Workflow,
+            behavior_type: crate::core::BehaviorType::Workflow,
         });
         let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -3000,7 +2988,7 @@ mod tests {
         let restarted_behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::Workflow,
+            behavior_type: crate::core::BehaviorType::Workflow,
         });
         let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -3043,7 +3031,7 @@ mod tests {
         let behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenEvent,
+            behavior_type: crate::core::BehaviorType::GenEvent,
         });
         let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -3084,7 +3072,7 @@ mod tests {
         let restarted_behavior = Box::new(CheckpointTrackingBehavior {
             count: 0,
             observed_count: observed_count.clone(),
-            behavior_type: plexspaces_core::BehaviorType::GenEvent,
+            behavior_type: crate::core::BehaviorType::GenEvent,
         });
         let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
@@ -3236,9 +3224,9 @@ mod tests {
             .await
             .unwrap();
 
-        let profile = ResourceProfile::CpuIntensive;
+        let profile = ResourceProfile::ResourceProfileCpuIntensive;
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3249,10 +3237,7 @@ mod tests {
         .with_resource_profile(profile);
 
         // Verify profile was set
-        assert!(matches!(
-            actor.resource_profile,
-            ResourceProfile::CpuIntensive
-        ));
+        assert_eq!(actor.resource_profile, ResourceProfile::ResourceProfileCpuIntensive);
     }
 
     #[tokio::test]
@@ -3263,14 +3248,14 @@ mod tests {
             .unwrap();
 
         let contract = ResourceContract {
-            max_memory_bytes: 1024 * 1024 * 50, // 50 MB
+            max_memory_bytes: 1024 * 1024 * 50u64, // 50 MB
             max_cpu_percent: 80.0,
             max_io_ops_per_sec: Some(1000),
             guaranteed_bandwidth_mbps: Some(10),
             max_execution_time: None,
         };
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3283,7 +3268,7 @@ mod tests {
         // Verify contract was set
         assert!(actor.resource_contract.is_some());
         let stored_contract = actor.resource_contract.unwrap();
-        assert_eq!(stored_contract.max_memory_bytes, 1024 * 1024 * 50);
+        assert_eq!(stored_contract.max_memory_bytes, 1024 * 1024 * 50u64);
         assert_eq!(stored_contract.max_cpu_percent, 80.0);
         assert_eq!(stored_contract.max_io_ops_per_sec, Some(1000));
     }
@@ -3295,7 +3280,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3321,7 +3306,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3334,7 +3319,7 @@ mod tests {
         let health = actor.health().await;
 
         // Actor just created, should be healthy
-        assert!(matches!(health, ActorHealth::Healthy));
+        assert!(health.is_healthy());
     }
 
     #[tokio::test]
@@ -3344,7 +3329,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3366,14 +3351,14 @@ mod tests {
             .unwrap();
 
         let contract = ResourceContract {
-            max_memory_bytes: 1024 * 1024 * 1000, // 1000 MB (high limit)
+            max_memory_bytes: 1024 * 1024 * 1000u64, // 1000 MB (high limit)
             max_cpu_percent: 100.0,
             max_io_ops_per_sec: Some(10000),
             guaranteed_bandwidth_mbps: None,
             max_execution_time: None,
         };
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3453,7 +3438,7 @@ mod tests {
             .await
             .expect("Failed to create mailbox");
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3478,7 +3463,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor-123"),
             behavior,
             mailbox,
@@ -3498,7 +3483,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3524,7 +3509,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior1,
             mailbox,
@@ -3546,7 +3531,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior1,
             mailbox,
@@ -3571,7 +3556,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3653,7 +3638,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3675,7 +3660,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3696,7 +3681,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3796,7 +3781,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = ActorInstance::new(
             runtime_actor_id("test-actor"),
             behavior,
             mailbox,
@@ -3854,7 +3839,7 @@ mod tests {
     #[tokio::test]
     async fn test_message_processing_error_handling() {
         use async_trait::async_trait;
-        use plexspaces_core::{Actor as ActorTrait, BehaviorError, BehaviorType};
+        use crate::core::{Actor as ActorTrait, BehaviorError, BehaviorType};
         use plexspaces_mailbox::mailbox_config_default;
 
         // Behavior that always fails
@@ -3864,7 +3849,7 @@ mod tests {
         impl ActorTrait for FailingBehavior {
             async fn handle_message(
                 &mut self,
-                _ctx: &plexspaces_core::ActorContext,
+                _ctx: &crate::core::ActorContext,
                 _msg: Message,
             ) -> Result<(), BehaviorError> {
                 Err(BehaviorError::ProcessingError(
@@ -3917,7 +3902,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actor = Actor::new(
+        let actor = ActorInstance::new(
             ActorId::new("test-actor", "mock", "test-namespace", "test-node").unwrap(),
             behavior,
             mailbox,
@@ -3928,19 +3913,19 @@ mod tests {
 
         // Check health immediately (should be Healthy)
         let health1 = actor.health().await;
-        assert!(matches!(health1, ActorHealth::Healthy));
+        assert!(health1.is_healthy());
 
         // Simulate long wait (> 30 seconds for Stuck detection)
         // Note: We can't actually wait 30s in test, but we can verify the method works
         let health2 = actor.health().await;
-        assert!(matches!(health2, ActorHealth::Healthy));
+        assert!(health2.is_healthy());
     }
 }
 
 // Implement ActorStateHandle for Actor so that ActorRegistry can check state,
 // access the mailbox, and stop the actor without importing Actor directly.
 #[async_trait::async_trait]
-impl plexspaces_core::ActorStateHandle for Actor {
+impl crate::core::ActorStateHandle for ActorInstance {
     async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
         use crate::ActorState;
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
@@ -3974,7 +3959,7 @@ impl plexspaces_core::ActorStateHandle for Actor {
 }
 
 #[async_trait::async_trait]
-impl plexspaces_core::ActorStateHandle for ActorRuntimeHandle {
+impl crate::core::ActorStateHandle for ActorRuntimeHandle {
     async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
         use crate::ActorState;
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;

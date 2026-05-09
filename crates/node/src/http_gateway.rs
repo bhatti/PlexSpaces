@@ -55,6 +55,7 @@ use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
+use plexspaces_actor::RequestContextExt;
 use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_services::dashboard_service::DashboardServiceImpl;
 
@@ -78,7 +79,7 @@ pub type HttpGatewayState = (
     Arc<ActorServiceImpl>,
     bool,           // auth_disabled
     Option<String>, // jwt_secret
-    Arc<dyn plexspaces_core::ServiceLocator>,
+    Arc<dyn plexspaces_actor::ServiceLocator>,
     Option<Arc<DashboardServiceImpl>>,
 );
 
@@ -93,7 +94,7 @@ pub type HttpGatewayState = (
 /// Tuple containing all state needed by HTTP gateway handlers
 pub async fn create_gateway_state(
     actor_service: Arc<ActorServiceImpl>,
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     dashboard_service: Option<Arc<DashboardServiceImpl>>,
 ) -> HttpGatewayState {
     let auth_disabled = service_locator.is_auth_disabled().await;
@@ -510,12 +511,12 @@ pub async fn stop_actor_http_request(
     actor_target: String,
     actor_service: Arc<ActorServiceImpl>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let ctx = plexspaces_core::RequestContext::new_without_auth(effective_tenant_id, namespace);
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(effective_tenant_id, namespace);
     let canonical_id = actor_service
         .canonical_actor_id_from_client_target(&ctx, &actor_target)
         .await
         .unwrap_or_else(|| actor_target.clone());
-    let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id).map_err(|e| {
+    let actor_id = plexspaces_actor::ActorId::from_canonical(&canonical_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({

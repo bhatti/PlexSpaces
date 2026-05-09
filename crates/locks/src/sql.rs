@@ -37,7 +37,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use tracing::instrument;
 use ulid::Ulid;

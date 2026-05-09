@@ -36,6 +36,7 @@
 //! ```
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use plexspaces_common::RequestContextExt;
 use serde::{Deserialize, Serialize};
 
 /// Hint message for auth-related errors

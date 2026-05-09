@@ -18,11 +18,12 @@
 
 use async_trait::async_trait;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::{
+use plexspaces_actor::Message;
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
-    ActorRegistry, BehaviorError, BehaviorType, NodeRegistryTrait, RequestContext, ServiceLocator,
-};
+    ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
+    RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, CreateShardGroupRequest,
@@ -81,7 +82,7 @@ async fn create_test_actor_service(
     Arc<ActorRegistry>,
     Arc<plexspaces_services::ServiceLocatorImpl>,
 ) {
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_node::create_default_service_locator;
 
     let object_repo = Arc::new(
@@ -102,7 +103,7 @@ async fn create_test_actor_service(
 
     // Register ActorFactory (required for spawn_actor to work)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
+    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
@@ -112,12 +113,12 @@ async fn create_test_actor_service(
         .await;
     service_locator.register_service(facet_manager).await;
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator
         .register_service_by_name(
-            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            plexspaces_actor::ServiceName::ServiceNameActorFactoryImpl.as_str(),
             actor_factory.clone(),
         )
         .await;
@@ -125,12 +126,12 @@ async fn create_test_actor_service(
     service_locator.register_actor_factory(factory_trait).await;
 
     // Register BehaviorRegistry and behavior for "counter" actor type
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("counter", || {
             Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;

@@ -20,7 +20,7 @@
 
 use crate::BlobResult;
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_proto::storage::v1::BlobMetadata;
 
 /// Repository trait for blob metadata storage

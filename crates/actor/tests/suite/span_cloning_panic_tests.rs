@@ -16,7 +16,7 @@
 // - Verify that error handling doesn't panic even with concurrent requests
 // - Test error string extraction that was causing the panic
 
-use plexspaces_core::ExitReason;
+use plexspaces_actor::ExitReason;
 
 /// Test that ExitReason creation doesn't panic when error messages contain span-related panics
 /// This tests the fix where we filter out span cloning panic messages

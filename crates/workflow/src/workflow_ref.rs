@@ -35,7 +35,7 @@
 
 use crate::WorkflowError;
 use plexspaces_actor::{ActorBuilder, WorkflowRef};
-use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_actor::{RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait};
 use std::sync::Arc;
 
 /// Spawn a workflow actor and return a WorkflowRef for interacting with it.
@@ -65,7 +65,7 @@ pub async fn spawn_workflow<B>(
     service_locator: Arc<dyn ServiceLocatorTrait>,
 ) -> Result<WorkflowRef, WorkflowError>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let mut builder = ActorBuilder::new(Box::new(behavior))
         .with_name(workflow_name.into())

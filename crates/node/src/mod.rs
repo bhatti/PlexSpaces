@@ -28,12 +28,14 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
 use plexspaces_application::{Application, ApplicationError, ApplicationManager, ApplicationNode};
-use plexspaces_core::actor_context::ObjectRegistry;
-use plexspaces_core::LinkProvider;
-use plexspaces_core::{
+use plexspaces_actor::actor_context::ObjectRegistry;
+use plexspaces_actor::LinkProvider;
+use plexspaces_actor::{
     ActorId, ActorRegistry, ActorService, ApplicationManager as ApplicationManagerTrait, ExitReason,
-    ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    InitializableServiceLocator, ProcessResourceSampler, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait,
 };
+use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
@@ -87,14 +89,14 @@ impl std::fmt::Display for NodeId {
 }
 
 // MonitorLink is now defined in ActorRegistry (core crate)
-// Use plexspaces_core::MonitorLink instead
+// Use plexspaces_actor::MonitorLink instead
 
 // Use proto-generated ActorLink instead of custom struct
 type ActorLink = ProtoActorLink;
 
 // VirtualActorMetadata and MonitorLink are now defined in ActorRegistry (core crate)
 // Re-export for convenience
-pub use plexspaces_core::{MonitorLink, VirtualActorMetadata};
+pub use plexspaces_actor::{MonitorLink, VirtualActorMetadata};
 
 /// Node in the distributed system
 #[derive(Clone)]
@@ -127,7 +129,7 @@ pub struct Node {
     service_locator: Arc<ServiceLocatorImpl>,
     /// Health reporter for health checks and graceful shutdown
     /// Set in Node::start(), None before start
-    health_reporter: Arc<RwLock<Option<Arc<plexspaces_core::PlexSpacesHealthReporter>>>>,
+    health_reporter: Arc<RwLock<Option<Arc<plexspaces_actor::PlexSpacesHealthReporter>>>>,
     /// ReleaseSpec configuration (optional, loaded from release config files)
     /// If provided, NodeConfig will be extracted from release_spec.node in start()
     release_spec: Arc<RwLock<Option<plexspaces_proto::node::v1::ReleaseSpec>>>,
@@ -304,8 +306,8 @@ impl Node {
 
         // Register ApplicationManager in ServiceLocator for ApplicationServiceImpl to use
         // (This is Node-specific, so it stays here)
-        let app_manager: Arc<dyn plexspaces_core::ApplicationManager> =
-            self.application_manager.clone() as Arc<dyn plexspaces_core::ApplicationManager>;
+        let app_manager: Arc<dyn plexspaces_actor::ApplicationManager> =
+            self.application_manager.clone() as Arc<dyn plexspaces_actor::ApplicationManager>;
         self.service_locator
             .register_application_manager(app_manager)
             .await;
@@ -317,7 +319,7 @@ impl Node {
             let wasm_runtime = Arc::new(WasmRuntime::new().await.map_err(|e| {
                 NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
             })?);
-            let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> =
+            let wasm_runtime_trait: Arc<dyn plexspaces_actor::WasmRuntimeTrait> =
                 wasm_runtime.clone();
             self.service_locator
                 .register_wasm_runtime(wasm_runtime_trait)
@@ -487,7 +489,7 @@ impl Node {
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
-    ) -> Result<Arc<dyn plexspaces_core::MessageSender>, NodeError> {
+    ) -> Result<Arc<dyn plexspaces_actor::MessageSender>, NodeError> {
         let actor_factory = self
             .service_locator()
             .get_actor_factory()
@@ -496,7 +498,7 @@ impl Node {
                 NodeError::ConfigError("ActorFactory not found in ServiceLocator".to_string())
             })?;
 
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
@@ -541,8 +543,8 @@ impl Node {
         })
     }
 
-    fn map_actor_registry_error(e: plexspaces_core::ActorRegistryError) -> NodeError {
-        use plexspaces_core::ActorRegistryError;
+    fn map_actor_registry_error(e: plexspaces_actor::ActorRegistryError) -> NodeError {
+        use plexspaces_actor::ActorRegistryError;
         match e {
             ActorRegistryError::ActorNotFound(id) => NodeError::ActorNotFound(id),
             ActorRegistryError::SendFailed(msg) => NodeError::NetworkError(msg),
@@ -557,10 +559,10 @@ impl Node {
     }
 
     // Actor registry, virtual actors, facets: use `service_locator().actor_registry().await`,
-    // `.virtual_actor_manager().await`, `.facet_manager().await` per [`plexspaces_core::ServiceLocator`].
+    // `.virtual_actor_manager().await`, `.facet_manager().await` per [`plexspaces_actor::ServiceLocator`].
 
     /// Get health reporter (for tests and advanced usage)
-    pub async fn health_reporter(&self) -> Option<Arc<plexspaces_core::PlexSpacesHealthReporter>> {
+    pub async fn health_reporter(&self) -> Option<Arc<plexspaces_actor::PlexSpacesHealthReporter>> {
         let guard = self.health_reporter.read().await;
         guard.clone()
     }
@@ -572,10 +574,10 @@ impl Node {
     pub async fn metrics(&self) -> NodeMetrics {
         self.update_metrics_with_system_info().await;
         let mut m = self.metrics.read().await.clone();
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         if let Some(renderer) = sl.get_metrics_prometheus_renderer().await {
             let text = renderer.render_prometheus_text();
-            plexspaces_core::overlay_node_operational_counters_from_exposition(
+            plexspaces_actor::overlay_node_operational_counters_from_exposition(
                 &text,
                 self.id.as_str(),
                 &mut m,
@@ -586,8 +588,8 @@ impl Node {
 
     /// Look up a remote node's address from NodeRegistry
     async fn lookup_node_address(&self, node_id: &NodeId) -> Result<String, NodeError> {
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         if let Some(node_registry) = service_locator_trait.get_node_registry().await {
             let ctx = service_locator_trait
                 .request_context_for_system_operations()
@@ -631,8 +633,8 @@ impl Node {
             };
 
         // Get connected nodes count from NodeRegistry
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         let connected_nodes =
             if let Some(node_registry) = service_locator_trait.get_node_registry().await {
                 let ctx = service_locator_trait
@@ -826,15 +828,15 @@ impl Node {
         // Use same context as registration (internal context, cluster_name as namespace if defined)
         let ctx = if let Some(cluster) = &cluster_name {
             // Use cluster_name as namespace for cluster isolation (same as registration)
-            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-                self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
             service_locator_trait
                 .request_context_for_system_operations_with_namespace(cluster.clone())
                 .await
         } else {
             // Use default internal context (same as registration)
-            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-                self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+            let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+                self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
             service_locator_trait
                 .request_context_for_system_operations()
                 .await
@@ -914,7 +916,7 @@ impl Node {
             plexspaces_blob::node_startup::blob_config_from_release_spec(release_spec.as_ref())
         };
         let db_url = self.get_shared_database_url().await;
-        let locator: Arc<dyn plexspaces_core::ServiceLocator + Send + Sync> =
+        let locator: Arc<dyn plexspaces_actor::InitializableServiceLocator + Send + Sync> =
             self.service_locator.clone();
         let service_arc = plexspaces_blob::node_startup::create_and_register_blob_service(
             locator,
@@ -1046,7 +1048,7 @@ impl Node {
         {
             let release_spec = self.release_spec.read().await;
             if let Some(ref spec) = *release_spec {
-                let locator: Arc<dyn plexspaces_core::ServiceLocator + Send + Sync> =
+                let locator: Arc<dyn plexspaces_actor::InitializableServiceLocator + Send + Sync> =
                     self.service_locator.clone();
                 plexspaces_services::release_runtime_registration::register_runtime_and_security_from_release(
                     locator,
@@ -1079,8 +1081,8 @@ impl Node {
                     None
                 }
             });
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         let registration_ctx = if let Some(cluster) = &cluster_name {
             service_locator_trait
                 .request_context_for_system_operations_with_namespace(cluster.clone())
@@ -1244,7 +1246,7 @@ impl Node {
                 ));
             self.service_locator
                 .register_actor_service(actor_service_for_context.clone()
-                    as Arc<dyn plexspaces_core::ActorService + Send + Sync>)
+                    as Arc<dyn plexspaces_actor::ActorService + Send + Sync>)
                 .await;
         }
 
@@ -1254,8 +1256,8 @@ impl Node {
         self.service_locator
             .register_service(connection_info.clone())
             .await;
-        let connection_info_trait: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync> =
-            connection_info.clone() as Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>;
+        let connection_info_trait: Arc<dyn plexspaces_actor::NodeConnectionInfo + Send + Sync> =
+            connection_info.clone() as Arc<dyn plexspaces_actor::NodeConnectionInfo + Send + Sync>;
         self.service_locator
             .register_node_connection_info(connection_info_trait)
             .await;
@@ -1268,7 +1270,7 @@ impl Node {
         // Wire ServiceLocator into ActorRegistry for remote DOWN/EXIT delivery.
         actor_registry
             .set_service_locator(
-                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+                self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
             )
             .await;
 
@@ -1279,7 +1281,7 @@ impl Node {
         ActorRegistry::start_temporary_sender_cleanup(actor_registry.clone());
 
         // Start stale monitor GC background task (default 60s interval).
-        plexspaces_core::start_monitor_gc_task(
+        plexspaces_actor::start_monitor_gc_task(
             actor_registry.actor_monitor().clone(),
             self.id.as_str().to_string(),
             self.service_locator.clone(),
@@ -1501,7 +1503,7 @@ impl Node {
         };
 
         // Create health reporter and services
-        use plexspaces_core::PlexSpacesHealthReporter;
+        use plexspaces_actor::PlexSpacesHealthReporter;
         use plexspaces_proto::system::v1::system_service_server::SystemServiceServer;
         use plexspaces_services::system_service::SystemServiceImpl;
 
@@ -1538,7 +1540,7 @@ impl Node {
         ));
 
         // Register ProcessGroupService in ServiceLocator so it can be accessed by other components
-        let process_group_service_trait: Arc<dyn plexspaces_core::ProcessGroupService> =
+        let process_group_service_trait: Arc<dyn plexspaces_actor::ProcessGroupService> =
             process_group_impl.clone();
         self.service_locator
             .register_process_group_service(process_group_service_trait)
@@ -1604,7 +1606,7 @@ impl Node {
         // Create WASM runtime service for dynamic actor deployment (if not already registered by initialize_services)
         use plexspaces_proto::wasm::v1::wasm_runtime_service_server::WasmRuntimeServiceServer;
         use plexspaces_wasm_runtime::{grpc_service::WasmRuntimeServiceImpl, WasmRuntime};
-        let wasm_runtime_trait_for_service: Arc<dyn plexspaces_core::WasmRuntimeTrait> =
+        let wasm_runtime_trait_for_service: Arc<dyn plexspaces_actor::WasmRuntimeTrait> =
             if let Some(rt) = self.service_locator.get_wasm_runtime().await {
                 // Already registered in initialize_services() (e.g. for tests that use build() only)
                 rt
@@ -1612,7 +1614,7 @@ impl Node {
                 let rt = Arc::new(WasmRuntime::new().await.map_err(|e| {
                     NodeError::ConfigError(format!("Failed to create WASM runtime: {}", e))
                 })?);
-                let rt_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = rt.clone();
+                let rt_trait: Arc<dyn plexspaces_actor::WasmRuntimeTrait> = rt.clone();
                 self.service_locator
                     .register_wasm_runtime(rt_trait.clone())
                     .await;
@@ -1645,7 +1647,7 @@ impl Node {
         };
         node_service
             .register_node_connectivity(
-                node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>
+                node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>
             )
             .await;
 
@@ -1654,7 +1656,7 @@ impl Node {
         use plexspaces_services::application_service::ApplicationServiceImpl;
         let application_service = Arc::new(ApplicationServiceImpl::new(
             self.service_locator(),
-            Some(node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>),
+            Some(node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>),
         ));
 
         // Capture configured auto-deploy directory now, but deploy after the server starts
@@ -1827,7 +1829,7 @@ impl Node {
             use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
             use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
             let sls = ServiceLinkServiceImpl::new(
-                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+                self.service_locator.clone() as Arc<dyn plexspaces_actor::InitializableServiceLocator>
             )
             .await;
             server_builder.grpc_service(tonic_web::enable(
@@ -1840,7 +1842,7 @@ impl Node {
         // Connect to cluster_seed_nodes if configured (non-blocking; node is already listening)
         {
             let node_connectivity =
-                node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
+                node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
             let service_locator = self.service_locator.clone();
             tokio::spawn(async move {
                 if let Some(cfg) = service_locator.get_node_config().await {
@@ -1863,11 +1865,11 @@ impl Node {
 
         // Build HTTP routes and assemble single-port gRPC+HTTP server
         let (auth_disabled, jwt_secret) = plexspaces_grpc_middleware::http_jwt_auth_snapshot(
-            self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator + Send + Sync>,
+            self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator + Send + Sync>,
         )
         .await;
         let node_connectivity_for_http =
-            node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
+            node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
         let http_routes = crate::http_routes::all_http_routes(
             actor_service_for_http.clone(),
             self.service_locator.clone(),
@@ -1883,7 +1885,7 @@ impl Node {
                 actor_service_for_http,
                 auth_disabled,
                 jwt_secret,
-                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>,
+                self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>,
                 dashboard_service_for_http_opt,
             );
             http_routes.merge(create_dashboard_router().with_state(dashboard_state))
@@ -1903,7 +1905,7 @@ impl Node {
         if let Some(wasm_apps_dir_str) = wasm_apps_directory {
             let service_locator_for_deploy = self.service_locator.clone();
             let node_connectivity_for_deploy =
-                node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
+                node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
             tokio::spawn(async move {
                 let wasm_apps_dir = std::path::PathBuf::from(&wasm_apps_dir_str);
                 tracing::info!(
@@ -1955,7 +1957,7 @@ impl Node {
     /// Returns a ULID `monitor_ref` that can be passed to [`Self::demonitor`].
     pub async fn monitor(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         actor_id: &ActorId,
         supervisor_id: &ActorId,
     ) -> Result<MonitorRef, NodeError> {
@@ -2509,8 +2511,8 @@ impl Node {
 
         // Close network connections via NodeRegistry
         tracing::warn!("🛑 Phase 4: Network Connections");
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         if let Some(node_registry) = service_locator_trait.get_node_registry().await {
             let ctx = service_locator_trait
                 .request_context_for_system_operations()
@@ -2604,8 +2606,8 @@ impl Node {
         let active_requests = node_metrics.messages_routed as usize;
 
         // Get connected nodes from NodeRegistry
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+            self.service_locator().clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
         let connected_nodes =
             if let Some(node_registry) = service_locator_trait.get_node_registry().await {
                 let ctx = service_locator_trait
@@ -2765,12 +2767,17 @@ impl ApplicationNode for Node {
         Some(self.service_locator().clone() as Arc<dyn ServiceLocatorTrait>)
     }
 
+    /// Get InitializableServiceLocator for startup/initialization code
+    fn initializable_service_locator(&self) -> Option<Arc<dyn InitializableServiceLocator>> {
+        Some(self.service_locator().clone() as Arc<dyn InitializableServiceLocator>)
+    }
+
     /// Get BlobService for WASM actors
-    async fn blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> {
+    async fn blob_service(&self) -> Option<Arc<dyn plexspaces_actor::BlobServiceTrait>> {
         let guard = self.blob_service.read().await;
         guard
             .clone()
-            .map(|bs| bs as Arc<dyn plexspaces_core::BlobServiceTrait>)
+            .map(|bs| bs as Arc<dyn plexspaces_actor::BlobServiceTrait>)
     }
 }
 
@@ -2947,7 +2954,7 @@ impl ClusterManager {
 mod tests {
     use super::*;
     use plexspaces_actor::ActorRef;
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_proto::actor::v1::ActorVisibility;
     use std::time::Duration;
 
@@ -2960,11 +2967,10 @@ mod tests {
         node: &Node,
         actor_id: &ActorId,
     ) -> Result<Option<ActorRef>, NodeError> {
-        use plexspaces_core::ActorRegistry;
+        use plexspaces_actor::ActorRegistry;
         use std::sync::Arc;
 
         // Get ActorRegistry
-        use plexspaces_core::service_names;
         let actor_registry: Arc<ActorRegistry> = node
             .service_locator()
             .actor_registry()
@@ -3003,7 +3009,7 @@ mod tests {
     use super::*;
     use plexspaces_mailbox::Mailbox;
 
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
 
     // Import NodeBuilder for tests
     use crate::NodeBuilder;
@@ -3078,7 +3084,7 @@ mod tests {
         // Register with ActorRegistry first
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -3147,7 +3153,7 @@ mod tests {
         // Register with ActorRegistry first
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -3311,7 +3317,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry
             .register_actor(
                 &ctx,
@@ -3453,12 +3459,12 @@ mod tests {
 
         // Register a BehaviorRegistry so spawn_actor can create "test" actors
         {
-            use plexspaces_core::behavior_factory::BehaviorRegistry;
+            use plexspaces_actor::behavior_factory::BehaviorRegistry;
             let registry = BehaviorRegistry::new();
             registry
                 .register_simple("test", || {
                     Box::pin(async move {
-                        Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_core::Actor>)
+                        Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
                     })
                 })
                 .await;
@@ -3469,14 +3475,14 @@ mod tests {
 
         // Get ActorFactory from ServiceLocator using extension trait
         let service_locator = node.service_locator();
-        use plexspaces_core::ActorFactory;
+        use plexspaces_actor::ActorFactory;
         let actor_factory = service_locator
             .get_actor_factory()
             .await
             .expect("ActorFactoryImpl should be registered after initialize_services()");
 
         // Test code - spawn with explicit tenant/namespace per Rule #6
-        let spawn_ctx = plexspaces_core::RequestContext::new_without_auth(
+        let spawn_ctx = plexspaces_actor::RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "default".to_string(),
         );
@@ -3486,7 +3492,7 @@ mod tests {
         let _message_sender = actor_factory
             .spawn_actor(
                 &spawn_ctx,
-                &plexspaces_core::ActorSpawnSpec {
+                &plexspaces_actor::ActorSpawnSpec {
                     identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                         name: actor_id.name().to_string(),
                         actor_type: actor_id.actor_type().to_string(),
@@ -3547,13 +3553,13 @@ mod tests {
 
         // Register a BehaviorRegistry so spawn_actor can create "test" actors
         {
-            use plexspaces_core::behavior_factory::BehaviorRegistry;
+            use plexspaces_actor::behavior_factory::BehaviorRegistry;
             let registry = BehaviorRegistry::new();
             registry
                 .register_simple("test", || {
                     Box::pin(async move {
                         Ok(Box::new(plexspaces_behavior::MockBehavior::new())
-                            as Box<dyn plexspaces_core::Actor>)
+                            as Box<dyn plexspaces_actor::Actor>)
                     })
                 })
                 .await;
@@ -3564,14 +3570,14 @@ mod tests {
 
         // Get ActorFactory from ServiceLocator using extension trait
         let service_locator = node.service_locator();
-        use plexspaces_core::ActorFactory;
+        use plexspaces_actor::ActorFactory;
         let actor_factory = service_locator
             .get_actor_factory()
             .await
             .expect("ActorFactory should be registered after initialize_services()");
 
         // Test code - spawn with explicit tenant/namespace per Rule #6
-        let spawn_ctx = plexspaces_core::RequestContext::new_without_auth(
+        let spawn_ctx = plexspaces_actor::RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "default".to_string(),
         );
@@ -3581,7 +3587,7 @@ mod tests {
         let _message_sender = actor_factory
             .spawn_actor(
                 &spawn_ctx,
-                &plexspaces_core::ActorSpawnSpec {
+                &plexspaces_actor::ActorSpawnSpec {
                     identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                         name: actor_id.name().to_string(),
                         actor_type: actor_id.actor_type().to_string(),
@@ -3669,7 +3675,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry2
             .register_actor(
                 &ctx,
@@ -3814,7 +3820,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry2
             .register_actor(
                 &ctx,
@@ -3927,7 +3933,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry
             .register_actor(
                 &ctx,
@@ -4096,7 +4102,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry
             .register_actor(
                 &ctx,
@@ -4234,17 +4240,36 @@ mod tests {
         use tokio::sync::mpsc;
 
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
+        node.initialize_services().await.unwrap();
 
         // Create subscription channel
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel();
 
         // Subscribe
         node.subscribe_lifecycle_events(tx).await;
 
+        // Publish one event and confirm subscription is active first.
+        let first_event = plexspaces_proto::ActorLifecycleEvent {
+            actor_id: "test-actor@test-node".to_string(),
+            timestamp: Some(prost_types::Timestamp {
+                seconds: chrono::Utc::now().timestamp(),
+                nanos: 0,
+            }),
+            event_type: Some(plexspaces_proto::actor_lifecycle_event::EventType::Created(
+                plexspaces_proto::v1::actor::ActorCreated {},
+            )),
+        };
+        let actor_registry = get_actor_registry(&node).await;
+        actor_registry.publish_lifecycle_event(first_event).await;
+        let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), rx.recv())
+            .await
+            .unwrap();
+        assert!(received.is_some(), "subscriber should receive event before unsubscribe");
+
         // Unsubscribe
         node.unsubscribe_lifecycle_events().await;
 
-        // Publish a test event
+        // Publish another event after unsubscribe.
         let event = plexspaces_proto::ActorLifecycleEvent {
             actor_id: "test-actor@test-node".to_string(),
             timestamp: Some(prost_types::Timestamp {
@@ -4256,13 +4281,15 @@ mod tests {
             )),
         };
 
-        let actor_registry = get_actor_registry(&node).await;
         actor_registry.publish_lifecycle_event(event).await;
 
-        // After unsubscribe, channel might receive events that were already queued,
-        // but subsequent events should not be received.
-        // Just verify that unsubscribe doesn't panic
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // After unsubscribe, no new event should be delivered.
+        let after_unsubscribe =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await;
+        assert!(
+            after_unsubscribe.is_err(),
+            "subscriber should not receive events after unsubscribe"
+        );
     }
 
     #[tokio::test]
@@ -4300,7 +4327,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -4337,7 +4364,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry
             .register_actor(
                 &ctx,
@@ -4438,7 +4465,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -4475,7 +4502,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref);
         actor_registry
             .register_actor(
                 &ctx,
@@ -4605,7 +4632,7 @@ mod tests {
             .request_context_for_system_operations()
             .await;
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry
             .register_actor(
                 &ctx,
@@ -4731,7 +4758,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -4826,7 +4853,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -4888,7 +4915,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -4983,7 +5010,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper1 = Arc::new(ActorRef::local(
             actor1_ref.id().clone(),
             "".to_string(), // test tenant
@@ -5157,7 +5184,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -5244,7 +5271,7 @@ mod tests {
         // Tenant comes from auth, not config
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry
             .register_actor(
                 &ctx,
@@ -5331,7 +5358,7 @@ mod tests {
         );
         // Register actor with MessageSender (mailbox is internal)
 
-        use plexspaces_core::MessageSender;
+        use plexspaces_actor::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
             "".to_string(), // test tenant
@@ -5391,7 +5418,7 @@ mod tests {
 
     use async_trait::async_trait;
     use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 
     fn app_ctx(name: &str) -> RequestContext {

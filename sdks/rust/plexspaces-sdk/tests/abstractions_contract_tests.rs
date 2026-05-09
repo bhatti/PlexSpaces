@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use plexspaces_actor::TestServiceLocatorStub;
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 use plexspaces_journaling::SqliteJournalStorage;
 use plexspaces_sdk::{
     create_facets_with_storage, event_actor, gen_server_actor, handler, json, new_message,
@@ -126,7 +126,7 @@ fn abstractions_workflow_declares_expected_facets() {
             status: "pending".to_string(),
         }
         .behavior_type(),
-        plexspaces_core::BehaviorType::Workflow
+        plexspaces_actor::BehaviorType::Workflow
     );
 }
 
@@ -135,7 +135,7 @@ fn abstractions_channel_declares_expected_facets_and_behavior() {
     assert_eq!(AbstractionsChannel::declared_facets(), &["process_group"]);
     assert_eq!(
         AbstractionsChannel { received: vec![] }.behavior_type(),
-        plexspaces_core::BehaviorType::GenEvent
+        plexspaces_actor::BehaviorType::GenEvent
     );
 }
 

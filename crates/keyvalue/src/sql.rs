@@ -66,7 +66,7 @@
 
 use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use sqlx::{Pool, Postgres, Row, Sqlite};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

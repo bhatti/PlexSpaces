@@ -15,10 +15,11 @@
 use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{
+use plexspaces_actor::{
     behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorId, ActorRegistry,
-    BehaviorError, BehaviorType, FacetManager, Message, ReplyWaiterRegistry,
-    ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
+    BehaviorError, BehaviorType, FacetManager, InitializableServiceLocator, Message,
+    ReplyWaiterRegistry, ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
+    RequestContextExt,
 };
 use plexspaces_mailbox::new_message;
 use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
@@ -138,7 +139,7 @@ async fn create_test_registry_with_actors(
     tenant_id: &str,
     num_actors: usize,
 ) -> (Arc<ActorRegistry>, Arc<ServiceLocatorImpl>) {
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
 
     let object_repo = Arc::new(
         SqliteObjectRegistryRepository::new(":memory:")
@@ -156,7 +157,7 @@ async fn create_test_registry_with_actors(
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -176,7 +177,7 @@ async fn create_test_registry_with_actors(
 
         async fn lookup_full(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -193,7 +194,7 @@ async fn create_test_registry_with_actors(
 
         async fn register(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner.register(ctx, registration).await.map_err(|e| {
@@ -206,7 +207,7 @@ async fn create_test_registry_with_actors(
 
         async fn discover(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
             _name: Option<String>,
             _labels: Option<Vec<String>>,
@@ -220,7 +221,7 @@ async fn create_test_registry_with_actors(
 
         async fn unregister(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -237,7 +238,7 @@ async fn create_test_registry_with_actors(
 
         async fn heartbeat(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -285,7 +286,7 @@ async fn create_test_registry_with_actors(
 
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    use plexspaces_core::FacetManagerServiceWrapper;
+    use plexspaces_actor::FacetManagerServiceWrapper;
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
     )));
@@ -321,7 +322,7 @@ async fn create_test_registry_with_actors(
         .await;
 
     // Register actors with type information using spawn_actor
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         tenant_id.to_string(),
         "default".to_string(),
     );
@@ -333,7 +334,7 @@ async fn create_test_registry_with_actors(
         let message_sender = actor_factory
             .spawn_actor(
                 &ctx,
-                &plexspaces_core::ActorSpawnSpec {
+                &plexspaces_actor::ActorSpawnSpec {
                     identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                         name: actor_id.name().to_string(),
                         actor_type: actor_type.to_string(),

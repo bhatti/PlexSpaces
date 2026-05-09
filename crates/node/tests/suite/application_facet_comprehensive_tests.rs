@@ -36,13 +36,11 @@ use async_trait::async_trait;
 use plexspaces_application::{
     Application, ApplicationError, ApplicationManagerImpl, ApplicationNode,
 };
-use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocator};
+use plexspaces_actor::{ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
-};
+use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy};
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use prost_types::Duration as ProstDuration;
@@ -57,7 +55,7 @@ fn app_ctx(name: &str) -> RequestContext {
 
 /// Facet factory for TimerFacet
 struct TimerFacetFactory {
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 }
 
 #[async_trait]
@@ -88,7 +86,7 @@ impl FacetFactory for TimerFacetFactory {
 
 /// Facet factory for ReminderFacet
 struct ReminderFacetFactory {
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 }
 
 #[async_trait]
@@ -174,8 +172,8 @@ impl FacetFactory for VirtualActorFacetFactory {
 }
 
 /// Helper: Register all facet factories in FacetRegistry
-async fn register_all_facet_factories(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) {
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+async fn register_all_facet_factories(service_locator: Arc<dyn plexspaces_actor::InitializableServiceLocator>) {
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     // Create new registry with all factories
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
@@ -218,7 +216,7 @@ async fn test_application_deploy_with_multiple_facet_types() {
         .expect("Failed to initialize services");
 
     // Register all facet factories
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
     register_all_facet_factories(service_locator.clone()).await;
 
     // Create ApplicationSpec with multiple facet types
@@ -253,7 +251,7 @@ async fn test_application_deploy_with_multiple_facet_types() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -295,7 +293,7 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
         .expect("Failed to initialize services");
 
     // Register all facet factories
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
     register_all_facet_factories(service_locator.clone()).await;
 
     // Create ApplicationSpec with multiple facet types
@@ -330,7 +328,7 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -384,9 +382,9 @@ async fn test_application_with_timer_facet_only() {
         .expect("Failed to initialize services");
 
     // Register TimerFacet factory
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
 
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register(
@@ -428,7 +426,7 @@ async fn test_application_with_timer_facet_only() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -476,9 +474,9 @@ async fn test_application_with_reminder_facet_only() {
         .await
         .expect("Failed to initialize services");
 
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
 
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register(
@@ -520,7 +518,7 @@ async fn test_application_with_reminder_facet_only() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -564,9 +562,9 @@ async fn test_application_with_durability_facet_only() {
         .await
         .expect("Failed to initialize services");
 
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
 
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register("durability".to_string(), Arc::new(DurabilityFacetFactory));
@@ -602,7 +600,7 @@ async fn test_application_with_durability_facet_only() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -646,9 +644,9 @@ async fn test_application_with_virtual_actor_facet_only() {
         .await
         .expect("Failed to initialize services");
 
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
 
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register(
@@ -687,7 +685,7 @@ async fn test_application_with_virtual_actor_facet_only() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -782,6 +780,7 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
         max_restarts: 5,
         max_restart_window: None,
         children: vec![child_spec],
+        ..Default::default()
     };
 
     // Create ApplicationSpec
@@ -842,6 +841,7 @@ fn create_application_spec_with_single_facet(
         max_restarts: 5,
         max_restart_window: None,
         children: vec![child_spec],
+        ..Default::default()
     };
 
     ApplicationSpec {
@@ -907,7 +907,7 @@ async fn test_observability_metrics_for_facet_lifecycle() {
         .expect("Failed to initialize services");
 
     // Register all facet factories
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
     register_all_facet_factories(service_locator.clone()).await;
 
     // Create ApplicationSpec with multiple facet types
@@ -939,7 +939,7 @@ async fn test_observability_metrics_for_facet_lifecycle() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -997,7 +997,7 @@ async fn test_application_metrics_for_deploy_undeploy() {
         .expect("Failed to initialize services");
 
     // Register all facet factories
-    let service_locator = node.service_locator();
+    let service_locator = node.initializable_service_locator().unwrap();
     register_all_facet_factories(service_locator.clone()).await;
 
     // Create ApplicationSpec
@@ -1029,7 +1029,7 @@ async fn test_application_metrics_for_deploy_undeploy() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }

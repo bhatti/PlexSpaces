@@ -264,7 +264,7 @@
 //! - No shared mutable state (immutable after creation)
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext};
+use crate::core::{ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext, RequestContextExt};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
@@ -272,7 +272,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use ulid::Ulid;
 
-use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
+use crate::core::ServiceLocator as ServiceLocatorTrait;
 
 // Import proto types for gRPC communication
 use plexspaces_proto::actor::v1::{
@@ -435,6 +435,27 @@ impl ActorRef {
     /// - Accessing metrics/observability services
     /// - Future features (circuit breakers, retry policies, etc.)
     ///
+    /// Create a minimal placeholder `ActorRef` from just an `ActorId`.
+    /// Used in tests and child specs where a full mailbox/locator is not needed.
+    pub fn new(id: ActorId) -> Result<Self, crate::core::ActorIdError> {
+        let ns = id.namespace().to_string();
+        let tenant = String::new();
+        Ok(Self {
+            id,
+            tenant_id: tenant,
+            namespace: ns,
+            inner: ActorRefInner::Remote {
+                node_id: String::new(),
+                service_locator: Arc::new(crate::TestServiceLocatorStub::new()),
+                visibility: ActorVisibility::ActorVisibilityPublic,
+            },
+            actor_type: Arc::new(RwLock::new(None)),
+            behavior_kind: Arc::new(RwLock::new(None)),
+            local_state_handle: Arc::new(RwLock::new(None)),
+            temporary_sender: Arc::new(RwLock::new(None)),
+        })
+    }
+
     /// ## Multi-tenancy Design
     /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     /// - **namespace**: Stored in ActorRef. Source of truth is application (if deployed) or actor creation.
@@ -607,7 +628,7 @@ impl ActorRef {
     /// Temporary sender IDs are used when ask() is called from outside an actor context
     /// to prevent self-messaging. They have a distinct format that never matches actor IDs.
     fn is_temporary_sender_id(actor_id: &str) -> bool {
-        plexspaces_core::ActorId::from_canonical(actor_id)
+        crate::core::ActorId::from_canonical(actor_id)
             .map(|id| id.is_temporary_sender())
             .unwrap_or(false)
     }
@@ -620,7 +641,7 @@ impl ActorRef {
             | ActorRefInner::Remote {
                 service_locator, ..
             } => {
-                use plexspaces_core::ActorRegistry;
+                use crate::core::ActorRegistry;
                 let registry: Arc<ActorRegistry> =
                     service_locator.actor_registry().await.ok_or_else(|| {
                         ActorRefError::SendFailed("ActorRegistry not available".to_string())
@@ -715,8 +736,8 @@ impl ActorRef {
     ///
     /// ## Returns
     /// RequestContext with this ActorRef's tenant_id and namespace.
-    pub fn get_request_context(&self) -> plexspaces_core::RequestContext {
-        use plexspaces_core::RequestContext;
+    pub fn get_request_context(&self) -> crate::core::RequestContext {
+        use crate::core::RequestContext;
         RequestContext::new_without_auth(self.tenant_id.clone(), self.namespace.clone())
     }
 
@@ -753,8 +774,8 @@ impl ActorRef {
     /// Unified `tell()` pattern that supports both local and remote actors.
     ///
     /// ## Arguments
-    /// * `ctx` - Caller's [`plexspaces_core::RequestContext`] (same tenant/namespace semantics as
-    ///   [`ActorRegistry::tell`](plexspaces_core::ActorRegistry::tell): JWT-derived tenant and
+    /// * `ctx` - Caller's [`crate::core::RequestContext`] (same tenant/namespace semantics as
+    ///   [`ActorRegistry::tell`](crate::core::ActorRegistry::tell): JWT-derived tenant and
     ///   request-scoped namespace from gRPC/HTTP middleware, not fields on [`Message`].
     /// * `message` - Message to send
     ///
@@ -796,7 +817,7 @@ impl ActorRef {
     /// ```
     pub async fn tell(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &crate::core::RequestContext,
         message: impl Into<Message>,
     ) -> Result<(), ActorRefError> {
         self.tell_impl(ctx, message.into()).await
@@ -805,10 +826,10 @@ impl ActorRef {
     /// Internal implementation of tell() - used by both inherent method and MessageSender trait
     async fn tell_impl(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &crate::core::RequestContext,
         message: Message,
     ) -> Result<(), ActorRefError> {
-        use plexspaces_core::monitoring;
+        use crate::core::monitoring;
 
         let actor_id = self.id.clone();
         let message_type = message.message_type.clone();
@@ -860,7 +881,7 @@ impl ActorRef {
         let _guard = span.enter();
 
         // Get ReplyWaiterRegistry once for all reply routing checks
-        let waiter_registry: Option<Arc<plexspaces_core::ReplyWaiterRegistry>> =
+        let waiter_registry: Option<Arc<crate::core::ReplyWaiterRegistry>> =
             self.service_locator().reply_waiter_registry().await;
 
         // SIMPLIFIED ROUTING: Since we always create temporary sender for ask(), routing is simple:
@@ -928,7 +949,7 @@ impl ActorRef {
                 }
 
                 if let Err(msg) =
-                    plexspaces_core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
+                    crate::core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
                         ctx,
                         self.tenant_id(),
                         self.namespace(),
@@ -994,7 +1015,7 @@ impl ActorRef {
                 }
 
                 if let Err(msg) =
-                    plexspaces_core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
+                    crate::core::actor_visibility::enforce_visibility_for_actor_ref_messaging(
                         ctx,
                         self.tenant_id(),
                         self.namespace(),
@@ -1041,7 +1062,7 @@ impl ActorRef {
                         reply_to: proto_message.reply_to,
                         message_id: proto_message.id,
                     });
-                    plexspaces_core::apply_request_context_to_grpc_metadata(ctx, request.metadata_mut());
+                    crate::core::apply_request_context_to_grpc_metadata(ctx, request.metadata_mut());
 
                     // Send via gRPC
                     client_ref.send_message(request).await.map_err(|e| {
@@ -1175,10 +1196,10 @@ impl ActorRef {
     /// - `ActorRefError::ActorTerminated` - Actor terminated before reply
     ///
     /// ## Arguments
-    /// * `ctx` - Caller's [`plexspaces_core::RequestContext`] (JWT / gRPC / HTTP boundary), same as [`Self::tell`].
+    /// * `ctx` - Caller's [`crate::core::RequestContext`] (JWT / gRPC / HTTP boundary), same as [`Self::tell`].
     pub async fn ask(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &crate::core::RequestContext,
         mut message: Message,
         timeout: Duration,
     ) -> Result<Message, ActorRefError> {
@@ -1336,7 +1357,7 @@ impl ActorRef {
     ) -> Result<(), ActorRefError> {
         // Use send() method - temporary sender behaves like normal actor
         // Set message fields: receiver=target_actor_id, sender=current_actor, correlation_id
-        use plexspaces_core::actor_context::ActorService;
+        use crate::core::actor_context::ActorService;
         let actor_service = service_locator.get_actor_service().await.ok_or_else(|| {
             ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string())
         })?;
@@ -1348,8 +1369,8 @@ impl ActorRef {
             reply_msg.correlation_id = corr_id.to_string();
         }
         // Build context from sender's canonical actor ID (namespace-aware)
-        use plexspaces_core::RequestContext;
-        let ctx = plexspaces_core::ActorId::from_canonical(&sender_id.to_string())
+        use crate::core::RequestContext;
+        let ctx = crate::core::ActorId::from_canonical(&sender_id.to_string())
             .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
             .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
         actor_service
@@ -1403,7 +1424,7 @@ impl PartialEq for ActorRef {
 impl MessageSender for ActorRef {
     async fn tell(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &crate::core::RequestContext,
         message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.tell_impl(ctx, message)
@@ -1413,7 +1434,7 @@ impl MessageSender for ActorRef {
 
     async fn ask(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &crate::core::RequestContext,
         message: Message,
         timeout: std::time::Duration,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
@@ -1479,9 +1500,9 @@ impl MessageSender for ActorRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ActorContext;
-    use plexspaces_core::ActorId;
-    use plexspaces_core::ActorStateHandle;
+    use crate::core::ActorContext;
+    use crate::core::ActorId;
+    use crate::core::ActorStateHandle;
     use plexspaces_mailbox::MailboxConfig;
     use ulid::Ulid;
 
@@ -1517,10 +1538,9 @@ mod tests {
         )
     }
 
-    /// Helper to create a test ServiceLocator with default services
+    /// Helper to create a test ServiceLocator stub (no external crate dependencies)
     pub(crate) async fn create_test_service_locator() -> Arc<dyn ServiceLocatorTrait> {
-        use plexspaces_node::create_default_service_locator;
-        create_default_service_locator(Some("test-node".to_string()), None).await
+        Arc::new(crate::TestServiceLocatorStub::new())
     }
 
     fn test_actor_id(name: &str, node_id: &str) -> ActorId {
@@ -1532,8 +1552,8 @@ mod tests {
     }
 
     /// Minimal caller scope for `tell`/`ask` in unit tests (auth off; tenant/namespace empty).
-    fn tell_test_ctx() -> plexspaces_core::RequestContext {
-        plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
+    fn tell_test_ctx() -> crate::core::RequestContext {
+        crate::core::RequestContext::new_without_auth(String::new(), String::new())
     }
 
     /// TEST 1: Can create a local ActorRef
@@ -1562,9 +1582,9 @@ mod tests {
     /// TEST 2: Can create a remote ActorRef
     #[tokio::test]
     async fn test_create_remote_actor_ref() {
-        use plexspaces_node::create_default_service_locator;
+        
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+            Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         let actor_ref = ActorRef::remote(
             test_actor_id("remote-actor", "node1"),
             "",
@@ -1595,12 +1615,12 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(actor_ref.clone());
             registry
                 .register_actor(
                     &ctx,
@@ -1691,17 +1711,17 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl plexspaces_core::ActorService for MockActorService {
+    impl crate::core::ActorService for MockActorService {
         async fn spawn_actor(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<crate::core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
         async fn send(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -1713,7 +1733,7 @@ mod tests {
         }
         async fn create_shard_group(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
         ) -> Result<
             plexspaces_proto::actor::v1::CreateShardGroupResponse,
@@ -1723,7 +1743,7 @@ mod tests {
         }
         async fn bulk_update_shard_group(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
         ) -> Result<
             plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
@@ -1733,7 +1753,7 @@ mod tests {
         }
         async fn map_shard_group(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
         ) -> Result<
             plexspaces_proto::actor::v1::MapShardGroupResponse,
@@ -1743,7 +1763,7 @@ mod tests {
         }
         async fn scatter_gather(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &crate::core::RequestContext,
             _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
         ) -> Result<
             plexspaces_proto::actor::v1::ScatterGatherResponse,
@@ -1754,20 +1774,15 @@ mod tests {
     }
 
     /// Helper to create test ActorContext
-    fn create_test_context(actor_id: &str, node_id: &str) -> plexspaces_core::ActorContext {
-        use plexspaces_core::ActorContext;
-        use plexspaces_services::ServiceLocatorImpl;
+    fn create_test_context(actor_id: &str, node_id: &str) -> crate::core::ActorContext {
+        use crate::core::ActorContext;
         use std::sync::Arc;
 
-        // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-            Arc::new(ServiceLocatorImpl::new());
-
-        // Note: Services are not registered in test ServiceLocator
-        // Tests that need services should register them explicitly
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         ActorContext::new(
             node_id.to_string(),
-            String::new(), // tenant_id (empty if auth disabled)
+            String::new(),
             "test-ns".to_string(),
             service_locator,
             None,
@@ -1833,12 +1848,12 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(actor_ref1.clone());
             registry
                 .register_actor(
                     &ctx,
@@ -2001,12 +2016,12 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(actor_ref.clone());
             registry
                 .register_actor(
                     &ctx,
@@ -2042,18 +2057,18 @@ mod tests {
             sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
         }
         #[async_trait::async_trait]
-        impl plexspaces_core::ActorService for TrackingActorService {
+        impl crate::core::ActorService for TrackingActorService {
             async fn spawn_actor(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            ) -> Result<crate::core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
             }
             async fn send(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 actor_id: &str,
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -2065,7 +2080,7 @@ mod tests {
             }
             async fn create_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::CreateShardGroupResponse,
@@ -2075,7 +2090,7 @@ mod tests {
             }
             async fn bulk_update_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
@@ -2085,7 +2100,7 @@ mod tests {
             }
             async fn map_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::MapShardGroupResponse,
@@ -2095,7 +2110,7 @@ mod tests {
             }
             async fn scatter_gather(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::ScatterGatherResponse,
@@ -2106,9 +2121,9 @@ mod tests {
         }
 
         // Create remote ActorRef with ServiceLocator
-        use plexspaces_node::create_default_service_locator;
+        
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+            Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             test_actor_id("target-actor", "node2"),
@@ -2132,21 +2147,16 @@ mod tests {
     fn create_test_context_with_actor_service(
         actor_id: &str,
         node_id: &str,
-        _actor_service: Arc<dyn plexspaces_core::ActorService>,
+        _actor_service: Arc<dyn crate::core::ActorService>,
     ) -> ActorContext {
-        use plexspaces_core::ActorContext;
-        use plexspaces_services::ServiceLocatorImpl;
+        use crate::core::ActorContext;
         use std::sync::Arc;
 
-        // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-            Arc::new(ServiceLocatorImpl::new());
-
-        // Note: Services are not registered in test ServiceLocator
-        // Tests that need services should register them explicitly
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
         ActorContext::new(
             node_id.to_string(),
-            String::new(), // tenant_id (empty if auth disabled)
+            String::new(),
             "test-ns".to_string(),
             service_locator,
             None,
@@ -2180,12 +2190,12 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(target_ref.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(target_ref.clone());
             registry
                 .register_actor(
                     &ctx,
@@ -2264,18 +2274,18 @@ mod tests {
         // Create a mock actor service that handles ask pattern
         struct MockActorService;
         #[async_trait::async_trait]
-        impl plexspaces_core::ActorService for MockActorService {
+        impl crate::core::ActorService for MockActorService {
             async fn spawn_actor(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            ) -> Result<crate::core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
             }
             async fn send(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _actor_id: &str,
                 _message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -2283,7 +2293,7 @@ mod tests {
             }
             async fn create_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::CreateShardGroupResponse,
@@ -2293,7 +2303,7 @@ mod tests {
             }
             async fn bulk_update_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
@@ -2303,7 +2313,7 @@ mod tests {
             }
             async fn map_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::MapShardGroupResponse,
@@ -2313,7 +2323,7 @@ mod tests {
             }
             async fn scatter_gather(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::ScatterGatherResponse,
@@ -2324,9 +2334,9 @@ mod tests {
         }
 
         // Create remote ActorRef using actor crate's ActorRef
-        use plexspaces_node::create_default_service_locator;
+        
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None).await;
+            Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         let actor_ref = ActorRef::remote(
             test_actor_id("target-actor", "node2"),
             "test".to_string(), // tenant_id
@@ -2429,7 +2439,7 @@ mod tests {
     #[test]
     fn test_actor_id_fields_for_routing() {
         let actor_id =
-            plexspaces_core::ActorId::new("complex-actor-name", "worker", "default", "node-123")
+            crate::core::ActorId::new("complex-actor-name", "worker", "default", "node-123")
                 .unwrap();
         assert_eq!(actor_id.name(), "complex-actor-name");
         assert_eq!(actor_id.node_id(), "node-123");
@@ -2452,12 +2462,12 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use plexspaces_core::{ActorRegistry, RequestContext};
+        use crate::core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
             let ctx =
                 RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
-            let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
+            let sender: Arc<dyn crate::core::MessageSender> = Arc::new(actor_ref1.clone());
             registry
                 .register_actor(
                     &ctx,
@@ -2487,18 +2497,18 @@ mod tests {
             sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
         }
         #[async_trait::async_trait]
-        impl plexspaces_core::ActorService for TrackingActorService {
+        impl crate::core::ActorService for TrackingActorService {
             async fn spawn_actor(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            ) -> Result<crate::core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
             {
                 Err("Not implemented".into())
             }
             async fn send(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 actor_id: &str,
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -2510,7 +2520,7 @@ mod tests {
             }
             async fn create_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::CreateShardGroupResponse,
@@ -2520,7 +2530,7 @@ mod tests {
             }
             async fn bulk_update_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
@@ -2530,7 +2540,7 @@ mod tests {
             }
             async fn map_shard_group(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::MapShardGroupResponse,
@@ -2540,7 +2550,7 @@ mod tests {
             }
             async fn scatter_gather(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &crate::core::RequestContext,
                 _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
             ) -> Result<
                 plexspaces_proto::actor::v1::ScatterGatherResponse,
@@ -2575,8 +2585,8 @@ mod tests {
         // Test local (same node) - already tested in test_ask_with_context_local
         // Test remote (different node) - already tested in test_ask_with_context_remote
         // This test verifies the node_id comparison logic works correctly
-        let actor1 = plexspaces_core::ActorId::new("actor", "worker", "default", "node1").unwrap();
-        let actor2 = plexspaces_core::ActorId::new("actor", "worker", "default", "node2").unwrap();
+        let actor1 = crate::core::ActorId::new("actor", "worker", "default", "node1").unwrap();
+        let actor2 = crate::core::ActorId::new("actor", "worker", "default", "node2").unwrap();
 
         assert_eq!(actor1.name(), actor2.name());
         assert_ne!(actor1.node_id(), actor2.node_id());
@@ -2610,7 +2620,7 @@ mod tests {
 
         // Create a ReplyWaiter and register it in ReplyWaiterRegistry
         let correlation_id = "corr-123".to_string();
-        let waiter = plexspaces_core::ReplyWaiter::new();
+        let waiter = crate::core::ReplyWaiter::new();
         let waiter_clone = waiter.clone();
 
         if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
@@ -2679,9 +2689,9 @@ mod tests {
         let corr_id2 = "corr-2".to_string();
         let corr_id3 = "corr-3".to_string();
 
-        let waiter1 = plexspaces_core::ReplyWaiter::new();
-        let waiter2 = plexspaces_core::ReplyWaiter::new();
-        let waiter3 = plexspaces_core::ReplyWaiter::new();
+        let waiter1 = crate::core::ReplyWaiter::new();
+        let waiter2 = crate::core::ReplyWaiter::new();
+        let waiter3 = crate::core::ReplyWaiter::new();
 
         let waiter1_clone = waiter1.clone();
         let waiter2_clone = waiter2.clone();
@@ -2756,7 +2766,7 @@ mod tests {
 
         for i in 0..10 {
             let corr_id = format!("corr-{}", i);
-            let waiter = plexspaces_core::ReplyWaiter::new();
+            let waiter = crate::core::ReplyWaiter::new();
             let waiter_clone = waiter.clone();
 
             if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
@@ -2798,7 +2808,7 @@ mod tests {
 
         // Register a waiter in ReplyWaiterRegistry
         let correlation_id = "corr-timeout".to_string();
-        let waiter = plexspaces_core::ReplyWaiter::new();
+        let waiter = crate::core::ReplyWaiter::new();
         let waiter_clone = waiter.clone();
 
         if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {

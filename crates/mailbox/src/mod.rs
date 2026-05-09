@@ -38,8 +38,10 @@
 //! This eliminates busy-waiting and provides zero-latency message delivery.
 //!
 //! ## Mailbox Capacity
-//! Default capacity is 10000 messages. Use `ActorBuilder::with_mailbox_capacity()`
-//! or `ActorBuilder::with_mailbox_config()` to configure capacity.
+//! Default capacity is 10000 messages. Use `ActorBuilder::with_config(Some(ActorConfig {
+//!     max_mailbox_size: ...,
+//!     ..Default::default()
+//! }))` to configure capacity when spawning through actor specs.
 //! When capacity is reached, behavior depends on `BackpressureStrategy`:
 //! - `Error`: Returns `MailboxError::Full` (default for Block strategy)
 //! - `DropOldest`: Drops oldest message and enqueues new one
@@ -52,9 +54,17 @@
 //! only and are lost on actor restart. This is a future enhancement.
 
 use plexspaces_channel::{create_channel, Channel, ChannelError};
-use plexspaces_core::is_ctrl_message;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider};
 use plexspaces_proto::common::v1::Message as ProtoMessage;
+
+/// Prefix for all control messages (e.g. "__DOWN__", "__EXIT__").
+/// Mirrors `plexspaces_actor::CTRL_MSG_PREFIX` without the cyclic dependency.
+const CTRL_MSG_PREFIX: &str = "__";
+
+#[inline(always)]
+fn is_ctrl_message(message_type: &str) -> bool {
+    message_type.starts_with(CTRL_MSG_PREFIX)
+}
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
@@ -3192,12 +3202,12 @@ mod tests {
             .await.unwrap().unwrap();
 
         assert!(
-            plexspaces_core::is_ctrl_message(&m1.message_type),
+            is_ctrl_message(&m1.message_type),
             "first dequeue must be ctrl, got {}",
             m1.message_type
         );
         assert!(
-            plexspaces_core::is_ctrl_message(&m2.message_type),
+            is_ctrl_message(&m2.message_type),
             "second dequeue must be ctrl, got {}",
             m2.message_type
         );
@@ -3206,7 +3216,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping_message_is_ctrl() {
         let down = with_message_type(new_message(vec![]), "__PING__");
-        assert!(plexspaces_core::is_ctrl_message(&down.message_type));
+        assert!(is_ctrl_message(&down.message_type));
     }
 
     #[tokio::test]

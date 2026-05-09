@@ -35,7 +35,7 @@
 
 #[cfg(feature = "ddb-backend")]
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_locks::{
         ddb::DynamoDBLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions,
         RenewLockOptions,

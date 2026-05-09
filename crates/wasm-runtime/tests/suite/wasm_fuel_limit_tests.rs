@@ -24,6 +24,7 @@
 
 #[cfg(test)]
 mod tests {
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::{ResourceLimits, WasmConfig, WasmInstance, WasmRuntime};
     use wasmtime::StoreLimitsBuilder;
 
@@ -67,10 +68,11 @@ mod tests {
             .await
             .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let instance = runtime
             .instantiate(
                 module,
-                "test-actor".to_string(),
+                actor_id.clone(),
                 &[],
                 config,
                 None, // channel_service
@@ -90,7 +92,7 @@ mod tests {
 
         // Instance created successfully with custom fuel limit
         // (Fuel is set internally, we verify it doesn't fail)
-        assert_eq!(instance.actor_id(), "test-actor");
+        assert_eq!(instance.actor_id(), actor_id.to_string());
     }
 
     /// Test: Default fuel limit is used when not specified
@@ -114,10 +116,11 @@ mod tests {
             .await
             .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let instance = runtime
             .instantiate(
                 module,
-                "test-actor".to_string(),
+                actor_id.clone(),
                 &[],
                 config,
                 None,
@@ -135,7 +138,7 @@ mod tests {
             .await
             .expect("Failed to instantiate with default fuel limit");
 
-        assert_eq!(instance.actor_id(), "test-actor");
+        assert_eq!(instance.actor_id(), actor_id.to_string());
     }
 
     /// Test: Zero fuel limit disables fuel metering
@@ -168,10 +171,11 @@ mod tests {
             .expect("Failed to load module");
 
         // Instantiation should still work (fuel metering disabled)
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let instance = runtime
             .instantiate(
                 module,
-                "test-actor".to_string(),
+                actor_id.clone(),
                 &[],
                 config,
                 None,
@@ -189,7 +193,7 @@ mod tests {
             .await
             .expect("Failed to instantiate with zero fuel limit");
 
-        assert_eq!(instance.actor_id(), "test-actor");
+        assert_eq!(instance.actor_id(), actor_id.to_string());
     }
 
     /// Test: Large fuel limit is supported
@@ -222,10 +226,11 @@ mod tests {
             .await
             .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let instance = runtime
             .instantiate(
                 module,
-                "test-actor".to_string(),
+                actor_id.clone(),
                 &[],
                 config,
                 None,
@@ -243,6 +248,6 @@ mod tests {
             .await
             .expect("Failed to instantiate with large fuel limit");
 
-        assert_eq!(instance.actor_id(), "test-actor");
+        assert_eq!(instance.actor_id(), actor_id.to_string());
     }
 }

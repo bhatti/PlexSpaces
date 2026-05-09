@@ -11,7 +11,6 @@ description = "Application lifecycle management for PlexSpaces (Erlang/OTP-inspi
 
 [dependencies]
 plexspaces-common = { path = "../common" }
-plexspaces-core = { path = "../core" }
 plexspaces-proto = { workspace = true }
 plexspaces-actor = { path = "../actor" }
 plexspaces-wasm-runtime = { path = "../wasm-runtime" }

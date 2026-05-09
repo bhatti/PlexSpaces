@@ -6,7 +6,7 @@
 // Integration test for WASM component deployment via HTTP API
 // This test reproduces the WASI binding issue and verifies the fix
 
-use plexspaces_core::{ApplicationManager, ServiceLocator};
+use plexspaces_actor::{ApplicationManager, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
 use reqwest::multipart;
 use std::path::PathBuf;
@@ -134,7 +134,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
         .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8000);
-    let http_port = grpc_port + 1;
+    let http_port = grpc_port;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     // Check if WASM file exists
@@ -191,8 +191,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
                 eprintln!("✅ WASM component deployment succeeded!");
 
                 // Verify application is registered
-                use plexspaces_core::service_names;
-                use plexspaces_core::ApplicationManager;
+                use plexspaces_actor::ApplicationManager;
                 let app_manager: Arc<dyn ApplicationManager> = node
                     .service_locator()
                     .get_application_manager()
@@ -260,7 +259,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
         .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8000);
-    let http_port = grpc_port + 1;
+    let http_port = grpc_port;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     // Check if WASM file exists
@@ -321,8 +320,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 eprintln!("✅ WASM component deployment with supervisor tree succeeded!");
 
                 // Verify application is registered
-                use plexspaces_core::service_names;
-                use plexspaces_core::ApplicationManager;
+                use plexspaces_actor::ApplicationManager;
                 let app_manager: Arc<dyn ApplicationManager> = node
                     .service_locator()
                     .get_application_manager()
@@ -340,7 +338,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
 
                 // Verify actors were spawned by supervisor tree
                 // The auto-generated ApplicationSpec creates one worker actor with the application name as actor ID
-                use plexspaces_core::ActorRegistry;
+                use plexspaces_actor::ActorRegistry;
                 let actor_registry: Arc<ActorRegistry> = node
                     .service_locator()
                     .actor_registry()

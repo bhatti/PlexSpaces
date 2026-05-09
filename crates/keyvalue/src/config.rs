@@ -50,7 +50,7 @@
 //! ```
 
 use crate::{KVError, KVResult, KeyValueStore};
-use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend, RequestContextExt};
 use plexspaces_proto::storage::v1::{
     storage_provider_config, SharedDbConfig, StorageProvider, StorageProviderConfig,
 };

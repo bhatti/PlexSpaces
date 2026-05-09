@@ -38,7 +38,7 @@
 pub use plexspaces_actor as actor; // Pillar 2: Erlang/OTP actors
 pub use plexspaces_actor::supervisor as supervision; // Pillar 2: Fault tolerance (merged into actor crate)
 pub use plexspaces_behavior as behavior; // OTP-style behaviors
-pub use plexspaces_core as core; // Core types (ActorId, ActorContext, etc.)
+pub use plexspaces_actor as core; // Core types (ActorId, ActorContext, etc.) — merged into actor
 pub use plexspaces_facet as facet; // Dynamic behavior composition
 pub use plexspaces_keyvalue as keyvalue;
 pub use plexspaces_lattice as lattice;
@@ -55,12 +55,13 @@ pub use plexspaces_proto as proto;
 
 // Re-export core types for convenience
 pub use actor::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUsage};
-pub use actor::{Actor as ActorStruct, ActorState};
+pub use actor::{ActorInstance as ActorStruct, ActorState};
 pub use behavior::{GenServer, MessageType, MockBehavior};
 pub use core::{
-    Actor, ActorContext, ActorError, ActorId, ActorRef, BehaviorContext, BehaviorError,
+    ActorContext, ActorError, ActorId, ActorRef, BehaviorContext, BehaviorError,
     BehaviorType,
 };
+pub use core::actor_types::Actor;
 pub use journal::{Journal, JournalEntry, MemoryJournal};
 pub use lattice::{
     ConsistencyLevel, CounterLattice, LWWLattice, Lattice, OrSetLattice, SetLattice, VectorClock,

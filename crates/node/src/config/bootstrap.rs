@@ -64,6 +64,19 @@ pub enum ConfigError {
     NotFound(String),
 }
 
+impl ConfigError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::config::v1::ConfigErrorCode {
+        use plexspaces_proto::config::v1::ConfigErrorCode;
+        match self {
+            ConfigError::Io(_) => ConfigErrorCode::ConfigErrorIo,
+            ConfigError::Toml(_) => ConfigErrorCode::ConfigErrorParse,
+            ConfigError::Env(_) => ConfigErrorCode::ConfigErrorEnv,
+            ConfigError::NotFound(_) => ConfigErrorCode::ConfigErrorNotFound,
+        }
+    }
+}
+
 /// Configuration bootstrap helper
 ///
 /// ## Usage

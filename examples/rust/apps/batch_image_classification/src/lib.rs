@@ -71,7 +71,6 @@ struct AppState {
 struct InitConfig {
     actor_id: Option<String>,
     role: Option<String>,
-    declaration_name: Option<String>,
     args: Option<HashMap<String, String>>,
 }
 
@@ -158,7 +157,6 @@ fn resolve_role(config: &InitConfig, actor_id: &str) -> Option<String> {
         .as_ref()
         .and_then(|args| args.get("role").cloned())
         .or_else(|| config.role.clone())
-        .or_else(|| config.declaration_name.clone())
         .or_else(|| actor_name_from_actor_id(actor_id))
 }
 
@@ -827,7 +825,6 @@ mod tests {
                 &InitConfig {
                     actor_id: Some(actor_id.to_string()),
                     role: Some("worker".to_string()),
-                    declaration_name: Some("worker".to_string()),
                     args: Some(args),
                 },
                 actor_id,
@@ -839,8 +836,7 @@ mod tests {
             resolve_role(
                 &InitConfig {
                     actor_id: Some(actor_id.to_string()),
-                    role: None,
-                    declaration_name: Some("worker".to_string()),
+                    role: Some("worker".to_string()),
                     args: None,
                 },
                 actor_id,
@@ -853,7 +849,6 @@ mod tests {
                 &InitConfig {
                     actor_id: Some(actor_id.to_string()),
                     role: None,
-                    declaration_name: None,
                     args: None,
                 },
                 actor_id,

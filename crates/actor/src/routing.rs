@@ -33,13 +33,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use plexspaces_core::{
+use crate::core::{
     apply_request_context_to_grpc_metadata,
     monitoring::{
         record_node_failed_delivery, record_node_local_delivery, record_node_messages_routed,
         record_node_remote_delivery,
     },
-    ActorId, ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    ActorId, ReplyWaiter, ReplyWaiterError, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_proto::actor::v1::{
     actor_service_client::ActorServiceClient, AskReplyRequest, SendMessageRequest,
@@ -217,11 +218,11 @@ pub fn ask_helper(
         if let Err(e) = registry.tell(&ctx, &target_actor_id, message).await {
             waiter_registry.remove(&correlation_id).await;
             return Err(match e {
-                plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                crate::core::ActorRegistryError::ActorNotFound(id) => {
                     ActorRefError::ActorNotFound(id.into())
                 }
-                plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
-                plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                crate::core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                crate::core::ActorRegistryError::VisibilityDenied(msg) => {
                     ActorRefError::VisibilityDenied(msg)
                 }
                 other => ActorRefError::SendFailed(other.to_string()),
@@ -312,11 +313,11 @@ pub fn route_local(
                 .ask(&ctx, &actor_id, message, timeout_duration)
                 .await
                 .map_err(|e| match e {
-                    plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                    crate::core::ActorRegistryError::ActorNotFound(id) => {
                         ActorRefError::ActorNotFound(id.into())
                     }
-                    plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
-                    plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                    crate::core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    crate::core::ActorRegistryError::VisibilityDenied(msg) => {
                         ActorRefError::VisibilityDenied(msg)
                     }
                     other => ActorRefError::SendFailed(other.to_string()),
@@ -361,11 +362,11 @@ pub fn route_local(
                 .tell(&ctx, &actor_id, message)
                 .await
                 .map_err(|e| match e {
-                    plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                    crate::core::ActorRegistryError::ActorNotFound(id) => {
                         ActorRefError::ActorNotFound(id.into())
                     }
-                    plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
-                    plexspaces_core::ActorRegistryError::VisibilityDenied(msg) => {
+                    crate::core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    crate::core::ActorRegistryError::VisibilityDenied(msg) => {
                         ActorRefError::VisibilityDenied(msg)
                     }
                     other => ActorRefError::SendFailed(other.to_string()),

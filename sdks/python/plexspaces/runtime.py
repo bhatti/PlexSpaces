@@ -8,8 +8,8 @@
 # WIT bindings.
 #
 # Supports multiple @actor classes in one module via Erlang-style ApplicationSpec:
-# The framework passes {"actor_id": "...", "actor_type": "...", "declaration_name": "..."}
-# in init config. The wrapper selects the correct class from declaration_name
+# The framework passes {"actor_id": "...", "actor_type": "...", "role": "..."}
+# in init config. The wrapper selects the correct class from role
 # or actor_id prefix matching.
 
 """
@@ -34,9 +34,9 @@ The generated wrapper implements the WIT actor interface:
 When a module contains multiple @actor classes, the wrapper selects the
 class from the init config in priority order:
 
-1. ``config["declaration_name"]`` — the child declaration role from
+1. ``config["role"]`` — the child role from
    ``app-config.toml`` / ``ActorSpawnSpec.role``.
-2. Prefix match on the normalized ``actor_id`` against declaration and class
+2. Prefix match on the normalized ``actor_id`` against role and class
    aliases (e.g. ``data-worker-0`` matches ``data-worker``).
 3. ``ACTOR_ROLES`` aliases embedded at build time when provided.
 """
@@ -116,6 +116,56 @@ def build_class_alias_map(
     return class_map
 
 
+def select_actor_class(
+    config: dict,
+    class_map: Dict[str, Type],
+    default_class: Type,
+) -> Type:
+    """Select the actor class to instantiate from the framework-supplied init config.
+
+    Priority (mirrors Erlang supervisor child-spec dispatch):
+    1. ``config["role"]`` — ``ChildSpec.role`` / ``ActorSpawnSpec.role`` set at
+       registration time.  Exact match first; suffix match (``_<role>`` /
+       ``-<role>``) for compound aliases second.
+    2. Exact-then-prefix match on the normalised ``actor_id`` name component.
+       Longest prefix wins so ``counter-worker`` beats ``counter``.
+    3. ``config["actor_type"]`` — shared WASM behavior class, used when a
+       module exposes only one role per actor_type.
+    4. ``default_class`` — the first registered actor class.
+    """
+    if not isinstance(config, dict) or not class_map:
+        return default_class
+
+    def _norm(s: str) -> str:
+        return s.replace("-", "_")
+
+    # 1. role
+    role_key = _norm(config.get("role", ""))
+    if role_key:
+        if role_key in class_map:
+            return class_map[role_key]
+        for key, cls in class_map.items():
+            if key.endswith(f"_{role_key}") or key.endswith(f"-{role_key}"):
+                return cls
+
+    # 2. actor_id prefix
+    actor_id = normalize_role_actor_id(config.get("actor_id", ""))
+    if actor_id:
+        actor_id = _norm(actor_id)
+        if actor_id in class_map:
+            return class_map[actor_id]
+        for prefix, cls in sorted(class_map.items(), key=lambda x: -len(x[0])):
+            if actor_id.startswith(prefix):
+                return cls
+
+    # 3. actor_type
+    actor_type = _norm(config.get("actor_type", ""))
+    if actor_type and actor_type in class_map:
+        return class_map[actor_type]
+
+    return default_class
+
+
 def generate_wrapper(
     actor_classes: List[Type], module_name: str, actor_roles: Optional[Dict[str, Type]] = None
 ) -> str:
@@ -123,13 +173,13 @@ def generate_wrapper(
     Generate the WIT interface wrapper code for one or more actor classes.
 
     When multiple classes are provided, the wrapper selects the class from the
-    init config in priority order: ``declaration_name`` exact match, prefix
+    init config in priority order: ``role`` exact match, prefix
     match on normalized ``actor_id``, then ``actor_type`` exact match.
 
     Args:
         actor_classes: List of @actor decorated classes (at least one)
         module_name: Name of the module containing the actor classes
-        actor_roles: Optional declaration-name to actor-class mapping from ACTOR_ROLES
+        actor_roles: Optional role to actor-class mapping from ACTOR_ROLES
 
     Returns:
         Python source code for the wrapper
@@ -155,23 +205,14 @@ def generate_wrapper(
         "    _sanitize_payload_for_wasm, _desanitize_from_wasm, _has_float,",
         "    payload_from_request_json,",
         ")",
-        "",
-        "def _normalize_role_actor_id(actor_id: str) -> str:",
-        '    """Normalize runtime actor IDs to logical child/base IDs."""',
-        "    if not actor_id:",
-        '        return ""',
-        '    if "//" in actor_id:',
-        '        return actor_id.split("//", 1)[0]',
-        '    if ":" in actor_id:',
-        '        return actor_id.split(":", 1)[0]',
-        "    return actor_id",
+        "from plexspaces.runtime import select_actor_class as _select_actor_class",
         "",
     ]
 
     # Class map for multi-actor support.
     # Selection priority in _select_class:
-    #   1. config["declaration_name"] — ChildSpec.role / ActorSpawnSpec.role
-    #   2. exact or prefix match on actor_id against declaration/class aliases
+    #   1. config["role"] — ChildSpec.role / ActorSpawnSpec.role
+    #   2. exact or prefix match on actor_id against role/class aliases
     #   3. config["actor_type"] — shared behavior class when it uniquely maps
     if len(actor_classes) == 1:
         lines.append(f"_actor_class = {default_class}")
@@ -179,7 +220,7 @@ def generate_wrapper(
     else:
         lines.append(f"_actor_class = {default_class}  # default")
         lines.append("")
-        lines.append("# Auto-generated class map: declaration aliases and class aliases -> class")
+        lines.append("# Auto-generated class map: role aliases and class aliases -> class")
         lines.append("_CLASS_MAP = {")
         for alias, cls in class_map.items():
             lines.append(f'    "{alias}": {cls.__name__},')
@@ -192,37 +233,8 @@ def generate_wrapper(
         "",
         "",
         "def _select_class(config):",
-        '    """Select actor class from init config.',
-        "    Priority:",
-        '    1. declaration_name — ChildSpec.role / ActorSpawnSpec.role passed by the framework',
-        '    2. exact or prefix match on normalized actor_id against declaration/class aliases',
-        '    3. config["actor_type"] — ChildSpec.actor_type for single-role behavior classes',
-        '    """',
-        "    global _actor_class",
-        "    if not isinstance(config, dict) or not _CLASS_MAP:",
-        "        return _actor_class",
-        "    # 1. declaration_name — framework passes ChildSpec.role directly",
-        '    decl_name = config.get("declaration_name", "").replace("-", "_")',
-        "    if decl_name:",
-        "        if decl_name in _CLASS_MAP:",
-        "            return _CLASS_MAP[decl_name]",
-        "        for key, cls in _CLASS_MAP.items():",
-        '            if key.endswith(f"_{decl_name}") or key.endswith(f"-{decl_name}"):',
-        "                return cls",
-        "    # 2. exact or prefix match on actor_id",
-        '    actor_id = _normalize_role_actor_id(config.get("actor_id", ""))',
-        "    if actor_id:",
-        '        actor_id = actor_id.replace("-", "_")',
-        "        if actor_id in _CLASS_MAP:",
-        "            return _CLASS_MAP[actor_id]",
-        "        for prefix, cls in sorted(_CLASS_MAP.items(), key=lambda x: -len(x[0])):",
-        "            if actor_id.startswith(prefix):",
-        "                return cls",
-        "    # 3. actor_type — shared behavior class fallback",
-        '    actor_type = config.get("actor_type", "").replace("-", "_")',
-        "    if actor_type and actor_type in _CLASS_MAP:",
-        "        return _CLASS_MAP[actor_type]",
-        "    return _actor_class",
+        '    """Delegate to plexspaces.runtime.select_actor_class (single source of truth)."""',
+        f"    return _select_actor_class(config, _CLASS_MAP, {default_class})",
         "",
         "",
         f'class Actor(exports.Actor):',

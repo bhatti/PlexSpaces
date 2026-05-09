@@ -39,7 +39,7 @@ use crate::{
     RenewLockOptions,
 };
 use async_trait::async_trait;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;

@@ -27,7 +27,7 @@
 //! - Tenant/namespace isolation
 
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_locks::{
         memory::MemoryLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions,
         RenewLockOptions,

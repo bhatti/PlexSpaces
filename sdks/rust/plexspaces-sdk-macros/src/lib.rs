@@ -285,9 +285,9 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // If custom name is provided, use Custom(name) behavior type for HTTP gateway routing
     let behavior_type_expr = if let Some(ref custom) = custom_name {
-        quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
+        quote! { plexspaces_actor::BehaviorType::Custom(#custom.to_string()) }
     } else {
-        quote! { plexspaces_core::BehaviorType::GenServer }
+        quote! { plexspaces_actor::BehaviorType::GenServer }
     };
 
     let expanded = quote! {
@@ -296,16 +296,16 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
         #facets_impl
 
         #[plexspaces_sdk::async_trait]
-        impl plexspaces_core::Actor for #name {
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        impl plexspaces_actor::Actor for #name {
+            fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
                 #behavior_type_expr
             }
 
             async fn handle_message(
                 &mut self,
-                ctx: &plexspaces_core::ActorContext,
-                msg: plexspaces_core::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
+                ctx: &plexspaces_actor::ActorContext,
+                msg: plexspaces_actor::Message,
+            ) -> Result<(), plexspaces_actor::BehaviorError> {
                 <Self as plexspaces_behavior::GenServer>::route_message(self, ctx, msg).await
             }
         }
@@ -357,9 +357,9 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
-        quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
+        quote! { plexspaces_actor::BehaviorType::Custom(#custom.to_string()) }
     } else {
-        quote! { plexspaces_core::BehaviorType::GenEvent }
+        quote! { plexspaces_actor::BehaviorType::GenEvent }
     };
 
     let expanded = quote! {
@@ -368,16 +368,16 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
         #facets_impl
 
         #[plexspaces_sdk::async_trait]
-        impl plexspaces_core::Actor for #name {
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        impl plexspaces_actor::Actor for #name {
+            fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
                 #behavior_type_expr
             }
 
             async fn handle_message(
                 &mut self,
-                ctx: &plexspaces_core::ActorContext,
-                msg: plexspaces_core::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
+                ctx: &plexspaces_actor::ActorContext,
+                msg: plexspaces_actor::Message,
+            ) -> Result<(), plexspaces_actor::BehaviorError> {
                 // GenEvent: dispatch to handlers, no reply expected
                 // Use #[plexspaces_handlers(event)] to generate dispatch
                 <Self as plexspaces_behavior::EventHandler>::handle_event(self, ctx, msg).await
@@ -443,9 +443,9 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
-        quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
+        quote! { plexspaces_actor::BehaviorType::Custom(#custom.to_string()) }
     } else {
-        quote! { plexspaces_core::BehaviorType::GenStateMachine }
+        quote! { plexspaces_actor::BehaviorType::GenStateMachine }
     };
 
     // Generate FSM_STATES const if states provided
@@ -481,16 +481,16 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
         #fsm_initial_impl
 
         #[plexspaces_sdk::async_trait]
-        impl plexspaces_core::Actor for #name {
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        impl plexspaces_actor::Actor for #name {
+            fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
                 #behavior_type_expr
             }
 
             async fn handle_message(
                 &mut self,
-                ctx: &plexspaces_core::ActorContext,
-                msg: plexspaces_core::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
+                ctx: &plexspaces_actor::ActorContext,
+                msg: plexspaces_actor::Message,
+            ) -> Result<(), plexspaces_actor::BehaviorError> {
                 // FSM: dispatch to state handlers based on current state and event
                 // Use #[plexspaces_handlers(fsm)] to generate dispatch
                 self.handle_fsm_message(ctx, msg).await
@@ -551,9 +551,9 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
-        quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
+        quote! { plexspaces_actor::BehaviorType::Custom(#custom.to_string()) }
     } else {
-        quote! { plexspaces_core::BehaviorType::Workflow }
+        quote! { plexspaces_actor::BehaviorType::Workflow }
     };
 
     let expanded = quote! {
@@ -562,16 +562,16 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
         #facets_impl
 
         #[plexspaces_sdk::async_trait]
-        impl plexspaces_core::Actor for #name {
-            fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        impl plexspaces_actor::Actor for #name {
+            fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
                 #behavior_type_expr
             }
 
             async fn handle_message(
                 &mut self,
-                ctx: &plexspaces_core::ActorContext,
-                msg: plexspaces_core::Message,
-            ) -> Result<(), plexspaces_core::BehaviorError> {
+                ctx: &plexspaces_actor::ActorContext,
+                msg: plexspaces_actor::Message,
+            ) -> Result<(), plexspaces_actor::BehaviorError> {
                 <Self as plexspaces_behavior::Workflow>::route_workflow_message(self, ctx, msg).await
             }
         }
@@ -1017,7 +1017,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             // Call init handler if present
             // Note: This is called by the actor lifecycle, not in handle_message
             #[allow(dead_code)]
-            async fn __plexspaces_init(&mut self, ctx: &plexspaces_core::ActorContext) -> Result<(), plexspaces_core::BehaviorError> {
+            async fn __plexspaces_init(&mut self, ctx: &plexspaces_actor::ActorContext) -> Result<(), plexspaces_actor::BehaviorError> {
                 self.#method(ctx).await
             }
         }
@@ -1054,7 +1054,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             }
         } else {
             quote! {
-                Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                Err(plexspaces_actor::BehaviorError::UnsupportedMessage)
             }
         };
 
@@ -1085,33 +1085,33 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             impl plexspaces_behavior::Workflow for #self_ty {
                 async fn run(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
-                    input: plexspaces_core::Message,
-                ) -> Result<plexspaces_core::Message, plexspaces_core::BehaviorError> {
+                    ctx: &plexspaces_actor::ActorContext,
+                    input: plexspaces_actor::Message,
+                ) -> Result<plexspaces_actor::Message, plexspaces_actor::BehaviorError> {
                     #run_impl
                 }
 
                 async fn signal(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
+                    ctx: &plexspaces_actor::ActorContext,
                     name: String,
-                    data: plexspaces_core::Message,
-                ) -> Result<(), plexspaces_core::BehaviorError> {
+                    data: plexspaces_actor::Message,
+                ) -> Result<(), plexspaces_actor::BehaviorError> {
                     match name.as_str() {
                         #(#signal_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        _ => Err(plexspaces_actor::BehaviorError::UnsupportedMessage)
                     }
                 }
 
                 async fn query(
                     &self,
-                    ctx: &plexspaces_core::ActorContext,
+                    ctx: &plexspaces_actor::ActorContext,
                     name: String,
-                    params: plexspaces_core::Message,
-                ) -> Result<plexspaces_core::Message, plexspaces_core::BehaviorError> {
+                    params: plexspaces_actor::Message,
+                ) -> Result<plexspaces_actor::Message, plexspaces_actor::BehaviorError> {
                     match name.as_str() {
                         #(#query_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        _ => Err(plexspaces_actor::BehaviorError::UnsupportedMessage)
                     }
                 }
             }
@@ -1154,7 +1154,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                         if !msg.sender_id.is_empty() {
                             let reply_payload = serde_json::to_vec(&result)
                                 .unwrap_or_else(|_| b"{}".to_vec());
-                            let mut reply = plexspaces_core::Message::default();
+                            let mut reply = plexspaces_actor::Message::default();
                             reply.payload = reply_payload;
                             reply.receiver_id = msg.sender_id.clone();
                             reply.sender_id = msg.receiver_id.clone();
@@ -1167,7 +1167,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                                 &msg.sender_id,
                                 ctx.actor_id().clone(),
                                 reply,
-                            ).await.map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
+                            ).await.map_err(|e| plexspaces_actor::BehaviorError::ProcessingError(e.to_string()))?;
                         }
                         Ok(())
                     }
@@ -1204,7 +1204,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     if !msg.sender_id.is_empty() {
                         let reply_payload = serde_json::to_vec(&result)
                             .unwrap_or_else(|_| b"{}".to_vec());
-                        let mut reply = plexspaces_core::Message::default();
+                        let mut reply = plexspaces_actor::Message::default();
                         reply.payload = reply_payload;
                         reply.receiver_id = msg.sender_id.clone(); // Reply goes TO sender (temporary sender)
                         reply.sender_id = msg.receiver_id.clone(); // Reply comes FROM this actor
@@ -1218,7 +1218,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                             ctx.actor_id().clone(),
                             reply,
                         ).await.map_err(|e| {
-                            plexspaces_core::BehaviorError::ProcessingError(e.to_string())
+                            plexspaces_actor::BehaviorError::ProcessingError(e.to_string())
                         })?;
                     }
                     Ok(())
@@ -1233,7 +1233,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         }
     } else {
         quote! {
-            _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+            _ => Err(plexspaces_actor::BehaviorError::UnsupportedMessage)
         }
     };
 
@@ -1244,9 +1244,9 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             impl plexspaces_behavior::GenServer for #self_ty {
                 async fn handle_request(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
-                    msg: plexspaces_core::Message,
-                ) -> Result<(), plexspaces_core::BehaviorError> {
+                    ctx: &plexspaces_actor::ActorContext,
+                    msg: plexspaces_actor::Message,
+                ) -> Result<(), plexspaces_actor::BehaviorError> {
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
@@ -1288,9 +1288,9 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             impl plexspaces_behavior::EventHandler for #self_ty {
                 async fn handle_event(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
-                    msg: plexspaces_core::Message,
-                ) -> Result<(), plexspaces_core::BehaviorError> {
+                    ctx: &plexspaces_actor::ActorContext,
+                    msg: plexspaces_actor::Message,
+                ) -> Result<(), plexspaces_actor::BehaviorError> {
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
@@ -1315,9 +1315,9 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 /// Handle FSM message - dispatch based on current state and event
                 async fn handle_fsm_message(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
-                    msg: plexspaces_core::Message,
-                ) -> Result<(), plexspaces_core::BehaviorError> {
+                    ctx: &plexspaces_actor::ActorContext,
+                    msg: plexspaces_actor::Message,
+                ) -> Result<(), plexspaces_actor::BehaviorError> {
                     // Parse payload to determine event
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
@@ -1330,7 +1330,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
 
                     match event {
                         #(#match_arms)*
-                        _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
+                        _ => Err(plexspaces_actor::BehaviorError::UnsupportedMessage)
                     }
                 }
             }
@@ -1339,16 +1339,16 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         // Custom actor: dispatch in handle_message
         quote! {
             #[plexspaces_sdk::async_trait]
-            impl plexspaces_core::Actor for #self_ty {
-                fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-                    plexspaces_core::BehaviorType::Custom(stringify!(#self_ty).to_string())
+            impl plexspaces_actor::Actor for #self_ty {
+                fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+                    plexspaces_actor::BehaviorType::Custom(stringify!(#self_ty).to_string())
                 }
 
                 async fn handle_message(
                     &mut self,
-                    ctx: &plexspaces_core::ActorContext,
-                    msg: plexspaces_core::Message,
-                ) -> Result<(), plexspaces_core::BehaviorError> {
+                    ctx: &plexspaces_actor::ActorContext,
+                    msg: plexspaces_actor::Message,
+                ) -> Result<(), plexspaces_actor::BehaviorError> {
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));

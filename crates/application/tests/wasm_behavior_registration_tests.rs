@@ -4,7 +4,7 @@
 // Tests for behavior registration patterns (embedded and WASM)
 
 use async_trait::async_trait;
-use plexspaces_core::{Actor, BehaviorFactory, BehaviorRegistry, Message, ServiceLocator};
+use plexspaces_actor::{Actor, BehaviorFactory, BehaviorRegistry, Message, ServiceLocator, InitializableServiceLocator};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
 
@@ -29,14 +29,14 @@ async fn test_embedded_application_explicit_behavior_registration() {
     impl Actor for TestWorker {
         async fn handle_message(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
+            _ctx: &plexspaces_actor::ActorContext,
             _msg: Message,
-        ) -> Result<(), plexspaces_core::BehaviorError> {
+        ) -> Result<(), plexspaces_actor::BehaviorError> {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 
@@ -47,7 +47,7 @@ async fn test_embedded_application_explicit_behavior_registration() {
             Box::pin(async move {
                 Ok(Box::new(TestWorker {
                     id: "worker-1".to_string(),
-                }) as Box<dyn plexspaces_core::Actor>)
+                }) as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;
@@ -98,14 +98,14 @@ async fn test_behavior_registry_arc_interior_mutability() {
     impl Actor for TestActor {
         async fn handle_message(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
+            _ctx: &plexspaces_actor::ActorContext,
             _msg: Message,
-        ) -> Result<(), plexspaces_core::BehaviorError> {
+        ) -> Result<(), plexspaces_actor::BehaviorError> {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 
@@ -118,7 +118,7 @@ async fn test_behavior_registry_arc_interior_mutability() {
             Box::pin(async move {
                 Ok(Box::new(TestActor {
                     name: "actor1".to_string(),
-                }) as Box<dyn plexspaces_core::Actor>)
+                }) as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;
@@ -128,7 +128,7 @@ async fn test_behavior_registry_arc_interior_mutability() {
             Box::pin(async move {
                 Ok(Box::new(TestActor {
                     name: "actor2".to_string(),
-                }) as Box<dyn plexspaces_core::Actor>)
+                }) as Box<dyn plexspaces_actor::Actor>)
             })
         })
         .await;

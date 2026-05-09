@@ -26,7 +26,7 @@
 use async_trait::async_trait;
 
 // Import from plexspaces-core crate
-use plexspaces_core::{Actor, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor, BehaviorError, BehaviorType, RequestContextExt};
 use plexspaces_proto::common::v1::Message;
 
 // Re-export workflow execution context and retry config (single run-with-config API; proto RetryConfig)
@@ -150,7 +150,7 @@ pub trait GenServer: Actor {
     /// ```
     async fn handle_request(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError>;
 
@@ -171,7 +171,7 @@ pub trait GenServer: Actor {
     /// GenServer only handles Call messages. For Cast/Info, use GenEvent instead.
     async fn route_message(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         use crate::MessageTypeExt;
@@ -239,7 +239,7 @@ pub trait GenServer: Actor {
         match msg_type {
             MessageType::Call => {
                 // DEBUG: Check if sender is temporary sender
-                use plexspaces_core::TEMP_SENDER_PREFIX;
+                use plexspaces_actor::TEMP_SENDER_PREFIX;
                 let sender_is_temp = !msg.sender_id.is_empty()
                     && msg
                         .sender_id
@@ -373,7 +373,7 @@ pub trait EventHandler: Send + Sync {
     /// Context is the first parameter (Go convention), followed by the message.
     async fn handle_event(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         event: Message,
     ) -> Result<(), BehaviorError>;
 }
@@ -407,7 +407,7 @@ impl GenEventBehavior {
 impl Actor for GenEventBehavior {
     async fn handle_message(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         // Notify all handlers
@@ -463,7 +463,7 @@ where
     /// Context is the first parameter (Go convention), followed by the event.
     pub async fn transition(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         event: E,
     ) -> Result<(), BehaviorError> {
         // 1. Get next state from transition function
@@ -506,7 +506,7 @@ where
 {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
+        _ctx: &plexspaces_actor::ActorContext,
         _msg: Message,
     ) -> Result<(), BehaviorError> {
         // Note: Generic message -> event deserialization is intentionally not implemented.
@@ -530,7 +530,7 @@ pub trait StateHandler<S, E>: Send + Sync {
     /// Context is the first parameter (Go convention), followed by state and event.
     async fn handle(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         state: &S,
         event: E,
     ) -> Result<Option<S>, BehaviorError>;
@@ -620,7 +620,7 @@ pub trait Workflow: Actor {
     /// Context is the first parameter (Go convention), followed by the message.
     async fn run(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         input: Message,
     ) -> Result<Message, BehaviorError>;
 
@@ -644,7 +644,7 @@ pub trait Workflow: Actor {
     /// Context is the first parameter (Go convention), followed by name and data.
     async fn signal(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         name: String,
         data: Message,
     ) -> Result<(), BehaviorError>;
@@ -669,7 +669,7 @@ pub trait Workflow: Actor {
     /// Context is the first parameter (Go convention), followed by name and params.
     async fn query(
         &self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         name: String,
         params: Message,
     ) -> Result<Message, BehaviorError>;
@@ -684,7 +684,7 @@ pub trait Workflow: Actor {
     /// Context is the first parameter (Go convention), followed by the message.
     async fn route_workflow_message(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
+        ctx: &plexspaces_actor::ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         use crate::MessageTypeExt;
@@ -737,7 +737,7 @@ pub trait Workflow: Actor {
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
 
-                    let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                    let reply_ctx = plexspaces_actor::RequestContext::new_without_auth(
                         ctx.tenant_id.clone(),
                         ctx.namespace.clone(),
                     );
@@ -841,7 +841,7 @@ pub trait Workflow: Actor {
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
 
-                    let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                    let reply_ctx = plexspaces_actor::RequestContext::new_without_auth(
                         ctx.tenant_id.clone(),
                         ctx.namespace.clone(),
                     );
@@ -963,7 +963,7 @@ impl MockBehavior {
 impl Actor for MockBehavior {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
+        _ctx: &plexspaces_actor::ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         self.messages_received.push(msg);
@@ -997,8 +997,8 @@ mod tests {
         assert_eq!(behavior.behavior_type(), BehaviorType::GenEvent);
 
         // Test with no handlers (should succeed) - Go-style: context first, then message
-        use plexspaces_core::ActorContext;
-        use plexspaces_core::ServiceLocator;
+        use plexspaces_actor::ActorContext;
+        use plexspaces_actor::ServiceLocator;
         use std::sync::Arc;
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(

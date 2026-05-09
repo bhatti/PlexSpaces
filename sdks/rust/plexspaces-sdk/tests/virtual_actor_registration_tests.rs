@@ -5,7 +5,7 @@
 // Verifies that spawning an actor with virtual_actor facet automatically registers the type
 // and that type-level registration enables get_or_activate for other actor IDs of the same type.
 
-use plexspaces_core::{ActorId, RequestContext};
+use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
 use plexspaces_node::NodeBuilder;
 use plexspaces_sdk::{
     call_message, gen_server_actor, json, plexspaces_handlers, spawn, ActorContext, BehaviorError,

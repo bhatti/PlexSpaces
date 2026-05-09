@@ -7,8 +7,8 @@
 
 use crate::{HostFunctions, WasmCapabilities, WasmError, WasmModule, WasmResult};
 use hex;
-use plexspaces_core::ActorId;
-use plexspaces_core::ChannelService;
+use plexspaces_actor::ActorId;
+use plexspaces_actor::ChannelService;
 use std::sync::Arc;
 #[cfg(feature = "component-model")]
 use tokio::sync::Semaphore;
@@ -83,7 +83,7 @@ impl ComponentState {
 /// WASM actor instance with state and execution context
 pub struct WasmInstance {
     /// Actor ID
-    pub(crate) actor_id: String,
+    pub(crate) actor_id: ActorId,
 
     /// Wasmtime store (holds instance state and limits)
     store: Arc<RwLock<Store<InstanceContext>>>,
@@ -108,7 +108,7 @@ pub struct WasmInstance {
 
     /// TupleSpace provider used when actor-world components are re-instantiated.
     #[cfg(feature = "component-model")]
-    tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
+    tuplespace_provider: Option<Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
 
     /// When true, load checkpoint on init and save on terminate. Off by default for performance.
     #[cfg(feature = "component-model")]
@@ -233,22 +233,22 @@ impl WasmInstance {
     pub async fn new(
         engine: &Engine,
         module: WasmModule,
-        actor_id: String,
+        actor_id: ActorId,
         initial_state: &[u8],
         capabilities: WasmCapabilities,
         limits: StoreLimits,
         max_fuel: u64,
         channel_service: Option<Arc<dyn ChannelService>>,
         message_sender: Option<Arc<dyn crate::MessageSender>>,
-        tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
-        keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>>,
+        tuplespace_provider: Option<Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
+        keyvalue_store: Option<Arc<dyn plexspaces_actor::KeyValueStore>>,
         process_group_registry: Option<Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
-        lock_manager: Option<Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
-        object_registry: Option<Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
-        journal_storage: Option<Arc<dyn plexspaces_core::JournalStorage>>,
+        lock_manager: Option<Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
+        object_registry: Option<Arc<dyn plexspaces_actor::actor_context::ObjectRegistry>>,
+        journal_storage: Option<Arc<dyn plexspaces_actor::JournalStorage>>,
         blob_service: Option<Arc<plexspaces_blob::BlobService>>,
-        elastic_pool_service: Option<Arc<dyn plexspaces_core::ElasticPoolService>>,
-        outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
+        elastic_pool_service: Option<Arc<dyn plexspaces_actor::ElasticPoolService>>,
+        outbound_http_client: Option<Arc<dyn plexspaces_actor::OutboundHttpClient>>,
         durability_enabled: bool,
         global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
         shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
@@ -280,15 +280,12 @@ impl WasmInstance {
 
         // Store host_functions in Arc for sharing between traditional and component contexts
         let host_functions_arc = Arc::new(host_functions);
-        let parsed_actor_id = ActorId::from_canonical(&actor_id).map_err(|err| {
-            WasmError::ActorFunctionError(format!(
-                "invalid canonical actor id for wasm instance '{actor_id}': {err}"
-            ))
-        })?;
+        let parsed_actor_id = actor_id.clone();
+        let actor_id_str = actor_id.to_string();
 
         // Create context
         let context = InstanceContext {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id_str.clone(),
             host_functions: host_functions_arc.clone(),
             capabilities,
             limits,
@@ -353,7 +350,7 @@ impl WasmInstance {
                         // Reuse the same host_functions Arc for component context
                         // This ensures message_sender and channel_service are available
                         let context_clone = InstanceContext {
-                            actor_id: actor_id.clone(),
+                            actor_id: actor_id_str.clone(),
                             host_functions: host_functions_arc.clone(),
                             capabilities: capabilities_clone1,
                             limits: limits_clone1,
@@ -571,7 +568,7 @@ impl WasmInstance {
                         let dummy_capabilities = capabilities_clone2;
                         let dummy_limits = limits_clone2;
                         let dummy_context = InstanceContext {
-                            actor_id: actor_id.clone(),
+                            actor_id: actor_id_str.clone(),
                             host_functions: context_clone.host_functions.clone(),
                             capabilities: dummy_capabilities,
                             limits: dummy_limits,
@@ -1212,9 +1209,9 @@ impl WasmInstance {
         Ok(())
     }
 
-    /// Get actor ID
+    /// Get actor ID as canonical string
     pub fn actor_id(&self) -> &str {
-        &self.actor_id
+        self.actor_id.as_str()
     }
 
     /// Check if this is a component instance (components are not Send and cannot be pooled)
@@ -1661,12 +1658,7 @@ impl WasmInstance {
             .env("PATH", "/")
             .build();
         let tuplespace_provider = self.tuplespace_provider.clone();
-        let parsed_actor_id = ActorId::from_canonical(&self.actor_id).map_err(|err| {
-            WasmError::ActorFunctionError(format!(
-                "invalid canonical actor id for wasm component '{}': {err}",
-                self.actor_id
-            ))
-        })?;
+        let parsed_actor_id = self.actor_id.clone();
         let component_ctx = ComponentContext {
             instance_ctx: instance_ctx.clone(),
             wasi_ctx,
@@ -1809,12 +1801,7 @@ impl WasmInstance {
             .env("PATH", "/")
             .build();
         let tuplespace_provider = self.tuplespace_provider.clone();
-        let parsed_actor_id = ActorId::from_canonical(&self.actor_id).map_err(|err| {
-            WasmError::ActorFunctionError(format!(
-                "invalid canonical actor id for wasm component '{}': {err}",
-                self.actor_id
-            ))
-        })?;
+        let parsed_actor_id = self.actor_id.clone();
         let component_ctx = ComponentContext {
             instance_ctx: instance_ctx.clone(),
             wasi_ctx,
@@ -1995,7 +1982,7 @@ impl WasmInstance {
                     })?;
                     let reinstantiation_start = std::time::Instant::now();
                     metrics::counter!("plexspaces_wasm_reinstantiation_total",
-                        "actor_id" => self.actor_id.clone()
+                        "actor_id" => self.actor_id.to_string()
                     )
                     .increment(1);
 
@@ -2018,7 +2005,7 @@ impl WasmInstance {
                     .map_err(|e| {
                         let error_msg = e.to_string();
                         metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
-                            "actor_id" => self.actor_id.clone(),
+                            "actor_id" => self.actor_id.to_string(),
                             "error_type" => "instantiation_failed"
                         )
                         .increment(1);
@@ -2038,7 +2025,7 @@ impl WasmInstance {
 
                     let reinstantiation_duration = reinstantiation_start.elapsed();
                     metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
-                        "actor_id" => self.actor_id.clone()
+                        "actor_id" => self.actor_id.to_string()
                     )
                     .record(reinstantiation_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::TRACE) {
@@ -2116,7 +2103,7 @@ impl WasmInstance {
                 })?;
                 let reinstantiation_start = std::time::Instant::now();
                 metrics::counter!("plexspaces_wasm_reinstantiation_total",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .increment(1);
 
@@ -2138,7 +2125,7 @@ impl WasmInstance {
                 .map_err(|e| {
                     let error_msg = e.to_string();
                     metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
-                        "actor_id" => self.actor_id.clone(),
+                        "actor_id" => self.actor_id.to_string(),
                         "error_type" => "instantiation_failed"
                     )
                     .increment(1);
@@ -2158,7 +2145,7 @@ impl WasmInstance {
 
                 let reinstantiation_duration = reinstantiation_start.elapsed();
                 metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .record(reinstantiation_duration.as_secs_f64());
                 if tracing::enabled!(tracing::Level::TRACE) {
@@ -2322,7 +2309,7 @@ impl WasmInstance {
                 })?;
                 let reinstantiation_start = std::time::Instant::now();
                 metrics::counter!("plexspaces_wasm_reinstantiation_total",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .increment(1);
 
@@ -2353,7 +2340,7 @@ impl WasmInstance {
                     .map_err(|e| {
                         let error_msg = e.to_string();
                         metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
-                            "actor_id" => self.actor_id.clone(),
+                            "actor_id" => self.actor_id.to_string(),
                             "error_type" => "instantiation_failed"
                         ).increment(1);
                         tracing::error!(
@@ -2416,7 +2403,7 @@ impl WasmInstance {
                 // Record re-instantiation success metrics
                 let reinstantiation_duration = reinstantiation_start.elapsed();
                 metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .record(reinstantiation_duration.as_secs_f64());
                 let final_result = processed_result?;
@@ -2466,14 +2453,14 @@ impl WasmInstance {
     #[cfg(feature = "component-model")]
     pub async fn get_state_component(&self) -> WasmResult<Vec<u8>> {
         metrics::counter!("plexspaces_wasm_get_state_total",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .increment(1);
         let start_time = std::time::Instant::now();
 
         let component_state = self.component_state.as_ref().ok_or_else(|| {
             metrics::counter!("plexspaces_wasm_get_state_errors_total",
-                "actor_id" => self.actor_id.clone(),
+                "actor_id" => self.actor_id.to_string(),
                 "error" => "no_component_state"
             )
             .increment(1);
@@ -2516,18 +2503,18 @@ impl WasmInstance {
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_get_state_duration_seconds",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .record(duration.as_secs_f64());
 
         match result {
             Ok(state_bytes) => {
                 metrics::counter!("plexspaces_wasm_get_state_success_total",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .increment(1);
                 metrics::gauge!("plexspaces_wasm_state_size_bytes",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .set(state_bytes.len() as f64);
 
@@ -2542,7 +2529,7 @@ impl WasmInstance {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_get_state_errors_total",
-                    "actor_id" => self.actor_id.clone(),
+                    "actor_id" => self.actor_id.to_string(),
                     "error" => "call_failed"
                 )
                 .increment(1);
@@ -2573,14 +2560,14 @@ impl WasmInstance {
     #[cfg(feature = "component-model")]
     pub async fn set_state_component(&self, state_bytes: &[u8]) -> WasmResult<()> {
         metrics::counter!("plexspaces_wasm_set_state_total",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .increment(1);
         let start_time = std::time::Instant::now();
 
         let component_state = self.component_state.as_ref().ok_or_else(|| {
             metrics::counter!("plexspaces_wasm_set_state_errors_total",
-                "actor_id" => self.actor_id.clone(),
+                "actor_id" => self.actor_id.to_string(),
                 "error" => "no_component_state"
             )
             .increment(1);
@@ -2617,14 +2604,14 @@ impl WasmInstance {
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_set_state_duration_seconds",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .record(duration.as_secs_f64());
 
         match result {
             Ok(()) => {
                 metrics::counter!("plexspaces_wasm_set_state_success_total",
-                    "actor_id" => self.actor_id.clone()
+                    "actor_id" => self.actor_id.to_string()
                 )
                 .increment(1);
 
@@ -2638,7 +2625,7 @@ impl WasmInstance {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_set_state_errors_total",
-                    "actor_id" => self.actor_id.clone(),
+                    "actor_id" => self.actor_id.to_string(),
                     "error" => "call_failed"
                 )
                 .increment(1);
@@ -2768,7 +2755,7 @@ impl WasmInstance {
             return Ok(0);
         }
         metrics::counter!("plexspaces_wasm_checkpoint_save_total",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .increment(1);
         let start_time = std::time::Instant::now();
@@ -2799,9 +2786,9 @@ impl WasmInstance {
         drop(store); // Release lock before async operation
 
         // Create checkpoint using proper Checkpoint struct
-        use plexspaces_core::journal_storage::Checkpoint;
+        use plexspaces_actor::journal_storage::Checkpoint;
         let checkpoint = Checkpoint {
-            actor_id: self.actor_id.clone(),
+            actor_id: self.actor_id.to_string(),
             sequence: 0,     // Will be set by storage
             timestamp: None, // Storage layer handles timestamp
             state_data: state_bytes.clone(),
@@ -2818,7 +2805,7 @@ impl WasmInstance {
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_checkpoint_save_duration_seconds",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .record(duration.as_secs_f64());
 
@@ -2855,7 +2842,7 @@ impl WasmInstance {
             return Ok(0);
         }
         metrics::counter!("plexspaces_wasm_checkpoint_load_total",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .increment(1);
         let start_time = std::time::Instant::now();
@@ -2877,7 +2864,7 @@ impl WasmInstance {
         // Load latest checkpoint from journal storage
         let checkpoint = match journal_storage.get_latest_checkpoint(&self.actor_id).await {
             Ok(cp) => cp,
-            Err(plexspaces_core::journal_storage::JournalError::CheckpointNotFound(_)) => {
+            Err(plexspaces_actor::journal_storage::JournalError::CheckpointNotFound(_)) => {
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     "🆕 WASM checkpoint load: no checkpoint found, fresh start"
@@ -2906,7 +2893,7 @@ impl WasmInstance {
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_checkpoint_load_duration_seconds",
-            "actor_id" => self.actor_id.clone()
+            "actor_id" => self.actor_id.to_string()
         )
         .record(duration.as_secs_f64());
 

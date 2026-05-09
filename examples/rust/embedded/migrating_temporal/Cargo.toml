@@ -10,7 +10,7 @@ default-run = "temporal-comparison"
 description = "Temporal-style durable workflow comparison (embedded)"
 
 [dependencies]
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-journaling = { path = "../../../../crates/journaling", features = ["sqlite-backend"] }

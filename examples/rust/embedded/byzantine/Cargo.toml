@@ -10,7 +10,7 @@ description = "Byzantine Fault Tolerant consensus using PlexSpaces Application f
 [dependencies]
 # PlexSpaces framework
 plexspaces-node = { path = "../../../../crates/node" }
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-application = { path = "../../../../crates/application" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }

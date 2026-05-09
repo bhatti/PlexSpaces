@@ -35,15 +35,14 @@ import (
 type ActorFactory func() Actor
 
 // initConfig is the JSON structure passed by the framework to Init().
-// declaration_name is the primary dispatch key and is sourced from ActorSpawnSpec.role /
-// ChildSpec.role. actor_type is the shared behavior class/module name and is only a fallback.
+// role is the primary dispatch key and is sourced from ActorSpawnSpec.role / ChildSpec.role.
+// actor_type is the shared behavior class/module name and is only a fallback.
 // actor_id is used as a final fallback when neither field is present.
 type initConfig struct {
-	ActorID         string          `json:"actor_id"`
-	ActorType       string          `json:"actor_type"`
-	DeclarationName string          `json:"declaration_name"`
-	Role            string          `json:"role"`
-	Args            json.RawMessage `json:"args"`
+	ActorID   string          `json:"actor_id"`
+	ActorType string          `json:"actor_type"`
+	Role      string          `json:"role"`
+	Args      json.RawMessage `json:"args"`
 }
 
 // ActorRouter routes messages to multiple actor types within a single
@@ -103,13 +102,10 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	// declaration_name sourced from ActorSpawnSpec.role / ChildSpec.role is the authoritative
+	// role sourced from ActorSpawnSpec.role / ChildSpec.role is the authoritative
 	// dispatch key for multi-actor WASM modules. Fall back to actor_type, then to the canonical
 	// actor_id-derived role for older/simpler configs.
-	dispatchKey := config.DeclarationName
-	if dispatchKey == "" {
-		dispatchKey = config.Role
-	}
+	dispatchKey := config.Role
 	if dispatchKey == "" {
 		dispatchKey = config.ActorType
 	}

@@ -14,9 +14,7 @@ categories = ["concurrency", "database"]
 
 [dependencies]
 # Core PlexSpaces dependencies
-plexspaces-core = { path = "../core" }
 plexspaces-actor = { path = "../actor" }
-plexspaces-behavior = { path = "../behavior" }
 plexspaces-persistence = { path = "../persistence" }
 plexspaces-proto = { path = "../proto" }
 plexspaces-facet = { path = "../facet" }
@@ -43,6 +41,7 @@ sqlx = { workspace = true }
 # AWS DynamoDB backend (optional)
 aws-sdk-dynamodb = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
 
 # IDs
 ulid = { workspace = true }
@@ -66,9 +65,11 @@ tempfile = { workspace = true }
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
 # Node for integration tests
 plexspaces-node = { path = "../node" }
+# Behavior traits for workflow_ref_test
+plexspaces-behavior = { path = "../behavior" }
 
 [features]
 default = []
 sqlite = ["sqlx/sqlite"]
 postgres = ["sqlx/postgres"]
-ddb-backend = ["aws-sdk-dynamodb", "aws-config", "metrics"]
+ddb-backend = ["aws-sdk-dynamodb", "aws-config", "metrics", "base64"]

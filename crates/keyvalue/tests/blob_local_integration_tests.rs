@@ -24,7 +24,7 @@
 #[cfg(feature = "blob-backend")]
 mod tests {
     use object_store::local::LocalFileSystem;
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_keyvalue::{
         blob::{BlobKVConfig, BlobKVStore},
         KeyValueStore,

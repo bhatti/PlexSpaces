@@ -9,7 +9,7 @@
 // All tests use MockChannelService (in-memory) and do not require external services.
 
 use futures::StreamExt;
-use plexspaces_core::ChannelService;
+use plexspaces_actor::{ActorId, ChannelService};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::*;
 use std::collections::HashMap;
@@ -118,7 +118,7 @@ async fn test_genserver_handle_request() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-genserver".to_string(),
+        ActorId::new("test-genserver", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -182,7 +182,7 @@ async fn test_genevent_handle_event() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-genevent".to_string(),
+        ActorId::new("test-genevent", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -246,7 +246,7 @@ async fn test_genfsm_handle_transition() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-genfsm".to_string(),
+        ActorId::new("test-genfsm", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -309,7 +309,7 @@ async fn test_fallback_to_handle_message() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-fallback".to_string(),
+        ActorId::new("test-fallback", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -385,7 +385,7 @@ async fn test_channel_send_to_queue() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-channel".to_string(),
+        ActorId::new("test-channel", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -409,7 +409,7 @@ async fn test_channel_send_to_queue() {
     .expect("Failed to create instance");
 
     // Verify instance was created with channel service
-    assert_eq!(instance.actor_id(), "test-channel");
+    assert_eq!(instance.actor_id(), "test-channel//wasm-actor::test@local");
 }
 
 /// Test channel host function publish_to_topic
@@ -443,7 +443,7 @@ async fn test_channel_publish_to_topic() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-publish".to_string(),
+        ActorId::new("test-publish", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -467,7 +467,7 @@ async fn test_channel_publish_to_topic() {
     .expect("Failed to create instance");
 
     // Verify instance was created
-    assert_eq!(instance.actor_id(), "test-publish");
+    assert_eq!(instance.actor_id(), "test-publish//wasm-actor::test@local");
 }
 
 /// Test that channel service is optional
@@ -503,7 +503,7 @@ async fn test_channel_service_optional() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "test-optional".to_string(),
+        ActorId::new("test-optional", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -527,5 +527,5 @@ async fn test_channel_service_optional() {
     .expect("Failed to create instance");
 
     // Should still work
-    assert_eq!(instance.actor_id(), "test-optional");
+    assert_eq!(instance.actor_id(), "test-optional//wasm-actor::test@local");
 }

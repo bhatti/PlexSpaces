@@ -108,7 +108,7 @@ impl From<plexspaces_proto::storage::v1::BlobMetadata> for BlobMetadataJson {
 #[derive(Clone)]
 pub struct HttpRouterLayer {
     blob_service: Option<Arc<plexspaces_blob::BlobService>>,
-    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
+    service_locator: Option<Arc<plexspaces_actor::ServiceLocator>>,
     node_id: Option<String>,
 }
 
@@ -129,7 +129,7 @@ impl HttpRouterLayer {
     }
 
     /// Register service locator and node ID for actor ask/tell routes
-    pub fn with_actor_service(mut self, service_locator: Arc<plexspaces_core::ServiceLocator>, node_id: String) -> Self {
+    pub fn with_actor_service(mut self, service_locator: Arc<plexspaces_actor::ServiceLocator>, node_id: String) -> Self {
         self.service_locator = Some(service_locator);
         self.node_id = Some(node_id);
         self
@@ -163,7 +163,7 @@ where
 /// HTTP router service that routes requests to appropriate handlers
 pub struct HttpRouterService<S> {
     blob_service: Option<Arc<plexspaces_blob::BlobService>>,
-    service_locator: Option<Arc<plexspaces_core::ServiceLocator>>,
+    service_locator: Option<Arc<plexspaces_actor::ServiceLocator>>,
     node_id: Option<String>,
     inner: S,
 }

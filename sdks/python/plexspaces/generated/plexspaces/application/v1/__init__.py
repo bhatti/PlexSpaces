@@ -20,6 +20,7 @@ import grpclib
 from betterproto.grpc.grpclib_server import ServiceBase
 
 from ...common import v1 as __common_v1__
+from ...supervision import v1 as __supervision_v1__
 from ...wasm import v1 as __wasm_v1__
 
 if TYPE_CHECKING:
@@ -44,57 +45,6 @@ class ApplicationType(betterproto.Enum):
     """
     Active application (has supervision tree and processes)
      e.g., byzantine-generals, heat-diffusion
-    """
-
-
-class SupervisionStrategy(betterproto.Enum):
-    """Supervision strategy (Erlang/OTP)"""
-
-    UNSPECIFIED = 0
-    """Unspecified (default to one_for_one)"""
-
-    ONE_FOR_ONE = 1
-    """
-    One-for-One: Only restart failed child
-     If child A crashes, restart only A
-    """
-
-    ONE_FOR_ALL = 2
-    """
-    One-for-All: Restart all children if one fails
-     If child A crashes, restart A, B, C
-    """
-
-    REST_FOR_ONE = 3
-    """
-    Rest-for-One: Restart failed child and those started after it
-     If child B crashes (started after A), restart B, C (not A)
-    """
-
-
-class RestartPolicy(betterproto.Enum):
-    """Restart policy (Erlang/OTP)"""
-
-    UNSPECIFIED = 0
-    """Unspecified (default to permanent)"""
-
-    PERMANENT = 1
-    """
-    Permanent: Always restart on failure
-     Use for critical long-running processes
-    """
-
-    TRANSIENT = 2
-    """
-    Transient: Restart only if abnormal exit (error)
-     Don't restart if normal exit (shutdown)
-     Use for tasks that may complete successfully
-    """
-
-    TEMPORARY = 3
-    """
-    Temporary: Never restart
-     Use for one-shot tasks
     """
 
 
@@ -259,6 +209,21 @@ class ApplicationStatus(betterproto.Enum):
     """Failed (error during start/run)"""
 
 
+class ApplicationErrorCode(betterproto.Enum):
+    """Error codes for ApplicationError"""
+
+    APPLICATION_ERROR_UNSPECIFIED = 0
+    APPLICATION_ERROR_STARTUP_FAILED = 1
+    APPLICATION_ERROR_SHUTDOWN_FAILED = 2
+    APPLICATION_ERROR_NOT_FOUND = 3
+    APPLICATION_ERROR_DEPENDENCY_FAILED = 4
+    APPLICATION_ERROR_CONFIG_ERROR = 5
+    APPLICATION_ERROR_SHUTDOWN_TIMEOUT = 6
+    APPLICATION_ERROR_ACTOR_SPAWN_FAILED = 7
+    APPLICATION_ERROR_ACTOR_STOP_FAILED = 8
+    APPLICATION_ERROR_OTHER = 9
+
+
 @dataclass(eq=False, repr=False)
 class ApplicationSpec(betterproto.Message):
     """
@@ -336,7 +301,9 @@ class ApplicationSpec(betterproto.Message):
     )
     """Application-level environment variables"""
 
-    supervisor: Optional["SupervisorSpec"] = betterproto.message_field(9, optional=True)
+    supervisor: Optional["__supervision_v1__.SupervisorSpec"] = (
+        betterproto.message_field(9, optional=True)
+    )
     """Supervision tree (only for active applications)"""
 
     enabled: bool = betterproto.bool_field(10)
@@ -397,91 +364,6 @@ class ApplicationServiceLinkRequirement(betterproto.Message):
 
     link_name: str = betterproto.string_field(1)
     policy_template: Optional[str] = betterproto.string_field(2, optional=True)
-
-
-@dataclass(eq=False, repr=False)
-class SupervisorSpec(betterproto.Message):
-    """
-    Supervisor specification (Erlang/OTP supervisor)
-
-     ## Purpose
-     Defines a supervision tree node. Supervisors manage child processes
-     (workers or other supervisors) with fault tolerance strategies.
-
-     ## Why This Exists
-     - Fault tolerance (automatic restarts)
-     - Organized process hierarchy
-     - Declarative restart strategies
-     - Local supervision only (simpler than distributed)
-    """
-
-    strategy: "SupervisionStrategy" = betterproto.enum_field(1)
-    """Supervision strategy"""
-
-    max_restarts: int = betterproto.uint32_field(2)
-    """Maximum restarts allowed"""
-
-    max_restart_window: timedelta = betterproto.message_field(3)
-    """Time window for restart counting (seconds)"""
-
-    children: List["ChildSpec"] = betterproto.message_field(4)
-    """Child processes"""
-
-
-@dataclass(eq=False, repr=False)
-class ChildSpec(betterproto.Message):
-    """
-    Child process specification
-
-     ## Purpose
-     Defines a child process (worker or supervisor) managed by a supervisor.
-
-     ## Why This Exists
-     - Clear child identity and lifecycle
-     - Restart policy per child
-     - Shutdown timeout specification
-     - Support for nested supervisors
-    """
-
-    actor_identity: "__common_v1__.ActorIdentity" = betterproto.message_field(1)
-    """
-    Instance name + behavior class (canonical ActorId is derived at deploy time).
-    """
-
-    role: str = betterproto.string_field(2)
-    """
-    Role of this child within the application (e.g. "worker", "leader", "supervisor").
-     Maps 1:1 to the TOML `role` field in [[supervisor.children]].
-     Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-    """
-
-    args: Dict[str, str] = betterproto.map_field(
-        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
-    )
-    """Arguments to pass to start function"""
-
-    restart: "RestartPolicy" = betterproto.enum_field(4)
-    """Restart policy"""
-
-    shutdown_timeout: timedelta = betterproto.message_field(5)
-    """Shutdown timeout"""
-
-    supervisor: Optional["SupervisorSpec"] = betterproto.message_field(6, optional=True)
-    """Nested supervisor (if type=SUPERVISOR)"""
-
-    facets: List["__common_v1__.Facet"] = betterproto.message_field(7)
-    """
-    Facet configuration (for automatic attachment during actor creation)
-     Facets are attached in priority order (high priority first) before actor.init() is called
-     All facets are automatically restored during supervisor restart
-     Phase 1: Unified Lifecycle - Multiple facets support
-    """
-
-    behavior_kind: Optional[str] = betterproto.string_field(8, optional=True)
-    """
-    OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
-     When set, process_message spans and actor registration logs show this instead of the child id.
-    """
 
 
 @dataclass(eq=False, repr=False)
@@ -600,7 +482,7 @@ class DeployApplicationRequest(betterproto.Message):
      Defines supervision tree, dependencies, environment variables, etc.
     """
 
-    initial_state: bytes = betterproto.bytes_field(7)
+    initial_state: bytes = betterproto.bytes_field(6)
     """
     Initial state (optional, for stateful applications)
      Passed to application's start() method.

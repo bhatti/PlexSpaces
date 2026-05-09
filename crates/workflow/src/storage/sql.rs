@@ -27,6 +27,7 @@
 //! - Schema: file/Postgres use unified `db/migrations` at init; `:memory:` uses inline schema in this module.
 //! - Database-agnostic SQL where possible; sqlx for type-safe queries.
 
+use prost::Message as ProstMessage;
 use serde_json::Value;
 use sqlx::{
     postgres::PgPool,
@@ -68,6 +69,251 @@ enum SqlPool {
 pub struct WorkflowStorage {
     pool: SqlPool,
     db_type: DatabaseType,
+}
+
+/// Encode a WorkflowDefinition to proto binary bytes
+fn encode_definition(def: &WorkflowDefinition) -> Result<Vec<u8>, WorkflowError> {
+    let mut buf = Vec::new();
+    def.encode(&mut buf)
+        .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+    Ok(buf)
+}
+
+/// Decode a WorkflowDefinition from proto binary bytes
+fn decode_definition(bytes: &[u8]) -> Result<WorkflowDefinition, WorkflowError> {
+    WorkflowDefinition::decode(bytes)
+        .map_err(|e| WorkflowError::Serialization(e.to_string()))
+}
+
+/// Convert serde_json::Value to prost_types::Struct
+fn value_to_struct(value: &Value) -> Option<prost_types::Struct> {
+    match value {
+        Value::Object(map) => {
+            let mut fields = std::collections::BTreeMap::new();
+            for (k, v) in map {
+                fields.insert(k.clone(), value_to_prost_value(v));
+            }
+            Some(prost_types::Struct { fields })
+        }
+        Value::Null => None,
+        _ => {
+            // Wrap non-object values (arrays, scalars) using sentinel key "__value__"
+            // so they can be transparently unwrapped in struct_to_value.
+            let mut fields = std::collections::BTreeMap::new();
+            fields.insert("__value__".to_string(), value_to_prost_value(value));
+            Some(prost_types::Struct { fields })
+        }
+    }
+}
+
+/// Convert prost_types::Struct to serde_json::Value
+fn struct_to_value(s: &prost_types::Struct) -> Value {
+    // Detect the sentinel wrapper "__value__" used for non-object values (arrays, scalars)
+    if s.fields.len() == 1 {
+        if let Some(inner) = s.fields.get("__value__") {
+            return prost_value_to_value(inner);
+        }
+    }
+    let mut map = serde_json::Map::new();
+    for (k, v) in &s.fields {
+        map.insert(k.clone(), prost_value_to_value(v));
+    }
+    Value::Object(map)
+}
+
+fn value_to_prost_value(v: &Value) -> prost_types::Value {
+    let kind = match v {
+        Value::Null => prost_types::value::Kind::NullValue(0),
+        Value::Bool(b) => prost_types::value::Kind::BoolValue(*b),
+        Value::Number(n) => prost_types::value::Kind::NumberValue(n.as_f64().unwrap_or(0.0)),
+        Value::String(s) => prost_types::value::Kind::StringValue(s.clone()),
+        Value::Array(arr) => {
+            let values = arr.iter().map(value_to_prost_value).collect();
+            prost_types::value::Kind::ListValue(prost_types::ListValue { values })
+        }
+        Value::Object(map) => {
+            let mut fields = std::collections::BTreeMap::new();
+            for (k, val) in map {
+                fields.insert(k.clone(), value_to_prost_value(val));
+            }
+            prost_types::value::Kind::StructValue(prost_types::Struct { fields })
+        }
+    };
+    prost_types::Value { kind: Some(kind) }
+}
+
+fn prost_value_to_value(v: &prost_types::Value) -> Value {
+    match &v.kind {
+        None => Value::Null,
+        Some(prost_types::value::Kind::NullValue(_)) => Value::Null,
+        Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(*b),
+        Some(prost_types::value::Kind::NumberValue(n)) => {
+            serde_json::Number::from_f64(*n)
+                .map(Value::Number)
+                .unwrap_or(Value::Null)
+        }
+        Some(prost_types::value::Kind::StringValue(s)) => Value::String(s.clone()),
+        Some(prost_types::value::Kind::ListValue(list)) => {
+            Value::Array(list.values.iter().map(prost_value_to_value).collect())
+        }
+        Some(prost_types::value::Kind::StructValue(s)) => struct_to_value(s),
+    }
+}
+
+/// Get the `serde_json::Value` from an `Option<prost_types::Struct>`
+fn opt_struct_to_value(s: &Option<prost_types::Struct>) -> Option<Value> {
+    s.as_ref().map(struct_to_value)
+}
+
+/// Convert serde_json::Value to Option<prost_types::Struct>
+fn value_to_opt_struct(v: &Value) -> Option<prost_types::Struct> {
+    if v.is_null() {
+        None
+    } else {
+        value_to_struct(v)
+    }
+}
+
+/// Get the step type as StepType enum
+pub fn step_type(step: &Step) -> StepType {
+    StepType::try_from(step.r#type).unwrap_or(StepType::StepTypeTask)
+}
+
+/// Get config as a serde_json::Value from a Step's config field
+pub fn step_config_value(step: &Step) -> Value {
+    step.config
+        .as_ref()
+        .map(struct_to_value)
+        .unwrap_or(Value::Object(serde_json::Map::new()))
+}
+
+/// Get the next step ID from a Step's depends_on field (first entry)
+pub fn step_next(step: &Step) -> Option<&str> {
+    step.depends_on.first().map(|s| s.as_str())
+}
+
+/// Get the opt_struct_to_value helper for use outside this module
+pub fn execution_input_to_value(input: &Option<prost_types::Struct>) -> Option<Value> {
+    input.as_ref().map(|s| {
+        let mut map = serde_json::Map::new();
+        for (k, v) in &s.fields {
+            map.insert(k.clone(), prost_value_to_value(v));
+        }
+        Value::Object(map)
+    })
+}
+
+/// Create a Step from components
+pub fn make_step(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    step_type: StepType,
+    config: Value,
+    next: Option<String>,
+    on_error: Option<String>,
+    retry: Option<RetryConfig>,
+) -> Step {
+    Step {
+        id: id.into(),
+        name: name.into(),
+        r#type: step_type as i32,
+        config: value_to_opt_struct(&config),
+        depends_on: next.into_iter().collect(),
+        on_error: on_error.unwrap_or_default(),
+        retry,
+        timeout: None,
+    }
+}
+
+/// Create a WorkflowDefinition from components
+pub fn make_workflow_definition(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    version: impl Into<String>,
+    steps: Vec<Step>,
+) -> WorkflowDefinition {
+    WorkflowDefinition {
+        id: id.into(),
+        name: name.into(),
+        version: version.into(),
+        steps,
+        default_timeout: None,
+        default_retry: None,
+        labels: HashMap::new(),
+        created_at: None,
+        updated_at: None,
+    }
+}
+
+/// Internal execution state stored in SQL (uses serde_json for flexibility)
+#[derive(Debug, Clone)]
+pub(crate) struct WorkflowExecutionRow {
+    pub execution_id: String,
+    pub definition_id: String,
+    pub definition_version: String,
+    pub status: ExecutionStatus,
+    pub current_step_id: Option<String>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub node_id: Option<String>,
+    pub version: u64,
+    pub last_heartbeat: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Internal step execution state stored in SQL
+#[derive(Debug, Clone)]
+pub(crate) struct StepExecutionRow {
+    pub step_execution_id: String,
+    pub execution_id: String,
+    pub step_id: String,
+    pub status: StepStatus,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub attempt: u32,
+}
+
+impl From<WorkflowExecutionRow> for WorkflowExecution {
+    fn from(row: WorkflowExecutionRow) -> Self {
+        WorkflowExecution {
+            execution_id: row.execution_id,
+            definition_id: row.definition_id,
+            definition_version: row.definition_version,
+            status: row.status as i32,
+            current_step_id: row.current_step_id.unwrap_or_default(),
+            input: row.input.as_ref().and_then(|v| value_to_opt_struct(v)),
+            output: row.output.as_ref().and_then(|v| value_to_opt_struct(v)),
+            error: row.error.unwrap_or_default(),
+            node_id: row.node_id.unwrap_or_default(),
+            created_at: None,
+            started_at: None,
+            completed_at: None,
+            updated_at: None,
+            labels: HashMap::new(),
+            last_heartbeat: row.last_heartbeat.map(|dt| prost_types::Timestamp {
+                seconds: dt.timestamp(),
+                nanos: 0,
+            }),
+        }
+    }
+}
+
+impl From<StepExecutionRow> for StepExecution {
+    fn from(row: StepExecutionRow) -> Self {
+        StepExecution {
+            step_execution_id: row.step_execution_id,
+            execution_id: row.execution_id,
+            step_id: row.step_id,
+            status: row.status as i32,
+            input: row.input.as_ref().and_then(|v| value_to_opt_struct(v)),
+            output: row.output.as_ref().and_then(|v| value_to_opt_struct(v)),
+            error: row.error.unwrap_or_default(),
+            attempt: row.attempt,
+            started_at: None,
+            completed_at: None,
+        }
+    }
 }
 
 /// Create workflow tables for :memory: SQLite. File-based uses unified db/migrations at init.
@@ -313,13 +559,10 @@ impl WorkflowStorage {
         Self::new_sqlite(path).await
     }
 
-    /// Save workflow definition
+    /// Save workflow definition (serialized as proto binary)
     pub async fn save_definition(&self, def: &WorkflowDefinition) -> Result<(), WorkflowError> {
-        // Serialize definition to JSON (proto serialization can be added later)
-        let definition_json =
-            serde_json::to_string(def).map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+        let definition_bytes = encode_definition(def)?;
 
-        // Database-agnostic query (works for both SQLite and PostgreSQL)
         match &self.pool {
             SqlPool::Sqlite(pool) => {
                 sqlx::query(
@@ -335,7 +578,7 @@ impl WorkflowStorage {
                 .bind(&def.id)
                 .bind(&def.version)
                 .bind(&def.name)
-                .bind(definition_json.as_bytes())
+                .bind(&definition_bytes)
                 .execute(pool)
                 .await
                 .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -354,7 +597,7 @@ impl WorkflowStorage {
                 .bind(&def.id)
                 .bind(&def.version)
                 .bind(&def.name)
-                .bind(definition_json.as_bytes())
+                .bind(&definition_bytes)
                 .execute(pool)
                 .await
                 .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -411,10 +654,7 @@ impl WorkflowStorage {
             }
         };
 
-        let definition: WorkflowDefinition = serde_json::from_slice(&definition_bytes)
-            .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
-
-        Ok(definition)
+        decode_definition(&definition_bytes)
     }
 
     /// List all workflow definitions
@@ -457,8 +697,7 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let definition_bytes: Vec<u8> = row.get(0);
-                    let definition: WorkflowDefinition = serde_json::from_slice(&definition_bytes)
-                        .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+                    let definition = decode_definition(&definition_bytes)?;
                     definitions.push(definition);
                 }
             }
@@ -488,8 +727,7 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let definition_bytes: Vec<u8> = row.get(0);
-                    let definition: WorkflowDefinition = serde_json::from_slice(&definition_bytes)
-                        .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+                    let definition = decode_definition(&definition_bytes)?;
                     definitions.push(definition);
                 }
             }
@@ -587,7 +825,7 @@ impl WorkflowStorage {
         .bind(&execution_id)
         .bind(definition_id)
         .bind(definition_version)
-        .bind("PENDING")
+        .bind(ExecutionStatus::ExecutionStatusPending.as_sql_str())
         .bind(&input_json)
                 .bind(node_id)
                 .execute(pool)
@@ -605,7 +843,7 @@ impl WorkflowStorage {
                 .bind(&execution_id)
                 .bind(definition_id)
                 .bind(definition_version)
-                .bind("PENDING")
+                .bind(ExecutionStatus::ExecutionStatusPending.as_sql_str())
                 .bind(&input_json)
                 .bind(node_id)
                 .execute(pool)
@@ -651,11 +889,20 @@ impl WorkflowStorage {
         Ok(execution_id)
     }
 
-    /// Get workflow execution
+    /// Get workflow execution (returns proto WorkflowExecution)
     pub async fn get_execution(
         &self,
         execution_id: &str,
     ) -> Result<WorkflowExecution, WorkflowError> {
+        let row = self.get_execution_row(execution_id).await?;
+        Ok(row.into())
+    }
+
+    /// Get workflow execution as internal row (with full version/heartbeat info)
+    pub(crate) async fn get_execution_row(
+        &self,
+        execution_id: &str,
+    ) -> Result<WorkflowExecutionRow, WorkflowError> {
         let (
             execution_id_val,
             definition_id,
@@ -745,9 +992,9 @@ impl WorkflowStorage {
             }
         };
 
-        let status = ExecutionStatus::from_string(&status_str)?;
+        let status = ExecutionStatus::from_sql_str(&status_str)?;
 
-        Ok(WorkflowExecution {
+        Ok(WorkflowExecutionRow {
             execution_id: execution_id_val,
             definition_id,
             definition_version,
@@ -777,30 +1024,17 @@ impl WorkflowStorage {
     }
 
     /// Update execution status with version check (optimistic locking)
-    ///
-    /// ## Purpose
-    /// Updates execution status only if version matches (optimistic locking).
-    /// Returns error if version mismatch (concurrent update detected).
-    ///
-    /// ## Arguments
-    /// * `execution_id` - Execution ID
-    /// * `status` - New status
-    /// * `expected_version` - Expected version (None = no version check)
-    ///
-    /// ## Returns
-    /// Ok if update succeeded, WorkflowError::ConcurrentUpdate if version mismatch
     pub async fn update_execution_status_with_version(
         &self,
         execution_id: &str,
         status: ExecutionStatus,
         expected_version: Option<u64>,
     ) -> Result<(), WorkflowError> {
-        let status_str = status.to_string();
+        let status_str = status.as_sql_str();
 
         let rows_affected = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let result = if let Some(version) = expected_version {
-                    // Version-based optimistic locking
                     sqlx::query(
             r#"
             UPDATE workflow_executions
@@ -813,16 +1047,15 @@ impl WorkflowStorage {
                         WHERE execution_id = ? AND version = ?
                         "#,
                     )
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
                     .bind(execution_id)
                     .bind(version as i64)
                     .execute(pool)
                     .await
                 } else {
-                    // No version check (backward compatibility)
                     sqlx::query(
                         r#"
                         UPDATE workflow_executions
@@ -835,10 +1068,10 @@ impl WorkflowStorage {
             WHERE execution_id = ?
             "#,
         )
-                    .bind(&status_str)
-        .bind(&status_str)
-        .bind(&status_str)
-        .bind(&status_str)
+                    .bind(status_str)
+        .bind(status_str)
+        .bind(status_str)
+        .bind(status_str)
         .bind(execution_id)
                     .execute(pool)
                     .await
@@ -849,7 +1082,6 @@ impl WorkflowStorage {
             }
             SqlPool::Postgres(pool) => {
                 let result = if let Some(version) = expected_version {
-                    // Version-based optimistic locking (PostgreSQL)
                     sqlx::query(
                         r#"
                         UPDATE workflow_executions
@@ -862,16 +1094,15 @@ impl WorkflowStorage {
                         WHERE execution_id = $5 AND version = $6
                         "#,
                     )
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
                     .bind(execution_id)
                     .bind(version as i64)
                     .execute(pool)
                     .await
                 } else {
-                    // No version check (backward compatibility)
                     sqlx::query(
                         r#"
                         UPDATE workflow_executions
@@ -884,10 +1115,10 @@ impl WorkflowStorage {
                         WHERE execution_id = $5
                         "#,
                     )
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
-                    .bind(&status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
+                    .bind(status_str)
                     .bind(execution_id)
                     .execute(pool)
                     .await
@@ -910,18 +1141,6 @@ impl WorkflowStorage {
     }
 
     /// Transfer workflow ownership to a new node (with optimistic locking)
-    ///
-    /// ## Purpose
-    /// Transfers workflow ownership from one node to another.
-    /// Used for recovery when original node is dead or node-id changed.
-    ///
-    /// ## Arguments
-    /// * `execution_id` - Execution ID
-    /// * `new_node_id` - New node owner
-    /// * `expected_version` - Expected version (for optimistic locking)
-    ///
-    /// ## Returns
-    /// Ok if transfer succeeded, WorkflowError::ConcurrentUpdate if version mismatch
     pub async fn transfer_ownership(
         &self,
         execution_id: &str,
@@ -976,10 +1195,6 @@ impl WorkflowStorage {
     }
 
     /// Update heartbeat for a workflow execution
-    ///
-    /// ## Purpose
-    /// Updates last_heartbeat timestamp to indicate node is alive.
-    /// Used for health monitoring.
     pub async fn update_heartbeat(
         &self,
         execution_id: &str,
@@ -1159,7 +1374,7 @@ impl WorkflowStorage {
                 .bind(&step_exec_id)
                 .bind(execution_id)
                 .bind(step_id)
-                .bind("RUNNING")
+                .bind(StepStatus::StepStatusRunning.as_sql_str())
                 .bind(&input_json)
                 .bind(attempt as i64)
                 .execute(pool)
@@ -1177,7 +1392,7 @@ impl WorkflowStorage {
                 .bind(&step_exec_id)
                 .bind(execution_id)
                 .bind(step_id)
-                .bind("RUNNING")
+                .bind(StepStatus::StepStatusRunning.as_sql_str())
                 .bind(&input_json)
                 .bind(attempt as i64)
                 .execute(pool)
@@ -1194,6 +1409,15 @@ impl WorkflowStorage {
         &self,
         step_exec_id: &str,
     ) -> Result<StepExecution, WorkflowError> {
+        let row = self.get_step_execution_row(step_exec_id).await?;
+        Ok(row.into())
+    }
+
+    /// Get step execution as internal row
+    pub(crate) async fn get_step_execution_row(
+        &self,
+        step_exec_id: &str,
+    ) -> Result<StepExecutionRow, WorkflowError> {
         let (
             step_execution_id,
             execution_id,
@@ -1273,9 +1497,9 @@ impl WorkflowStorage {
             }
         };
 
-        let status = StepExecutionStatus::from_string(&status_str)?;
+        let status = StepStatus::from_sql_str(&status_str)?;
 
-        Ok(StepExecution {
+        Ok(StepExecutionRow {
             step_execution_id,
             execution_id,
             step_id,
@@ -1295,11 +1519,11 @@ impl WorkflowStorage {
     pub async fn complete_step_execution(
         &self,
         step_exec_id: &str,
-        status: StepExecutionStatus,
+        status: StepStatus,
         output: Option<Value>,
         error: Option<String>,
     ) -> Result<(), WorkflowError> {
-        let status_str = status.to_string();
+        let status_str = status.as_sql_str();
         let output_json = output
             .map(|v| serde_json::to_string(&v))
             .transpose()
@@ -1317,7 +1541,7 @@ impl WorkflowStorage {
             WHERE step_execution_id = ?
             "#,
                 )
-                .bind(&status_str)
+                .bind(status_str)
                 .bind(output_json.as_ref())
                 .bind(error.as_ref())
                 .bind(step_exec_id)
@@ -1336,7 +1560,7 @@ impl WorkflowStorage {
                     WHERE step_execution_id = $4
                     "#,
                 )
-                .bind(&status_str)
+                .bind(status_str)
                 .bind(output_json.as_ref())
                 .bind(error.as_ref())
                 .bind(step_exec_id)
@@ -1354,6 +1578,15 @@ impl WorkflowStorage {
         &self,
         execution_id: &str,
     ) -> Result<Vec<StepExecution>, WorkflowError> {
+        let rows = self.get_step_execution_history_rows(execution_id).await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// Get all step executions as internal rows
+    pub(crate) async fn get_step_execution_history_rows(
+        &self,
+        execution_id: &str,
+    ) -> Result<Vec<StepExecutionRow>, WorkflowError> {
         let mut executions = Vec::new();
 
         match &self.pool {
@@ -1374,13 +1607,13 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = StepExecutionStatus::from_string(&status_str)?;
+                    let status = StepStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(4);
                     let output_json: Option<String> = row.get(5);
                     let attempt: i64 = row.get(7);
 
-                    executions.push(StepExecution {
+                    executions.push(StepExecutionRow {
                         step_execution_id: row.get(0),
                         execution_id: row.get(1),
                         step_id: row.get(2),
@@ -1413,13 +1646,13 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = StepExecutionStatus::from_string(&status_str)?;
+                    let status = StepStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(4);
                     let output_json: Option<String> = row.get(5);
                     let attempt: i64 = row.get(7);
 
-                    executions.push(StepExecution {
+                    executions.push(StepExecutionRow {
                         step_execution_id: row.get(0),
                         execution_id: row.get(1),
                         step_id: row.get(2),
@@ -1441,21 +1674,6 @@ impl WorkflowStorage {
     }
 
     /// Send a signal to a workflow execution
-    ///
-    /// ## Purpose
-    /// Stores a signal that can be consumed by a Signal step.
-    /// Signals are used for external events (Awakeable pattern).
-    ///
-    /// ## Arguments
-    /// * `execution_id` - The workflow execution ID
-    /// * `signal_name` - Name of the signal (e.g., "approval", "payment")
-    /// * `payload` - Signal data payload
-    ///
-    /// ## Returns
-    /// Ok if signal was stored successfully
-    ///
-    /// ## Errors
-    /// WorkflowError if database operation fails
     pub async fn send_signal(
         &self,
         execution_id: &str,
@@ -1499,25 +1717,11 @@ impl WorkflowStorage {
     }
 
     /// Check if a signal has been received for an execution
-    ///
-    /// ## Purpose
-    /// Polls for a signal by name. If found, removes it from storage (consume).
-    ///
-    /// ## Arguments
-    /// * `execution_id` - The workflow execution ID
-    /// * `signal_name` - Name of the signal to check for
-    ///
-    /// ## Returns
-    /// Some(payload) if signal was received, None otherwise
-    ///
-    /// ## Errors
-    /// WorkflowError if database operation fails
     pub async fn check_signal(
         &self,
         execution_id: &str,
         signal_name: &str,
     ) -> Result<Option<Value>, WorkflowError> {
-        // Query for the signal
         let payload_json_opt: Option<String> = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let row_opt = sqlx::query(
@@ -1553,10 +1757,8 @@ impl WorkflowStorage {
             let payload: Value = serde_json::from_str(&payload_json)
                 .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
 
-            // Delete the signal (consume it) - database-specific syntax
             match &self.pool {
                 SqlPool::Sqlite(pool) => {
-                    // SQLite uses rowid
                     sqlx::query(
                         "DELETE FROM signals
                  WHERE execution_id = ? AND signal_name = ?
@@ -1578,7 +1780,6 @@ impl WorkflowStorage {
                     })?;
                 }
                 SqlPool::Postgres(pool) => {
-                    // PostgreSQL uses CTID or subquery
                     sqlx::query(
                         "DELETE FROM signals
                          WHERE ctid = (
@@ -1605,26 +1806,22 @@ impl WorkflowStorage {
     }
 
     /// List workflow executions by status
-    ///
-    /// ## Purpose
-    /// Query for workflows in specific states (e.g., RUNNING, PENDING) for recovery.
-    /// Used by auto-recovery service to find interrupted workflows.
-    ///
-    /// ## Arguments
-    /// * `statuses` - List of execution statuses to filter by
-    /// * `node_id` - Optional node ID filter (to find workflows owned by specific node)
-    ///
-    /// ## Returns
-    /// Vector of workflow executions matching the criteria
-    ///
-    /// ## Errors
-    /// WorkflowError if database query fails
     pub async fn list_executions_by_status(
         &self,
         statuses: Vec<ExecutionStatus>,
         node_id: Option<&str>,
     ) -> Result<Vec<WorkflowExecution>, WorkflowError> {
-        let status_strings: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+        let rows = self.list_execution_rows_by_status(statuses, node_id).await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// List workflow execution rows by status
+    pub(crate) async fn list_execution_rows_by_status(
+        &self,
+        statuses: Vec<ExecutionStatus>,
+        node_id: Option<&str>,
+    ) -> Result<Vec<WorkflowExecutionRow>, WorkflowError> {
+        let status_strings: Vec<String> = statuses.iter().map(|s| s.as_sql_str().to_string()).collect();
         let mut executions = Vec::new();
 
         match &self.pool {
@@ -1654,12 +1851,10 @@ impl WorkflowStorage {
 
                 let mut query_builder = sqlx::query(&query);
 
-                // Bind status values
                 for status_str in &status_strings {
                     query_builder = query_builder.bind(status_str);
                 }
 
-                // Bind node_id if provided
                 if let Some(nid) = node_id {
                     query_builder = query_builder.bind(nid);
                 }
@@ -1671,14 +1866,14 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = ExecutionStatus::from_string(&status_str)?;
+                    let status = ExecutionStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(5);
                     let output_json: Option<String> = row.get(6);
                     let version: i64 = row.get(9);
                     let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> = row.get(10);
 
-                    executions.push(WorkflowExecution {
+                    executions.push(WorkflowExecutionRow {
                         execution_id: row.get(0),
                         definition_id: row.get(1),
                         definition_version: row.get(2),
@@ -1720,16 +1915,16 @@ impl WorkflowStorage {
                     param_idx += 1;
                 }
 
+                let _ = param_idx; // suppress warning
+
                 query.push_str(" ORDER BY created_at ASC");
 
                 let mut query_builder = sqlx::query(&query);
 
-                // Bind status values
                 for status_str in &status_strings {
                     query_builder = query_builder.bind(status_str);
                 }
 
-                // Bind node_id if provided
                 if let Some(nid) = node_id {
                     query_builder = query_builder.bind(nid);
                 }
@@ -1741,14 +1936,14 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = ExecutionStatus::from_string(&status_str)?;
+                    let status = ExecutionStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(5);
                     let output_json: Option<String> = row.get(6);
                     let version: i64 = row.get(9);
                     let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> = row.get(10);
 
-                    executions.push(WorkflowExecution {
+                    executions.push(WorkflowExecutionRow {
                         execution_id: row.get(0),
                         definition_id: row.get(1),
                         definition_version: row.get(2),
@@ -1773,29 +1968,24 @@ impl WorkflowStorage {
     }
 
     /// List stale workflow executions (not updated recently)
-    ///
-    /// ## Purpose
-    /// Find workflows that haven't been updated in a while, indicating
-    /// the node may have crashed without updating status.
-    ///
-    /// ## Arguments
-    /// * `stale_threshold_seconds` - Number of seconds since last update to consider stale
-    /// * `statuses` - Statuses to check (typically RUNNING)
-    ///
-    /// ## Returns
-    /// Vector of stale workflow executions
-    ///
-    /// ## Errors
-    /// WorkflowError if database query fails
     pub async fn list_stale_executions(
         &self,
         stale_threshold_seconds: u64,
         statuses: Vec<ExecutionStatus>,
     ) -> Result<Vec<WorkflowExecution>, WorkflowError> {
-        let status_strings: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+        let rows = self.list_stale_execution_rows(stale_threshold_seconds, statuses).await?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    /// List stale workflow execution rows
+    pub(crate) async fn list_stale_execution_rows(
+        &self,
+        stale_threshold_seconds: u64,
+        statuses: Vec<ExecutionStatus>,
+    ) -> Result<Vec<WorkflowExecutionRow>, WorkflowError> {
+        let status_strings: Vec<String> = statuses.iter().map(|s| s.as_sql_str().to_string()).collect();
         let mut executions = Vec::new();
 
-        // Database-specific date difference calculation
         match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let status_placeholders: String = status_strings
@@ -1819,12 +2009,10 @@ impl WorkflowStorage {
 
                 let mut query_builder = sqlx::query(&query);
 
-                // Bind status values
                 for status_str in &status_strings {
                     query_builder = query_builder.bind(status_str);
                 }
 
-                // Bind stale threshold
                 query_builder = query_builder.bind(stale_threshold_seconds as i64);
 
                 let rows = query_builder
@@ -1834,14 +2022,14 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = ExecutionStatus::from_string(&status_str)?;
+                    let status = ExecutionStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(5);
                     let output_json: Option<String> = row.get(6);
                     let version: i64 = row.get(9);
                     let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> = row.get(10);
 
-                    executions.push(WorkflowExecution {
+                    executions.push(WorkflowExecutionRow {
                         execution_id: row.get(0),
                         definition_id: row.get(1),
                         definition_version: row.get(2),
@@ -1882,12 +2070,10 @@ impl WorkflowStorage {
 
                 let mut query_builder = sqlx::query(&query);
 
-                // Bind status values
                 for status_str in &status_strings {
                     query_builder = query_builder.bind(status_str);
                 }
 
-                // Bind stale threshold
                 query_builder = query_builder.bind(stale_threshold_seconds as i64);
 
                 let rows = query_builder
@@ -1897,14 +2083,14 @@ impl WorkflowStorage {
 
                 for row in rows {
                     let status_str: String = row.get(3);
-                    let status = ExecutionStatus::from_string(&status_str)?;
+                    let status = ExecutionStatus::from_sql_str(&status_str)?;
 
                     let input_json: Option<String> = row.get(5);
                     let output_json: Option<String> = row.get(6);
                     let version: i64 = row.get(9);
                     let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> = row.get(10);
 
-                    executions.push(WorkflowExecution {
+                    executions.push(WorkflowExecutionRow {
                         execution_id: row.get(0),
                         definition_id: row.get(1),
                         definition_version: row.get(2),
@@ -1928,3 +2114,4 @@ impl WorkflowStorage {
         Ok(executions)
     }
 }
+

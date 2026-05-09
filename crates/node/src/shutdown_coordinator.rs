@@ -434,6 +434,18 @@ pub enum ShutdownError {
     Other(String),
 }
 
+impl ShutdownError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::ShutdownErrorCode {
+        use plexspaces_proto::node::v1::ShutdownErrorCode;
+        match self {
+            ShutdownError::PhaseFailed { .. } => ShutdownErrorCode::ShutdownErrorPhaseFailed,
+            ShutdownError::Timeout => ShutdownErrorCode::ShutdownErrorTimeout,
+            ShutdownError::Other(_) => ShutdownErrorCode::ShutdownErrorOther,
+        }
+    }
+}
+
 /// Trait for types that support graceful shutdown
 ///
 /// ## Purpose

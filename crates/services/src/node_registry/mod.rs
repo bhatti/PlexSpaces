@@ -41,7 +41,7 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn, Level};
 
-use plexspaces_core::{NodeRegistryTrait, ObjectRegistry, RequestContext, ServiceLocator};
+use plexspaces_actor::{NodeRegistryTrait, ObjectRegistry, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_proto::common::v1::Metadata as CommonMetadata;
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration, PingResponse};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
@@ -1239,7 +1239,7 @@ impl NodeRegistry {
         service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
         timeout: Duration,
     ) -> Result<PingResponse, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::grpc_connection_manager::ServiceType;
+        use plexspaces_actor::grpc_connection_manager::ServiceType;
         use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
         use plexspaces_proto::node::v1::PingRequest;
 
@@ -1260,7 +1260,7 @@ impl NodeRegistry {
             .unwrap_or_default();
 
         let channel = conn_manager
-            .get_connection(ServiceType::NodeService, &target.node_id, &target.address)
+            .get_connection(ServiceType::ServiceNameNodeService, &target.node_id, &target.address)
             .await
             .map_err(|e| format!("Failed to get channel: {}", e))?;
 
@@ -1287,7 +1287,7 @@ impl NodeRegistry {
         service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
         timeout: Duration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::grpc_connection_manager::ServiceType;
+        use plexspaces_actor::grpc_connection_manager::ServiceType;
         use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
         use plexspaces_proto::node::v1::PingReqRequest;
 
@@ -1303,7 +1303,7 @@ impl NodeRegistry {
 
         let channel = conn_manager
             .get_connection(
-                ServiceType::NodeService,
+                ServiceType::ServiceNameNodeService,
                 &intermediary.node_id,
                 &intermediary.address,
             )

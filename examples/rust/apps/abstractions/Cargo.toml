@@ -23,7 +23,7 @@ wit-bindgen = "0.51.0"
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-journaling = { path = "../../../../crates/journaling" }
 async-trait = "0.1"
 serde_json = "1.0"

@@ -31,7 +31,6 @@ use plexspaces_proto::workflow::v1::{
     ListDefinitionsRequest, ListDefinitionsResponse, ListExecutionsRequest, ListExecutionsResponse,
     QueryExecutionRequest, QueryExecutionResponse, SignalExecutionRequest, StartExecutionRequest,
     StartExecutionResponse, UpdateDefinitionRequest, UpdateDefinitionResponse,
-    WorkflowDefinition as ProtoWorkflowDefinition, WorkflowExecution as ProtoWorkflowExecution,
 };
 use plexspaces_workflow::executor::WorkflowExecutor;
 use plexspaces_workflow::storage::WorkflowStorage;
@@ -69,84 +68,6 @@ impl WorkflowServiceImpl {
             }
         }
     }
-
-    /// Convert internal WorkflowDefinition to proto
-    fn internal_definition_to_proto(def: &WorkflowDefinition) -> ProtoWorkflowDefinition {
-        use prost_types::Duration;
-
-        ProtoWorkflowDefinition {
-            id: def.id.clone(),
-            name: def.name.clone(),
-            version: def.version.clone(),
-            steps: vec![], // TODO: Convert steps (requires Step conversion)
-            default_timeout: def.timeout.map(|d| Duration {
-                seconds: d.as_secs() as i64,
-                nanos: d.subsec_nanos() as i32,
-            }),
-            default_retry: None, // TODO: Convert retry_policy
-            labels: std::collections::HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        }
-    }
-
-    /// Convert proto WorkflowDefinition to internal
-    fn proto_definition_to_internal(
-        proto: &ProtoWorkflowDefinition,
-    ) -> Result<WorkflowDefinition, Status> {
-        use std::time::Duration;
-
-        let timeout = proto
-            .default_timeout
-            .as_ref()
-            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64));
-
-        Ok(WorkflowDefinition {
-            id: proto.id.clone(),
-            name: proto.name.clone(),
-            version: proto.version.clone(),
-            steps: vec![], // TODO: Convert steps (requires Step conversion)
-            timeout,
-            retry_policy: None, // TODO: Convert default_retry
-        })
-    }
-
-    /// Convert internal WorkflowExecution to proto
-    fn internal_execution_to_proto(exec: &WorkflowExecution) -> ProtoWorkflowExecution {
-        use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-
-        let status = match exec.status {
-            ExecutionStatus::Pending => ProtoExecutionStatus::ExecutionStatusPending,
-            ExecutionStatus::Running => ProtoExecutionStatus::ExecutionStatusRunning,
-            ExecutionStatus::Completed => ProtoExecutionStatus::ExecutionStatusCompleted,
-            ExecutionStatus::Failed => ProtoExecutionStatus::ExecutionStatusFailed,
-            ExecutionStatus::Cancelled => ProtoExecutionStatus::ExecutionStatusCancelled,
-            ExecutionStatus::TimedOut => ProtoExecutionStatus::ExecutionStatusTimedOut,
-        };
-
-        // Convert input/output from Value to Struct
-        // TODO: Implement full Value to Struct conversion
-        // For now, use None (empty structs)
-        let input_struct = None;
-        let output_struct = None;
-
-        ProtoWorkflowExecution {
-            execution_id: exec.execution_id.clone(),
-            definition_id: exec.definition_id.clone(),
-            definition_version: exec.definition_version.clone(),
-            status: status as i32,
-            current_step_id: exec.current_step_id.clone().unwrap_or_default(),
-            input: input_struct,
-            output: output_struct,
-            error: exec.error.clone().unwrap_or_default(),
-            node_id: exec.node_id.clone().unwrap_or_default(),
-            started_at: None,
-            updated_at: None,
-            completed_at: None,
-            created_at: None,
-            labels: std::collections::HashMap::new(),
-        }
-    }
 }
 
 #[tonic::async_trait]
@@ -156,24 +77,17 @@ impl WorkflowService for WorkflowServiceImpl {
         request: Request<CreateDefinitionRequest>,
     ) -> Result<Response<CreateDefinitionResponse>, Status> {
         let req = request.into_inner();
-        let proto_def = req
+        let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
-        // Convert proto to internal
-        let def = Self::proto_definition_to_internal(&proto_def)?;
-
-        // Save to storage
         self.storage
             .save_definition(&def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert back to proto for response
-        let response_def = Self::internal_definition_to_proto(&def);
-
         Ok(Response::new(CreateDefinitionResponse {
-            definition: Some(response_def),
+            definition: Some(def),
         }))
     }
 
@@ -193,18 +107,14 @@ impl WorkflowService for WorkflowServiceImpl {
             &req.version
         };
 
-        // Get from storage
         let def = self
             .storage
             .get_definition(&req.id, version)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert to proto
-        let proto_def = Self::internal_definition_to_proto(&def);
-
         Ok(Response::new(GetDefinitionResponse {
-            definition: Some(proto_def),
+            definition: Some(def),
         }))
     }
 
@@ -214,29 +124,20 @@ impl WorkflowService for WorkflowServiceImpl {
     ) -> Result<Response<ListDefinitionsResponse>, Status> {
         let req = request.into_inner();
 
-        // Get name prefix filter if provided
         let name_prefix = if req.name_prefix.is_empty() {
             None
         } else {
             Some(req.name_prefix.as_str())
         };
 
-        // List definitions from storage
         let definitions = self
             .storage
             .list_definitions(name_prefix)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert to proto
-        let proto_definitions: Vec<_> = definitions
-            .iter()
-            .map(Self::internal_definition_to_proto)
-            .collect();
-
-        // TODO: Implement pagination
         Ok(Response::new(ListDefinitionsResponse {
-            definitions: proto_definitions,
+            definitions,
             page: None,
         }))
     }
@@ -246,24 +147,17 @@ impl WorkflowService for WorkflowServiceImpl {
         request: Request<UpdateDefinitionRequest>,
     ) -> Result<Response<UpdateDefinitionResponse>, Status> {
         let req = request.into_inner();
-        let proto_def = req
+        let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
-        // Convert proto to internal
-        let def = Self::proto_definition_to_internal(&proto_def)?;
-
-        // Save to storage (update)
         self.storage
             .save_definition(&def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert back to proto for response
-        let response_def = Self::internal_definition_to_proto(&def);
-
         Ok(Response::new(UpdateDefinitionResponse {
-            definition: Some(response_def),
+            definition: Some(def),
         }))
     }
 
@@ -277,7 +171,6 @@ impl WorkflowService for WorkflowServiceImpl {
             return Err(Status::invalid_argument("id is required"));
         }
 
-        // Delete from storage
         self.storage
             .delete_definition(&req.id, &req.version)
             .await
@@ -314,7 +207,6 @@ impl WorkflowService for WorkflowServiceImpl {
             "Starting workflow execution"
         );
 
-        // Start execution using executor
         let execution_id =
             WorkflowExecutor::start_execution(&*self.storage, &req.definition_id, version, input)
                 .await
@@ -333,18 +225,14 @@ impl WorkflowService for WorkflowServiceImpl {
             return Err(Status::invalid_argument("execution_id is required"));
         }
 
-        // Get from storage
         let exec = self
             .storage
             .get_execution(&req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert to proto
-        let proto_exec = Self::internal_execution_to_proto(&exec);
-
         Ok(Response::new(GetExecutionResponse {
-            execution: Some(proto_exec),
+            execution: Some(exec),
         }))
     }
 
@@ -354,35 +242,23 @@ impl WorkflowService for WorkflowServiceImpl {
     ) -> Result<Response<ListExecutionsResponse>, Status> {
         let req = request.into_inner();
 
-        // Build status filter
+        // Build status filter using proto enum values
         let statuses = if req.status == 0 {
             // No status filter - list all statuses
             vec![
-                ExecutionStatus::Pending,
-                ExecutionStatus::Running,
-                ExecutionStatus::Completed,
-                ExecutionStatus::Failed,
-                ExecutionStatus::Cancelled,
-                ExecutionStatus::TimedOut,
+                ExecutionStatus::ExecutionStatusPending,
+                ExecutionStatus::ExecutionStatusRunning,
+                ExecutionStatus::ExecutionStatusCompleted,
+                ExecutionStatus::ExecutionStatusFailed,
+                ExecutionStatus::ExecutionStatusCancelled,
+                ExecutionStatus::ExecutionStatusTimedOut,
             ]
         } else {
-            // Convert proto status to internal
-            use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-            let status = match ProtoExecutionStatus::try_from(req.status) {
-                Ok(ProtoExecutionStatus::ExecutionStatusPending) => ExecutionStatus::Pending,
-                Ok(ProtoExecutionStatus::ExecutionStatusRunning) => ExecutionStatus::Running,
-                Ok(ProtoExecutionStatus::ExecutionStatusCompleted) => ExecutionStatus::Completed,
-                Ok(ProtoExecutionStatus::ExecutionStatusFailed) => ExecutionStatus::Failed,
-                Ok(ProtoExecutionStatus::ExecutionStatusCancelled) => ExecutionStatus::Cancelled,
-                Ok(ProtoExecutionStatus::ExecutionStatusTimedOut) => ExecutionStatus::TimedOut,
-                _ => {
-                    return Err(Status::invalid_argument("Invalid execution status"));
-                }
-            };
+            let status = ExecutionStatus::try_from(req.status)
+                .map_err(|_| Status::invalid_argument("Invalid execution status"))?;
             vec![status]
         };
 
-        // List executions from storage
         let executions = self
             .storage
             .list_executions_by_status(statuses, None)
@@ -399,15 +275,9 @@ impl WorkflowService for WorkflowServiceImpl {
                 .collect()
         };
 
-        // Convert to proto
-        let proto_executions: Vec<_> = executions
-            .iter()
-            .map(Self::internal_execution_to_proto)
-            .collect();
-
         // TODO: Implement pagination and timestamp filters
         Ok(Response::new(ListExecutionsResponse {
-            executions: proto_executions,
+            executions,
             page: None,
         }))
     }
@@ -429,9 +299,8 @@ impl WorkflowService for WorkflowServiceImpl {
             "Cancelling workflow execution"
         );
 
-        // Update execution status to cancelled
         self.storage
-            .update_execution_status(&req.execution_id, ExecutionStatus::Cancelled)
+            .update_execution_status(&req.execution_id, ExecutionStatus::ExecutionStatusCancelled)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -477,7 +346,6 @@ impl WorkflowService for WorkflowServiceImpl {
             })
             .unwrap_or_else(|| Value::Null);
 
-        // Send signal to storage
         self.storage
             .send_signal(&req.execution_id, &req.signal_name, payload)
             .await
@@ -502,7 +370,6 @@ impl WorkflowService for WorkflowServiceImpl {
             return Err(Status::invalid_argument("query_name is required"));
         }
 
-        // Get execution from storage
         let exec = self
             .storage
             .get_execution(&req.execution_id)
@@ -512,18 +379,19 @@ impl WorkflowService for WorkflowServiceImpl {
         // Build query result based on query_name
         let result = match req.query_name.as_str() {
             "status" => {
-                // Return execution status
+                // Return execution status as its proto enum name
+                let status_str = ExecutionStatus::try_from(exec.status)
+                    .map(|s| format!("{:?}", s))
+                    .unwrap_or_else(|_| exec.status.to_string());
                 prost_types::Value {
-                    kind: Some(prost_types::value::Kind::StringValue(
-                        exec.status.to_string(),
-                    )),
+                    kind: Some(prost_types::value::Kind::StringValue(status_str)),
                 }
             }
             "current_step" => {
                 // Return current step ID
                 prost_types::Value {
                     kind: Some(prost_types::value::Kind::StringValue(
-                        exec.current_step_id.unwrap_or_default(),
+                        exec.current_step_id.clone(),
                     )),
                 }
             }
@@ -533,7 +401,7 @@ impl WorkflowService for WorkflowServiceImpl {
                     "execution_id": exec.execution_id,
                     "definition_id": exec.definition_id,
                     "definition_version": exec.definition_version,
-                    "status": exec.status.to_string(),
+                    "status": exec.status,
                     "current_step_id": exec.current_step_id,
                     "error": exec.error,
                 });
@@ -566,52 +434,15 @@ impl WorkflowService for WorkflowServiceImpl {
             return Err(Status::invalid_argument("execution_id is required"));
         }
 
-        // Get step execution history from storage
+        // get_step_execution_history already returns Vec<StepExecution> (proto type)
         let step_executions = self
             .storage
             .get_step_execution_history(&req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Convert to proto
-        use plexspaces_proto::workflow::v1::{
-            StepExecution as ProtoStepExecution, StepStatus as ProtoStepStatus,
-        };
-
-        let proto_steps = step_executions
-            .iter()
-            .map(|step| {
-                let status = match step.status {
-                    StepExecutionStatus::Pending => ProtoStepStatus::StepStatusPending,
-                    StepExecutionStatus::Running => ProtoStepStatus::StepStatusRunning,
-                    StepExecutionStatus::Completed => ProtoStepStatus::StepStatusCompleted,
-                    StepExecutionStatus::Failed => ProtoStepStatus::StepStatusFailed,
-                    StepExecutionStatus::Retrying => ProtoStepStatus::StepStatusRetrying,
-                    StepExecutionStatus::Cancelled => ProtoStepStatus::StepStatusCancelled,
-                };
-
-                // Convert input/output to Struct
-                // TODO: Implement full Value to Struct conversion
-                let input_struct = None;
-                let output_struct = None;
-
-                ProtoStepExecution {
-                    step_execution_id: step.step_execution_id.clone(),
-                    execution_id: step.execution_id.clone(),
-                    step_id: step.step_id.clone(),
-                    status: status as i32,
-                    attempt: step.attempt,
-                    input: input_struct,
-                    output: output_struct,
-                    error: step.error.clone().unwrap_or_default(),
-                    started_at: None,
-                    completed_at: None,
-                }
-            })
-            .collect();
-
         Ok(Response::new(GetStepExecutionsResponse {
-            step_executions: proto_steps,
+            step_executions,
             page: None, // TODO: Implement pagination
         }))
     }
@@ -622,10 +453,10 @@ mod tests {
     use super::*;
     use plexspaces_proto::v1::common::Empty;
     use plexspaces_proto::workflow::v1::{
-        CreateDefinitionRequest, DeleteDefinitionRequest, GetDefinitionRequest,
-        GetExecutionRequest, GetStepExecutionsRequest, ListDefinitionsRequest,
-        ListExecutionsRequest, QueryExecutionRequest, SignalExecutionRequest,
-        StartExecutionRequest, UpdateDefinitionRequest,
+        CancelExecutionRequest, CreateDefinitionRequest, DeleteDefinitionRequest,
+        GetDefinitionRequest, GetExecutionRequest, GetStepExecutionsRequest,
+        ListDefinitionsRequest, ListExecutionsRequest, QueryExecutionRequest,
+        SignalExecutionRequest, StartExecutionRequest, UpdateDefinitionRequest,
         WorkflowDefinition as ProtoWorkflowDefinition,
     };
     use plexspaces_workflow::storage::WorkflowStorage;
@@ -947,7 +778,8 @@ mod tests {
         // Verify status is cancelled
         let get_req = Request::new(GetExecutionRequest { execution_id });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
-        assert_eq!(exec.execution.unwrap().status, 5); // CANCELLED
+        // ExecutionStatusCancelled = 5
+        assert_eq!(exec.execution.unwrap().status, ExecutionStatus::ExecutionStatusCancelled as i32);
     }
 
     #[tokio::test]

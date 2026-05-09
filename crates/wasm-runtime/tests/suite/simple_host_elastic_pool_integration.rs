@@ -11,7 +11,7 @@
 #[cfg(feature = "component-model")]
 mod tests {
     use async_trait::async_trait;
-    use plexspaces_core::{ActorId, ElasticPoolService, PoolServiceError};
+    use plexspaces_actor::{ActorId, ElasticPoolService, PoolServiceError};
     use plexspaces_proto::pool::v1::{ActorHandle, PoolConfig, PoolMetrics};
     use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;
     use plexspaces_wasm_runtime::simple_component_host::SimpleHostImpl;

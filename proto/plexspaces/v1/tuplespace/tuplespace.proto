@@ -863,3 +863,20 @@ service TupleSpaceService {
     };
   }
 }
+
+// Error codes for tuple space operations.
+enum TupleSpaceErrorCode {
+  TUPLE_SPACE_ERROR_UNSPECIFIED = 0;
+  // Matching tuple was not found
+  TUPLE_SPACE_ERROR_NOT_FOUND = 1;
+  // Pattern is syntactically or semantically invalid
+  TUPLE_SPACE_ERROR_PATTERN_ERROR = 2;
+  // Lease acquisition, renewal, or expiry failure
+  TUPLE_SPACE_ERROR_LEASE_ERROR = 3;
+  // Underlying I/O or persistence error
+  TUPLE_SPACE_ERROR_IO_ERROR = 4;
+  // Operation timed out
+  TUPLE_SPACE_ERROR_TIMEOUT = 5;
+  // Tuple space is at capacity
+  TUPLE_SPACE_ERROR_CAPACITY_EXCEEDED = 6;
+}

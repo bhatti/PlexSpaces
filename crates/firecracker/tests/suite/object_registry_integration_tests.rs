@@ -3,7 +3,7 @@
 //
 // Tests for VM Object Registry Integration
 
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_firecracker::{VmRegistry, VmRegistryEntry, VmState};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::ObjectType;

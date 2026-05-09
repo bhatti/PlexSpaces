@@ -29,14 +29,12 @@
 
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
-use plexspaces_actor::child_spec::{
-    ChildType as CSChildType, RestartStrategy, ShutdownSpec, StartedChild,
-};
+use plexspaces_actor::child_spec::{ProtoRestartPolicy, ShutdownSpec, StartedChild};
 use plexspaces_actor::supervisor::{
-    ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
+    RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
-use plexspaces_actor::{Actor, ActorRef as ActorActorRef, ChildSpec};
-use plexspaces_core::{
+use plexspaces_actor::{ActorInstance, ActorRef as ActorActorRef, ChildSpec};
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -44,13 +42,13 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tokio::time::{sleep, Duration};
 
-fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
-    plexspaces_core::ActorId::new(name, "gen_server", "namespace", "test-node")
+fn test_actor_id(name: &str) -> plexspaces_actor::ActorId {
+    plexspaces_actor::ActorId::new(name, "gen_server", "namespace", "test-node")
         .expect("valid test actor id")
 }
 
-fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
-    if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(id) {
+fn actor_id_from_legacy(id: &str) -> plexspaces_actor::ActorId {
+    if let Ok(actor_id) = plexspaces_actor::ActorId::from_canonical(id) {
         return actor_id;
     }
     let name = id.split('@').next().unwrap_or(id);
@@ -60,7 +58,7 @@ fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
 /// Helper function to create a ChildSpec from a sync factory
 fn create_child_spec_from_factory(
     id: String,
-    factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync>,
+    factory: Arc<dyn Fn() -> Result<ActorInstance, ActorError> + Send + Sync>,
     restart_policy: RestartPolicy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
@@ -69,15 +67,14 @@ fn create_child_spec_from_factory(
     let actor_ref =
         CoreActorRef::new(actor_id_from_legacy(&id)).expect("Failed to create actor ref");
 
-    let restart_strategy = match restart_policy {
-        RestartPolicy::Permanent => RestartStrategy::Permanent,
-        RestartPolicy::Transient => RestartStrategy::Transient,
-        RestartPolicy::Temporary => RestartStrategy::Temporary,
-        RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
+    let restart_policy_proto = match restart_policy {
+        RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => ProtoRestartPolicy::RestartPolicyPermanent,
+        RestartPolicy::Transient => ProtoRestartPolicy::RestartPolicyTransient,
+        RestartPolicy::Temporary => ProtoRestartPolicy::RestartPolicyTemporary,
     };
 
     let mut spec = ChildSpec::worker_sync(actor_id_from_legacy(&id), factory, actor_ref)
-        .with_restart(restart_strategy);
+        .with_restart(restart_policy_proto);
 
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
@@ -101,7 +98,7 @@ impl TestActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for TestActor {
+impl plexspaces_actor::Actor for TestActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
@@ -114,8 +111,8 @@ impl plexspaces_core::Actor for TestActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -364,7 +361,6 @@ async fn test_get_childspec() {
             })
         }),
     );
-    // Note: RestartStrategy is not directly accessible, so we skip the restart strategy test
     // The important part is that get_childspec() returns the spec
 
     let _ = supervisor

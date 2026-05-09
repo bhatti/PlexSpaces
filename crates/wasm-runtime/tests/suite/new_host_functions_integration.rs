@@ -25,7 +25,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
@@ -46,7 +46,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::RwLock;
 
-    /// Simple in-memory KeyValueStore for testing (implements plexspaces_core::KeyValueStore)
+    /// Simple in-memory KeyValueStore for testing (implements plexspaces_actor::KeyValueStore)
     struct TestMemoryKVStore {
         data: RwLock<HashMap<String, Vec<u8>>>,
     }
@@ -60,58 +60,58 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl plexspaces_core::KeyValueStore for TestMemoryKVStore {
+    impl plexspaces_actor::KeyValueStore for TestMemoryKVStore {
         async fn get(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
-        ) -> plexspaces_core::KeyValueStoreResult<Option<Vec<u8>>> {
+        ) -> plexspaces_actor::KeyValueStoreResult<Option<Vec<u8>>> {
             Ok(self.data.read().await.get(key).cloned())
         }
 
         async fn put(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
             value: Vec<u8>,
-        ) -> plexspaces_core::KeyValueStoreResult<()> {
+        ) -> plexspaces_actor::KeyValueStoreResult<()> {
             self.data.write().await.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn put_with_ttl(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
             value: Vec<u8>,
             _ttl: Duration,
-        ) -> plexspaces_core::KeyValueStoreResult<()> {
+        ) -> plexspaces_actor::KeyValueStoreResult<()> {
             self.data.write().await.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn delete(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
-        ) -> plexspaces_core::KeyValueStoreResult<()> {
+        ) -> plexspaces_actor::KeyValueStoreResult<()> {
             self.data.write().await.remove(key);
             Ok(())
         }
 
         async fn exists(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
-        ) -> plexspaces_core::KeyValueStoreResult<bool> {
+        ) -> plexspaces_actor::KeyValueStoreResult<bool> {
             Ok(self.data.read().await.contains_key(key))
         }
 
         async fn list_keys(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             prefix: &str,
-        ) -> plexspaces_core::KeyValueStoreResult<Vec<String>> {
+        ) -> plexspaces_actor::KeyValueStoreResult<Vec<String>> {
             Ok(self
                 .data
                 .read()
@@ -124,11 +124,11 @@ mod tests {
 
         async fn cas(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
             expected: Option<Vec<u8>>,
             new_value: Vec<u8>,
-        ) -> plexspaces_core::KeyValueStoreResult<bool> {
+        ) -> plexspaces_actor::KeyValueStoreResult<bool> {
             let mut data = self.data.write().await;
             let current = data.get(key).cloned();
             if current == expected {
@@ -141,10 +141,10 @@ mod tests {
 
         async fn increment(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             key: &str,
             delta: i64,
-        ) -> plexspaces_core::KeyValueStoreResult<i64> {
+        ) -> plexspaces_actor::KeyValueStoreResult<i64> {
             let mut data = self.data.write().await;
             let current = data
                 .get(key)
@@ -169,10 +169,10 @@ mod tests {
     async fn create_test_host_functions_with_services() -> Arc<HostFunctions> {
         // Create in-memory services for testing (using SQLite :memory: backends)
         // SqliteKVStore implements plexspaces_keyvalue::KeyValueStore (for ProcessGroupRegistry)
-        // TestMemoryKVStore implements plexspaces_core::KeyValueStore (for HostFunctions)
+        // TestMemoryKVStore implements plexspaces_actor::KeyValueStore (for HostFunctions)
         let kv_store_for_pg: Arc<dyn plexspaces_keyvalue::KeyValueStore> =
             Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
-        let kv_store_for_host: Arc<dyn plexspaces_core::KeyValueStore> =
+        let kv_store_for_host: Arc<dyn plexspaces_actor::KeyValueStore> =
             Arc::new(TestMemoryKVStore::new());
         let process_group_registry = Arc::new(ProcessGroupRegistry::new(
             "test-node".to_string(),

@@ -32,7 +32,9 @@ pub mod node_address;
 pub mod release_config;
 pub mod release_parser;
 pub mod request_context;
+pub mod request_context_ext;
 pub mod security_validator;
+pub mod service_name_ext;
 pub mod storage_config;
 pub mod virtual_actor_config;
 
@@ -40,7 +42,11 @@ pub mod virtual_actor_config;
 pub mod test_helpers;
 
 pub use activation_strategy::{from_config_str, to_config_str, ActivationStrategy};
-pub use aws_config::{AWSConfig, DLQConfig, DynamoDBConfig, S3Config, SQSConfig};
+pub use aws_config::{
+    AWSConfig, AwsConfigExt, DLQConfig, DynamoDBConfig, DynamoDbConfigExt, S3Config, S3ConfigExt,
+    SQSConfig, SqsConfigExt,
+};
+pub use plexspaces_proto::config::v1::{AwsConfig, DlqConfig, DynamoDbConfig, SqsConfig};
 pub use config_manager::{
     get_env, get_env_bool, get_env_or, get_env_u32, get_env_u64, initialize, EnvConfig,
 };
@@ -51,6 +57,9 @@ pub use node_address::{
 pub use release_config::create_default_release_config;
 pub use release_parser::{Release, ReleaseError};
 pub use request_context::{RequestContext, RequestContextError, AUTH_REQUIRED_HINT};
+pub use request_context_ext::RequestContextExt;
+pub use service_name_ext::ServiceNameExt;
+pub use plexspaces_proto::services::prv::ServiceName;
 pub use security_validator::{validate_security_config, SecurityValidationError};
 pub use storage_config::{resolve_shared_db_backend, sqlite_database_path, SharedDbBackend};
 pub use virtual_actor_config::{

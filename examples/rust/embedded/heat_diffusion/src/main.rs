@@ -20,7 +20,7 @@
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json, spawn, GenServerRef, RequestContext};
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker, service_wrappers::TupleSpaceProviderWrapper};
-use plexspaces_core::{TupleSpaceProvider, BehaviorError, ActorContext, Message};
+use plexspaces_actor::{TupleSpaceProvider, BehaviorError, ActorContext, Message, RequestContextExt};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;

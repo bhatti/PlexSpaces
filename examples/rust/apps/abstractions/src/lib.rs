@@ -1034,7 +1034,7 @@ impl AbstractionsChannel {
 mod tests {
     use super::*;
     use plexspaces_actor::TestServiceLocatorStub;
-    use plexspaces_core::ServiceLocator;
+    use plexspaces_actor::ServiceLocator;
     use plexspaces_journaling::SqliteJournalStorage;
 
     #[test]
@@ -1059,7 +1059,7 @@ mod tests {
         };
         assert_eq!(
             workflow.behavior_type(),
-            plexspaces_core::BehaviorType::Workflow
+            plexspaces_actor::BehaviorType::Workflow
         );
     }
 

@@ -360,6 +360,9 @@ message WorkflowExecution {
 
   // User-defined labels
   map<string, string> labels = 14;
+
+  // Last heartbeat timestamp (set by update_heartbeat, tracks node liveness)
+  optional google.protobuf.Timestamp last_heartbeat = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Execution status
@@ -449,7 +452,11 @@ enum WorkflowError {
   WORKFLOW_ERROR_INVALID_DEFINITION = 4;
 
   // Execution error (runtime failure)
+  // Execution error (runtime failure)
   WORKFLOW_ERROR_EXECUTION = 5;
+
+  // Concurrent update conflict (optimistic locking failure)
+  WORKFLOW_ERROR_CONCURRENT_UPDATE = 6;
 }
 
 // ==================== gRPC Service with REST API ====================

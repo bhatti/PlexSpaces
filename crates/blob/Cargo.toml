@@ -42,8 +42,8 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgre
 plexspaces-proto = { path = "../proto" }
 prost-types = { workspace = true }
 
-# Core for Service trait
-plexspaces-core = { path = "../core" }
+# Actor for Service trait
+plexspaces-actor = { path = "../actor" }
 
 # HTTP server support (optional, for HTTP handlers)
 tonic = { workspace = true, optional = true }

@@ -122,7 +122,7 @@
 //!
 //! // Create instance pool (pre-warm 10 instances)
 //! let config = WasmConfig::default();
-//! let pool = InstancePool::new(runtime.engine(), module.clone(), 10, config).await?;
+//! let pool = InstancePool::new(runtime.engine(), module.clone(), 10, config, "my-actor", "my-namespace", "node-1").await?;
 //!
 //! // Get instance from pool (< 10ms warm start)
 //! let mut pooled = pool.checkout().await?;

@@ -7,9 +7,9 @@ use crate::policy::{circuit_breaker_for_link, effective_max_attempts, resolve_po
 use crate::retry::{backoff_duration_for_attempt, method_allows_retry, status_is_retriable};
 use async_trait::async_trait;
 use plexspaces_circuit_breaker::CircuitBreaker;
-use plexspaces_core::{
-    OutboundHttpClient, OutboundHttpClientError as CoreOutboundError, OutboundHttpRequest,
-    OutboundHttpResponse,
+use plexspaces_actor::{
+    HttpHeader, OutboundHttpClient, OutboundHttpClientError as CoreOutboundError,
+    OutboundHttpRequest, OutboundHttpResponse,
 };
 use plexspaces_proto::node::v1::{OutboundTransport, RuntimeConfig, ServiceLinkConfig};
 use rand::thread_rng;
@@ -28,7 +28,7 @@ struct ResolvedLink {
     policy: plexspaces_proto::node::v1::ClientTransportPolicy,
     reqwest: reqwest::Client,
     breaker: Arc<CircuitBreaker>,
-    extra_headers: Vec<(String, String)>,
+    extra_headers: Vec<HttpHeader>,
 }
 
 /// Outbound HTTP client built from [`RuntimeConfig`](plexspaces_proto::node::v1::RuntimeConfig).
@@ -110,17 +110,17 @@ impl ResilientOutboundHttpClient {
     }
 }
 
-fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<(String, String)> {
+fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<HttpHeader> {
     let mut h = Vec::new();
     for (k, v) in &link.default_headers {
-        h.push((k.clone(), v.clone()));
+        h.push(HttpHeader { key: k.clone(), value: v.clone() });
     }
     if let (Some(name), Some(env_var)) = (
         link.api_key_header_name.as_deref(),
         link.api_key_env_var.as_deref(),
     ) {
         if let Ok(val) = std::env::var(env_var) {
-            h.push((name.to_string(), val));
+            h.push(HttpHeader { key: name.to_string(), value: val });
         } else {
             tracing::warn!(
                 link = %link.name,
@@ -131,7 +131,7 @@ fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<(String, String)> {
     }
     if let Some(env_var) = link.bearer_token_env_var.as_deref() {
         if let Ok(val) = std::env::var(env_var) {
-            h.push(("Authorization".to_string(), format!("Bearer {val}")));
+            h.push(HttpHeader { key: "Authorization".to_string(), value: format!("Bearer {val}") });
         } else {
             tracing::warn!(
                 link = %link.name,
@@ -278,11 +278,14 @@ impl OutboundHttpClient for ResilientOutboundHttpClient {
                             continue;
                         }
 
-                        let headers: Vec<(String, String)> = r
+                        let headers: Vec<HttpHeader> = r
                             .headers()
                             .iter()
                             .filter_map(|(k, v)| {
-                                v.to_str().ok().map(|s| (k.to_string(), s.to_string()))
+                                v.to_str().ok().map(|s| HttpHeader {
+                                    key: k.to_string(),
+                                    value: s.to_string(),
+                                })
                             })
                             .collect();
                         let body = match r.bytes().await {
@@ -323,7 +326,7 @@ impl OutboundHttpClient for ResilientOutboundHttpClient {
                         }
 
                         return Ok(OutboundHttpResponse {
-                            status,
+                            status: status as u32,
                             headers,
                             body: body.to_vec(),
                         });
@@ -381,21 +384,21 @@ fn join_url(base: &str, path: &str) -> Result<String, String> {
 
 fn collect_headers(
     req: &OutboundHttpRequest,
-    link_headers: &[(String, String)],
+    link_headers: &[HttpHeader],
 ) -> reqwest::header::HeaderMap {
     let mut m = reqwest::header::HeaderMap::new();
-    for (k, v) in link_headers {
+    for h in link_headers {
         if let (Ok(n), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
+            reqwest::header::HeaderName::from_bytes(h.key.as_bytes()),
+            reqwest::header::HeaderValue::from_str(&h.value),
         ) {
             m.insert(n, val);
         }
     }
-    for (k, v) in &req.headers {
+    for h in &req.headers {
         if let (Ok(n), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
+            reqwest::header::HeaderName::from_bytes(h.key.as_bytes()),
+            reqwest::header::HeaderValue::from_str(&h.value),
         ) {
             m.insert(n, val);
         }

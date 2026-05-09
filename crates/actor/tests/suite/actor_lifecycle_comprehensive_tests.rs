@@ -27,7 +27,7 @@
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, BehaviorType,
     ExitAction, ExitReason, Message,
 };
@@ -82,7 +82,7 @@ impl TestLifecycleActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for TestLifecycleActor {
+impl plexspaces_actor::Actor for TestLifecycleActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         *self.init_called.lock().unwrap() = true;
         self.init_result
@@ -142,7 +142,7 @@ impl ObservabilityTestActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for ObservabilityTestActor {
+impl plexspaces_actor::Actor for ObservabilityTestActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         self.init_called
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -165,7 +165,7 @@ impl plexspaces_core::Actor for ObservabilityTestActor {
 struct FailingInitActor;
 
 #[async_trait]
-impl plexspaces_core::Actor for FailingInitActor {
+impl plexspaces_actor::Actor for FailingInitActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Err(ActorError::InvalidState("init failed".to_string()))
     }
@@ -362,7 +362,7 @@ async fn test_terminate_called_on_stop() {
 #[tokio::test]
 async fn test_handle_exit_called_when_linked_actor_dies() {
     use plexspaces_actor::TestServiceLocatorStub;
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+    let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> =
         Arc::new(TestServiceLocatorStub::new());
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -650,7 +650,7 @@ async fn test_multiple_facets_detachment_order() {
         terminate_called: Arc<AtomicU32>,
     }
     #[async_trait]
-    impl plexspaces_core::Actor for SimpleActorWithTerminate {
+    impl plexspaces_actor::Actor for SimpleActorWithTerminate {
         async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
             Ok(())
         }

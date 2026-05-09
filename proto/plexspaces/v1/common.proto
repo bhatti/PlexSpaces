@@ -940,3 +940,60 @@ message Message {
   // Example: "GET", "POST", "PUT", "DELETE"
   string uri_method = 17 [(buf.validate.field).string.max_len = 16];
 }
+
+// RequestContext error codes
+enum RequestContextErrorCode {
+  REQUEST_CONTEXT_ERROR_UNSPECIFIED = 0;
+
+  // tenant_id is required but was not provided (auth enabled)
+  REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID = 1;
+
+  // tenant_id exceeds max length
+  REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID = 2;
+
+  // namespace exceeds max length
+  REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE = 3;
+}
+
+// A single HTTP header key-value pair.
+message HttpHeader {
+  string key = 1 [(buf.validate.field).string.max_len = 256];
+  string value = 2 [(buf.validate.field).string.max_len = 8192];
+}
+
+// Outbound HTTP request to an external service via a named service link.
+message OutboundHttpRequest {
+  // HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
+  string method = 1 [(buf.validate.field).string.max_len = 16];
+
+  // Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
+  string path_and_query = 2 [(buf.validate.field).string.max_len = 4096];
+
+  // Extra headers merged with link defaults and auth headers
+  repeated HttpHeader headers = 3;
+
+  // Request body bytes
+  bytes body = 4;
+}
+
+// Outbound HTTP response from an external service call.
+message OutboundHttpResponse {
+  // HTTP status code
+  uint32 status = 1;
+
+  // Response headers
+  repeated HttpHeader headers = 2;
+
+  // Response body bytes
+  bytes body = 3;
+}
+
+// Error codes for outbound HTTP client operations.
+enum OutboundHttpClientErrorCode {
+  OUTBOUND_HTTP_ERROR_UNSPECIFIED = 0;
+  OUTBOUND_HTTP_ERROR_UNKNOWN_LINK = 1;
+  OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN = 2;
+  OUTBOUND_HTTP_ERROR_INVALID_URL = 3;
+  OUTBOUND_HTTP_ERROR_REQUEST_FAILED = 4;
+  OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE = 5;
+}

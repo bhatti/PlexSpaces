@@ -8,7 +8,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 # Core types (for Service trait and ObjectRegistry trait)
-plexspaces-core = { path = "../core" }
+plexspaces-actor = { path = "../actor" }
 # Core proto definitions
 plexspaces-proto = { path = "../proto" }
 # Common utilities (RequestContext)

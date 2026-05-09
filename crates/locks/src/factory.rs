@@ -291,33 +291,34 @@ pub async fn create_lock_manager(
 #[cfg(test)]
 mod tests {
     use super::create_lock_manager_from_runtime;
+    use crate::LockError;
     use plexspaces_proto::node::v1::RuntimeConfig;
     use plexspaces_proto::storage::v1::{
         storage_provider_config, RedisBackendConfig, SharedDbConfig, StorageProvider,
         StorageProviderConfig,
     };
 
-    #[tokio::test]
-    async fn test_create_lock_manager_from_runtime_shared_db_memory() {
-        let runtime = RuntimeConfig {
+    fn runtime_with_memory_shared_db() -> RuntimeConfig {
+        RuntimeConfig {
             db: Some(SharedDbConfig {
                 connection_string: "sqlite::memory:".to_string(),
                 ..Default::default()
             }),
             ..Default::default()
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_lock_manager_from_runtime_shared_db_memory() {
+        let runtime = runtime_with_memory_shared_db();
 
         let result = create_lock_manager_from_runtime(&runtime).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_create_lock_manager_from_runtime_redis_provider_without_feature_errors() {
+    async fn test_create_lock_manager_from_runtime_redis_provider_reports_backend_availability() {
         let runtime = RuntimeConfig {
-            db: Some(SharedDbConfig {
-                connection_string: "sqlite::memory:".to_string(),
-                ..Default::default()
-            }),
             locks_provider: Some(StorageProviderConfig {
                 provider: StorageProvider::StorageProviderRedis as i32,
                 config: Some(storage_provider_config::Config::Redis(RedisBackendConfig {
@@ -325,13 +326,40 @@ mod tests {
                     ..Default::default()
                 })),
             }),
-            ..Default::default()
+            ..runtime_with_memory_shared_db()
         };
 
         let result = create_lock_manager_from_runtime(&runtime).await;
-        #[cfg(feature = "redis-backend")]
-        assert!(result.is_ok());
         #[cfg(not(feature = "redis-backend"))]
-        assert!(result.is_err());
+        {
+            assert!(matches!(result, Err(LockError::BackendError(message)) if message.contains("Redis backend not available")));
+        }
+        #[cfg(feature = "redis-backend")]
+        {
+            match result {
+                Ok(_) => {}
+                Err(LockError::BackendError(message)) => {
+                    assert!(
+                        message.contains("failed to connect redis"),
+                        "expected Redis connection failure or successful construction, got: {message}"
+                    );
+                }
+                Err(other) => panic!("unexpected redis backend result: {other}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_lock_manager_from_runtime_redis_provider_requires_redis_config() {
+        let runtime = RuntimeConfig {
+            locks_provider: Some(StorageProviderConfig {
+                provider: StorageProvider::StorageProviderRedis as i32,
+                config: None,
+            }),
+            ..runtime_with_memory_shared_db()
+        };
+
+        let result = create_lock_manager_from_runtime(&runtime).await;
+        assert!(matches!(result, Err(LockError::ConfigError(message)) if message.contains("redis lock provider requires redis config")));
     }
 }

@@ -54,8 +54,11 @@ aws-config = { version = "1", optional = true }
 plexspaces-common = { path = "../common", optional = true }
 metrics = { workspace = true }
 
+# channel-service and process-group-backend features need traits from service-traits (not actor, to avoid cycle)
+plexspaces-service-traits = { path = "../service-traits", optional = true }
 # Optional: Process Group backend (for Erlang pg/pg2-style pub/sub)
-plexspaces-core = { path = "../core", optional = true }
+# NOTE: plexspaces-actor is NOT an optional dep here — it would create actor→journaling→mailbox→channel→actor cycle.
+# Process group backend production code uses plexspaces-service-traits; tests use dev-dep on plexspaces-actor.
 plexspaces-facet = { path = "../facet", optional = true }
 
 [dev-dependencies]
@@ -63,7 +66,7 @@ tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 tempfile = { workspace = true }
 tonic = { workspace = true }
-plexspaces-core = { workspace = true }
+plexspaces-actor = { workspace = true }
 plexspaces-locks = { workspace = true }
 ulid = { workspace = true }
 [features]
@@ -81,9 +84,9 @@ sqs-backend = [
     "plexspaces-common/test-helpers",
     "base64",
 ]
-process-group-backend = ["plexspaces-core", "dep:plexspaces-facet"]
-# Enable ChannelServiceImpl which implements plexspaces_core::ChannelService on top of Channel trait
-channel-service = ["plexspaces-core"]
+process-group-backend = ["plexspaces-service-traits", "plexspaces-common", "dep:plexspaces-facet"]
+# Enable ChannelServiceImpl which implements ChannelService trait on top of Channel trait
+channel-service = ["plexspaces-service-traits"]
 test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests
 

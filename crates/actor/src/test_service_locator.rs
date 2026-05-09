@@ -28,69 +28,43 @@
 //! - Node will replace this with full ServiceLocatorImpl when spawning actors
 
 use async_trait::async_trait;
-use plexspaces_core::facet_service_wrapper::{
+use crate::core::facet_service_wrapper::{
     FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
 };
-use plexspaces_core::{
-    ActorRegistry, ActorService, BehaviorRegistry, ChannelService, GrpcConnectionManager,
-    JournalStorage, MetricsPrometheusRenderer, ObjectRegistry, ProcessGroupService,
-    ReplyWaiterRegistry, RequestContext, Service, ServiceLocator, TupleSpaceProvider,
-    VirtualActorManager,
+use crate::core::{
+    ActorRegistry, BehaviorRegistry, ChannelService, GrpcConnectionManager,
+    MetricsPrometheusRenderer, ObjectRegistry,
+    ReplyWaiterRegistry, ServiceLocator,
+    TupleSpaceProvider, VirtualActorManager,
 };
+use plexspaces_common::RequestContextExt;
 use std::sync::Arc;
 
 /// Minimal stub implementation of ServiceLocator for testing
 ///
 /// ## Purpose
-/// Provides a stub that returns None for all service lookups.
+/// Provides a stub that returns None for most service lookups, but includes
+/// a real ReplyWaiterRegistry so reply-waiter tests work without the full services crate.
 /// Used only for creating ActorContext in Actor::new() and tests.
 /// Node will replace this with full ServiceLocatorImpl when spawning actors.
 #[derive(Clone)]
-pub struct TestServiceLocatorStub;
+pub struct TestServiceLocatorStub {
+    reply_waiter_registry: Arc<ReplyWaiterRegistry>,
+}
 
 impl TestServiceLocatorStub {
     /// Create a new test stub
     pub fn new() -> Self {
-        Self
+        Self {
+            reply_waiter_registry: Arc::new(ReplyWaiterRegistry::new()),
+        }
     }
 }
 
 #[async_trait]
 impl ServiceLocator for TestServiceLocatorStub {
-    async fn register_service<T: Service + 'static>(&self, _service: Arc<T>)
-    where
-        Self: Sized,
-    {
-        // No-op for stub
-    }
-
-    async fn get_service<T: Service + 'static>(&self) -> Option<Arc<T>>
-    where
-        Self: Sized,
-    {
-        None
-    }
-
-    async fn register_service_by_name<T: Service + 'static>(&self, _name: &str, _service: Arc<T>)
-    where
-        Self: Sized,
-    {
-        // No-op for stub
-    }
-
-    async fn get_service_by_name<T: Service + 'static>(&self, _name: &str) -> Option<Arc<T>>
-    where
-        Self: Sized,
-    {
-        None
-    }
-
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
         None
-    }
-
-    async fn register_actor_registry(&self, _registry: Arc<ActorRegistry>) {
-        // No-op for stub
     }
 
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
@@ -98,63 +72,19 @@ impl ServiceLocator for TestServiceLocatorStub {
     }
 
     async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        None
-    }
-
-    // Note: ActorFactory methods are not part of ServiceLocator trait (to avoid circular dependency)
-    // Test stubs don't need to implement them
-
-    async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
-        None
-    }
-
-    async fn register_actor_service(&self, _service: Arc<dyn ActorService>) {
-        // No-op for stub
+        Some(self.reply_waiter_registry.clone())
     }
 
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
         None
     }
 
-    async fn register_channel_service(&self, _service: Arc<dyn ChannelService>) {
-        // No-op for stub
-    }
-
     async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>> {
         None
     }
 
-    async fn register_tuplespace_provider(&self, _provider: Arc<dyn TupleSpaceProvider>) {
-        // No-op for stub
-    }
-
     async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>> {
         None
-    }
-
-    async fn register_object_registry(&self, _registry: Arc<dyn ObjectRegistry>) {
-        // No-op for stub
-    }
-
-    async fn get_journal_storage(&self) -> Option<Arc<dyn JournalStorage + Send + Sync>> {
-        None
-    }
-
-    async fn register_journal_storage(&self, _storage: Arc<dyn JournalStorage + Send + Sync>) {
-        // No-op for stub
-    }
-
-    async fn get_lock_manager(
-        &self,
-    ) -> Option<Arc<dyn plexspaces_core::LockManager + Send + Sync>> {
-        None
-    }
-
-    async fn register_lock_manager(
-        &self,
-        _service: Arc<dyn plexspaces_core::LockManager + Send + Sync>,
-    ) {
-        // No-op for stub
     }
 
     async fn get_metrics_prometheus_renderer(
@@ -163,30 +93,14 @@ impl ServiceLocator for TestServiceLocatorStub {
         None
     }
 
-    async fn register_metrics_prometheus_renderer(
-        &self,
-        _renderer: Arc<dyn MetricsPrometheusRenderer + Send + Sync>,
-    ) {
-    }
-
     async fn get_metrics_service_access(
         &self,
-    ) -> Option<Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>> {
+    ) -> Option<Arc<dyn crate::core::MetricsServiceAccess + Send + Sync>> {
         None
-    }
-
-    async fn register_metrics_service_access(
-        &self,
-        _service: Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>,
-    ) {
     }
 
     async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
         None
-    }
-
-    async fn register_facet_manager(&self, _service: Arc<FacetManagerServiceWrapper>) {
-        // No-op for stub
     }
 
     async fn facet_container_for_actor(
@@ -200,37 +114,14 @@ impl ServiceLocator for TestServiceLocatorStub {
         None
     }
 
-    async fn register_facet_registry(&self, _service: Arc<FacetRegistryServiceWrapper>) {
-        // No-op for stub
-    }
-
-    async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> {
-        None
-    }
-
-    async fn register_actor_factory(&self, _factory: Arc<dyn plexspaces_core::ActorFactory>) {
-        // No-op for stub
-    }
-
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
         None
     }
 
-    async fn register_node_config(&self, _config: plexspaces_proto::node::v1::NodeConfig) {
-        // No-op for stub
-    }
-
     async fn get_node_connection_info(
         &self,
-    ) -> Option<Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>> {
+    ) -> Option<Arc<dyn crate::core::NodeConnectionInfo + Send + Sync>> {
         None
-    }
-
-    async fn register_node_connection_info(
-        &self,
-        _accessor: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>,
-    ) {
-        // No-op for stub
     }
 
     async fn initialize_services(
@@ -240,50 +131,20 @@ impl ServiceLocator for TestServiceLocatorStub {
         // No-op for stub
     }
 
-    fn is_shutdown_requested(&self) -> bool {
-        false
-    }
-
     fn request_shutdown(&self) {
         // No-op for stub
     }
 
-    async fn application_manager(&self) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
+    async fn application_manager(&self) -> Option<Arc<dyn crate::core::ApplicationManager>> {
         None
-    }
-
-    async fn register_application_manager(
-        &self,
-        _manager: Arc<dyn plexspaces_core::ApplicationManager>,
-    ) {
-        // No-op for stub
     }
 
     async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>> {
         None
     }
 
-    async fn register_behavior_registry(&self, _registry: Arc<BehaviorRegistry>) {
-        // No-op for stub
-    }
-
-    async fn request_context_for_system_operations(&self) -> RequestContext {
-        RequestContext::new_without_auth("default".to_string(), "default".to_string())
-    }
-
-    async fn request_context_for_system_operations_with_namespace(
-        &self,
-        namespace: String,
-    ) -> RequestContext {
-        RequestContext::new_without_auth("default".to_string(), namespace)
-    }
-
     async fn get_grpc_connection_manager(&self) -> Option<Arc<GrpcConnectionManager>> {
         None
-    }
-
-    async fn register_grpc_connection_manager(&self, _manager: Arc<GrpcConnectionManager>) {
-        // No-op for stub
     }
 
     async fn get_actor_service_client(
@@ -300,71 +161,88 @@ impl ServiceLocator for TestServiceLocatorStub {
         Err("TestServiceLocatorStub: get_application_service_client not implemented".into())
     }
 
-    async fn get_wasm_runtime(&self) -> Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>> {
+    async fn get_wasm_runtime(&self) -> Option<Arc<dyn crate::core::WasmRuntimeTrait>> {
         None
-    }
-
-    async fn register_wasm_runtime(&self, _runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) {
-        // No-op for stub
-    }
-
-    async fn get_process_group_service(&self) -> Option<Arc<dyn ProcessGroupService>> {
-        None
-    }
-
-    async fn register_process_group_service(&self, _service: Arc<dyn ProcessGroupService>) {
-        // No-op for stub
     }
 
     async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
         None
     }
 
-    async fn register_security_config(&self, _config: plexspaces_proto::node::v1::SecurityConfig) {
-        // No-op for stub
-    }
-
     async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig> {
         None
-    }
-
-    async fn register_runtime_config(&self, _config: plexspaces_proto::node::v1::RuntimeConfig) {
-        // No-op for stub
     }
 
     async fn is_auth_disabled(&self) -> bool {
         false // Auth enabled by default for security
     }
 
-    async fn get_blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> {
+    async fn get_blob_service(&self) -> Option<Arc<dyn crate::core::BlobServiceTrait>> {
         None
     }
 
-    async fn register_blob_service(&self, _service: Arc<dyn plexspaces_core::BlobServiceTrait>) {
-        // No-op for stub
-    }
-
-    async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> {
+    async fn get_node_registry(&self) -> Option<Arc<dyn crate::core::NodeRegistryTrait>> {
         None
     }
 
-    async fn register_node_registry(&self, _registry: Arc<dyn plexspaces_core::NodeRegistryTrait>) {
-        // No-op for stub
-    }
-
-    async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_core::KeyValueStore>> {
-        None
-    }
-
-    async fn register_keyvalue_store(&self, _store: Arc<dyn plexspaces_core::KeyValueStore>) {
-        // No-op for stub
-    }
 }
 
 #[async_trait]
+impl plexspaces_service_traits::ServiceLocatorBase for TestServiceLocatorStub {
+    async fn get_actor_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ActorService>> {
+        None
+    }
+
+    async fn get_journal_storage(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::JournalStorage + Send + Sync>> {
+        None
+    }
+
+    async fn get_keyvalue_store(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_common::KeyValueStore>> {
+        None
+    }
+
+    async fn get_lock_manager(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_locks::LockManager + Send + Sync>> {
+        None
+    }
+
+    async fn get_actor_factory(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ActorFactory>> {
+        None
+    }
+
+    fn is_shutdown_requested(&self) -> bool {
+        false
+    }
+
+    async fn request_context_for_system_operations(&self) -> plexspaces_common::RequestContext {
+        plexspaces_common::RequestContext::new_without_auth(
+            "default".to_string(),
+            "default".to_string(),
+        )
+    }
+
+    async fn request_context_for_system_operations_with_namespace(
+        &self,
+        namespace: String,
+    ) -> plexspaces_common::RequestContext {
+        plexspaces_common::RequestContext::new_without_auth("default".to_string(), namespace)
+    }
+}
 
 impl Default for TestServiceLocatorStub {
     fn default() -> Self {
         Self::new()
     }
 }
+
+// TestServiceLocatorStub is accessible outside the crate for integration tests
+// The Default impl ensures it can be used as Arc::new(TestServiceLocatorStub::new())

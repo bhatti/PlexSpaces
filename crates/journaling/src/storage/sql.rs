@@ -68,7 +68,8 @@
 use crate::storage::{ReminderRegistration, ReminderState};
 use crate::{ActorEvent, ActorHistory, Checkpoint, JournalEntry, JournalStats};
 use async_trait::async_trait;
-use plexspaces_core::{JournalError, JournalResult, JournalStorage};
+use plexspaces_common::ServiceNameExt;
+use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::prost_types;
 use prost::Message;
@@ -423,13 +424,10 @@ impl SqliteJournalStorage {
             .await
             .unwrap_or_else(|_| "unknown".to_string());
 
-        // For :memory: only: create schema inline. File-based uses unified db/migrations at init.
-        if path == ":memory:" {
-            run_memory_schema_sqlite(&pool).await.map_err(|e| {
-                error!(db_path = %display_path, error = %e, "Journal schema creation failed");
-                JournalError::Storage(e)
-            })?;
-        }
+        run_memory_schema_sqlite(&pool).await.map_err(|e| {
+            error!(db_path = %display_path, error = %e, "Journal schema creation failed");
+            JournalError::Storage(e)
+        })?;
 
         info!(
             db_path = %display_path,
@@ -3239,10 +3237,3 @@ mod tests {
     }
 }
 
-// Implement Service trait for registration in ServiceLocator
-#[cfg(feature = "sqlite-backend")]
-impl plexspaces_core::Service for SqliteJournalStorage {
-    fn service_name(&self) -> String {
-        plexspaces_core::service_names::JOURNAL_STORAGE.to_string()
-    }
-}

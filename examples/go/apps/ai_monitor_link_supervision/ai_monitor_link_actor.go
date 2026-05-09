@@ -586,7 +586,7 @@ func (a *AuditLogActor) Handle(fromActor, msgType, payloadJSON string) string {
 // ============================================================
 // init — register all actor roles/classes via ActorRouter.
 // The framework now dispatches Go multi-actor WASM modules by ChildSpec.role
-// (sent as declaration_name in init config), with actor_type only as fallback.
+// (sent as role in init config), with actor_type only as fallback.
 // ============================================================
 
 func init() {

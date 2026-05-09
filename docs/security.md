@@ -420,7 +420,7 @@ Then call HTTP or gRPC without a token (when the node is configured to allow it)
 All operations require a `RequestContext`:
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Create context from request
 let ctx = RequestContext::new("tenant-123".to_string())
@@ -550,7 +550,7 @@ services:
 ### Integration Test Setup
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 #[tokio::test]
 async fn test_blob_operations() {

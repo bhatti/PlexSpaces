@@ -27,7 +27,7 @@
 //! - Extracts capacity from metrics map (sent via heartbeat)
 //! - Provides methods to get node capacities, filter by labels, etc.
 
-use plexspaces_core::{ObjectRegistry, RequestContext};
+use plexspaces_actor::{ObjectRegistry, RequestContext, RequestContextExt};
 use plexspaces_proto::{
     common::v1::ResourceSpec, node::v1::NodeCapacity, object_registry::v1::ObjectType,
 };
@@ -44,6 +44,21 @@ pub enum CapacityTrackerError {
     /// Invalid capacity data
     #[error("Invalid capacity data: {0}")]
     InvalidData(String),
+}
+
+impl CapacityTrackerError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::CapacityTrackerErrorCode {
+        use plexspaces_proto::node::v1::CapacityTrackerErrorCode;
+        match self {
+            CapacityTrackerError::RegistryError(_) => {
+                CapacityTrackerErrorCode::CapacityTrackerErrorRegistryError
+            }
+            CapacityTrackerError::InvalidData(_) => {
+                CapacityTrackerErrorCode::CapacityTrackerErrorInvalidData
+            }
+        }
+    }
 }
 
 /// Result type for capacity tracking
@@ -359,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity() {
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::RequestContext;
         let repo = Arc::new(
             SqliteObjectRegistryRepository::new(":memory:")
                 .await
@@ -406,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities() {
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::RequestContext;
         let repo = Arc::new(
             SqliteObjectRegistryRepository::new(":memory:")
                 .await

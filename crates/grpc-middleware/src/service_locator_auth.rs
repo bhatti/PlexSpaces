@@ -3,11 +3,11 @@
 //
 // This file is part of PlexSpaces.
 
-//! Resolve HTTP / gRPC-gateway auth parameters from a [`ServiceLocator`](plexspaces_core::ServiceLocator).
+//! Resolve HTTP / gRPC-gateway auth parameters from a [`ServiceLocator`](plexspaces_actor::ServiceLocator).
 
 use std::sync::Arc;
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 
 /// Returns `(auth_disabled, jwt_secret)` for wiring HTTP routes and gateway middleware.
 pub async fn http_jwt_auth_snapshot(

@@ -87,7 +87,13 @@ class WorkflowError(betterproto.Enum):
     """Invalid workflow definition"""
 
     EXECUTION = 5
-    """Execution error (runtime failure)"""
+    """
+    Execution error (runtime failure)
+     Execution error (runtime failure)
+    """
+
+    CONCURRENT_UPDATE = 6
+    """Concurrent update conflict (optimistic locking failure)"""
 
 
 @dataclass(eq=False, repr=False)

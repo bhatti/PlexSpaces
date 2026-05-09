@@ -588,6 +588,46 @@ pub struct Message {
     #[prost(string, tag="17")]
     pub uri_method: ::prost::alloc::string::String,
 }
+/// A single HTTP header key-value pair.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HttpHeader {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub value: ::prost::alloc::string::String,
+}
+/// Outbound HTTP request to an external service via a named service link.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OutboundHttpRequest {
+    /// HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
+    #[prost(string, tag="1")]
+    pub method: ::prost::alloc::string::String,
+    /// Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
+    #[prost(string, tag="2")]
+    pub path_and_query: ::prost::alloc::string::String,
+    /// Extra headers merged with link defaults and auth headers
+    #[prost(message, repeated, tag="3")]
+    pub headers: ::prost::alloc::vec::Vec<HttpHeader>,
+    /// Request body bytes
+    #[prost(bytes="vec", tag="4")]
+    pub body: ::prost::alloc::vec::Vec<u8>,
+}
+/// Outbound HTTP response from an external service call.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OutboundHttpResponse {
+    /// HTTP status code
+    #[prost(uint32, tag="1")]
+    pub status: u32,
+    /// Response headers
+    #[prost(message, repeated, tag="2")]
+    pub headers: ::prost::alloc::vec::Vec<HttpHeader>,
+    /// Response body bytes
+    #[prost(bytes="vec", tag="3")]
+    pub body: ::prost::alloc::vec::Vec<u8>,
+}
 /// Activation strategy for virtual actors (single definition used by actor_runtime and node.release).
 ///
 /// Used by VirtualActorConfig (actor_runtime), DefaultVirtualActorConfig (release), and Rust
@@ -702,6 +742,85 @@ impl ResourceState {
             "RESOURCE_STATE_DELETING" => Some(Self::ResourceStateDeleting),
             "RESOURCE_STATE_FAILED" => Some(Self::ResourceStateFailed),
             "RESOURCE_STATE_UNKNOWN" => Some(Self::ResourceStateUnknown),
+            _ => None,
+        }
+    }
+}
+/// RequestContext error codes
+///
+/// TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
+/// type, these codes will be the single source of truth for all context errors.
+/// See plan: Phase 4 — Consolidate RequestContext to proto-only.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RequestContextErrorCode {
+    RequestContextErrorUnspecified = 0,
+    /// tenant_id is required but was not provided (auth enabled)
+    RequestContextErrorMissingTenantId = 1,
+    /// tenant_id exceeds max length
+    RequestContextErrorInvalidTenantId = 2,
+    /// namespace exceeds max length
+    RequestContextErrorInvalidNamespace = 3,
+}
+impl RequestContextErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            RequestContextErrorCode::RequestContextErrorUnspecified => "REQUEST_CONTEXT_ERROR_UNSPECIFIED",
+            RequestContextErrorCode::RequestContextErrorMissingTenantId => "REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID",
+            RequestContextErrorCode::RequestContextErrorInvalidTenantId => "REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID",
+            RequestContextErrorCode::RequestContextErrorInvalidNamespace => "REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "REQUEST_CONTEXT_ERROR_UNSPECIFIED" => Some(Self::RequestContextErrorUnspecified),
+            "REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID" => Some(Self::RequestContextErrorMissingTenantId),
+            "REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID" => Some(Self::RequestContextErrorInvalidTenantId),
+            "REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE" => Some(Self::RequestContextErrorInvalidNamespace),
+            _ => None,
+        }
+    }
+}
+/// Error codes for outbound HTTP client operations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OutboundHttpClientErrorCode {
+    OutboundHttpErrorUnspecified = 0,
+    OutboundHttpErrorUnknownLink = 1,
+    OutboundHttpErrorCircuitOpen = 2,
+    OutboundHttpErrorInvalidUrl = 3,
+    OutboundHttpErrorRequestFailed = 4,
+    OutboundHttpErrorBodyTooLarge = 5,
+}
+impl OutboundHttpClientErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            OutboundHttpClientErrorCode::OutboundHttpErrorUnspecified => "OUTBOUND_HTTP_ERROR_UNSPECIFIED",
+            OutboundHttpClientErrorCode::OutboundHttpErrorUnknownLink => "OUTBOUND_HTTP_ERROR_UNKNOWN_LINK",
+            OutboundHttpClientErrorCode::OutboundHttpErrorCircuitOpen => "OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN",
+            OutboundHttpClientErrorCode::OutboundHttpErrorInvalidUrl => "OUTBOUND_HTTP_ERROR_INVALID_URL",
+            OutboundHttpClientErrorCode::OutboundHttpErrorRequestFailed => "OUTBOUND_HTTP_ERROR_REQUEST_FAILED",
+            OutboundHttpClientErrorCode::OutboundHttpErrorBodyTooLarge => "OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OUTBOUND_HTTP_ERROR_UNSPECIFIED" => Some(Self::OutboundHttpErrorUnspecified),
+            "OUTBOUND_HTTP_ERROR_UNKNOWN_LINK" => Some(Self::OutboundHttpErrorUnknownLink),
+            "OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN" => Some(Self::OutboundHttpErrorCircuitOpen),
+            "OUTBOUND_HTTP_ERROR_INVALID_URL" => Some(Self::OutboundHttpErrorInvalidUrl),
+            "OUTBOUND_HTTP_ERROR_REQUEST_FAILED" => Some(Self::OutboundHttpErrorRequestFailed),
+            "OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE" => Some(Self::OutboundHttpErrorBodyTooLarge),
             _ => None,
         }
     }

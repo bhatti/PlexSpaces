@@ -24,7 +24,7 @@
 mod tests {
     use super::super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
+    use plexspaces_actor::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
 
     /// Helper to create a test message
@@ -59,7 +59,7 @@ mod tests {
     impl EventHandler for LoggingHandler {
         async fn handle_event(
             &mut self,
-            ctx: &plexspaces_core::ActorContext,
+            ctx: &plexspaces_actor::ActorContext,
             event: Message,
         ) -> Result<(), BehaviorError> {
             let payload = String::from_utf8_lossy(&event.payload);
@@ -78,7 +78,7 @@ mod tests {
     impl EventHandler for FailingHandler {
         async fn handle_event(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
+            _ctx: &plexspaces_actor::ActorContext,
             _event: Message,
         ) -> Result<(), BehaviorError> {
             Err(BehaviorError::ProcessingError("Handler failed".to_string()))
@@ -89,7 +89,7 @@ mod tests {
 
     // Helper to create test context and message (Go-style)
     fn create_test_context_and_message(message: Message) -> (Arc<ActorContext>, Message) {
-        use plexspaces_core::ServiceLocator;
+        use plexspaces_actor::ServiceLocator;
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
@@ -249,7 +249,7 @@ mod tests {
         impl EventHandler for CountingHandler {
             async fn handle_event(
                 &mut self,
-                _ctx: &plexspaces_core::ActorContext,
+                _ctx: &plexspaces_actor::ActorContext,
                 event: Message,
             ) -> Result<(), BehaviorError> {
                 self.count += 1;

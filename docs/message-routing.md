@@ -34,7 +34,7 @@ Spawn-time **`ActorVisibility`** on `ActorSpawnSpec` constrains who may **tell**
 - **Link / monitor / unlink / demonitor** use **`validate_link_monitor_operand_scope`** on **`ActorRegistry`** for **local-hosted operands only** (namespace vs `RequestContext`, and tenant+scope when auth is enabled); not **`ActorVisibility`**.
 - **`ActorVisibilityUnspecified`** is treated like **public** for messaging decisions.
 
-Legacy JSON init bytes (used only by narrow programmatic bridges) are normalized into `spec.role` / `spec.args` via **`plexspaces_core::legacy_spawn_init_json_to_role_and_args`**; the factory still derives runtime init using **`wasm_init_payload(&spec, &actor_id)`**.
+Legacy JSON init bytes (used only by narrow programmatic bridges) are normalized into `spec.role` / `spec.args` via **`plexspaces_actor::legacy_spawn_init_json_to_role_and_args`**; the factory still derives runtime init using **`wasm_init_payload(&spec, &actor_id)`**.
 
 ## Core Concepts
 

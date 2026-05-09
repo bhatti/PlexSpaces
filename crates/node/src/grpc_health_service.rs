@@ -40,7 +40,7 @@
 //! the standard service. For custom service name handling, we update the
 //! HealthReporter status based on dependency checks.
 
-use plexspaces_core::PlexSpacesHealthReporter;
+use plexspaces_actor::PlexSpacesHealthReporter;
 use std::sync::Arc;
 use tokio::time::Duration;
 

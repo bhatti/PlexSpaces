@@ -11,7 +11,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_journaling::{JournalStorage, SqliteJournalStorage};
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::durability::Host;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;

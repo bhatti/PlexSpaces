@@ -27,13 +27,11 @@
 
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocator};
+use plexspaces_actor::{ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
-};
+use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy};
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use prost_types::Duration as ProstDuration;
@@ -167,7 +165,7 @@ async fn test_application_deploy_with_facets() {
     new_registry.register("test_lifecycle".to_string(), factory);
 
     // Replace the registry in ServiceLocator
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
 
@@ -203,7 +201,7 @@ async fn test_application_deploy_with_facets() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -253,7 +251,7 @@ async fn test_application_undeploy_with_facets() {
     new_registry.register("test_lifecycle".to_string(), factory);
 
     // Replace the registry in ServiceLocator
-    use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
+    use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
 
@@ -289,7 +287,7 @@ async fn test_application_undeploy_with_facets() {
             "127.0.0.1:50051"
         }
 
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
@@ -388,6 +386,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         max_restarts: 5,
         max_restart_window: None,
         children: vec![child_spec],
+        ..Default::default()
     };
 
     // Create ApplicationSpec

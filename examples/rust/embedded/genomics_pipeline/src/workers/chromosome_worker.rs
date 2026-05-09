@@ -16,7 +16,7 @@
 //! results are cached in the journal for exactly-once semantics on replay.
 
 use crate::models::*;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_journaling::{ExecutionContextImpl, ExecutionMode, JournalError};
 use plexspaces_sdk::new_message;

@@ -67,7 +67,7 @@ pub struct ApplicationDeployLogContext {
 #[derive(Clone)]
 pub struct WasmDeploymentService {
     /// WASM runtime for compilation and instantiation
-    runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
+    runtime: Arc<dyn plexspaces_actor::WasmRuntimeTrait>,
 }
 
 impl WasmDeploymentService {
@@ -86,7 +86,7 @@ impl WasmDeploymentService {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) -> Self {
+    pub fn new(runtime: Arc<dyn plexspaces_actor::WasmRuntimeTrait>) -> Self {
         Self { runtime }
     }
 

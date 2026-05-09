@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use plexspaces_core::{ActorId, BehaviorError};
+use plexspaces_actor::{ActorId, BehaviorError};
 use plexspaces_persistence::{
     Journal, JournalEntry, JournalError, PromiseMetadata, PromiseResult, SideEffect,
 };

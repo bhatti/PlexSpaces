@@ -8,7 +8,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
         durability::Host as DurabilityHost,
         logging::Host as LoggingHost,
@@ -38,7 +38,7 @@ mod tests {
     fn create_test_host_functions_with_channel_service() -> Arc<HostFunctions> {
         use async_trait::async_trait;
         use futures::stream;
-        use plexspaces_core::ChannelService;
+        use plexspaces_actor::ChannelService;
         use plexspaces_proto::common::v1::Message;
         use std::collections::HashMap;
 

@@ -4,7 +4,7 @@
 // Integration tests for NodeService ConnectNodes and DisconnectNodes over gRPC.
 // Uses an in-process tonic Server with NodeServiceImpl so no separate process is required.
 
-use plexspaces_core::{NodeRegistryTrait, ObjectRegistry as CoreObjectRegistry, ServiceLocator};
+use plexspaces_actor::{NodeRegistryTrait, ObjectRegistry as CoreObjectRegistry, ServiceLocator, InitializableServiceLocator, RequestContextExt};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, ConnectNodesRequest, DisconnectNodesRequest,

@@ -13,7 +13,6 @@ description = "Message queue and mailbox implementations"
 # Mailbox depends on channel for backend abstraction
 plexspaces-proto = { workspace = true }
 plexspaces-channel = { path = "../channel", default-features = false }
-plexspaces-core = { workspace = true }
 
 # Observability
 metrics = { workspace = true }
@@ -44,7 +43,7 @@ tempfile = { version = "3.10" }
 plexspaces-journaling = { path = "../journaling", default-features = false, features = ["sqlite-backend"] }
 plexspaces-facet = { path = "../facet" }
 plexspaces-proto = { workspace = true }
-plexspaces-core = { workspace = true }
+plexspaces-actor = { workspace = true }
 ulid = { workspace = true }
 
 [lib]

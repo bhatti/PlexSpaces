@@ -78,7 +78,7 @@
 //! cargo test -p plexspaces-node --test wasm_application_spec_integration_tests -- --nocapture
 //! ```
 
-use plexspaces_core::ApplicationManager; // Trait for get_state() method
+use plexspaces_actor::ApplicationManager; // Trait for get_state() method
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::dashboard::v1::{
@@ -95,6 +95,8 @@ use wat;
 async fn create_test_node(node_id: &str, listen_addr: &str) -> Arc<plexspaces_node::Node> {
     let node = NodeBuilder::new(node_id.to_string())
         .with_listen_addr(listen_addr.to_string())
+        .with_auth_disabled()
+        .with_in_memory_backends()
         .build()
         .await;
     Arc::new(node)
@@ -113,7 +115,7 @@ async fn create_dashboard_service(node: Arc<plexspaces_node::Node>) -> Dashboard
     // This test doesn't need explicit app_manager registration
 
     // Create HealthReporterAccess implementation
-    use plexspaces_core::PlexSpacesHealthReporter;
+    use plexspaces_actor::PlexSpacesHealthReporter;
     let (health_reporter, _service) = PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
 
@@ -157,7 +159,6 @@ async fn wait_for_http_server(http_url: &str, max_retries: u32) -> bool {
         {
             if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND
             {
-                eprintln!("✅ HTTP server is ready (attempt {})", i + 1);
                 return true;
             }
         }
@@ -220,17 +221,10 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
         return None;
     }
 
-    eprintln!(
-        "📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)",
-        wasm_path.display()
-    );
-
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&wasm_path))
         .await
         .ok()
         .and_then(|r| r.ok())?;
-
-    eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
 
     // Cache the bytes
     {
@@ -276,7 +270,6 @@ async fn test_empty_node_dashboard_shows_zero_applications() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
@@ -319,17 +312,15 @@ async fn test_wasm_deployment_creates_applicationspec() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
-    let http_port = 9014;
+    let http_port = 9013;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -337,10 +328,6 @@ async fn test_wasm_deployment_creates_applicationspec() {
 
     // Create minimal WASM module
     let wasm_bytes = create_minimal_wasm_module();
-    eprintln!(
-        "📦 Deploying WASM module ({} bytes) with ApplicationSpec",
-        wasm_bytes.len()
-    );
 
     // ACT: Deploy via HTTP (ApplicationSpec will be auto-generated)
     let client = reqwest::Client::builder()
@@ -373,8 +360,6 @@ async fn test_wasm_deployment_creates_applicationspec() {
         .await
         .unwrap_or_else(|_| "No response body".to_string());
 
-    eprintln!("📥 Response status: {}", status);
-    eprintln!("📥 Response body: {}", response_text);
 
     // ASSERT: Deployment should succeed
     assert!(
@@ -413,7 +398,6 @@ async fn test_wasm_deployment_creates_applicationspec() {
         "Application should be in Running state"
     );
 
-    eprintln!("✅ ApplicationSpec created and application deployed successfully");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -427,18 +411,16 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
     let dashboard_service = create_dashboard_service(node.clone()).await;
-    let http_port = 9016;
+    let http_port = 9015;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -457,10 +439,6 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
     let before_summary = before_response.into_inner();
     let before_app_count = before_summary.total_applications;
 
-    eprintln!(
-        "📊 Dashboard before deployment: {} applications",
-        before_app_count
-    );
     assert_eq!(before_app_count, 0, "Should start with 0 applications");
 
     // ACT 2: Deploy WASM application
@@ -511,11 +489,6 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
     let after_summary = after_response.into_inner();
     let after_app_count = after_summary.total_applications;
 
-    eprintln!(
-        "📊 Dashboard after deployment: {} applications",
-        after_app_count
-    );
-
     // ASSERT: Dashboard should reflect the deployment
     assert!(
         after_app_count > before_app_count,
@@ -551,7 +524,6 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
         "Application name should match"
     );
 
-    eprintln!("✅ Dashboard correctly reflects WASM deployment");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -565,17 +537,15 @@ async fn test_wasm_deployment_applicationspec_fields() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
-    let http_port = 9018;
+    let http_port = 9017;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -632,7 +602,6 @@ async fn test_wasm_deployment_applicationspec_fields() {
         "Application should be running"
     );
 
-    eprintln!("✅ ApplicationSpec created with correct name and version");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -646,18 +615,16 @@ async fn test_wasm_deployment_undeployment_flow() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
     let dashboard_service = create_dashboard_service(node.clone()).await;
-    let http_port = 9020;
+    let http_port = 9019;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -750,7 +717,6 @@ async fn test_wasm_deployment_undeployment_flow() {
         "Dashboard should show 0 applications after undeployment"
     );
 
-    eprintln!("✅ Deployment and undeployment flow verified");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -764,18 +730,16 @@ async fn test_wasm_deployment_multiple_applications() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
     let dashboard_service = create_dashboard_service(node.clone()).await;
-    let http_port = 9022;
+    let http_port = 9021;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -871,7 +835,6 @@ async fn test_wasm_deployment_multiple_applications() {
         "Should have 3 applications in list"
     );
 
-    eprintln!("✅ Multiple applications deployed and verified");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -885,17 +848,15 @@ async fn test_wasm_deployment_component_error_handling() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
-    let http_port = 9024;
+    let http_port = 9023;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -905,7 +866,6 @@ async fn test_wasm_deployment_component_error_handling() {
     let wasm_bytes = match get_shared_wasm_bytes().await {
         Some(bytes) => bytes,
         None => {
-            eprintln!("⚠️  Calculator WASM not found, skipping component error test");
             let _ = node.shutdown(Duration::from_secs(5)).await;
             start_handle.abort();
             return;
@@ -948,7 +908,6 @@ async fn test_wasm_deployment_component_error_handling() {
     // Component deployment should fail, but with a clear error message
     if status.is_success() {
         // If it succeeds, that's fine (component support might be implemented)
-        eprintln!("✅ Component deployment succeeded (component support may be implemented)");
     } else {
         // Should fail with component error
         assert!(
@@ -956,7 +915,6 @@ async fn test_wasm_deployment_component_error_handling() {
             "Error should mention component. Response: {}",
             response_text
         );
-        eprintln!("✅ Component error handled correctly: {}", response_text);
     }
 
     // Cleanup
@@ -971,17 +929,15 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
-    let http_port = 9026;
+    let http_port = 9025;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -1032,7 +988,6 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
         "Application should be running (ApplicationSpec used correctly)"
     );
 
-    eprintln!("✅ ApplicationSpec auto-generation verified");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -1046,17 +1001,15 @@ async fn test_wasm_deployment_name_vs_application_id() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
-    let http_port = 9028;
+    let http_port = 9027;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -1095,28 +1048,28 @@ async fn test_wasm_deployment_name_vs_application_id() {
 
     sleep(Duration::from_millis(1000)).await;
 
-    // ASSERT: Application should be registered by name, not application_id
+    // ASSERT: Application should be found by both application_id (primary) and name (fallback)
     let app_manager = node.application_manager();
 
-    // Should be found by name
-    let app_state_by_name = app_manager.get_state(app_name).await;
-    assert!(
-        app_state_by_name.is_some(),
-        "Application should be registered with name '{}' (not application_id)",
-        app_name
-    );
-
-    // Should NOT be found by application_id
+    // Should be found by application_id (primary key)
     let app_state_by_id = app_manager.get_state(app_id).await;
     assert!(
-        app_state_by_id.is_none(),
-        "Application should NOT be registered with application_id '{}'",
+        app_state_by_id.is_some(),
+        "Application should be registered with application_id '{}'",
         app_id
     );
 
-    // Undeploy should use name, not application_id
+    // Should also be found by name (via fallback scan)
+    let app_state_by_name = app_manager.get_state(app_name).await;
+    assert!(
+        app_state_by_name.is_some(),
+        "Application should also be findable by name '{}'",
+        app_name
+    );
+
+    // Undeploy can use either application_id or name
     let undeploy_response = client
-        .delete(&format!("{}/api/v1/applications/{}", http_url, app_name))
+        .delete(&format!("{}/api/v1/applications/{}", http_url, app_id))
         .send()
         .await
         .expect("Failed to undeploy application");
@@ -1124,10 +1077,9 @@ async fn test_wasm_deployment_name_vs_application_id() {
     assert_eq!(
         undeploy_response.status(),
         reqwest::StatusCode::OK,
-        "Undeployment should succeed using name"
+        "Undeployment should succeed using application_id"
     );
 
-    eprintln!("✅ Verified ApplicationManager uses name, not application_id");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
@@ -1141,18 +1093,16 @@ async fn test_wasm_deployment_complete_workflow() {
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         if let Err(e) = node_clone.start().await {
-            eprintln!("Failed to start node: {}", e);
         }
     });
 
     sleep(Duration::from_millis(2000)).await;
 
     let dashboard_service = create_dashboard_service(node.clone()).await;
-    let http_port = 9030;
+    let http_port = 9029;
     let http_url = format!("http://127.0.0.1:{}", http_port);
 
     if !wait_for_http_server(&http_url, 10).await {
-        eprintln!("❌ HTTP server did not become ready");
         let _ = node.shutdown(Duration::from_secs(5)).await;
         start_handle.abort();
         panic!("HTTP server not ready");
@@ -1178,7 +1128,6 @@ async fn test_wasm_deployment_complete_workflow() {
         before_summary.total_applications, 0,
         "Should start with 0 applications"
     );
-    eprintln!("✅ Step 1: Empty node verified (0 applications)");
 
     // STEP 2: Deploy WASM application
     let wasm_bytes = create_minimal_wasm_module();
@@ -1208,7 +1157,6 @@ async fn test_wasm_deployment_complete_workflow() {
         "Deployment should succeed"
     );
     sleep(Duration::from_millis(1000)).await;
-    eprintln!("✅ Step 2: WASM application deployed");
 
     // STEP 3: Verify dashboard shows application
     let after_request = Request::new(GetSummaryRequest {
@@ -1225,7 +1173,6 @@ async fn test_wasm_deployment_complete_workflow() {
         after_summary.total_applications, 1,
         "Dashboard should show 1 application"
     );
-    eprintln!("✅ Step 3: Dashboard verified (1 application)");
 
     // STEP 4: Verify ApplicationSpec was created and used
     let app_manager = node.application_manager();
@@ -1236,7 +1183,6 @@ async fn test_wasm_deployment_complete_workflow() {
         Some(ApplicationState::ApplicationStateRunning),
         "Application should be running"
     );
-    eprintln!("✅ Step 4: ApplicationSpec verified (application running)");
 
     // STEP 5: Undeploy
     let undeploy_response = client
@@ -1251,7 +1197,6 @@ async fn test_wasm_deployment_complete_workflow() {
         "Undeployment should succeed"
     );
     sleep(Duration::from_millis(500)).await;
-    eprintln!("✅ Step 5: Application undeployed");
 
     // STEP 6: Verify dashboard shows 0 applications again
     let final_request = Request::new(GetSummaryRequest {
@@ -1268,9 +1213,7 @@ async fn test_wasm_deployment_complete_workflow() {
         final_summary.total_applications, 0,
         "Dashboard should show 0 applications after undeployment"
     );
-    eprintln!("✅ Step 6: Dashboard verified (0 applications)");
 
-    eprintln!("✅ Complete workflow verified: empty → deploy → dashboard → undeploy → dashboard");
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;

@@ -9,7 +9,7 @@ default-run = "skypilot-comparison"
 description = "SkyPilot-style multi-cloud AI workload orchestration example with PlexSpaces"
 
 [dependencies]
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }

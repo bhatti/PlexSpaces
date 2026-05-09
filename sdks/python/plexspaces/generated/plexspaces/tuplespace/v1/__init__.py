@@ -81,6 +81,29 @@ class TransactionState(betterproto.Enum):
     ABORTED = 4
 
 
+class TupleSpaceErrorCode(betterproto.Enum):
+    """Error codes for tuple space operations."""
+
+    TUPLE_SPACE_ERROR_UNSPECIFIED = 0
+    TUPLE_SPACE_ERROR_NOT_FOUND = 1
+    """Matching tuple was not found"""
+
+    TUPLE_SPACE_ERROR_PATTERN_ERROR = 2
+    """Pattern is syntactically or semantically invalid"""
+
+    TUPLE_SPACE_ERROR_LEASE_ERROR = 3
+    """Lease acquisition, renewal, or expiry failure"""
+
+    TUPLE_SPACE_ERROR_IO_ERROR = 4
+    """Underlying I/O or persistence error"""
+
+    TUPLE_SPACE_ERROR_TIMEOUT = 5
+    """Operation timed out"""
+
+    TUPLE_SPACE_ERROR_CAPACITY_EXCEEDED = 6
+    """Tuple space is at capacity"""
+
+
 @dataclass(eq=False, repr=False)
 class StorageStats(betterproto.Message):
     """Storage statistics"""

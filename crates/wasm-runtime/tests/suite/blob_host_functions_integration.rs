@@ -14,7 +14,7 @@
 mod tests {
     use object_store::local::LocalFileSystem;
     use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService};
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::blob::Host as BlobHost;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::Context;

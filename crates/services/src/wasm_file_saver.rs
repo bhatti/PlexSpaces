@@ -37,7 +37,8 @@
 //!     application-spec.toml  # ApplicationSpec config
 //! ```
 
-use plexspaces_proto::application::v1::{ApplicationSpec, RestartPolicy, SupervisionStrategy};
+use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::supervision::v1::{RestartPolicy, SupervisionStrategy};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -290,9 +291,8 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_proto::application::v1::{
-        ApplicationSpec, ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
-    };
+    use plexspaces_proto::application::v1::ApplicationSpec;
+    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
     use plexspaces_proto::common::v1::ActorIdentity;
     use tempfile::TempDir;
 
@@ -437,6 +437,7 @@ mod tests {
                         ..Default::default()
                     },
                 ],
+                ..Default::default()
             }),
             ..Default::default()
         };

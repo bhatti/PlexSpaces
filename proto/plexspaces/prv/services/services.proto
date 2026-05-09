@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// Internal service canonical data types for PlexSpaces.
+//
+// ## Design
+// prv protos are Rust-only internal contracts; no polyglot generation needed.
+// No gRPC service blocks — these are in-process trait contracts.
+//
+// ## What belongs here
+// Only canonical data shapes that are:
+//   a) shared across multiple crates without a better home, OR
+//   b) serialized to storage / wire and need a canonical schema
+//
+// ## What does NOT belong here
+// Request/response wrapper messages that merely mirror a Rust trait
+// method signature — the async fn signature is the contract for in-process
+// calls. Proto adds no value for unserialised, single-process invocations.
+
+syntax = "proto3";
+
+// prv protos are Rust-only internal contracts; no polyglot generation needed.
+package plexspaces.services.prv;
+
+// ---------------------------------------------------------------------------
+// ServiceName enum
+// ---------------------------------------------------------------------------
+
+// Canonical service names for ServiceLocator registration and lookup.
+// Replaces the Rust pub mod service_names string constants.
+enum ServiceName {
+  SERVICE_NAME_UNSPECIFIED = 0;
+  SERVICE_NAME_ACTOR_REGISTRY = 1;
+  SERVICE_NAME_OBJECT_REGISTRY = 2;
+  SERVICE_NAME_PROCESS_GROUP_REGISTRY = 3;
+  SERVICE_NAME_PROCESS_GROUP_SERVICE = 4;
+  SERVICE_NAME_REPLY_WAITER_REGISTRY = 5;
+  SERVICE_NAME_VIRTUAL_ACTOR_MANAGER = 6;
+  SERVICE_NAME_FACET_MANAGER = 7;
+  SERVICE_NAME_FACET_REGISTRY = 8;
+  SERVICE_NAME_ACTOR_FACTORY_IMPL = 9;
+  SERVICE_NAME_JOURNAL_STORAGE = 10;
+  SERVICE_NAME_CHANNEL_SERVICE = 11;
+  SERVICE_NAME_FACET_SERVICE = 12;
+  SERVICE_NAME_FIRECRACKER_VM_SERVICE = 13;
+  SERVICE_NAME_NODE = 14;
+  SERVICE_NAME_TUPLESPACE_SERVICE = 15;
+  // gRPC remote connection service types (used by GrpcConnectionManager)
+  SERVICE_NAME_APPLICATION_SERVICE = 16;
+  SERVICE_NAME_ACTOR_SERVICE = 17;
+  SERVICE_NAME_BLOB_SERVICE = 18;
+  SERVICE_NAME_WORKFLOW_SERVICE = 19;
+  SERVICE_NAME_SYSTEM_SERVICE = 20;
+  SERVICE_NAME_NODE_SERVICE = 21;
+}
+
+// ---------------------------------------------------------------------------
+// ServiceCallErrorCode
+// ---------------------------------------------------------------------------
+
+// Error taxonomy for in-process service call failures.
+// Rust error types map to these codes via a code() method.
+enum ServiceCallErrorCode {
+  SERVICE_CALL_ERROR_UNSPECIFIED = 0;
+  SERVICE_CALL_ERROR_NOT_FOUND = 1;
+  SERVICE_CALL_ERROR_UNAVAILABLE = 2;
+  SERVICE_CALL_ERROR_TIMEOUT = 3;
+  SERVICE_CALL_ERROR_SERIALIZATION = 4;
+  SERVICE_CALL_ERROR_INTERNAL = 5;
+  SERVICE_CALL_ERROR_INVALID_ARGUMENT = 6;
+  SERVICE_CALL_ERROR_ALREADY_EXISTS = 7;
+  SERVICE_CALL_ERROR_PERMISSION_DENIED = 8;
+}
+
+// ---------------------------------------------------------------------------
+// TupleSpace data types
+// These are canonical shapes used in storage, WASM host bindings, and
+// cross-crate coordination — they belong in proto as a data contract.
+// ---------------------------------------------------------------------------
+
+// A single typed field within a tuple.
+message TupleField {
+  oneof value {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+    bytes bytes_value = 5;
+  }
+}
+
+// An ordered sequence of typed fields with an optional identity and metadata.
+message TupleData {
+  string id = 1;
+  repeated TupleField fields = 2;
+  map<string, string> metadata = 3;
+}
+
+// A single pattern field: either a wildcard (matches any value) or an exact value.
+message PatternField {
+  bool wildcard = 1;
+  TupleField value = 2;
+}
+
+// Pattern for matching tuples in the tuple space.
+message TuplePattern {
+  repeated PatternField fields = 1;
+}
+
+// ---------------------------------------------------------------------------
+// WASM runtime metadata
+// ---------------------------------------------------------------------------
+
+// Canonical descriptor for a cached WASM module.
+message WasmModuleInfo {
+  string name = 1;
+  string version = 2;
+  // Content-hash (SHA-256 hex) used as the module cache key.
+  string module_hash = 3;
+}
+
+// ---------------------------------------------------------------------------
+// In-process service trait contracts
+//
+// This section documents which existing v1 proto messages are the canonical
+// parameter/return types for each Rust service trait. No new message types
+// are defined here — we reference existing ones.
+//
+// ActorFactory (plexspaces_core::ActorFactory)
+//   spawn_actor(spec)  → uses plexspaces.actor.v1.ActorSpawnSpec (actor_runtime.proto)
+//                        returns plexspaces.common.v1.ActorId (common.proto)
+//   stop_actor(id)     → uses plexspaces.common.v1.ActorId
+//   activate_virtual_actor(id, spec) → ActorId + ActorSpawnSpec
+//
+// ActorService (plexspaces_core::ActorService)
+//   send(msg)          → uses plexspaces.common.v1.Message (common.proto)
+//   send_and_wait(msg, timeout_ms) → Message in, Message out
+//   spawn_actor(spec)  → ActorSpawnSpec in, ActorId out
+//
+// ChannelService (plexspaces_core::ChannelService)
+//   send_to_queue      → uses plexspaces.channel.v1.SendRequest (channel.proto)
+//   publish_to_topic   → uses plexspaces.channel.v1.PublishRequest
+//   subscribe_to_topic → uses plexspaces.channel.v1.SubscribeRequest
+//   receive_from_queue → uses plexspaces.channel.v1.ReceiveRequest / ReceiveResponse
+//   Public gRPC surface: plexspaces.channel.v1.ChannelService
+//
+// ProcessGroupService (plexspaces_core::ProcessGroupService)
+//   create_group       → uses plexspaces.processgroups.v1.CreateGroupRequest
+//   delete_group       → uses plexspaces.processgroups.v1.DeleteGroupRequest
+//   join_group         → uses plexspaces.processgroups.v1.JoinGroupRequest
+//   leave_group        → uses plexspaces.processgroups.v1.LeaveGroupRequest
+//   publish_to_group   → uses plexspaces.processgroups.v1.PublishToGroupRequest
+//   get_members        → uses plexspaces.processgroups.v1.GetMembersRequest / Response
+//
+// ObjectRegistry (plexspaces_core::ObjectRegistry)
+//   register           → uses plexspaces.object_registry.v1.RegisterRequest
+//                        (carries ObjectRegistration, object_registry.proto)
+//   lookup             → uses plexspaces.object_registry.v1.LookupRequest / LookupResponse
+//   discover           → uses plexspaces.object_registry.v1.DiscoverRequest / DiscoverResponse
+//   unregister         → uses plexspaces.object_registry.v1.UnregisterRequest
+//   heartbeat          → uses plexspaces.object_registry.v1.HeartbeatRequest
+//
+// TupleSpaceProvider (plexspaces_core::TupleSpaceProvider)
+//   write(tuple)       → uses TupleData (defined above in this file)
+//   read(pattern)      → uses TuplePattern (defined above), returns repeated TupleData
+//   take(pattern)      → uses TuplePattern, returns optional TupleData
+//   count(pattern)     → uses TuplePattern, returns uint64
+//
+// JournalStorage (plexspaces_core::JournalStorage)
+//   append_entry       → uses plexspaces.journaling.v1.JournalEntry (journaling.proto)
+//   save_checkpoint    → uses plexspaces.journaling.v1.Checkpoint
+//   replay_from        → uses actor_id string + sequence range, streams JournalEntry
+//   Error codes        → JournalErrorCode in journaling.proto
+//
+// KeyValueStore (plexspaces_common::KeyValueStore)
+//   get/put/delete     → uses plexspaces.keyvalue.v1.GetRequest/PutRequest (keyvalue.proto)
+//   Error codes        → KeyValueStoreErrorCode in keyvalue.proto
+// ---------------------------------------------------------------------------

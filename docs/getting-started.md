@@ -218,7 +218,7 @@ Actors are the fundamental unit of computation in PlexSpaces:
 An `ActorRef` is a lightweight handle to an actor:
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Caller scope (JWT / gateway / in-process tests)
 let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());

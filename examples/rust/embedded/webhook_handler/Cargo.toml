@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
-plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-proto = { path = "../../../../crates/proto" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }

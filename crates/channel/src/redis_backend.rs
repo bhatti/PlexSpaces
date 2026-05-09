@@ -113,20 +113,21 @@ impl RedisChannel {
     /// - [`ChannelError::BackendError`]: Failed to connect to Redis
     ///
     /// ## Examples
-    /// ```rust
+    /// ```rust,no_run
     /// # use plexspaces_channel::*;
     /// # use plexspaces_proto::channel::v1::*;
     /// # async fn example() -> ChannelResult<()> {
     /// let config = ChannelConfig {
     ///     name: "my-stream".to_string(),
     ///     provider: ChannelProvider::ChannelProviderRedis as i32,
-    ///     backend_config: Some(channel_config::BackendConfig::RedisConfig(
+    ///     backend_config: Some(channel_config::BackendConfig::Redis(
     ///         RedisConfig {
     ///             url: "redis://localhost:6379".to_string(),
-    ///             stream_max_len: 1000,
+    ///             stream_key: "my-stream".to_string(),
+    ///             max_length: 1000,
     ///             consumer_group: "my-group".to_string(),
     ///             consumer_name: "consumer-1".to_string(),
-    ///             block_ms: 5000,
+    ///             ..Default::default()
     ///         }
     ///     )),
     ///     ..Default::default()

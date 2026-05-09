@@ -53,6 +53,19 @@ pub enum KeyValueStoreError {
     CasConflict,
 }
 
+impl KeyValueStoreError {
+    /// Returns the proto error code for this error variant.
+    pub fn code(&self) -> plexspaces_proto::keyvalue::v1::KeyValueStoreErrorCode {
+        use plexspaces_proto::keyvalue::v1::KeyValueStoreErrorCode;
+        match self {
+            KeyValueStoreError::NotFound(_) => KeyValueStoreErrorCode::KeyValueStoreErrorNotFound,
+            KeyValueStoreError::StorageError(_) => KeyValueStoreErrorCode::KeyValueStoreErrorStorage,
+            KeyValueStoreError::SerializationError(_) => KeyValueStoreErrorCode::KeyValueStoreErrorSerialization,
+            KeyValueStoreError::CasConflict => KeyValueStoreErrorCode::KeyValueStoreErrorCasConflict,
+        }
+    }
+}
+
 /// Result type for key-value store operations.
 pub type KeyValueStoreResult<T> = Result<T, KeyValueStoreError>;
 

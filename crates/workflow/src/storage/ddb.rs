@@ -115,8 +115,10 @@ use aws_sdk_dynamodb::{
     },
     Client as DynamoDbClient,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
+use prost::Message as ProstMessage;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -255,7 +257,7 @@ pub trait WorkflowStorageTrait: Send + Sync {
         &self,
         ctx: &RequestContext,
         step_exec_id: &str,
-        status: StepExecutionStatus,
+        status: StepStatus,
         output: Option<Value>,
         error: Option<String>,
     ) -> Result<(), WorkflowError>;
@@ -971,39 +973,29 @@ impl DynamoDBWorkflowStorage {
             .get("status")
             .and_then(|v| v.as_s().ok())
             .ok_or_else(|| WorkflowError::Serialization("Missing status".to_string()))?;
-        let status = ExecutionStatus::from_string(status_str)?;
+        let status = ExecutionStatus::from_sql_str(status_str)? as i32;
 
         let current_step_id = item
             .get("current_step_id")
             .and_then(|v| v.as_s().ok())
-            .cloned();
+            .cloned()
+            .unwrap_or_default();
 
         let input_json = item.get("input_json").and_then(|v| v.as_s().ok()).cloned();
         let input = input_json
             .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| json_value_to_prost_struct(&v));
 
         let output_json = item.get("output_json").and_then(|v| v.as_s().ok()).cloned();
         let output = output_json
             .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| json_value_to_prost_struct(&v));
 
-        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned();
+        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
 
-        let node_id = item.get("node_id").and_then(|v| v.as_s().ok()).cloned();
-
-        let version = item
-            .get("version")
-            .and_then(|v| v.as_n().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(1);
-
-        let last_heartbeat_secs = item
-            .get("last_heartbeat")
-            .and_then(|v| v.as_n().ok())
-            .and_then(|s| s.parse::<i64>().ok());
-        let last_heartbeat = last_heartbeat_secs
-            .map(|secs| chrono::DateTime::from_timestamp(secs, 0).unwrap_or_else(|| Utc::now()));
+        let node_id = item.get("node_id").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
 
         Ok(WorkflowExecution {
             execution_id,
@@ -1015,8 +1007,7 @@ impl DynamoDBWorkflowStorage {
             output,
             error,
             node_id,
-            version,
-            last_heartbeat,
+            ..Default::default()
         })
     }
 
@@ -1046,19 +1037,21 @@ impl DynamoDBWorkflowStorage {
             .get("status")
             .and_then(|v| v.as_s().ok())
             .ok_or_else(|| WorkflowError::Serialization("Missing status".to_string()))?;
-        let status = StepExecutionStatus::from_string(status_str)?;
+        let status = StepStatus::from_sql_str(status_str)? as i32;
 
         let input_json = item.get("input_json").and_then(|v| v.as_s().ok()).cloned();
         let input = input_json
             .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| json_value_to_prost_struct(&v));
 
         let output_json = item.get("output_json").and_then(|v| v.as_s().ok()).cloned();
         let output = output_json
             .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| json_value_to_prost_struct(&v));
 
-        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned();
+        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
 
         let attempt = item
             .get("attempt")
@@ -1075,6 +1068,7 @@ impl DynamoDBWorkflowStorage {
             output,
             error,
             attempt,
+            ..Default::default()
         })
     }
 
@@ -1177,8 +1171,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let table_name = format!("{}-definitions", self.table_prefix);
         let pk = format!("{}#{}", Self::composite_key(ctx, &def.id), def.version);
 
-        let definition_json =
-            serde_json::to_string(def).map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+        let definition_json = BASE64.encode(def.encode_to_vec());
 
         let now_secs = Utc::now().timestamp();
 
@@ -1270,8 +1263,11 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             Ok(result) => {
                 if let Some(item) = result.item().cloned() {
                     if let Some(def_json_attr) = item.get("definition_json") {
-                        if let Ok(def_json) = def_json_attr.as_s() {
-                            let definition: WorkflowDefinition = serde_json::from_str(def_json)
+                        if let Ok(def_b64) = def_json_attr.as_s() {
+                            let bytes = BASE64
+                                .decode(def_b64)
+                                .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+                            let definition = WorkflowDefinition::decode(bytes.as_slice())
                                 .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
                             return Ok(definition);
                         }
@@ -1343,11 +1339,13 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
 
                         // Parse definition
                         if let Some(def_json_attr) = item.get("definition_json") {
-                            if let Ok(def_json) = def_json_attr.as_s() {
-                                if let Ok(definition) =
-                                    serde_json::from_str::<WorkflowDefinition>(def_json)
-                                {
-                                    definitions.push(definition);
+                            if let Ok(def_b64) = def_json_attr.as_s() {
+                                if let Ok(bytes) = BASE64.decode(def_b64) {
+                                    if let Ok(definition) =
+                                        WorkflowDefinition::decode(bytes.as_slice())
+                                    {
+                                        definitions.push(definition);
+                                    }
                                 }
                             }
                         }
@@ -1650,7 +1648,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let start_time = std::time::Instant::now();
         let table_name = format!("{}-executions", self.table_prefix);
         let pk = Self::composite_key(ctx, execution_id);
-        let status_str = status.to_string();
+        let status_str = status.as_sql_str().to_string();
         let now_secs = Utc::now().timestamp();
         let tenant_namespace = Self::tenant_namespace_key(ctx);
 
@@ -1663,17 +1661,17 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         update_expr.push_str(", status_created = :status_created");
 
         // Update timestamps based on status
-        if status == ExecutionStatus::Running {
+        if status == ExecutionStatus::ExecutionStatusRunning {
             update_expr.push_str(", last_heartbeat = :now");
             update_expr.push_str(", started_at = if_not_exists(started_at, :now)");
         }
 
         if matches!(
             status,
-            ExecutionStatus::Completed
-                | ExecutionStatus::Failed
-                | ExecutionStatus::Cancelled
-                | ExecutionStatus::TimedOut
+            ExecutionStatus::ExecutionStatusCompleted
+                | ExecutionStatus::ExecutionStatusFailed
+                | ExecutionStatus::ExecutionStatusCancelled
+                | ExecutionStatus::ExecutionStatusTimedOut
         ) {
             update_expr.push_str(", completed_at = :now");
         }
@@ -2120,7 +2118,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         &self,
         ctx: &RequestContext,
         step_exec_id: &str,
-        status: StepExecutionStatus,
+        status: StepStatus,
         output: Option<Value>,
         error: Option<String>,
     ) -> Result<(), WorkflowError> {
@@ -2133,7 +2131,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let pk = Self::composite_key(ctx, execution_id);
         let sk = format!("STEP#{}", step_exec_id);
 
-        let status_str = status.to_string();
+        let status_str = status.as_sql_str().to_string();
         let now_secs = Utc::now().timestamp();
 
         let mut expr_values = HashMap::new();
@@ -2450,7 +2448,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
 
         // Query using status_index GSI
         for status in &statuses {
-            let status_str = status.to_string();
+            let status_str = status.as_sql_str().to_string();
             let status_prefix = format!("{}#", status_str);
 
             loop {
@@ -2552,7 +2550,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
 
         // Query using status_index GSI and filter by last_heartbeat
         for status in &statuses {
-            let status_str = status.to_string();
+            let status_str = status.as_sql_str().to_string();
             let status_prefix = format!("{}#", status_str);
             let mut last_evaluated_key = None;
 
@@ -2660,10 +2658,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             }
         }
 
-        // Sort by last_heartbeat or updated_at (oldest first)
+        // Sort by updated_at (oldest first, to pick up stale executions in order)
         executions.sort_by(|a, b| {
-            let a_time = a.last_heartbeat.map(|h| h.timestamp()).unwrap_or(0);
-            let b_time = b.last_heartbeat.map(|h| h.timestamp()).unwrap_or(0);
+            let a_time = a.updated_at.as_ref().map(|t| t.seconds).unwrap_or(0);
+            let b_time = b.updated_at.as_ref().map(|t| t.seconds).unwrap_or(0);
             a_time.cmp(&b_time)
         });
 

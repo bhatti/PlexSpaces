@@ -4,10 +4,9 @@
 // Tests for ActorRef integration with ServiceLocator (TDD)
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{
+use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, Message,
-    ServiceLocator,
-};
+    ServiceLocator, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -43,7 +42,7 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_id: &str,
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -61,7 +60,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn lookup_full(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -78,7 +77,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn register(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
@@ -91,7 +90,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn discover(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: Option<ObjectType>,
         object_category: Option<String>,
         capabilities: Option<Vec<String>>,
@@ -122,7 +121,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn unregister(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -139,7 +138,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn heartbeat(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -209,7 +208,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
         Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
 
     // Register node address in ObjectRegistry
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -292,7 +291,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
         Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
 
     // Register node address in ObjectRegistry
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -390,11 +389,11 @@ async fn test_actor_ref_local_unchanged() {
     assert_eq!(actor_ref.id(), &actor_id);
 
     // Register actor before calling tell()
-    use plexspaces_core::{ActorRegistry, RequestContext};
+    use plexspaces_actor::{ActorRegistry, RequestContext};
     let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
         registry
             .register_actor(
                 &tell_ctx,

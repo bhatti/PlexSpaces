@@ -10,6 +10,7 @@
 //! Tests load WASM files from the local filesystem and use in-memory services.
 //! If WASM files are not present, tests will skip gracefully.
 
+use plexspaces_actor::ActorId;
 use plexspaces_wasm_runtime::{
     ResourceLimits, WasmCapabilities, WasmConfig, WasmModule, WasmRuntime,
 };
@@ -146,7 +147,7 @@ async fn test_wasm_component_instantiation() {
         shared_timer_pool: None,
     };
 
-    let actor_id = "test-calculator-actor".to_string();
+    let actor_id = ActorId::new("test-calculator-actor", "wasm", "default", "test-node").unwrap();
     let initial_state = vec![];
 
     let runtime_guard = runtime.lock().await;
@@ -250,7 +251,7 @@ async fn test_component_init_function() {
         shared_timer_pool: None,
     };
 
-    let actor_id = "test-calculator-init".to_string();
+    let actor_id = ActorId::new("test-calculator-init", "wasm", "default", "test-node").unwrap();
     let initial_state = b"test-initial-state".to_vec();
 
     // ACT: Instantiate component with initial state (with timeout)
@@ -288,7 +289,7 @@ async fn test_component_init_function() {
 
     // ASSERT: Init should be called (component should handle initial state)
     // Note: If init fails, instantiation would fail, so if we get here, init succeeded
-    assert_eq!(instance.actor_id(), actor_id);
+    assert_eq!(instance.actor_id(), actor_id.to_string());
     eprintln!("✅ Component init function called successfully");
 }
 
@@ -320,7 +321,8 @@ async fn test_component_handle_message() {
         shared_timer_pool: None,
     };
 
-    let actor_id = "test-calculator-handle".to_string();
+    let actor_id =
+        ActorId::new("test-calculator-handle", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
@@ -455,12 +457,14 @@ async fn test_component_empty_initial_state() {
     };
 
     // ACT: Instantiate with empty initial state (with timeout)
+    let actor_id_empty =
+        ActorId::new("test-empty-state", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
         runtime_guard.instantiate(
             module,
-            "test-empty-state".to_string(),
+            actor_id_empty,
             &[],
             config,
             None,
@@ -520,12 +524,14 @@ async fn test_component_observability() {
     };
 
     // ACT: Instantiate and call handle_message (with timeout)
+    let actor_id_obs =
+        ActorId::new("test-observability", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
         runtime_guard.instantiate(
             module,
-            "test-observability".to_string(),
+            actor_id_obs,
             &[],
             config,
             None,
@@ -593,12 +599,14 @@ async fn test_component_different_message_types() {
         shared_timer_pool: None,
     };
 
+    let actor_id_msg =
+        ActorId::new("test-message-types", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
         runtime_guard.instantiate(
             module,
-            "test-message-types".to_string(),
+            actor_id_msg,
             &[],
             config,
             None,

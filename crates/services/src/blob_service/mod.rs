@@ -33,7 +33,8 @@ use plexspaces_blob::{
     repository::ListFilters,
     BlobConfigExt, BlobError, BlobRepository, BlobResult,
 };
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
+use plexspaces_actor::RequestContextExt;
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
 /// Blob storage service
@@ -415,7 +416,7 @@ impl BlobService {
 }
 
 // Implement Service trait for ServiceLocator registration
-impl plexspaces_core::Service for BlobService {
+impl plexspaces_actor::Service for BlobService {
     fn service_name(&self) -> String {
         "BlobService".to_string()
     }

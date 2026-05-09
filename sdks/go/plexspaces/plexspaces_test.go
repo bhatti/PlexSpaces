@@ -586,7 +586,7 @@ func TestActorRouterInit(t *testing.T) {
 	}
 }
 
-func TestActorRouterInitPrefersDeclarationNameOverActorType(t *testing.T) {
+func TestActorRouterInitPrefersRoleOverActorType(t *testing.T) {
 	router := NewActorRouter()
 	counterCreated := false
 
@@ -595,12 +595,12 @@ func TestActorRouterInitPrefersDeclarationNameOverActorType(t *testing.T) {
 		return newCounterActor()
 	})
 
-	result := router.Init(`{"actor_id":"counter//shared_wasm::app@test-node","actor_type":"shared_wasm","declaration_name":"counter","args":{}}`)
+	result := router.Init(`{"actor_id":"counter//shared_wasm::app@test-node","actor_type":"shared_wasm","role":"counter","args":{}}`)
 	if result != "" {
-		t.Fatalf("router Init should succeed with declaration_name dispatch, got %q", result)
+		t.Fatalf("router Init should succeed with role dispatch, got %q", result)
 	}
 	if !counterCreated {
-		t.Fatal("declaration_name should select the registered actor factory")
+		t.Fatal("role should select the registered actor factory")
 	}
 }
 
@@ -785,7 +785,7 @@ func TestActorRouterInvalidConfigJSON(t *testing.T) {
 
 func TestInitConfigParsing(t *testing.T) {
 	var config initConfig
-	err := json.Unmarshal([]byte(`{"actor_id":"test:ns@node","actor_type":"shared_wasm","declaration_name":"counter","role":"counter","args":{"key":"value"}}`), &config)
+	err := json.Unmarshal([]byte(`{"actor_id":"test:ns@node","actor_type":"shared_wasm","role":"counter","args":{"key":"value"}}`), &config)
 	if err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
@@ -794,9 +794,6 @@ func TestInitConfigParsing(t *testing.T) {
 	}
 	if config.ActorType != "shared_wasm" {
 		t.Errorf("expected shared_wasm, got %q", config.ActorType)
-	}
-	if config.DeclarationName != "counter" {
-		t.Errorf("expected counter declaration_name, got %q", config.DeclarationName)
 	}
 	if config.Role != "counter" {
 		t.Errorf("expected counter role, got %q", config.Role)

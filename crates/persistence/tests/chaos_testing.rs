@@ -36,7 +36,7 @@ use tokio::sync::Mutex;
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> Message {
-    let proto_msg = plexspaces_core::Message {
+    let proto_msg = plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()

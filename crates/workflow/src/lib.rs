@@ -199,6 +199,7 @@
 #![warn(clippy::all)]
 
 // TDD: Modules enabled as we implement them
+
 pub mod executor;
 pub mod service;
 pub mod storage;
@@ -213,7 +214,12 @@ pub mod workflow_actor;
 pub use executor::WorkflowExecutor;
 pub use service::WorkflowServiceImpl;
 pub use storage::WorkflowStorage;
-pub use types::*;
+pub use types::{
+    ExecutionStatus, ExecutionStatusExt, RetryConfig, Step, StepExecution, StepExecutionExt,
+    StepStatus, StepStatusExt, StepType, WorkflowDefinition, WorkflowError,
+    WorkflowErrorProto, WorkflowExecution, WorkflowExecutionExt, WorkflowExecutionOutputExt,
+};
+pub use storage::sql::{make_step, make_workflow_definition, step_config_value, step_type, step_next, execution_input_to_value};
 pub use workflow_actor::{WorkflowActor, WorkflowMessage, WorkflowResponse};
 
 // Re-export WorkflowRef from actor crate (canonical location for all typed refs)

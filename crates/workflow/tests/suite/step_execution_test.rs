@@ -26,30 +26,18 @@ use plexspaces_workflow::*;
 use serde_json::json;
 
 /// Test recording step execution start
-///
-/// ## TDD Test
-/// This test will FAIL until we implement create_step_execution()
 #[tokio::test]
 async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
 
-    // Create workflow definition
-    let definition = WorkflowDefinition {
-        id: "step-test".to_string(),
-        name: "Step Test".to_string(),
-        version: "1.0".to_string(),
-        steps: vec![Step {
-            id: "step-1".to_string(),
-            name: "First Step".to_string(),
-            step_type: StepType::Task,
-            config: json!({}),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let definition = make_workflow_definition(
+        "step-test",
+        "Step Test",
+        "1.0",
+        vec![make_step("step-1", "First Step", StepType::StepTypeTask, json!({}), None, None, None)],
+    );
     storage.save_definition(&definition).await?;
 
-    // Create execution
     let execution_id = storage
         .create_execution(
             "step-test",
@@ -59,42 +47,30 @@ async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Er
         )
         .await?;
 
-    // Record step execution start
     let step_exec_id = storage
         .create_step_execution(&execution_id, "step-1", json!({"input": "test"}))
         .await?;
 
-    // Verify step execution was created
     let step_exec = storage.get_step_execution(&step_exec_id).await?;
     assert_eq!(step_exec.step_id, "step-1");
     assert_eq!(step_exec.execution_id, execution_id);
-    assert_eq!(step_exec.status, StepExecutionStatus::Running);
+    assert_eq!(step_exec.step_status(), StepStatus::StepStatusRunning);
     assert_eq!(step_exec.attempt, 1);
 
     Ok(())
 }
 
 /// Test recording step execution completion
-///
-/// ## TDD Test
-/// Tests updating step execution to completed status
 #[tokio::test]
 async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
 
-    let definition = WorkflowDefinition {
-        id: "completion-test".to_string(),
-        name: "Completion Test".to_string(),
-        version: "1.0".to_string(),
-        steps: vec![Step {
-            id: "step-1".to_string(),
-            name: "Step 1".to_string(),
-            step_type: StepType::Task,
-            config: json!({}),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let definition = make_workflow_definition(
+        "completion-test",
+        "Completion Test",
+        "1.0",
+        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+    );
     storage.save_definition(&definition).await?;
 
     let execution_id = storage
@@ -106,7 +82,6 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
         )
         .await?;
 
-    // Create and complete step execution
     let step_exec_id = storage
         .create_step_execution(&execution_id, "step-1", json!({}))
         .await?;
@@ -114,42 +89,31 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
     storage
         .complete_step_execution(
             &step_exec_id,
-            StepExecutionStatus::Completed,
+            StepStatus::StepStatusCompleted,
             Some(json!({"result": "success"})),
             None,
         )
         .await?;
 
-    // Verify completion
     let step_exec = storage.get_step_execution(&step_exec_id).await?;
-    assert_eq!(step_exec.status, StepExecutionStatus::Completed);
-    assert!(step_exec.output.is_some());
-    assert_eq!(step_exec.output.unwrap()["result"], "success");
+    assert_eq!(step_exec.step_status(), StepStatus::StepStatusCompleted);
+    let output = step_exec.output_value().expect("Step should have output");
+    assert_eq!(output["result"], "success");
 
     Ok(())
 }
 
 /// Test recording step execution failure
-///
-/// ## TDD Test
-/// Tests recording failures with error messages
 #[tokio::test]
 async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
 
-    let definition = WorkflowDefinition {
-        id: "failure-test".to_string(),
-        name: "Failure Test".to_string(),
-        version: "1.0".to_string(),
-        steps: vec![Step {
-            id: "step-1".to_string(),
-            name: "Step 1".to_string(),
-            step_type: StepType::Task,
-            config: json!({}),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let definition = make_workflow_definition(
+        "failure-test",
+        "Failure Test",
+        "1.0",
+        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+    );
     storage.save_definition(&definition).await?;
 
     let execution_id = storage
@@ -161,7 +125,6 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
         )
         .await?;
 
-    // Create and fail step execution
     let step_exec_id = storage
         .create_step_execution(&execution_id, "step-1", json!({}))
         .await?;
@@ -169,42 +132,30 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
     storage
         .complete_step_execution(
             &step_exec_id,
-            StepExecutionStatus::Failed,
+            StepStatus::StepStatusFailed,
             None,
             Some("Network timeout".to_string()),
         )
         .await?;
 
-    // Verify failure recorded
     let step_exec = storage.get_step_execution(&step_exec_id).await?;
-    assert_eq!(step_exec.status, StepExecutionStatus::Failed);
-    assert!(step_exec.error.is_some());
-    assert_eq!(step_exec.error.unwrap(), "Network timeout");
+    assert_eq!(step_exec.step_status(), StepStatus::StepStatusFailed);
+    assert_eq!(step_exec.error, "Network timeout");
 
     Ok(())
 }
 
 /// Test retry tracking with attempt numbers
-///
-/// ## TDD Test
-/// Tests that retry attempts are tracked correctly
 #[tokio::test]
 async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
 
-    let definition = WorkflowDefinition {
-        id: "retry-test".to_string(),
-        name: "Retry Test".to_string(),
-        version: "1.0".to_string(),
-        steps: vec![Step {
-            id: "step-1".to_string(),
-            name: "Step 1".to_string(),
-            step_type: StepType::Task,
-            config: json!({}),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    let definition = make_workflow_definition(
+        "retry-test",
+        "Retry Test",
+        "1.0",
+        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+    );
     storage.save_definition(&definition).await?;
 
     let execution_id = storage
@@ -216,7 +167,6 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
         )
         .await?;
 
-    // First attempt
     let step_exec_id_1 = storage
         .create_step_execution(&execution_id, "step-1", json!({}))
         .await?;
@@ -226,13 +176,12 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
     storage
         .complete_step_execution(
             &step_exec_id_1,
-            StepExecutionStatus::Failed,
+            StepStatus::StepStatusFailed,
             None,
             Some("Temporary failure".to_string()),
         )
         .await?;
 
-    // Second attempt (retry)
     let step_exec_id_2 = storage
         .create_step_execution_with_attempt(&execution_id, "step-1", json!({}), 2)
         .await?;
@@ -243,35 +192,19 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
 }
 
 /// Test retrieving step execution history
-///
-/// ## TDD Test
-/// Tests querying all step executions for a workflow execution
 #[tokio::test]
 async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
 
-    let definition = WorkflowDefinition {
-        id: "history-test".to_string(),
-        name: "History Test".to_string(),
-        version: "1.0".to_string(),
-        steps: vec![
-            Step {
-                id: "step-1".to_string(),
-                name: "Step 1".to_string(),
-                step_type: StepType::Task,
-                config: json!({}),
-                ..Default::default()
-            },
-            Step {
-                id: "step-2".to_string(),
-                name: "Step 2".to_string(),
-                step_type: StepType::Task,
-                config: json!({}),
-                ..Default::default()
-            },
+    let definition = make_workflow_definition(
+        "history-test",
+        "History Test",
+        "1.0",
+        vec![
+            make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None),
+            make_step("step-2", "Step 2", StepType::StepTypeTask, json!({}), None, None, None),
         ],
-        ..Default::default()
-    };
+    );
     storage.save_definition(&definition).await?;
 
     let execution_id = storage
@@ -283,14 +216,13 @@ async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Err
         )
         .await?;
 
-    // Execute two steps
     let step1_id = storage
         .create_step_execution(&execution_id, "step-1", json!({}))
         .await?;
     storage
         .complete_step_execution(
             &step1_id,
-            StepExecutionStatus::Completed,
+            StepStatus::StepStatusCompleted,
             Some(json!({})),
             None,
         )
@@ -302,13 +234,12 @@ async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Err
     storage
         .complete_step_execution(
             &step2_id,
-            StepExecutionStatus::Completed,
+            StepStatus::StepStatusCompleted,
             Some(json!({})),
             None,
         )
         .await?;
 
-    // Get history
     let history = storage.get_step_execution_history(&execution_id).await?;
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].step_id, "step-1");

@@ -152,7 +152,7 @@ impl VmRegistry {
     /// Registers VM with ObjectTypeVm in the unified object registry.
     /// This enables VM discovery alongside actors, tuplespaces, and services.
     pub async fn register_in_object_registry(
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         registry: &plexspaces_object_registry::ObjectRegistry,
         vm_entry: &VmRegistryEntry,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

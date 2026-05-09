@@ -37,7 +37,7 @@ use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, Message, RequestContext, spawn_with_facets, TimerFacet,
 };
-use plexspaces_core::{ActorId, ServiceLocator};
+use plexspaces_actor::{ActorId, ServiceLocator, RequestContextExt};
 use plexspaces_node::{CoordinationComputeTracker, NodeBuilder};
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -46,7 +46,7 @@ use anyhow::Result;
 
 // Required for macro-generated code
 extern crate plexspaces_behavior;
-extern crate plexspaces_core;
+
 
 // =============================================================================
 // Session Actor - SDK annotations style (like Python @actor, @handler)

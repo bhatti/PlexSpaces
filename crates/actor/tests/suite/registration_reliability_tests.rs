@@ -28,7 +28,7 @@
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitReason, Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -48,7 +48,7 @@ impl FailingInitActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for FailingInitActor {
+impl plexspaces_actor::Actor for FailingInitActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         if self.fail_init {
             Err(ActorError::InvalidState("init failed".to_string()))
@@ -65,8 +65,8 @@ impl plexspaces_core::Actor for FailingInitActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -74,7 +74,7 @@ impl plexspaces_core::Actor for FailingInitActor {
 struct PanickingActor;
 
 #[async_trait]
-impl plexspaces_core::Actor for PanickingActor {
+impl plexspaces_actor::Actor for PanickingActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
@@ -87,8 +87,8 @@ impl plexspaces_core::Actor for PanickingActor {
         panic!("Intentional panic for testing");
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -108,7 +108,7 @@ impl NaturalTerminationActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for NaturalTerminationActor {
+impl plexspaces_actor::Actor for NaturalTerminationActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
@@ -128,8 +128,8 @@ impl plexspaces_core::Actor for NaturalTerminationActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 

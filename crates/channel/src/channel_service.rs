@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! `ChannelServiceImpl` — implements `plexspaces_core::ChannelService` on top of the
+//! `ChannelServiceImpl` — implements `plexspaces_actor::ChannelService` on top of the
 //! `Channel` trait so any provider (InMemory, SQLite, Redis, …) can be used as a
 //! drop-in backend for actor messaging.
 //!
@@ -29,7 +29,7 @@
 //! ActorContext / WASM HostFunctions
 //!         │
 //!         ▼
-//! ChannelServiceImpl  ◄── plexspaces_core::ChannelService
+//! ChannelServiceImpl  ◄── plexspaces_actor::ChannelService
 //!         │
 //!         ▼
 //! Arc<dyn Channel>    ◄── InMemoryChannel | SqliteChannel | RedisChannel | …
@@ -49,7 +49,7 @@ use crate::{Channel, ChannelError, InMemoryChannel};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use plexspaces_core::ChannelService;
+use plexspaces_service_traits::ChannelService;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, DeliveryGuarantee};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
@@ -227,7 +227,7 @@ impl ChannelService for ChannelServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ChannelService;
+    use plexspaces_service_traits::ChannelService;
     use plexspaces_proto::common::v1::Message;
 
     fn make_msg(payload: &[u8]) -> Message {

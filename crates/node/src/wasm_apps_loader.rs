@@ -43,8 +43,8 @@
 //! - Errors are logged but don't prevent node startup (best-effort deployment)
 
 use plexspaces_application::ApplicationSpec;
-use plexspaces_core::ServiceLocator;
-use plexspaces_proto::application::v1::SupervisorSpec;
+use plexspaces_actor::ServiceLocator;
+use plexspaces_proto::supervision::v1::SupervisorSpec;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -281,7 +281,7 @@ pub fn parse_app_config_toml(
 /// ## Returns
 /// `Ok(SupervisorSpec)` with parsed children and their facets, `Err(WasmAppsLoaderError)` if parsing fails
 fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmAppsLoaderError> {
-    use plexspaces_proto::application::v1::SupervisionStrategy;
+    use plexspaces_proto::supervision::v1::SupervisionStrategy;
 
     let strategy_str = value
         .get("strategy")
@@ -334,6 +334,7 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
             nanos: 0,
         }),
         children,
+        ..Default::default()
     })
 }
 
@@ -363,8 +364,8 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 /// - This allows graceful degradation: one bad facet doesn't prevent other facets from being attached
 fn parse_child_spec(
     value: &toml::Value,
-) -> Result<plexspaces_proto::application::v1::ChildSpec, WasmAppsLoaderError> {
-    use plexspaces_proto::application::v1::{ChildSpec, RestartPolicy};
+) -> Result<plexspaces_proto::supervision::v1::ChildSpec, WasmAppsLoaderError> {
+    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy};
     use plexspaces_proto::common::v1::{ActorIdentity, Facet};
     use std::collections::HashMap;
 
@@ -567,7 +568,7 @@ fn parse_facet_from_toml(
 pub async fn deploy_all_from_directory(
     base_path: &Path,
     service_locator: Arc<dyn ServiceLocator>,
-    node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
+    node_connectivity: Option<Arc<dyn plexspaces_actor::NodeConnectivity>>,
 ) -> Result<Vec<String>, WasmAppsLoaderError> {
     let apps = scan_wasm_apps_directory(base_path)?;
 
@@ -612,7 +613,7 @@ pub async fn deploy_all_from_directory(
 async fn deploy_wasm_app(
     app: &WasmAppInfo,
     service_locator: Arc<dyn ServiceLocator>,
-    node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
+    node_connectivity: Option<Arc<dyn plexspaces_actor::NodeConnectivity>>,
 ) -> Result<String, WasmAppsLoaderError> {
     use plexspaces_proto::application::v1::application_service_server::ApplicationService;
     use plexspaces_proto::application::v1::DeployApplicationRequest;
@@ -686,7 +687,7 @@ mod tests {
 
     #[test]
     fn test_parse_supervisor_spec() {
-        use plexspaces_proto::application::v1::SupervisionStrategy;
+        use plexspaces_proto::supervision::v1::SupervisionStrategy;
 
         let toml_str = r#"
 [supervisor]
@@ -741,7 +742,7 @@ restart = "permanent"
 
     #[test]
     fn test_parse_supervisor_spec_with_facets() {
-        use plexspaces_proto::application::v1::SupervisionStrategy;
+        use plexspaces_proto::supervision::v1::SupervisionStrategy;
 
         let toml_str = r#"
 [supervisor]

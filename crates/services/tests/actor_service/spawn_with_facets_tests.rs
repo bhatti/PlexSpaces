@@ -22,10 +22,10 @@ use tonic::Request;
 /// Helper to create a test service locator with required services
 async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
-    use plexspaces_core::{
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::{
         ActorRegistry, FacetManager, FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
-        VirtualActorManager,
+        InitializableServiceLocator, VirtualActorManager,
     };
     use plexspaces_facet::FacetRegistry;
     use plexspaces_node::create_default_service_locator;
@@ -48,7 +48,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<
@@ -70,7 +70,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
         async fn lookup_full(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<
@@ -90,7 +90,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
         async fn register(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner.register(ctx, registration).await.map_err(
@@ -105,7 +105,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
         async fn discover(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
             _name: Option<String>,
             _labels: Option<Vec<String>>,
@@ -122,7 +122,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
         async fn unregister(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -139,7 +139,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
         async fn heartbeat(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -164,7 +164,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
     ));
 
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -228,7 +228,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
 
     // Register ActorFactory
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator

@@ -22,7 +22,7 @@ use tracing::{info, warn};
 use tracing_subscriber;
 
 use plexspaces_application::ApplicationNode;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_node::{ConfigBootstrap, NodeBuilder};
 use genomics_pipeline::{config::GenomicsPipelineConfig, GenomicsPipelineApplication};
 

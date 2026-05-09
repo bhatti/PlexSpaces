@@ -28,7 +28,7 @@
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_core::RequestContext;
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::{

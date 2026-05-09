@@ -35,15 +35,15 @@
 //! - [`DynamoDBJournalStorage`]: DynamoDB (AWS managed)
 
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
-use plexspaces_core::{JournalError, JournalResult};
+use plexspaces_service_traits::{JournalError, JournalResult};
 use plexspaces_proto::storage::v1::SharedDbConfig;
 use std::sync::Arc;
 
 // Re-export reminder types from proto
 pub use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};
 
-// Re-export JournalStorage trait from core to avoid duplication
-pub use plexspaces_core::JournalStorage;
+// Re-export JournalStorage trait from service-traits
+pub use plexspaces_service_traits::JournalStorage;
 
 // The JournalStorage trait is now defined in plexspaces-core to avoid circular dependencies
 // All implementations in this crate implement the trait from core

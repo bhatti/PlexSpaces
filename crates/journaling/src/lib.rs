@@ -240,6 +240,7 @@
 #![warn(clippy::all)]
 
 // Re-export proto types for convenience
+
 pub use plexspaces_proto::journaling::v1::{
     journal_entry,
     journal_entry::Entry,
@@ -289,8 +290,8 @@ mod storage;
 pub use storage::*;
 // Re-export factory helpers for convenience
 pub use storage::create_journal_storage_from_shared_db;
-// Re-export JournalStorage trait from core (trait is defined in core to avoid circular dependencies)
-pub use plexspaces_core::{JournalError, JournalResult, JournalStorage};
+// Re-export JournalStorage trait from service-traits
+pub use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 
 // Phase 2: Execution context for deterministic replay
 mod execution_context;
@@ -318,8 +319,7 @@ pub use plexspaces_common::{to_config_str, ActivationStrategy};
 pub use virtual_actor_facet::{
     virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
 };
-// VirtualActorLifecycleState is re-exported from core (defined there to avoid circular dependencies)
-pub use plexspaces_core::VirtualActorLifecycleState;
+pub use plexspaces_facet::VirtualActorLifecycleState;
 
 // Phase 8.5: Event Sourcing facet for Temporal-inspired event sourcing
 mod event_sourcing_facet;

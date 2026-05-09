@@ -51,7 +51,7 @@ use plexspaces_sdk::{
 use plexspaces_actor::supervisor::{Supervisor, SupervisorEvent, SupervisionStrategy};
 use plexspaces_actor::child_spec::{ChildSpec, RestartStrategy, StartFn, StartedChild};
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{ActorError, ActorId, ActorRef};
+use plexspaces_actor::{ActorError, ActorId, ActorRef, RequestContextExt};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -61,7 +61,7 @@ use tracing::{info, Level};
 use anyhow::Result;
 
 // Required for macro-generated code
-extern crate plexspaces_core;
+
 extern crate plexspaces_behavior;
 
 // =============================================================================
@@ -432,7 +432,7 @@ fn create_processor_spec(
     event_type: EventType,
     restart: RestartStrategy,
     ctx: RequestContext,
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> ChildSpec {
     let child_actor_id_for_factory = child_actor_id.clone();
     let ctx_for_factory = ctx.clone();
@@ -474,7 +474,7 @@ fn create_processor_spec(
             
             // Update actor context with full ServiceLocator (ActorBuilder uses stub)
             // Supervisor needs full service access for actor to work properly
-            use plexspaces_core::ActorContext;
+            use plexspaces_actor::ActorContext;
             let context = Arc::new(ActorContext::new(
                 node_id.clone(),
                 ctx.tenant_id().to_string(),

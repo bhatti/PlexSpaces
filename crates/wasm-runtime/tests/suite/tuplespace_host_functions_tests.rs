@@ -8,7 +8,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField, TupleSpace};
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
         tuplespace::Host as TuplespaceHost, types::Context,
@@ -25,11 +25,11 @@ mod tests {
         }
     }
 
-    fn create_test_tuplespace() -> Arc<dyn plexspaces_core::TupleSpaceProvider> {
+    fn create_test_tuplespace() -> Arc<dyn plexspaces_actor::TupleSpaceProvider> {
         // Create an in-memory tuplespace for testing
         let tuplespace = TupleSpace::with_tenant_namespace("test-tenant", "test-namespace");
         Arc::new(
-            plexspaces_core::service_wrappers::TupleSpaceProviderWrapper::new(Arc::new(tuplespace)),
+            plexspaces_actor::service_wrappers::TupleSpaceProviderWrapper::new(Arc::new(tuplespace)),
         )
     }
 

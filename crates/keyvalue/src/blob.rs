@@ -57,7 +57,7 @@ use object_store::{
     aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
     local::LocalFileSystem, path::Path as ObjectPath, ObjectMeta, ObjectStore,
 };
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};

@@ -7,10 +7,10 @@ use super::test_helpers::{
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
-};
+use plexspaces_actor::Message;
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
+    ServiceLocator, RequestContextExt};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -27,8 +27,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         message_type: message_type.to_string(),
@@ -124,7 +124,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     // Build and spawn actor with VirtualActorFacet (eager)
     let behavior = Box::new(TestActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -152,7 +152,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -176,12 +176,12 @@ async fn test_get_or_activate_with_virtual_facet_lazy() {
 
     // Register BehaviorRegistry so that activate_virtual_actor can rebuild the actor
     // from its stored actor_type ("GenServer") when the lazy actor receives its first message.
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
             Box::pin(
-                async move { Ok(Box::new(TestActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(TestActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;
@@ -194,7 +194,7 @@ async fn test_get_or_activate_with_virtual_facet_lazy() {
     // Build and spawn actor with VirtualActorFacet (lazy)
     let behavior = Box::new(TestActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();

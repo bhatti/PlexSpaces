@@ -41,15 +41,20 @@
 
 #[cfg(feature = "redis-backend")]
 mod redis_multinode_tests {
+    use plexspaces_common::test_helpers::redis_available;
     use plexspaces_tuplespace::storage::redis::{RedisConfig, RedisStorage};
     use plexspaces_tuplespace::*;
     use std::sync::Arc;
     use std::time::Duration;
 
+    fn redis_url() -> String {
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
+    }
+
     /// Create a TupleSpace instance connected to shared Redis
     async fn create_redis_tuplespace(node_id: &str) -> Arc<TupleSpace> {
         let config = RedisConfig {
-            connection_string: "redis://localhost:6379".to_string(),
+            connection_string: redis_url(),
             pool_size: 10,
             key_prefix: format!("test-multinode-{}", node_id),
             enable_pubsub: false,
@@ -66,24 +71,19 @@ mod redis_multinode_tests {
         ))
     }
 
-    /// Helper: Check if Redis is available
-    async fn is_redis_available() -> bool {
-        let config = RedisConfig {
-            connection_string: "redis://localhost:6379".to_string(),
-            pool_size: 1,
-            key_prefix: "test-health".to_string(),
-            enable_pubsub: false,
-        };
-
-        RedisStorage::new(config).await.is_ok()
+    async fn skip_if_redis_unavailable() -> bool {
+        if redis_available().await {
+            return false;
+        }
+        eprintln!("⚠️  Skipping test: Redis not available on localhost:6379");
+        eprintln!("   Start Redis: docker run -p 6379:6379 redis:7");
+        true
     }
 
     #[tokio::test]
     async fn test_redis_multinode_write_read() {
         // Skip if Redis not available
-        if !is_redis_available().await {
-            eprintln!("⚠️  Skipping test: Redis not available on localhost:6379");
-            eprintln!("   Start Redis: docker run -p 6379:6379 redis:7");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -136,8 +136,7 @@ mod redis_multinode_tests {
 
     #[tokio::test]
     async fn test_redis_multinode_atomic_take() {
-        if !is_redis_available().await {
-            eprintln!("⚠️  Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -185,8 +184,7 @@ mod redis_multinode_tests {
 
     #[tokio::test]
     async fn test_redis_multinode_consistent_count() {
-        if !is_redis_available().await {
-            eprintln!("⚠️  Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -242,8 +240,7 @@ mod redis_multinode_tests {
 
     #[tokio::test]
     async fn test_redis_multinode_distributed_barrier() {
-        if !is_redis_available().await {
-            eprintln!("⚠️  Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 
@@ -302,8 +299,7 @@ mod redis_multinode_tests {
 
     #[tokio::test]
     async fn test_redis_multinode_work_queue_pattern() {
-        if !is_redis_available().await {
-            eprintln!("⚠️  Skipping test: Redis not available");
+        if skip_if_redis_unavailable().await {
             return;
         }
 

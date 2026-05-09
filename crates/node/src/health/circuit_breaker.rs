@@ -30,7 +30,7 @@
 //! - Provides metrics for dashboard monitoring
 
 use plexspaces_circuit_breaker::CircuitBreaker;
-use plexspaces_core::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
+use plexspaces_actor::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
 use plexspaces_proto::circuitbreaker::prv::{
     CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy,
 };
@@ -223,8 +223,8 @@ impl HealthChecker for CircuitBreakerHealthChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::health_checker::PingChecker;
-    use plexspaces_core::HealthCheckContext;
+    use plexspaces_actor::health_checker::PingChecker;
+    use plexspaces_actor::HealthCheckContext;
 
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_success() {

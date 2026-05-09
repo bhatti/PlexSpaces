@@ -65,7 +65,7 @@ pub mod channel_config {
         #[prost(message, tag="15")]
         Udp(super::UdpConfig),
         #[prost(message, tag="16")]
-        Sqs(super::SqsConfig),
+        Sqs(super::super::super::config::v1::SqsConfig),
     }
 }
 /// In-memory channel configuration
@@ -335,39 +335,6 @@ pub struct UdpConfig {
     #[prost(uint32, tag="4")]
     pub message_ttl_seconds: u32,
 }
-/// AWS SQS configuration
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SqsConfig {
-    /// AWS region (e.g., "us-east-1")
-    #[prost(string, tag="1")]
-    pub region: ::prost::alloc::string::String,
-    /// Queue name prefix (default: "plexspaces-")
-    /// Actual queue names will be: {prefix}{channel_name}
-    #[prost(string, tag="2")]
-    pub queue_prefix: ::prost::alloc::string::String,
-    /// Endpoint URL (for local testing with SQS Local)
-    /// Leave empty for production (uses AWS service)
-    #[prost(string, tag="3")]
-    pub endpoint_url: ::prost::alloc::string::String,
-    /// Visibility timeout in seconds (default: 30)
-    /// How long a message is invisible after being received
-    #[prost(uint32, tag="4")]
-    pub visibility_timeout_seconds: u32,
-    /// Message retention period in seconds (default: 345600 = 4 days)
-    #[prost(uint32, tag="5")]
-    pub message_retention_period_seconds: u32,
-    /// Dead Letter Queue configuration
-    #[prost(bool, tag="6")]
-    pub dlq_enabled: bool,
-    /// Max receive count before sending to DLQ (default: 3)
-    #[prost(uint32, tag="7")]
-    pub dlq_max_receive_count: u32,
-    /// Receive message wait time in seconds (long polling, default: 20)
-    /// 0 = short polling, >0 = long polling
-    #[prost(uint32, tag="8")]
-    pub receive_message_wait_time_seconds: u32,
-}
 /// Channel statistics
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -400,8 +367,6 @@ pub struct ChannelStats {
     #[prost(map="string, string", tag="9")]
     pub backend_stats: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
-// Note: ChannelService gRPC service removed - channel operations use Rust ChannelService trait
-
 /// CreateChannel request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -711,4 +676,261 @@ impl OrderingGuarantee {
         }
     }
 }
+/// Error codes for channel operations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ChannelErrorCode {
+    ChannelErrorUnspecified = 0,
+    /// Channel has reached its capacity limit (bounded channels only)
+    ChannelErrorFull = 1,
+    /// Channel has been closed and is no longer accepting messages
+    ChannelErrorClosed = 2,
+    /// Operation did not complete within the allotted time
+    ChannelErrorTimeout = 3,
+    /// Requested message does not exist
+    ChannelErrorMessageNotFound = 4,
+    /// Channel configuration is invalid
+    ChannelErrorInvalidConfiguration = 5,
+    /// Channel does not exist
+    ChannelErrorNotFound = 6,
+    /// Channel with this name already exists
+    ChannelErrorAlreadyExists = 7,
+}
+impl ChannelErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ChannelErrorCode::ChannelErrorUnspecified => "CHANNEL_ERROR_UNSPECIFIED",
+            ChannelErrorCode::ChannelErrorFull => "CHANNEL_ERROR_FULL",
+            ChannelErrorCode::ChannelErrorClosed => "CHANNEL_ERROR_CLOSED",
+            ChannelErrorCode::ChannelErrorTimeout => "CHANNEL_ERROR_TIMEOUT",
+            ChannelErrorCode::ChannelErrorMessageNotFound => "CHANNEL_ERROR_MESSAGE_NOT_FOUND",
+            ChannelErrorCode::ChannelErrorInvalidConfiguration => "CHANNEL_ERROR_INVALID_CONFIGURATION",
+            ChannelErrorCode::ChannelErrorNotFound => "CHANNEL_ERROR_NOT_FOUND",
+            ChannelErrorCode::ChannelErrorAlreadyExists => "CHANNEL_ERROR_ALREADY_EXISTS",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "CHANNEL_ERROR_UNSPECIFIED" => Some(Self::ChannelErrorUnspecified),
+            "CHANNEL_ERROR_FULL" => Some(Self::ChannelErrorFull),
+            "CHANNEL_ERROR_CLOSED" => Some(Self::ChannelErrorClosed),
+            "CHANNEL_ERROR_TIMEOUT" => Some(Self::ChannelErrorTimeout),
+            "CHANNEL_ERROR_MESSAGE_NOT_FOUND" => Some(Self::ChannelErrorMessageNotFound),
+            "CHANNEL_ERROR_INVALID_CONFIGURATION" => Some(Self::ChannelErrorInvalidConfiguration),
+            "CHANNEL_ERROR_NOT_FOUND" => Some(Self::ChannelErrorNotFound),
+            "CHANNEL_ERROR_ALREADY_EXISTS" => Some(Self::ChannelErrorAlreadyExists),
+            _ => None,
+        }
+    }
+}
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+include!("plexspaces.channel.v1.tonic.rs");
 // @@protoc_insertion_point(module)

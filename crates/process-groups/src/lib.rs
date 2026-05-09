@@ -38,7 +38,7 @@
 //! ### Configuration Updates (Broadcast Pattern)
 //! ```rust,ignore
 //! use plexspaces_process_groups::*;
-//! use plexspaces_core::RequestContext;
+//! use plexspaces_actor::RequestContext;
 //!
 //! let ctx = RequestContext::new_without_auth("tenant-1".into(), "namespace".into());
 //!
@@ -72,7 +72,8 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-use plexspaces_core::{ActorId, RequestContext, Service};
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::{ActorId, RequestContext, RequestContextExt, Service};
 use plexspaces_keyvalue::{KVError, KeyValueStore};
 use plexspaces_proto::processgroups::v1::{GroupMembership, ProcessGroup};
 use prost::Message as ProstMessage;
@@ -142,7 +143,7 @@ pub struct ProcessGroupRegistry {
 
 impl Service for ProcessGroupRegistry {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::PROCESS_GROUP_REGISTRY.to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
     }
 }
 
@@ -878,7 +879,7 @@ impl ProcessGroupRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_keyvalue::SqliteKVStore;
 
     // Test constants

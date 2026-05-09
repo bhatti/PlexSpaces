@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// Actor domain types and error codes.
+// Moved here from actor_runtime.proto to separate stable data contracts
+// from the gRPC request/response service API.
+
+syntax = "proto3";
+
+package plexspaces.actor.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/actor_runtime;plexspaces_actor_v1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.actor.v1";
+
+// Actor lifecycle states.
+//
+// ## Purpose
+// Defines the state machine for actor lifecycle management and supervision.
+//
+// ## Why This Exists
+// - Enables supervision to track actor health and make restart decisions
+// - Supports graceful activation/deactivation (Orbit-inspired auto-activation)
+// - Allows migration state tracking for mobile agents
+// - Provides clear state transitions for debugging and monitoring
+//
+// ## State Transitions
+// ```
+// CREATING -> ACTIVATING -> ACTIVE -> DEACTIVATING -> INACTIVE
+//                        \-> MIGRATING -> ACTIVE (on new node)
+//                        \-> FAILED -> (supervisor restarts)
+//                        \-> TERMINATED (permanent stop)
+// ```
+//
+// ## Design Notes
+// - UNSPECIFIED should never occur in valid states (indicates error)
+// - ACTIVATING/DEACTIVATING enable graceful lifecycle management
+// - MIGRATING supports actor mobility between nodes
+// - FAILED triggers supervisor restart policies
+// - FAILED state includes error message for debugging (see Actor message for error details)
+enum ActorState {
+  ACTOR_STATE_UNSPECIFIED = 0;
+  ACTOR_STATE_CREATING = 1; // Actor is created but not yet started (replaces "Initializing")
+  ACTOR_STATE_ACTIVE = 2; // Actor is running and processing messages
+  ACTOR_STATE_INACTIVE = 3; // Actor is suspended/not processing (replaces "Suspended")
+  ACTOR_STATE_ACTIVATING = 4; // Actor is activating (loading state, running on_activate)
+  ACTOR_STATE_DEACTIVATING = 5; // Actor is deactivating (saving state, running on_deactivate)
+  ACTOR_STATE_STOPPING = 6; // Actor is stopping (shutdown in progress)
+  ACTOR_STATE_MIGRATING = 7; // Actor is migrating to another node
+  ACTOR_STATE_FAILED = 8; // Actor has crashed (error message in Actor.error_message field)
+  ACTOR_STATE_TERMINATED = 9; // Actor has permanently stopped (replaces "Stopped")
+}
+
+// Exit reason for actor termination (Erlang/OTP-style)
+//
+// ## Purpose
+// Defines why an actor terminated, enabling proper supervision decisions
+// and link/monitor propagation semantics.
+//
+// ## Erlang Equivalent
+// Maps to Erlang's exit reasons:
+// - normal: Normal termination (not an error)
+// - shutdown: Graceful shutdown requested
+// - kill: Forcefully killed
+// - {error, Reason}: Error with message
+// - {linked, Pid, Reason}: Linked actor died
+//
+// ## Usage
+// - Used in Actor::terminate() and Actor::handle_exit() lifecycle hooks
+// - Propagated to linked actors (if trap_exit=false, causes cascading crash)
+// - Used by supervisors to decide restart policies
+enum ExitReason {
+  EXIT_REASON_UNSPECIFIED = 0;
+  EXIT_REASON_NORMAL = 1; // Normal termination (not an error)
+  EXIT_REASON_SHUTDOWN = 2; // Shutdown requested (graceful)
+  EXIT_REASON_KILLED = 3; // Killed forcefully
+  EXIT_REASON_ERROR = 4; // Error with message (error_message field contains details)
+  EXIT_REASON_LINKED = 5; // Linked actor died (linked_actor_id and linked_reason fields)
+}
+
+// Exit action when handling EXIT from linked actor
+//
+// ## Purpose
+// Determines how an actor responds to EXIT signal from a linked actor.
+// Only relevant when ActorContext.trap_exit = true.
+//
+// ## Erlang Equivalent
+// Maps to Erlang's handle_exit behavior:
+// - Propagate: Actor will also terminate (default link behavior)
+// - Handle: Actor continues running (traps the exit)
+enum ExitAction {
+  EXIT_ACTION_UNSPECIFIED = 0;
+  EXIT_ACTION_PROPAGATE = 1; // Propagate exit - this actor will also terminate
+  EXIT_ACTION_HANDLE = 2; // Handle exit - this actor continues running
+}
+
+// Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
+message ExitReasonDetails {
+  // Error message (for EXIT_REASON_ERROR)
+  string error_message = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // Linked actor ID (for EXIT_REASON_LINKED)
+  string linked_actor_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Linked actor's exit reason (for EXIT_REASON_LINKED)
+  ExitReason linked_reason = 3;
+}
+
+// ============================================================================
+// Error codes (proto-first for polyglot error handling)
+// ============================================================================
+
+enum ActorErrorCode {
+  ACTOR_ERROR_UNSPECIFIED = 0;
+  ACTOR_ERROR_NOT_FOUND = 1;
+  ACTOR_ERROR_ALREADY_EXISTS = 2;
+  ACTOR_ERROR_INVALID_STATE = 3;
+  ACTOR_ERROR_TIMEOUT = 4;
+  ACTOR_ERROR_TERMINATED = 5;
+  ACTOR_ERROR_FACET_ERROR = 6;
+  ACTOR_ERROR_MAILBOX_ERROR = 7;
+  ACTOR_ERROR_BEHAVIOR_ERROR = 8;
+  ACTOR_ERROR_JOURNAL_ERROR = 9;
+}
+
+enum BehaviorErrorCode {
+  BEHAVIOR_ERROR_UNSPECIFIED = 0;
+  BEHAVIOR_ERROR_HANDLER_NOT_FOUND = 1;
+  BEHAVIOR_ERROR_UNSUPPORTED_MESSAGE = 2;
+  BEHAVIOR_ERROR_TRANSITION_FAILED = 3;
+  BEHAVIOR_ERROR_PROCESSING_ERROR = 4;
+}
+
+enum ActorIdErrorCode {
+  ACTOR_ID_ERROR_UNSPECIFIED = 0;
+  ACTOR_ID_ERROR_INVALID_NAME = 1;
+  ACTOR_ID_ERROR_INVALID_ACTOR_TYPE = 2;
+  ACTOR_ID_ERROR_MISSING_FIELD = 3;
+  ACTOR_ID_ERROR_INVALID_FORMAT = 4;
+}
+
+enum SupervisorErrorCode {
+  SUPERVISOR_ERROR_UNSPECIFIED = 0;
+  SUPERVISOR_ERROR_CHILD_START_FAILED = 1;
+  SUPERVISOR_ERROR_MAX_RESTARTS_EXCEEDED = 2;
+  SUPERVISOR_ERROR_CHILD_NOT_FOUND = 3;
+  SUPERVISOR_ERROR_SHUTDOWN_TIMEOUT = 4;
+  SUPERVISOR_ERROR_CONFIG_ERROR = 5;
+}
+
+enum GenServerErrorCode {
+  GEN_SERVER_ERROR_UNSPECIFIED = 0;
+  GEN_SERVER_ERROR_SERIALIZATION = 1;
+  GEN_SERVER_ERROR_CALL = 2;
+  GEN_SERVER_ERROR_CAST = 3;
+  GEN_SERVER_ERROR_SPAWN = 4;
+}
+
+enum FsmErrorCode {
+  FSM_ERROR_UNSPECIFIED = 0;
+  FSM_ERROR_SERIALIZATION = 1;
+  FSM_ERROR_TRANSITION = 2;
+  FSM_ERROR_QUERY = 3;
+  FSM_ERROR_SPAWN = 4;
+}
+
+enum EventErrorCode {
+  EVENT_ERROR_UNSPECIFIED = 0;
+  EVENT_ERROR_SERIALIZATION = 1;
+  EVENT_ERROR_EMIT = 2;
+  EVENT_ERROR_SPAWN = 3;
+}
+
+enum WorkflowRefErrorCode {
+  WORKFLOW_REF_ERROR_UNSPECIFIED = 0;
+  WORKFLOW_REF_ERROR_SERIALIZATION = 1;
+  WORKFLOW_REF_ERROR_EXECUTION = 2;
+  WORKFLOW_REF_ERROR_SPAWN = 3;
+}
+
+enum VirtualActorErrorCode {
+  VIRTUAL_ACTOR_ERROR_UNSPECIFIED = 0;
+  VIRTUAL_ACTOR_ERROR_NOT_FOUND = 1;
+  VIRTUAL_ACTOR_ERROR_ACTIVATION_FAILED = 2;
+}
+
+enum PoolServiceErrorCode {
+  POOL_SERVICE_ERROR_UNSPECIFIED = 0;
+  POOL_SERVICE_ERROR_POOL_NOT_FOUND = 1;
+  POOL_SERVICE_ERROR_CHECKOUT_TIMEOUT = 2;
+  POOL_SERVICE_ERROR_POOL_EXHAUSTED = 3;
+  POOL_SERVICE_ERROR_CIRCUIT_OPEN = 4;
+  POOL_SERVICE_ERROR_POOL_DRAINING = 5;
+  POOL_SERVICE_ERROR_INVALID_CONFIG = 6;
+  POOL_SERVICE_ERROR_ACTOR_ERROR = 7;
+}

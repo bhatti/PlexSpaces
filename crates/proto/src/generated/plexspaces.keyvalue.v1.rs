@@ -380,82 +380,50 @@ pub struct GetStatsResponse {
     #[prost(string, tag="3")]
     pub backend_type: ::prost::alloc::string::String,
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
+/// Error codes for key-value store operations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum KeyValueStoreErrorCode {
+    KeyValueStoreErrorUnspecified = 0,
+    /// Requested key does not exist
+    KeyValueStoreErrorNotFound = 1,
+    /// Underlying storage backend failure
+    KeyValueStoreErrorStorage = 2,
+    /// Serialization or deserialization failure
+    KeyValueStoreErrorSerialization = 3,
+    /// Compare-and-swap precondition failed
+    KeyValueStoreErrorCasConflict = 4,
+    /// Operation not permitted (e.g., read-only backend)
+    KeyValueStoreErrorPermissionDenied = 5,
+}
+impl KeyValueStoreErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            KeyValueStoreErrorCode::KeyValueStoreErrorUnspecified => "KEY_VALUE_STORE_ERROR_UNSPECIFIED",
+            KeyValueStoreErrorCode::KeyValueStoreErrorNotFound => "KEY_VALUE_STORE_ERROR_NOT_FOUND",
+            KeyValueStoreErrorCode::KeyValueStoreErrorStorage => "KEY_VALUE_STORE_ERROR_STORAGE",
+            KeyValueStoreErrorCode::KeyValueStoreErrorSerialization => "KEY_VALUE_STORE_ERROR_SERIALIZATION",
+            KeyValueStoreErrorCode::KeyValueStoreErrorCasConflict => "KEY_VALUE_STORE_ERROR_CAS_CONFLICT",
+            KeyValueStoreErrorCode::KeyValueStoreErrorPermissionDenied => "KEY_VALUE_STORE_ERROR_PERMISSION_DENIED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "KEY_VALUE_STORE_ERROR_UNSPECIFIED" => Some(Self::KeyValueStoreErrorUnspecified),
+            "KEY_VALUE_STORE_ERROR_NOT_FOUND" => Some(Self::KeyValueStoreErrorNotFound),
+            "KEY_VALUE_STORE_ERROR_STORAGE" => Some(Self::KeyValueStoreErrorStorage),
+            "KEY_VALUE_STORE_ERROR_SERIALIZATION" => Some(Self::KeyValueStoreErrorSerialization),
+            "KEY_VALUE_STORE_ERROR_CAS_CONFLICT" => Some(Self::KeyValueStoreErrorCasConflict),
+            "KEY_VALUE_STORE_ERROR_PERMISSION_DENIED" => Some(Self::KeyValueStoreErrorPermissionDenied),
+            _ => None,
+        }
+    }
+}
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

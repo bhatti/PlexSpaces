@@ -15,7 +15,7 @@ use super::test_helpers::{
 };
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, Message, ServiceLocator};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, InitializableServiceLocator, Message, ServiceLocator};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
@@ -35,12 +35,12 @@ impl ActorTrait for TestBehavior {
         &mut self,
         _ctx: &ActorContext,
         _message: Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -50,7 +50,7 @@ async fn create_test_node() -> Node {
 }
 
 fn create_timer_facet(
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> Box<TimerFacet> {
     Box::new(TimerFacet::new(serde_json::json!({}), 50, service_locator))
 }
@@ -239,11 +239,11 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let node = Arc::new(create_test_node().await);
 
     // Register BehaviorRegistry so lazy virtual actor can be activated via registry_tell
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     node.service_locator()

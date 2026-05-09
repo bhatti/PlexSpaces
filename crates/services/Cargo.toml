@@ -11,7 +11,7 @@ description = "Centralized service infrastructure and implementations for PlexSp
 
 [dependencies]
 # Core dependencies
-plexspaces-core = { path = "../core" }
+plexspaces-service-traits = { path = "../service-traits" }
 plexspaces-proto = { workspace = true }
 plexspaces-mailbox = { workspace = true }
 plexspaces-tuplespace = { path = "../tuplespace" }

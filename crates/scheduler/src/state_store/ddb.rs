@@ -77,7 +77,7 @@ use aws_sdk_dynamodb::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::scheduling::v1::{SchedulingRequest, SchedulingStatus};
 use prost::Message;
 use std::collections::HashMap;
@@ -91,7 +91,7 @@ use tracing::{debug, error, instrument, warn};
 /// ```rust,no_run
 /// use plexspaces_scheduler::state_store::ddb::DynamoDBSchedulingStateStore;
 /// use plexspaces_proto::scheduling::v1::SchedulingRequest;
-/// use plexspaces_core::RequestContext;
+/// use plexspaces_actor::{RequestContext, RequestContextExt};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 /// let store = DynamoDBSchedulingStateStore::new(

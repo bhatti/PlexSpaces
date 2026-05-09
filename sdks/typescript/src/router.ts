@@ -89,9 +89,9 @@ export class ActorRouter {
       // actor_type from init config is the authoritative dispatch key (set by ChildSpec.actor_type).
       // Fall back to extracting the type component from the canonical actor_id.
       const actorType = (config.actor_type as string) || normalizeActorRole(actorId);
-      // declaration_name is the child spec name (e.g. "router", "chain") — used when multiple
-      // children share the same actor_type (e.g. all use "llm_workflow_orchestrator_wasm").
-      const declarationName = (config.declaration_name as string) || "";
+      // role is the child spec name (e.g. "router", "chain") sourced from ActorSpawnSpec.role —
+      // used when multiple children share the same actor_type.
+      const role = (config.role as string) || "";
 
       const findFactory = (key: string): [string, ActorFactory | null] => {
         let bestPrefix = "";
@@ -107,15 +107,15 @@ export class ActorRouter {
         return [bestPrefix, bestFactory];
       };
 
-      // Try declaration_name first (exact child name match wins when present).
+      // Try role first (exact child name match wins when present).
       // Fall back to actor_type prefix matching for single-actor-type modules.
-      let [, bestFactory] = declarationName ? findFactory(declarationName) : ["", null];
+      let [, bestFactory] = role ? findFactory(role) : ["", null];
       if (!bestFactory) {
         [, bestFactory] = findFactory(actorType);
       }
 
       if (!bestFactory) {
-        throw new Error("ERROR: no actor registered for declaration_name='" + declarationName + "' actor_type='" + actorType + "'");
+        throw new Error("ERROR: no actor registered for role='" + role + "' actor_type='" + actorType + "'");
       }
 
       this.active = bestFactory();

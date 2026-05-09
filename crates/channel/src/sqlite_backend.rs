@@ -204,33 +204,14 @@ impl SqliteChannel {
                 })?;
         }
 
-        // Schema: for :memory: create inline; file-based uses unified db/migrations at init.
-        if sqlite_config.database_path == ":memory:" || sqlite_config.database_path.is_empty() {
-            sqlx::query(
-                r#"CREATE TABLE IF NOT EXISTS channel_messages (
-                    id TEXT PRIMARY KEY, channel_name TEXT NOT NULL, payload BLOB NOT NULL,
-                    headers_json TEXT NOT NULL DEFAULT '{}',
-                    timestamp INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"#,
-            )
-            .execute(&pool)
-            .await
-            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
-            sqlx::query("CREATE INDEX IF NOT EXISTS idx_channel_unacked ON channel_messages(channel_name, acked) WHERE acked = 0")
-                .execute(&pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_channel_name ON channel_messages(channel_name)",
-            )
-            .execute(&pool)
-            .await
-            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
-        }
-
         // Get table name
         let table_name = if sqlite_config.table_name.is_empty() {
             "channel_messages".to_string()
         } else {
             sqlite_config.table_name.clone()
         };
+
+        Self::ensure_schema(&pool, &table_name).await?;
 
         tracing::info!(
             db_path = %sqlite_config.database_path,
@@ -259,6 +240,47 @@ impl SqliteChannel {
         channel.recover_unacked_messages().await?;
 
         Ok(channel)
+    }
+
+    async fn ensure_schema(pool: &SqlitePool, table_name: &str) -> ChannelResult<()> {
+        let create_table_sql = format!(
+            r#"CREATE TABLE IF NOT EXISTS {} (
+                id TEXT PRIMARY KEY,
+                channel_name TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                headers_json TEXT NOT NULL DEFAULT '{{}}',
+                timestamp INTEGER NOT NULL,
+                acked INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )"#,
+            table_name
+        );
+        sqlx::query(&create_table_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+
+        let unacked_index = format!("idx_{}_unacked", table_name);
+        let create_unacked_index_sql = format!(
+            "CREATE INDEX IF NOT EXISTS {} ON {}(channel_name, acked) WHERE acked = 0",
+            unacked_index, table_name
+        );
+        sqlx::query(&create_unacked_index_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+
+        let name_index = format!("idx_{}_channel_name", table_name);
+        let create_name_index_sql = format!(
+            "CREATE INDEX IF NOT EXISTS {} ON {}(channel_name)",
+            name_index, table_name
+        );
+        sqlx::query(&create_name_index_sql)
+            .execute(pool)
+            .await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+
+        Ok(())
     }
 
     /// Recover unacked messages from database

@@ -28,20 +28,20 @@ use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::child_spec::StartedChild;
 use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
-use plexspaces_actor::{Actor, ChildSpec};
-use plexspaces_core::{
+use plexspaces_actor::{ActorInstance as Actor, ChildSpec};
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 
-fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
-    plexspaces_core::ActorId::new(name, "gen_server", "namespace", "test-node")
+fn test_actor_id(name: &str) -> plexspaces_actor::ActorId {
+    plexspaces_actor::ActorId::new(name, "gen_server", "namespace", "test-node")
         .expect("valid test actor id")
 }
 
-fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
-    if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(id) {
+fn actor_id_from_legacy(id: &str) -> plexspaces_actor::ActorId {
+    if let Ok(actor_id) = plexspaces_actor::ActorId::from_canonical(id) {
         return actor_id;
     }
     let name = id.split('@').next().unwrap_or(id);
@@ -60,7 +60,7 @@ impl TestActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for TestActor {
+impl plexspaces_actor::Actor for TestActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
@@ -73,17 +73,17 @@ impl plexspaces_core::Actor for TestActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
 struct InitObservingActor {
-    observed_ids: Arc<tokio::sync::Mutex<Vec<plexspaces_core::ActorId>>>,
+    observed_ids: Arc<tokio::sync::Mutex<Vec<plexspaces_actor::ActorId>>>,
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for InitObservingActor {
+impl plexspaces_actor::Actor for InitObservingActor {
     async fn init(&mut self, ctx: &ActorContext) -> Result<(), ActorError> {
         self.observed_ids.lock().await.push(ctx.actor_id().clone());
         Ok(())
@@ -97,8 +97,8 @@ impl plexspaces_core::Actor for InitObservingActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -165,8 +165,8 @@ async fn test_supervisor_start_child_with_facets() {
     let spec = spec.with_facet(proto_facet);
 
     // Verify facets are stored in ChildSpec
-    assert_eq!(spec.facets.len(), 1);
-    assert_eq!(spec.facets[0].r#type, "test");
+    assert_eq!(spec.proto.facets.len(), 1);
+    assert_eq!(spec.proto.facets[0].r#type, "test");
 
     let result = supervisor.start_child(spec).await;
     assert!(result.is_ok(), "start_child should succeed");
@@ -246,12 +246,12 @@ async fn test_supervisor_restart_preserves_facets() {
     assert!(retrieved_spec.is_some(), "Should be able to get child spec");
     let retrieved_spec = retrieved_spec.unwrap();
     assert_eq!(
-        retrieved_spec.facets.len(),
+        retrieved_spec.proto.facets.len(),
         1,
         "Spec should have 1 facet stored"
     );
     assert_eq!(
-        retrieved_spec.facets[0].r#type, "test_facet",
+        retrieved_spec.proto.facets[0].r#type, "test_facet",
         "Facet type should match"
     );
 
@@ -260,7 +260,7 @@ async fn test_supervisor_restart_preserves_facets() {
         .handle_failure(
             &actor_id_from_legacy(&actor_id),
             "simulated crash".to_string(),
-            Some(plexspaces_core::ExitReason::Error("test error".to_string())),
+            Some(plexspaces_actor::ExitReason::Error("test error".to_string())),
         )
         .await;
     assert!(result.is_ok(), "handle_failure should succeed");
@@ -284,12 +284,12 @@ async fn test_supervisor_restart_preserves_facets() {
     );
     let retrieved_spec = retrieved_spec.unwrap();
     assert_eq!(
-        retrieved_spec.facets.len(),
+        retrieved_spec.proto.facets.len(),
         1,
         "Spec should still have 1 facet after restart"
     );
     assert_eq!(
-        retrieved_spec.facets[0].r#type, "test_facet",
+        retrieved_spec.proto.facets[0].r#type, "test_facet",
         "Facet type should still match after restart"
     );
 }

@@ -10,8 +10,8 @@
 mod actor_integration_tests {
 
     /// Helper to create a test message
-    fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-        plexspaces_core::Message {
+    fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+        plexspaces_actor::Message {
             id: ulid::Ulid::new().to_string(),
             payload,
             ..Default::default()
@@ -19,9 +19,9 @@ mod actor_integration_tests {
     }
 
     use async_trait::async_trait;
-    use plexspaces_actor::Actor as ActorStruct;
-    use plexspaces_core::Message;
-    use plexspaces_core::{
+    use plexspaces_actor::ActorInstance as ActorStruct;
+    use plexspaces_actor::Message;
+    use plexspaces_actor::{
         Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
     };
     #[cfg(feature = "postgres-backend")]
@@ -42,7 +42,7 @@ mod actor_integration_tests {
 
     async fn actor_with_service_locator(
         id: ActorId,
-        behavior: Box<dyn plexspaces_core::Actor>,
+        behavior: Box<dyn plexspaces_actor::Actor>,
         mailbox: Mailbox,
         tenant_id: String,
         namespace: String,
@@ -51,7 +51,7 @@ mod actor_integration_tests {
             plexspaces_node::service_locator_helpers::create_default_service_locator(None, None)
                 .await;
         let node_id = id.node_id().to_string();
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = locator_impl;
+        let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> = locator_impl;
         let context = Arc::new(ActorContext::new(
             node_id,
             tenant_id.clone(),

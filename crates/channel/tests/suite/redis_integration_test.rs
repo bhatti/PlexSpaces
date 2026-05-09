@@ -47,6 +47,10 @@ use plexspaces_channel::*;
 use plexspaces_proto::channel::v1::*;
 use plexspaces_proto::common::v1::Message;
 
+fn redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
+}
+
 // Helper to check if Redis is available
 async fn is_redis_available() -> bool {
     #[cfg(feature = "test-helpers")]
@@ -55,17 +59,23 @@ async fn is_redis_available() -> bool {
     }
     #[cfg(not(feature = "test-helpers"))]
     {
-        // Fallback: fast TCP connection check
-        use std::time::Duration;
-        use tokio::net::TcpStream;
-        use tokio::time::timeout;
-        timeout(
-            Duration::from_millis(500),
-            TcpStream::connect("localhost:6379"),
-        )
+        tokio::task::spawn_blocking(|| {
+            redis::Client::open(redis_url())
+                .ok()
+                .and_then(|client| client.get_connection().ok())
+                .is_some()
+        })
         .await
-        .is_ok()
+        .unwrap_or(false)
     }
+}
+
+async fn skip_if_redis_unavailable() -> bool {
+    if is_redis_available().await {
+        return false;
+    }
+    eprintln!("Skipping test: Redis not available");
+    true
 }
 
 // Helper to create test config
@@ -79,7 +89,7 @@ fn create_test_config(name: &str) -> ChannelConfig {
         delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
         backend_config: Some(channel_config::BackendConfig::Redis(RedisConfig {
-            url: "redis://localhost:6379".to_string(),
+            url: redis_url(),
             stream_key: format!("test-stream:{}", name),
             max_length: 1000,
             consumer_group: "".to_string(),
@@ -96,7 +106,7 @@ fn create_test_config(name: &str) -> ChannelConfig {
 
 // Helper to cleanup Redis streams
 async fn cleanup_redis_stream(stream_name: &str) {
-    if let Ok(client) = redis::Client::open("redis://localhost:6379") {
+    if let Ok(client) = redis::Client::open(redis_url()) {
         if let Ok(mut conn) = client.get_connection() {
             let _: Result<(), redis::RedisError> =
                 redis::cmd("DEL").arg(stream_name).query(&mut conn);
@@ -106,8 +116,7 @@ async fn cleanup_redis_stream(stream_name: &str) {
 
 #[tokio::test]
 async fn test_redis_send_and_receive_single_message() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -140,8 +149,7 @@ async fn test_redis_send_and_receive_single_message() {
 
 #[tokio::test]
 async fn test_redis_send_and_receive_multiple_messages() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -178,8 +186,7 @@ async fn test_redis_send_and_receive_multiple_messages() {
 
 #[tokio::test]
 async fn test_redis_try_receive_empty() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -200,8 +207,7 @@ async fn test_redis_try_receive_empty() {
 
 #[tokio::test]
 async fn test_redis_try_receive_with_messages() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -232,8 +238,7 @@ async fn test_redis_try_receive_with_messages() {
 
 #[tokio::test]
 async fn test_redis_publish_subscribe() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -276,8 +281,7 @@ async fn test_redis_publish_subscribe() {
 
 #[tokio::test]
 async fn test_redis_ack() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -314,8 +318,7 @@ async fn test_redis_ack() {
 
 #[tokio::test]
 async fn test_redis_nack_requeue() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -356,8 +359,7 @@ async fn test_redis_nack_requeue() {
 
 #[tokio::test]
 async fn test_redis_consumer_group() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -395,8 +397,7 @@ async fn test_redis_consumer_group() {
 
 #[tokio::test]
 async fn test_redis_get_stats() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -429,8 +430,7 @@ async fn test_redis_get_stats() {
 
 #[tokio::test]
 async fn test_redis_close_channel() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 
@@ -463,8 +463,7 @@ async fn test_redis_close_channel() {
 
 #[tokio::test]
 async fn test_redis_message_persistence() {
-    if !is_redis_available().await {
-        eprintln!("Skipping test: Redis not available");
+    if skip_if_redis_unavailable().await {
         return;
     }
 

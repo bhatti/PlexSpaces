@@ -19,16 +19,16 @@
 //! Integration tests for Node with ActorContext
 
 use async_trait::async_trait;
-use plexspaces_actor::Actor;
-use plexspaces_core::{ActorId, BehaviorType};
+use plexspaces_actor::ActorInstance;
+use plexspaces_actor::{ActorId, BehaviorType, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{default_node_config, Node, NodeId};
 
 use super::test_helpers::{lookup_actor_ref, spawn_actor_helper};
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -50,12 +50,12 @@ impl ContextAwareBehavior {
 
 #[async_trait]
 #[async_trait]
-impl plexspaces_core::Actor for ContextAwareBehavior {
+impl plexspaces_actor::Actor for ContextAwareBehavior {
     async fn handle_message(
         &mut self,
-        ctx: &plexspaces_core::ActorContext,
-        _msg: plexspaces_core::Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+        ctx: &plexspaces_actor::ActorContext,
+        _msg: plexspaces_actor::Message,
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         self.received_messages += 1;
 
         // Verify context has all services (Go-style: ctx is ActorContext directly)
@@ -94,7 +94,7 @@ async fn test_node_spawns_actor_with_full_context() {
     let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
         .await
         .unwrap();
-    let actor = Actor::new(
+    let actor = ActorInstance::new(
         actor_id.clone(),
         behavior,
         mailbox,
@@ -136,7 +136,7 @@ async fn test_node_spawns_actor_with_full_context() {
     // Send a message to verify context is working
     // Use lookup_actor_ref + tell() to send message
     // If the actor is not registered, this will fail with ActorNotFound
-    use plexspaces_core::Message;
+    use plexspaces_actor::Message;
 
     let message = create_test_message(b"test".to_vec());
     // The actor should be registered - if not, the error will tell us what's wrong
@@ -144,7 +144,7 @@ async fn test_node_spawns_actor_with_full_context() {
         .await
         .expect("Actor should be registered")
         .expect("Actor should exist");
-    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -181,7 +181,7 @@ async fn test_actor_context_has_node_id() {
     let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
         .await
         .unwrap();
-    let actor = Actor::new(
+    let actor = ActorInstance::new(
         actor_id.clone(),
         behavior,
         mailbox,
@@ -192,7 +192,7 @@ async fn test_actor_context_has_node_id() {
 
     // Before spawning, context should have minimal info
     let initial_ctx = actor.context();
-    assert_eq!(initial_ctx.node_id, "local"); // Default from Actor::new
+    assert_eq!(initial_ctx.node_id, "unassigned"); // Default from ActorInstance::new before spawning
 
     // After spawning, Node updates context via create_actor_context()
     // The context is updated during spawn_actor() which calls create_actor_context()

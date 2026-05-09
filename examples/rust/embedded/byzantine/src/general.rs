@@ -7,7 +7,7 @@
 // Each general votes and relays messages to reach consensus.
 
 use async_trait::async_trait;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

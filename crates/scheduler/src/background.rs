@@ -33,7 +33,7 @@ use crate::capacity_tracker::CapacityTracker;
 use crate::state_store::SchedulingStateStore;
 use futures::StreamExt;
 use plexspaces_channel::Channel;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_locks::{
     AcquireLockOptions, Lock, LockError, LockManager, ReleaseLockOptions, RenewLockOptions,
 };
@@ -82,6 +82,30 @@ pub enum BackgroundSchedulerError {
     /// Node selection error
     #[error("Node selection error: {0}")]
     NodeSelectionError(String),
+}
+
+impl BackgroundSchedulerError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::BackgroundSchedulerErrorCode {
+        use plexspaces_proto::node::v1::BackgroundSchedulerErrorCode;
+        match self {
+            BackgroundSchedulerError::AlreadyStarted(_) => {
+                BackgroundSchedulerErrorCode::BackgroundSchedulerErrorAlreadyStarted
+            }
+            BackgroundSchedulerError::LockError(_) => {
+                BackgroundSchedulerErrorCode::BackgroundSchedulerErrorLockError
+            }
+            BackgroundSchedulerError::ChannelError(_) => {
+                BackgroundSchedulerErrorCode::BackgroundSchedulerErrorChannelError
+            }
+            BackgroundSchedulerError::StateStoreError(_) => {
+                BackgroundSchedulerErrorCode::BackgroundSchedulerErrorStateStoreError
+            }
+            BackgroundSchedulerError::NodeSelectionError(_) => {
+                BackgroundSchedulerErrorCode::BackgroundSchedulerErrorNodeSelectionError
+            }
+        }
+    }
 }
 
 /// Result type for background scheduler
@@ -566,7 +590,7 @@ mod tests {
     use super::*;
     use crate::state_store::sql::SqliteSchedulingStateStore;
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_core::ObjectRegistry;
+    use plexspaces_actor::ObjectRegistry;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::channel::v1::ChannelConfig;

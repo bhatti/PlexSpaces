@@ -1095,4 +1095,52 @@ impl ExecutionMode {
         }
     }
 }
+/// Error codes for journal storage operations.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum JournalErrorCode {
+    JournalErrorUnspecified = 0,
+    /// Backend storage failure (disk I/O, DB error, etc.)
+    JournalErrorStorage = 1,
+    /// Requested entry does not exist
+    JournalErrorEntryNotFound = 2,
+    /// No checkpoint exists for the actor
+    JournalErrorCheckpointNotFound = 3,
+    /// Compression or decompression failure
+    JournalErrorCompression = 4,
+    /// Entry payload failed to serialize/deserialize
+    JournalErrorSerialization = 5,
+    /// Concurrent write conflict (optimistic concurrency violation)
+    JournalErrorConflict = 6,
+}
+impl JournalErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            JournalErrorCode::JournalErrorUnspecified => "JOURNAL_ERROR_UNSPECIFIED",
+            JournalErrorCode::JournalErrorStorage => "JOURNAL_ERROR_STORAGE",
+            JournalErrorCode::JournalErrorEntryNotFound => "JOURNAL_ERROR_ENTRY_NOT_FOUND",
+            JournalErrorCode::JournalErrorCheckpointNotFound => "JOURNAL_ERROR_CHECKPOINT_NOT_FOUND",
+            JournalErrorCode::JournalErrorCompression => "JOURNAL_ERROR_COMPRESSION",
+            JournalErrorCode::JournalErrorSerialization => "JOURNAL_ERROR_SERIALIZATION",
+            JournalErrorCode::JournalErrorConflict => "JOURNAL_ERROR_CONFLICT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "JOURNAL_ERROR_UNSPECIFIED" => Some(Self::JournalErrorUnspecified),
+            "JOURNAL_ERROR_STORAGE" => Some(Self::JournalErrorStorage),
+            "JOURNAL_ERROR_ENTRY_NOT_FOUND" => Some(Self::JournalErrorEntryNotFound),
+            "JOURNAL_ERROR_CHECKPOINT_NOT_FOUND" => Some(Self::JournalErrorCheckpointNotFound),
+            "JOURNAL_ERROR_COMPRESSION" => Some(Self::JournalErrorCompression),
+            "JOURNAL_ERROR_SERIALIZATION" => Some(Self::JournalErrorSerialization),
+            "JOURNAL_ERROR_CONFLICT" => Some(Self::JournalErrorConflict),
+            _ => None,
+        }
+    }
+}
 // @@protoc_insertion_point(module)

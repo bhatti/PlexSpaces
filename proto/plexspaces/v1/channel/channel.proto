@@ -48,6 +48,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/config.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/channel/channel;plexspaces_channel_v1";
 
@@ -170,7 +171,7 @@ message ChannelConfig {
     SqliteConfig sqlite = 13;
     NatsConfig nats = 14;
     UdpConfig udp = 15;
-    SqsConfig sqs = 16;
+    plexspaces.config.v1.SqsConfig sqs = 16;
   }
 
   // Optional: TTL for messages
@@ -373,37 +374,6 @@ message UdpConfig {
   uint32 message_ttl_seconds = 4;
 }
 
-// AWS SQS configuration
-message SqsConfig {
-  // AWS region (e.g., "us-east-1")
-  string region = 1;
-
-  // Queue name prefix (default: "plexspaces-")
-  // Actual queue names will be: {prefix}{channel_name}
-  string queue_prefix = 2;
-
-  // Endpoint URL (for local testing with SQS Local)
-  // Leave empty for production (uses AWS service)
-  string endpoint_url = 3;
-
-  // Visibility timeout in seconds (default: 30)
-  // How long a message is invisible after being received
-  uint32 visibility_timeout_seconds = 4;
-
-  // Message retention period in seconds (default: 345600 = 4 days)
-  uint32 message_retention_period_seconds = 5;
-
-  // Dead Letter Queue configuration
-  bool dlq_enabled = 6;
-
-  // Max receive count before sending to DLQ (default: 3)
-  uint32 dlq_max_receive_count = 7;
-
-  // Receive message wait time in seconds (long polling, default: 20)
-  // 0 = short polling, >0 = long polling
-  uint32 receive_message_wait_time_seconds = 8;
-}
-
 // Channel statistics
 message ChannelStats {
   // Channel name
@@ -433,8 +403,6 @@ message ChannelStats {
   // Backend-specific stats
   map<string, string> backend_stats = 9;
 }
-
-// Note: ChannelService gRPC service removed - channel operations use Rust ChannelService trait
 
 // CreateChannel request
 message CreateChannelRequest {
@@ -561,4 +529,96 @@ message DeleteChannelRequest {
 // DeleteChannel response
 message DeleteChannelResponse {
   bool deleted = 1;
+}
+
+// ChannelService — public gRPC service for channel operations.
+//
+// ## Purpose
+// Exposes channel operations (queue and pub/sub) over gRPC so external
+// clients (and other PlexSpaces nodes) can interact with channels without
+// in-process coupling.  In-process Rust actors use the ChannelService Rust
+// trait directly; remote callers use this gRPC service.
+//
+// ## Architecture Context
+// - In-process: crates/core/src/actor_context.rs ChannelService trait
+// - Remote / public: this gRPC service definition
+service ChannelService {
+  // Create a new channel with the given config.
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels"
+      body: "*"
+    };
+  }
+
+  // Delete an existing channel.
+  rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse) {
+    option (google.api.http) = {delete: "/v1/channels/{channel}"};
+  }
+
+  // Send a message to a channel (queue pattern — load-balanced to one consumer).
+  rpc Send(SendRequest) returns (SendResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel}/send"
+      body: "*"
+    };
+  }
+
+  // Receive a batch of messages from a channel (polling).
+  rpc Receive(ReceiveRequest) returns (ReceiveResponse) {
+    option (google.api.http) = {get: "/v1/channels/{channel}/receive"};
+  }
+
+  // Subscribe to a channel (server-streaming — fan-out to all subscribers).
+  rpc Subscribe(SubscribeRequest) returns (stream plexspaces.common.v1.Message) {
+    option (google.api.http) = {get: "/v1/channels/{channel}/subscribe"};
+  }
+
+  // Publish to a channel (pub/sub pattern — all subscribers receive).
+  rpc Publish(PublishRequest) returns (PublishResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel}/publish"
+      body: "*"
+    };
+  }
+
+  // Acknowledge a message (mark as successfully processed).
+  rpc Ack(AckRequest) returns (AckResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel}/messages/{message_id}/ack"
+      body: "*"
+    };
+  }
+
+  // Negative-acknowledge a message (requeue or discard).
+  rpc Nack(NackRequest) returns (NackResponse) {
+    option (google.api.http) = {
+      post: "/v1/channels/{channel}/messages/{message_id}/nack"
+      body: "*"
+    };
+  }
+
+  // Get statistics for a channel.
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
+    option (google.api.http) = {get: "/v1/channels/{channel}/stats"};
+  }
+}
+
+// Error codes for channel operations.
+enum ChannelErrorCode {
+  CHANNEL_ERROR_UNSPECIFIED = 0;
+  // Channel has reached its capacity limit (bounded channels only)
+  CHANNEL_ERROR_FULL = 1;
+  // Channel has been closed and is no longer accepting messages
+  CHANNEL_ERROR_CLOSED = 2;
+  // Operation did not complete within the allotted time
+  CHANNEL_ERROR_TIMEOUT = 3;
+  // Requested message does not exist
+  CHANNEL_ERROR_MESSAGE_NOT_FOUND = 4;
+  // Channel configuration is invalid
+  CHANNEL_ERROR_INVALID_CONFIGURATION = 5;
+  // Channel does not exist
+  CHANNEL_ERROR_NOT_FOUND = 6;
+  // Channel with this name already exists
+  CHANNEL_ERROR_ALREADY_EXISTS = 7;
 }

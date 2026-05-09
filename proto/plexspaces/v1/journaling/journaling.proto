@@ -959,3 +959,20 @@ message EventSourcingConfig {
   /// Maximum page size (enforced limit, default: 1000)
   int32 max_page_size = 7;
 }
+
+// Error codes for journal storage operations.
+enum JournalErrorCode {
+  JOURNAL_ERROR_UNSPECIFIED = 0;
+  // Backend storage failure (disk I/O, DB error, etc.)
+  JOURNAL_ERROR_STORAGE = 1;
+  // Requested entry does not exist
+  JOURNAL_ERROR_ENTRY_NOT_FOUND = 2;
+  // No checkpoint exists for the actor
+  JOURNAL_ERROR_CHECKPOINT_NOT_FOUND = 3;
+  // Compression or decompression failure
+  JOURNAL_ERROR_COMPRESSION = 4;
+  // Entry payload failed to serialize/deserialize
+  JOURNAL_ERROR_SERIALIZATION = 5;
+  // Concurrent write conflict (optimistic concurrency violation)
+  JOURNAL_ERROR_CONFLICT = 6;
+}

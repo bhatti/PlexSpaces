@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use plexspaces_core::{ActorRegistry, ExitReason, RequestContext, ServiceLocator};
+use plexspaces_actor::{ActorRegistry, ExitReason, RequestContext, ServiceLocator, ServiceLocatorBase, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::actor_service_server::ActorServiceServer;

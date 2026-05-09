@@ -73,6 +73,23 @@ pub enum TaskRouterError {
     InvalidStrategy,
 }
 
+impl TaskRouterError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::TaskRouterErrorCode {
+        use plexspaces_proto::node::v1::TaskRouterErrorCode;
+        match self {
+            TaskRouterError::GroupNotFound(_) => TaskRouterErrorCode::TaskRouterErrorGroupNotFound,
+            TaskRouterError::NoActorsInGroup(_) => {
+                TaskRouterErrorCode::TaskRouterErrorNoActorsInGroup
+            }
+            TaskRouterError::ChannelError(_) => TaskRouterErrorCode::TaskRouterErrorChannelError,
+            TaskRouterError::InvalidStrategy => {
+                TaskRouterErrorCode::TaskRouterErrorInvalidStrategy
+            }
+        }
+    }
+}
+
 /// Result type for task routing
 pub type TaskRouterResult<T> = Result<T, TaskRouterError>;
 

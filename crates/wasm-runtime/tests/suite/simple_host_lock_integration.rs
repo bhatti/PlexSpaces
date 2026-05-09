@@ -8,7 +8,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_proto::locks::prv::Lock as ProtoLock;
     use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;

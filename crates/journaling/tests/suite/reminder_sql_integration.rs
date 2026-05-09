@@ -24,6 +24,7 @@
 use plexspaces_journaling::{
     sql::SqliteJournalStorage, JournalStorage, ReminderRegistration, ReminderState,
 };
+use plexspaces_actor::ActorId;
 use plexspaces_proto::prost_types;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -32,6 +33,12 @@ use tokio::time::sleep;
 /// Helper to create a test SQLite storage (in-memory)
 async fn create_test_storage() -> Arc<dyn JournalStorage> {
     Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap())
+}
+
+fn reminder_test_actor_id(name: &str, node_id: &str) -> String {
+    ActorId::new(name, "gen_server", "default", node_id)
+        .expect("valid reminder sql test actor id")
+        .to_string()
 }
 
 /// Helper to create a test reminder registration
@@ -61,8 +68,9 @@ fn create_test_reminder_registration(
 #[tokio::test]
 async fn test_register_reminder() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
-    let registration = create_test_reminder_registration("actor1@node1", "reminder1", 60, 1000);
+    let registration = create_test_reminder_registration(&actor_id, "reminder1", 60, 1000);
     let reminder_state = ReminderState {
         registration: Some(registration.clone()),
         last_fired: None,
@@ -83,7 +91,7 @@ async fn test_register_reminder() {
     );
 
     // Verify it was persisted by loading it
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(
         loaded[0].registration.as_ref().unwrap().reminder_name,
@@ -91,15 +99,16 @@ async fn test_register_reminder() {
     );
     assert_eq!(
         loaded[0].registration.as_ref().unwrap().actor_id,
-        "actor1@node1"
+        actor_id
     );
 }
 
 #[tokio::test]
 async fn test_unregister_reminder() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
-    let registration = create_test_reminder_registration("actor1@node1", "reminder1", 60, 1000);
+    let registration = create_test_reminder_registration(&actor_id, "reminder1", 60, 1000);
     let reminder_state = ReminderState {
         registration: Some(registration.clone()),
         last_fired: None,
@@ -112,28 +121,29 @@ async fn test_unregister_reminder() {
     storage.register_reminder(&reminder_state).await.unwrap();
 
     // Verify it exists
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
 
     // Unregister reminder
     let result = storage
-        .unregister_reminder("actor1@node1", "reminder1")
+        .unregister_reminder(&actor_id, "reminder1")
         .await;
     assert!(result.is_ok());
 
     // Verify it was removed
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 0);
 }
 
 #[tokio::test]
 async fn test_load_reminders() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
     // Register multiple reminders for same actor
     for i in 1..=3 {
         let registration = create_test_reminder_registration(
-            "actor1@node1",
+            &actor_id,
             &format!("reminder{}", i),
             60,
             1000 + i,
@@ -149,7 +159,7 @@ async fn test_load_reminders() {
     }
 
     // Load all reminders for actor
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 3);
 
     // Verify all reminders are present
@@ -165,9 +175,10 @@ async fn test_load_reminders() {
 #[tokio::test]
 async fn test_load_reminders_only_active() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
     // Register active reminder
-    let registration1 = create_test_reminder_registration("actor1@node1", "active", 60, 1000);
+    let registration1 = create_test_reminder_registration(&actor_id, "active", 60, 1000);
     let reminder_state1 = ReminderState {
         registration: Some(registration1.clone()),
         last_fired: None,
@@ -178,7 +189,7 @@ async fn test_load_reminders_only_active() {
     storage.register_reminder(&reminder_state1).await.unwrap();
 
     // Register inactive reminder
-    let registration2 = create_test_reminder_registration("actor1@node1", "inactive", 60, 1000);
+    let registration2 = create_test_reminder_registration(&actor_id, "inactive", 60, 1000);
     let reminder_state2 = ReminderState {
         registration: Some(registration2.clone()),
         last_fired: None,
@@ -189,7 +200,7 @@ async fn test_load_reminders_only_active() {
     storage.register_reminder(&reminder_state2).await.unwrap();
 
     // Load reminders - should only return active ones
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(
         loaded[0].registration.as_ref().unwrap().reminder_name,
@@ -200,8 +211,9 @@ async fn test_load_reminders_only_active() {
 #[tokio::test]
 async fn test_update_reminder() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
-    let registration = create_test_reminder_registration("actor1@node1", "reminder1", 60, 1000);
+    let registration = create_test_reminder_registration(&actor_id, "reminder1", 60, 1000);
     let mut reminder_state = ReminderState {
         registration: Some(registration.clone()),
         last_fired: None,
@@ -229,7 +241,7 @@ async fn test_update_reminder() {
     assert!(result.is_ok());
 
     // Verify update was persisted
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].fire_count, 1);
     assert!(loaded[0].last_fired.is_some());
@@ -355,8 +367,9 @@ async fn test_query_due_reminders_only_active() {
 #[tokio::test]
 async fn test_reminder_persistence_across_operations() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
-    let registration = create_test_reminder_registration("actor1@node1", "persistent", 60, 1000);
+    let registration = create_test_reminder_registration(&actor_id, "persistent", 60, 1000);
     let mut reminder_state = ReminderState {
         registration: Some(registration.clone()),
         last_fired: None,
@@ -381,7 +394,7 @@ async fn test_reminder_persistence_across_operations() {
     storage.update_reminder(&reminder_state).await.unwrap();
 
     // Verify persistence
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].fire_count, 1);
 
@@ -398,7 +411,7 @@ async fn test_reminder_persistence_across_operations() {
     storage.update_reminder(&reminder_state).await.unwrap();
 
     // Verify persistence
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].fire_count, 2);
 }
@@ -409,7 +422,7 @@ async fn test_multiple_actors_reminders() {
 
     // Register reminders for different actors
     for actor_num in 1..=3 {
-        let actor_id = format!("actor{}@node1", actor_num);
+        let actor_id = reminder_test_actor_id(&format!("actor{}", actor_num), "node1");
         for reminder_num in 1..=2 {
             let registration = create_test_reminder_registration(
                 &actor_id,
@@ -430,7 +443,7 @@ async fn test_multiple_actors_reminders() {
 
     // Verify each actor has their own reminders
     for actor_num in 1..=3 {
-        let actor_id = format!("actor{}@node1", actor_num);
+        let actor_id = reminder_test_actor_id(&format!("actor{}", actor_num), "node1");
         let loaded = storage.load_reminders(&actor_id).await.unwrap();
         assert_eq!(loaded.len(), 2);
     }
@@ -439,8 +452,9 @@ async fn test_multiple_actors_reminders() {
 #[tokio::test]
 async fn test_reminder_upsert_on_register() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
-    let registration = create_test_reminder_registration("actor1@node1", "reminder1", 60, 1000);
+    let registration = create_test_reminder_registration(&actor_id, "reminder1", 60, 1000);
     let reminder_state = ReminderState {
         registration: Some(registration.clone()),
         last_fired: None,
@@ -458,7 +472,7 @@ async fn test_reminder_upsert_on_register() {
     storage.register_reminder(&updated_state).await.unwrap();
 
     // Verify it was updated (not duplicated)
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].fire_count, 5);
 }
@@ -517,9 +531,10 @@ async fn test_query_due_reminders_ordering() {
 #[tokio::test]
 async fn test_reminder_with_nanos_precision() {
     let storage = create_test_storage().await;
+    let actor_id = reminder_test_actor_id("actor1", "node1");
 
     let registration = ReminderRegistration {
-        actor_id: "actor1@node1".to_string(),
+        actor_id: actor_id.clone(),
         reminder_name: "nanos_reminder".to_string(),
         interval: Some(prost_types::Duration {
             seconds: 60,
@@ -546,7 +561,7 @@ async fn test_reminder_with_nanos_precision() {
     storage.register_reminder(&reminder_state).await.unwrap();
 
     // Load and verify nanos are preserved
-    let loaded = storage.load_reminders("actor1@node1").await.unwrap();
+    let loaded = storage.load_reminders(&actor_id).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(
         loaded[0]

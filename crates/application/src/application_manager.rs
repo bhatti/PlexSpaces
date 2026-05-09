@@ -35,11 +35,12 @@
 use crate::application_trait::ApplicationNode;
 use crate::{Application, ApplicationError, SpecApplication, WasmApplication};
 use async_trait::async_trait;
-use plexspaces_common::RequestContext;
-use plexspaces_core::{
+use plexspaces_common::{RequestContext, RequestContextExt};
+use plexspaces_actor::{
     object_registry_helpers, ApplicationManager as ApplicationManagerTrait, Service,
 };
-use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
+use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -272,6 +273,27 @@ impl ApplicationManagerImpl {
         }
     }
 
+    /// Resolve lookup: try exact key (app name), then fall back to searching by application_id field.
+    async fn resolve_id(&self, id: &str) -> String {
+        let apps = self.applications.read().await;
+        if apps.contains_key(id) {
+            return id.to_string();
+        }
+        // Fall back: find by application_id (for WasmApplication)
+        for (key, inst) in apps.iter() {
+            if let Some(wasm_app) = inst
+                .app
+                .as_any()
+                .downcast_ref::<crate::wasm_application::WasmApplication>()
+            {
+                if wasm_app.application_id() == id {
+                    return key.clone();
+                }
+            }
+        }
+        id.to_string()
+    }
+
     /// Set the node context for the application manager.
     /// This is called by the Node after its creation.
     /// Can be called multiple times safely (idempotent).
@@ -429,6 +451,8 @@ impl ApplicationManagerImpl {
     /// ## State Transitions
     /// Created -> Starting -> Running (or Failed)
     pub async fn start(&self, name: &str) -> Result<(), ApplicationError> {
+        let key = self.resolve_id(name).await;
+        let name = key.as_str();
         let mut apps = self.applications.write().await;
 
         let instance = apps
@@ -568,6 +592,8 @@ impl ApplicationManagerImpl {
         name: &str,
         timeout_duration: Duration,
     ) -> Result<(), ApplicationError> {
+        let key = self.resolve_id(name).await;
+        let name = key.as_str();
         let mut apps = self.applications.write().await;
 
         let instance = apps
@@ -818,6 +844,8 @@ impl ApplicationManagerImpl {
     /// * `Ok(None)` - Non-WASM app unregistered
     /// * `Err(ApplicationError)` - Application not found or still running
     pub async fn unregister(&self, name: &str) -> Result<Option<String>, ApplicationError> {
+        let key = self.resolve_id(name).await;
+        let name = key.as_str();
         let (module_hash, tenant_id, namespace) = {
             let apps = self.applications.read().await;
             let instance = apps.get(name).ok_or_else(|| {
@@ -1235,8 +1263,15 @@ impl ApplicationManagerImpl {
         )
         .increment(1);
 
+        let application_id = instance
+            .app
+            .as_any()
+            .downcast_ref::<crate::wasm_application::WasmApplication>()
+            .map(|w| w.application_id().to_string())
+            .unwrap_or_else(|| name.to_string());
+
         Some(ApplicationInfo {
-            application_id: name.to_string(), // Use name as ID for now
+            application_id,
             name: name.to_string(),
             tenant_id: instance.tenant_id.clone(),
             namespace: instance.namespace.clone(),
@@ -1255,8 +1290,9 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
         &self,
         name: &str,
     ) -> Option<plexspaces_proto::v1::application::ApplicationState> {
+        let key = self.resolve_id(name).await;
         let apps = self.applications.read().await;
-        apps.get(name).map(|inst| inst.state.clone())
+        apps.get(&key).map(|inst| inst.state.clone())
     }
 
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
@@ -1276,14 +1312,16 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
         &self,
         name: &str,
     ) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
-        self.get_application_info_impl(name).await
+        let key = self.resolve_id(name).await;
+        self.get_application_info_impl(&key).await
     }
 
     async fn get_application_metrics(
         &self,
         name: &str,
     ) -> Option<plexspaces_proto::application::v1::ApplicationMetrics> {
-        self.get_application_info_impl(name)
+        let key = self.resolve_id(name).await;
+        self.get_application_info_impl(&key)
             .await
             .and_then(|info| info.metrics)
     }
@@ -1293,7 +1331,8 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
         name: &str,
         metrics: plexspaces_proto::application::v1::ApplicationMetrics,
     ) -> Result<(), String> {
-        self.merge_metrics(name, metrics)
+        let key = self.resolve_id(name).await;
+        self.merge_metrics(&key, metrics)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -1301,7 +1340,7 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
 
     async fn get_node_context(
         &self,
-    ) -> Option<std::sync::Arc<dyn plexspaces_core::ApplicationNode>> {
+    ) -> Option<std::sync::Arc<dyn plexspaces_actor::ApplicationNode>> {
         // ApplicationNode trait is defined in both application_trait and core
         // They are the same trait, but Rust treats them as different types
         // We need to return the core version for the trait method
@@ -1325,10 +1364,8 @@ impl Default for ApplicationManagerImpl {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_proto::application::v1::{
-        ApplicationSpec, ApplicationType, ChildSpec, RestartPolicy, ShutdownStrategy,
-        SupervisionStrategy, SupervisorSpec,
-    };
+    use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType, ShutdownStrategy};
+    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
     use std::collections::HashMap;
 
     fn app_ctx(name: &str) -> RequestContext {
@@ -1368,6 +1405,7 @@ mod tests {
             max_restarts: 3,
             max_restart_window: None,
             children,
+            ..Default::default()
         }
     }
 

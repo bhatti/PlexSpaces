@@ -26,6 +26,7 @@
 #[cfg(test)]
 #[cfg(feature = "component-model")]
 mod tests {
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::{ResourceLimits, WasmCapabilities, WasmConfig, WasmRuntime};
     use std::time::Duration;
     use tokio::time::timeout;
@@ -90,12 +91,13 @@ mod tests {
         .expect("Module loading timed out")
         .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-sequential-1", "wasm", "default", "test-node").unwrap();
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
                 module,
-                "test-sequential-1".to_string(),
+                actor_id,
                 &[],
                 config,
                 None,
@@ -204,12 +206,13 @@ mod tests {
         .expect("Module loading timed out")
         .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-state-1", "wasm", "default", "test-node").unwrap();
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
                 module,
-                "test-state-1".to_string(),
+                actor_id,
                 &[],
                 config,
                 None,
@@ -325,12 +328,13 @@ mod tests {
         .expect("Module loading timed out")
         .expect("Failed to load module");
 
+        let actor_id = ActorId::new("test-getstate-1", "wasm", "default", "test-node").unwrap();
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
                 module,
-                "test-getstate-1".to_string(),
+                actor_id,
                 &[],
                 config,
                 None,

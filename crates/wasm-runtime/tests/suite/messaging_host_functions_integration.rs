@@ -11,7 +11,7 @@
 #[cfg(feature = "component-model")]
 mod tests {
     use async_trait::async_trait;
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::messaging::Host;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;
     use plexspaces_wasm_runtime::component_host::MessagingImpl;

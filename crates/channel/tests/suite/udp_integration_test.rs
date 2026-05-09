@@ -27,7 +27,7 @@
 #[cfg(feature = "udp-backend")]
 mod tests {
     use futures::StreamExt;
-    use plexspaces_channel::{create_channel, Channel};
+    use plexspaces_channel::{create_channel, Channel, ChannelError, ChannelResult};
     use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, UdpConfig};
     use plexspaces_proto::common::v1::Message;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -44,7 +44,7 @@ mod tests {
         PORT_COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn create_udp_config(_cluster_name: &str, port: u32) -> UdpConfig {
+    fn create_udp_config(port: u32) -> UdpConfig {
         UdpConfig {
             multicast_address: "239.255.0.1".to_string(),
             multicast_port: port,
@@ -55,10 +55,9 @@ mod tests {
 
     async fn create_udp_channel(
         name: &str,
-        cluster_name: &str,
         port: u32,
     ) -> plexspaces_channel::ChannelResult<Box<dyn Channel>> {
-        let udp_config = create_udp_config(cluster_name, port);
+        let udp_config = create_udp_config(port);
         let channel_config = ChannelConfig {
             name: name.to_string(),
             provider: ChannelProvider::ChannelProviderUdp as i32,
@@ -78,10 +77,9 @@ mod tests {
 
     async fn create_udp_channel_or_skip(
         name: &str,
-        cluster_name: &str,
         port: u32,
     ) -> Option<Box<dyn Channel>> {
-        match create_udp_channel(name, cluster_name, port).await {
+        match create_udp_channel(name, port).await {
             Ok(channel) => Some(channel),
             Err(err) => {
                 eprintln!("Skipping UDP test - backend unavailable: {}", err);
@@ -90,11 +88,46 @@ mod tests {
         }
     }
 
+    fn should_skip_multicast_send(err: &ChannelError) -> bool {
+        matches!(err, ChannelError::BackendError(message) if message.contains("No route to host"))
+    }
+
+    async fn send_or_skip(channel: &dyn Channel, message: Message) -> Option<String> {
+        match channel.send(message).await {
+            Ok(message_id) => Some(message_id),
+            Err(err) if should_skip_multicast_send(&err) => {
+                eprintln!("Skipping UDP test - multicast routing unavailable: {}", err);
+                None
+            }
+            Err(err) => panic!("UDP send should succeed when backend is available: {}", err),
+        }
+    }
+
+    async fn publish_or_skip(channel: &dyn Channel, message: Message) -> Option<u32> {
+        match channel.publish(message).await {
+            Ok(subscriber_count) => Some(subscriber_count),
+            Err(err) if should_skip_multicast_send(&err) => {
+                eprintln!("Skipping UDP test - multicast routing unavailable: {}", err);
+                None
+            }
+            Err(err) => panic!(
+                "UDP publish should succeed when backend is available: {}",
+                err
+            ),
+        }
+    }
+
+    async fn send_batch_or_skip(channel: &dyn Channel, messages: Vec<Message>) -> Option<()> {
+        for message in messages {
+            send_or_skip(channel, message).await?;
+        }
+        Some(())
+    }
+
     #[tokio::test]
     async fn test_udp_channel_creation() {
         let port = get_unique_port();
-        let Some(channel) = create_udp_channel_or_skip("test-udp-1", "test-cluster", port).await
-        else {
+        let Some(channel) = create_udp_channel_or_skip("test-udp-1", port).await else {
             return;
         };
 
@@ -105,46 +138,22 @@ mod tests {
     #[tokio::test]
     async fn test_udp_channel_creation_with_config() {
         let port = get_unique_port();
-        let udp_config = UdpConfig {
-            multicast_address: "239.255.0.1".to_string(),
-            multicast_port: port,
-            bind_address: "0.0.0.0".to_string(),
-            message_ttl_seconds: 60,
+        let Some(channel) = create_udp_channel_or_skip("test-udp", port).await else {
+            return;
         };
 
-        let channel_config = ChannelConfig {
-            name: "test-udp".to_string(),
-            provider: ChannelProvider::ChannelProviderUdp as i32,
-            capacity: 0,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce
-                as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone
-                as i32,
-            backend_config: Some(
-                plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config),
-            ),
-            ..Default::default()
-        };
-
-        // UDP channel should be created successfully with valid config
-        // (cluster_name is no longer required - cluster membership determined by multicast address/port)
-        let result = create_channel(channel_config).await;
-        assert!(
-            result.is_ok(),
-            "UDP channel should be created with valid multicast config"
-        );
+        assert_eq!(channel.get_config().name, "test-udp");
+        assert!(!channel.is_closed());
     }
 
     #[tokio::test]
     async fn test_udp_send_receive() {
         // Use same port for both channels (they need to share multicast group)
         let port = get_unique_port();
-        let Some(channel1) = create_udp_channel_or_skip("test-udp-2", "test-cluster-2", port).await
-        else {
+        let Some(channel1) = create_udp_channel_or_skip("test-udp-2", port).await else {
             return;
         };
-        let Some(channel2) = create_udp_channel_or_skip("test-udp-2", "test-cluster-2", port).await
-        else {
+        let Some(channel2) = create_udp_channel_or_skip("test-udp-2", port).await else {
             return;
         };
         let mut stream = channel2.subscribe(None).await.unwrap();
@@ -157,7 +166,9 @@ mod tests {
             ..Default::default()
         };
 
-        let msg_id = channel1.send(msg.clone()).await.unwrap();
+        let Some(msg_id) = send_or_skip(channel1.as_ref(), msg.clone()).await else {
+            return;
+        };
         assert_eq!(msg_id, msg.id);
 
         let received = timeout(Duration::from_millis(750), stream.next())
@@ -171,14 +182,10 @@ mod tests {
     async fn test_udp_publish_subscribe() {
         // Use same port for both channels (they need to share multicast group)
         let port = get_unique_port();
-        let Some(publisher) =
-            create_udp_channel_or_skip("test-udp-3", "test-cluster-3", port).await
-        else {
+        let Some(publisher) = create_udp_channel_or_skip("test-udp-3", port).await else {
             return;
         };
-        let Some(subscriber) =
-            create_udp_channel_or_skip("test-udp-3", "test-cluster-3", port).await
-        else {
+        let Some(subscriber) = create_udp_channel_or_skip("test-udp-3", port).await else {
             return;
         };
 
@@ -193,7 +200,9 @@ mod tests {
             ..Default::default()
         };
 
-        let subscriber_count = publisher.publish(msg).await.unwrap();
+        let Some(subscriber_count) = publish_or_skip(publisher.as_ref(), msg).await else {
+            return;
+        };
         assert_eq!(subscriber_count, 1);
 
         // Receive from subscription
@@ -208,8 +217,7 @@ mod tests {
     async fn test_udp_ack_nack_noop() {
         // UDP channels don't support ACK/NACK (best-effort delivery)
         let port = get_unique_port();
-        let Some(channel) = create_udp_channel_or_skip("test-udp-4", "test-cluster-4", port).await
-        else {
+        let Some(channel) = create_udp_channel_or_skip("test-udp-4", port).await else {
             return;
         };
 
@@ -225,8 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_udp_channel_close() {
         let port = get_unique_port();
-        let Some(channel) = create_udp_channel_or_skip("test-udp-5", "test-cluster-5", port).await
-        else {
+        let Some(channel) = create_udp_channel_or_skip("test-udp-5", port).await else {
             return;
         };
 
@@ -240,23 +247,22 @@ mod tests {
     #[tokio::test]
     async fn test_udp_channel_stats() {
         let port = get_unique_port();
-        let Some(channel) = create_udp_channel_or_skip("test-udp-6", "test-cluster-6", port).await
-        else {
+        let Some(channel) = create_udp_channel_or_skip("test-udp-6", port).await else {
             return;
         };
 
-        // Send some messages
-        for i in 0..5 {
-            let msg = Message {
+        let messages = (0..5)
+            .map(|i| Message {
                 id: ulid::Ulid::new().to_string(),
                 channel: "test-udp-6".to_string(),
                 payload: format!("msg{}", i).into_bytes(),
                 ..Default::default()
-            };
-            channel.send(msg).await.unwrap();
+            })
+            .collect::<Vec<_>>();
+        if send_batch_or_skip(channel.as_ref(), messages).await.is_none() {
+            return;
         }
 
-        // Get stats
         let stats = channel.get_stats().await.unwrap();
         assert_eq!(stats.name, "test-udp-6");
         assert_eq!(stats.provider, ChannelProvider::ChannelProviderUdp as i32);

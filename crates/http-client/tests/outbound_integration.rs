@@ -3,7 +3,7 @@
 //! Integration tests: resilient client against a local axum server.
 
 use axum::{routing::get, Router};
-use plexspaces_core::{OutboundHttpClient, OutboundHttpRequest};
+use plexspaces_actor::{OutboundHttpClient, OutboundHttpRequest};
 use plexspaces_http_client::ResilientOutboundHttpClient;
 use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, FailureStrategy};
 use plexspaces_proto::node::v1::{
@@ -184,7 +184,7 @@ async fn circuit_opens_after_failures() {
     assert!(
         matches!(
             third,
-            Err(plexspaces_core::OutboundHttpClientError::CircuitOpen { .. })
+            Err(plexspaces_actor::OutboundHttpClientError::CircuitOpen { .. })
         ),
         "expected circuit open, got {:?}",
         third

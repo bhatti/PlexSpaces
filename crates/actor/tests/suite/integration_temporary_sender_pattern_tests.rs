@@ -6,10 +6,9 @@
 
 use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor, ActorContext, ActorId, ActorRegistry, ActorService, BehaviorError, BehaviorType,
-    Message, MessageSender,
-};
+    Message, MessageSender, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::{actor_service_server::ActorServiceServer, ActorVisibility};
@@ -41,6 +40,19 @@ fn genserver_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
 
 fn actor_id_from_message_receiver(receiver_id: &str) -> ActorId {
     ActorId::from_canonical(receiver_id).expect("request receiver_id should be canonical")
+}
+
+async fn spawn_counter_ref(
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
+    ctx: &plexspaces_actor::RequestContext,
+    name: &str,
+) -> ActorRef {
+    let behavior: Box<dyn plexspaces_actor::Actor> = Box::new(CounterActor::new());
+    ActorBuilder::new(behavior)
+        .with_name(name)
+        .spawn(ctx, service_locator)
+        .await
+        .expect("counter actor should spawn")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +168,7 @@ async fn create_test_registry_with_node(
     node_address: &str,
 ) -> Arc<ActorRegistry> {
     use async_trait::async_trait;
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_object_registry::ObjectRegistry;
     use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_proto::object_registry::v1::{
@@ -172,7 +184,7 @@ async fn create_test_registry_with_node(
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_id: &str,
             object_type: Option<ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -190,7 +202,7 @@ async fn create_test_registry_with_node(
 
         async fn lookup_full(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: ObjectType,
             object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -207,7 +219,7 @@ async fn create_test_registry_with_node(
 
         async fn register(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner.register(ctx, registration).await.map_err(|e| {
@@ -220,7 +232,7 @@ async fn create_test_registry_with_node(
 
         async fn discover(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: Option<ObjectType>,
             object_category: Option<String>,
             capabilities: Option<Vec<String>>,
@@ -251,7 +263,7 @@ async fn create_test_registry_with_node(
 
         async fn unregister(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -268,7 +280,7 @@ async fn create_test_registry_with_node(
 
         async fn heartbeat(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -292,7 +304,7 @@ async fn create_test_registry_with_node(
     let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
     // Register node as a service object (nodes are registered as services)
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -337,7 +349,7 @@ async fn register_test_actor(
     actor_registry: Arc<ActorRegistry>,
     actor_id: ActorId,
     mailbox: Arc<Mailbox>,
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 ) {
     let sender: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
         actor_id.clone(),
@@ -347,7 +359,7 @@ async fn register_test_actor(
         service_locator,
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -441,7 +453,7 @@ impl GenServer for ForwarderActor {
         forward_msg.sender_id = forwarder_id; // Use forwarder's own ID as sender
         forward_msg.message_type = "call".to_string();
 
-        let routing_ctx = plexspaces_core::RequestContext::new_without_auth(
+        let routing_ctx = plexspaces_actor::RequestContext::new_without_auth(
             ctx.tenant_id.clone(),
             ctx.namespace.clone(),
         );
@@ -483,25 +495,17 @@ async fn test_outside_sender_calling_ask() {
         .build()
         .await;
 
-    // Create and spawn counter actor using ActorBuilder (simpler setup)
-    let actor_id = genserver_actor_id("counter-1", "test-node-outside-ask", "default");
-    let behavior: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
-    let counter_ref = ActorBuilder::new(behavior)
-        .with_id(actor_id.to_string())
-        .with_namespace("default".to_string())
-        .spawn(&ctx, node.service_locator().clone())
-        .await
-        .unwrap();
+    let counter_ref = spawn_counter_ref(node.service_locator().clone(), &ctx, "counter-1").await;
 
     // Call ask() from outside - should use temporary sender
     let request = CounterMessage::Get;
     let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
     msg.message_type = "call".to_string();
-    msg.receiver_id = actor_id.to_string();
+    msg.receiver_id = counter_ref.id().to_string();
     // No sender set (outside caller) - temporary sender will be created
 
     let reply = counter_ref
@@ -538,38 +542,20 @@ async fn test_local_actor_calling_ask_of_local_actor() {
         .build()
         .await;
 
-    // Create and spawn two counter actors using ActorBuilder
-    let actor1_id = genserver_actor_id("counter-1", "test-node-local-ask", "default");
-    let actor2_id = genserver_actor_id("counter-2", "test-node-local-ask", "default");
-
-    let behavior1: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-    let behavior2: Box<dyn plexspaces_core::Actor> = Box::new(CounterActor::new());
-
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
-    let _counter1_ref = ActorBuilder::new(behavior1)
-        .with_id(actor1_id.to_string())
-        .with_namespace("default".to_string())
-        .spawn(&ctx, node.service_locator().clone())
-        .await
-        .unwrap();
-
-    let counter2_ref = ActorBuilder::new(behavior2)
-        .with_id(actor2_id.to_string())
-        .with_namespace("default".to_string())
-        .spawn(&ctx, node.service_locator().clone())
-        .await
-        .unwrap();
+    let counter1_ref = spawn_counter_ref(node.service_locator().clone(), &ctx, "counter-1").await;
+    let counter2_ref = spawn_counter_ref(node.service_locator().clone(), &ctx, "counter-2").await;
 
     // Simulate counter1 calling ask() on counter2
     // Set sender to counter1's ID
     let request = CounterMessage::Get;
     let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
     msg.message_type = "call".to_string();
-    msg.receiver_id = actor2_id.to_string();
-    msg.sender_id = actor1_id.to_string(); // Actor's own ID as sender
+    msg.receiver_id = counter2_ref.id().to_string();
+    msg.sender_id = counter1_ref.id().to_string(); // Actor's own ID as sender
 
     let reply = counter2_ref
         .ask(&ctx, msg, Duration::from_secs(5))
@@ -609,8 +595,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let node1_service_locator = node1.service_locator().clone();
 
     // Get node1's ActorRegistry
-    use plexspaces_core::service_names;
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
         .actor_registry()
         .await
@@ -637,7 +622,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
         node1_service_locator.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -700,16 +685,16 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
 
     // Create forwarder actor on node1 using ActorBuilder::spawn()
     // Forwarder will use Remote ActorRef pointing to counter@local_node_id
-    let forwarder_behavior: Box<dyn plexspaces_core::Actor> =
+    let forwarder_behavior: Box<dyn plexspaces_actor::Actor> =
         Box::new(ForwarderActor::new(counter_id.to_string()));
     let forwarder_id = genserver_actor_id("forwarder", "node1", "default");
-    let ctx_spawn = plexspaces_core::RequestContext::new_without_auth(
+    let ctx_spawn = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
 
     let forwarder_ref = ActorBuilder::new(forwarder_behavior)
-        .with_id(forwarder_id.to_string())
+        .with_name(forwarder_id.name().to_string())
         .with_namespace("default".to_string())
         .spawn(&ctx_spawn, node1_service_locator.clone())
         .await
@@ -719,7 +704,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     let request = CounterMessage::Get;
     let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
     msg.message_type = "call".to_string();
-    msg.receiver_id = forwarder_id.to_string();
+    msg.receiver_id = forwarder_ref.id().to_string();
     // No sender set (outside caller) - temporary sender will be created
 
     let reply = forwarder_ref
@@ -763,8 +748,7 @@ async fn test_chained_asks_multi_node() {
     let node1_service_locator = node1.service_locator().clone();
 
     // Get node1's ActorRegistry
-    use plexspaces_core::service_names;
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
         .actor_registry()
         .await
@@ -788,7 +772,7 @@ async fn test_chained_asks_multi_node() {
         node1_service_locator.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -851,16 +835,16 @@ async fn test_chained_asks_multi_node() {
 
     // Create forwarder actor on node1 using ActorBuilder::spawn()
     // Forwarder will use Remote ActorRef pointing to counter@local_node_id
-    let forwarder_behavior: Box<dyn plexspaces_core::Actor> =
+    let forwarder_behavior: Box<dyn plexspaces_actor::Actor> =
         Box::new(ForwarderActor::new(counter_id.to_string()));
     let forwarder_id = genserver_actor_id("forwarder", "node1", "default");
-    let ctx_spawn = plexspaces_core::RequestContext::new_without_auth(
+    let ctx_spawn = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
 
     let forwarder_ref = ActorBuilder::new(forwarder_behavior)
-        .with_id(forwarder_id.to_string())
+        .with_name(forwarder_id.name().to_string())
         .with_namespace("default".to_string())
         .spawn(&ctx_spawn, node1_service_locator.clone())
         .await
@@ -870,7 +854,7 @@ async fn test_chained_asks_multi_node() {
     let request = CounterMessage::Increment;
     let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
     msg.message_type = "call".to_string();
-    msg.receiver_id = forwarder_id.to_string();
+    msg.receiver_id = forwarder_ref.id().to_string();
     // No sender set (outside caller) - temporary sender will be created
 
     let reply = forwarder_ref
@@ -912,8 +896,7 @@ async fn test_concurrent_asks_multi_node() {
     let node1_service_locator = node1.service_locator().clone();
 
     // Get node1's ActorRegistry
-    use plexspaces_core::service_names;
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
     let actor_registry1: Arc<ActorRegistry> = node1_service_locator
         .actor_registry()
         .await
@@ -937,7 +920,7 @@ async fn test_concurrent_asks_multi_node() {
         node1_service_locator.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -1012,8 +995,8 @@ async fn test_concurrent_asks_multi_node() {
     let mut handles = vec![];
     for i in 0..10 {
         let counter_ref_clone = counter_ref.clone();
-        let counter_id_clone = counter_id.clone();
-        let ask_ctx = plexspaces_core::RequestContext::new_without_auth(
+        let counter_ref_id = counter_ref.id().to_string();
+        let ask_ctx = plexspaces_actor::RequestContext::new_without_auth(
             "test".to_string(),
             "default".to_string(),
         );
@@ -1021,7 +1004,7 @@ async fn test_concurrent_asks_multi_node() {
             let request = CounterMessage::Increment;
             let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());
             msg.message_type = "call".to_string();
-            msg.receiver_id = counter_id_clone.to_string();
+            msg.receiver_id = counter_ref_id;
 
             let reply = counter_ref_clone
                 .ask(&ask_ctx, msg, Duration::from_secs(10))

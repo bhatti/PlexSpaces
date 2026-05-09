@@ -8,7 +8,7 @@
 // the ObjectRegistry from ServiceLocator (based on node config).
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, ServiceLocator};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, InitializableServiceLocator, ServiceLocator, RequestContextExt};
 use plexspaces_facet::capabilities::registry::RegistryFacet;
 use plexspaces_mailbox::{new_message, Mailbox, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -44,8 +44,8 @@ impl ActorTrait for EchoBehavior {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -78,11 +78,11 @@ async fn shared_registry_test_node() -> Arc<Node> {
             .await,
     );
 
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     node.service_locator()
@@ -127,7 +127,7 @@ async fn spawn_registry_facet_actor(node: &Arc<Node>) -> (ActorRef, ActorId) {
         node_id.as_str(),
     )
     .expect("test actor id should be valid");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
@@ -163,7 +163,7 @@ const REGISTRY_FACET_CASES: &[RegistryFacetCase] = &[
 
 async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case_ulid: &str) {
     let (actor_ref, _) = spawn_registry_facet_actor(node).await;
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
@@ -335,7 +335,6 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
         .expect("ActorRegistry should be available");
 
     // Wait for actor to be registered (async registration)
-    let node_id = node.id().as_str().to_string();
     for _ in 0..20 {
         // Check if actor exists in registry
         if actor_registry.lookup_actor(actor_id).await.is_some() {
@@ -365,7 +364,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
 
 /// Adapter for ObjectRegistry trait
 struct ObjectRegistryAdapter {
-    inner: Arc<dyn plexspaces_core::ObjectRegistry>,
+    inner: Arc<dyn plexspaces_actor::ObjectRegistry>,
 }
 
 #[async_trait::async_trait]

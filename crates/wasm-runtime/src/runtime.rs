@@ -527,22 +527,22 @@ impl WasmRuntime {
     pub async fn instantiate(
         &self,
         module: WasmModule,
-        actor_id: String,
+        actor_id: plexspaces_actor::ActorId,
         initial_state: &[u8],
         config: crate::WasmConfig,
-        channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
+        channel_service: Option<std::sync::Arc<dyn plexspaces_actor::ChannelService>>,
         message_sender: Option<std::sync::Arc<dyn crate::MessageSender>>,
-        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
-        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
+        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
+        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_actor::KeyValueStore>>,
         process_group_registry: Option<
             std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>,
         >,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
-        object_registry: Option<std::sync::Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
+        object_registry: Option<std::sync::Arc<dyn plexspaces_actor::actor_context::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
-        elastic_pool_service: Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>>,
-        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>>,
+        elastic_pool_service: Option<std::sync::Arc<dyn plexspaces_actor::ElasticPoolService>>,
+        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_actor::OutboundHttpClient>>,
     ) -> WasmResult<crate::WasmInstance> {
         use wasmtime::StoreLimitsBuilder;
 
@@ -673,7 +673,7 @@ impl WasmRuntime {
 
 // Implement WasmRuntimeTrait to allow WasmRuntime to be used through ServiceLocator
 #[async_trait::async_trait]
-impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
+impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
     async fn module_count(&self) -> usize {
         self.module_count().await
     }
@@ -731,16 +731,16 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         actor_id: String,
         initial_state: &[u8],
         config: std::sync::Arc<dyn std::any::Any + Send + Sync>,
-        channel_service: Option<std::sync::Arc<dyn plexspaces_core::ChannelService>>,
+        channel_service: Option<std::sync::Arc<dyn plexspaces_actor::ChannelService>>,
         message_sender: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
-        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
+        tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_actor::TupleSpaceProvider>>,
+        keyvalue_store: Option<std::sync::Arc<dyn plexspaces_actor::KeyValueStore>>,
         process_group_registry: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
-        lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
-        object_registry: Option<std::sync::Arc<dyn plexspaces_core::ObjectRegistry>>,
-        journal_storage: Option<std::sync::Arc<dyn plexspaces_core::JournalStorage>>,
-        blob_service: Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>>,
-        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>>,
+        lock_manager: Option<std::sync::Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
+        object_registry: Option<std::sync::Arc<dyn plexspaces_actor::ObjectRegistry>>,
+        journal_storage: Option<std::sync::Arc<dyn plexspaces_actor::JournalStorage>>,
+        blob_service: Option<std::sync::Arc<dyn plexspaces_actor::BlobServiceTrait>>,
+        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_actor::OutboundHttpClient>>,
     ) -> Result<
         std::sync::Arc<dyn std::any::Any + Send + Sync>,
         Box<dyn std::error::Error + Send + Sync>,
@@ -807,16 +807,25 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> =
             blob_service
                 .map(|bs| {
-                    use plexspaces_core::BlobServiceTrait;
+                    use plexspaces_actor::BlobServiceTrait;
                     bs.as_any()
                 })
                 .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
+
+        // Parse actor_id string to ActorId at the boundary
+        let parsed_actor_id = plexspaces_actor::ActorId::from_canonical(&actor_id)
+            .map_err(|err| {
+                Box::new(WasmError::ActorFunctionError(format!(
+                    "invalid canonical actor id '{}': {err}",
+                    actor_id
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         // Create the instance using WasmInstance::new
         let instance = crate::WasmInstance::new(
             &self.engine,
             (*wasm_module).clone(),
-            actor_id,
+            parsed_actor_id,
             initial_state,
             capabilities,
             limits,

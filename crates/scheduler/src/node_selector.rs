@@ -55,6 +55,21 @@ pub enum NodeSelectionError {
     InvalidRequirements(String),
 }
 
+impl NodeSelectionError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::NodeSelectionErrorCode {
+        use plexspaces_proto::node::v1::NodeSelectionErrorCode;
+        match self {
+            NodeSelectionError::NoMatchingNode(_) => {
+                NodeSelectionErrorCode::NodeSelectionErrorNoMatchingNode
+            }
+            NodeSelectionError::InvalidRequirements(_) => {
+                NodeSelectionErrorCode::NodeSelectionErrorInvalidRequirements
+            }
+        }
+    }
+}
+
 /// Result type for node selection
 pub type NodeSelectionResult<T> = Result<T, NodeSelectionError>;
 

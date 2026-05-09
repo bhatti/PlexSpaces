@@ -25,7 +25,7 @@
 //! 3. Heartbeat updates are visible across nodes in the same cluster
 //! 4. Cluster isolation works (nodes in different clusters don't see each other)
 
-use plexspaces_core::{NodeRegistryTrait, RequestContext, ServiceLocator};
+use plexspaces_actor::{NodeRegistryTrait, RequestContext, ServiceLocator, ServiceLocatorBase};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;

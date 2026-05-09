@@ -22,6 +22,26 @@ if TYPE_CHECKING:
     from grpclib.metadata import Deadline
 
 
+class KeyValueStoreErrorCode(betterproto.Enum):
+    """Error codes for key-value store operations."""
+
+    KEY_VALUE_STORE_ERROR_UNSPECIFIED = 0
+    KEY_VALUE_STORE_ERROR_NOT_FOUND = 1
+    """Requested key does not exist"""
+
+    KEY_VALUE_STORE_ERROR_STORAGE = 2
+    """Underlying storage backend failure"""
+
+    KEY_VALUE_STORE_ERROR_SERIALIZATION = 3
+    """Serialization or deserialization failure"""
+
+    KEY_VALUE_STORE_ERROR_CAS_CONFLICT = 4
+    """Compare-and-swap precondition failed"""
+
+    KEY_VALUE_STORE_ERROR_PERMISSION_DENIED = 5
+    """Operation not permitted (e.g., read-only backend)"""
+
+
 @dataclass(eq=False, repr=False)
 class GetRequest(betterproto.Message):
     """Get request"""

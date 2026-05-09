@@ -119,9 +119,10 @@ pub trait DeclaredFacets {
 #[cfg(feature = "native")]
 pub use plexspaces_actor::{ActorBuilder, ActorRef};
 #[cfg(feature = "native")]
-pub use plexspaces_core::{
-    ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
+pub use plexspaces_actor::{
+    ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext, RequestContextExt,
 };
+use plexspaces_actor::RequestContextExt as _;
 #[cfg(feature = "native")]
 pub use plexspaces_node::NodeBuilder;
 
@@ -130,7 +131,7 @@ pub use plexspaces_node::NodeBuilder;
 /// For examples and user code, prefer SDK annotations (`#[gen_server_actor]`, `#[event_actor]`, etc.)
 /// which automatically implement this trait.
 #[cfg(feature = "native")]
-pub use plexspaces_core::Actor;
+pub use plexspaces_actor::actor_types::Actor;
 
 // ============================================================================
 // Message Creation Helpers
@@ -291,7 +292,7 @@ pub use plexspaces_workflow::DEFAULT_RUN_TIMEOUT;
 
 #[cfg(feature = "native")]
 fn actor_ref_from_sender(
-    sender: std::sync::Arc<dyn plexspaces_core::MessageSender>,
+    sender: std::sync::Arc<dyn plexspaces_actor::MessageSender>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
     sender
         .as_any()
@@ -320,13 +321,13 @@ fn actor_ref_from_sender(
 #[cfg(feature = "native")]
 pub async fn spawn_workflow_actor<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<WorkflowRef, WorkflowRefError>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let actor_ref = spawn_with_facets(
         ctx,
@@ -372,13 +373,13 @@ pub use serde_json::{json, Value};
 #[cfg(feature = "native")]
 pub async fn spawn<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
 where
-    B: plexspaces_core::Actor + DeclaredFacets + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + DeclaredFacets + Send + 'static,
 {
     let declared = B::declared_facets();
     let facets = create_facets(declared, &serde_json::json!({}), service_locator.clone())?;
@@ -418,14 +419,14 @@ where
 #[cfg(feature = "native")]
 pub async fn spawn_with_storage<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
     storage: std::sync::Arc<dyn plexspaces_journaling::JournalStorage>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
 where
-    B: plexspaces_core::Actor + DeclaredFacets + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + DeclaredFacets + Send + 'static,
 {
     let declared = B::declared_facets();
     let facets = create_facets_with_storage(
@@ -485,14 +486,14 @@ where
 #[cfg(feature = "native")]
 pub async fn spawn_with_facets<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let namespace_str = namespace.as_ref().to_string();
 
@@ -504,7 +505,7 @@ where
         let behavior_type = behavior.behavior_type();
         let actor_type = actor_type_from_behavior(&behavior_type);
 
-        let _ = plexspaces_core::register_virtual_actor_definition(
+        let _ = plexspaces_actor::register_virtual_actor_definition(
             &service_locator,
             plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
@@ -517,7 +518,7 @@ where
                 visibility: 0,
                 behavior_kind: actor_type,
                 args: std::collections::HashMap::new(),
-                facets: plexspaces_core::proto_facets_for_registration(Some(&facets), None),
+                facets: plexspaces_actor::proto_facets_for_registration(Some(&facets), None),
                 labels: std::collections::HashMap::new(),
                 config: None,
             },
@@ -578,7 +579,7 @@ where
 #[cfg(feature = "native")]
 pub async fn spawn_with_behavior_type(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     _namespace: impl AsRef<str>,
     behavior_type: impl AsRef<str>,
@@ -608,10 +609,10 @@ pub async fn spawn_with_behavior_type(
     .map_err(|e| format!("Failed to construct actor ID: {}", e))?;
 
     let (role_from_init, args_from_init) =
-        plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+        plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
 
     let spawn_spec = {
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
         ActorSpawnSpec {
             identity: Some(ActorIdentity {
@@ -640,9 +641,9 @@ pub async fn spawn_with_behavior_type(
 }
 
 #[cfg(feature = "native")]
-fn actor_type_from_behavior(behavior_type: &plexspaces_core::BehaviorType) -> String {
+fn actor_type_from_behavior(behavior_type: &plexspaces_actor::BehaviorType) -> String {
     match behavior_type {
-        plexspaces_core::BehaviorType::Custom(s) => s.clone(),
+        plexspaces_actor::BehaviorType::Custom(s) => s.clone(),
         bt => bt.actor_type_slug().into_owned(),
     }
 }
@@ -675,7 +676,7 @@ fn actor_type_from_behavior(behavior_type: &plexspaces_core::BehaviorType) -> St
 pub fn create_facets(
     facet_names: &[&str],
     config: &serde_json::Value,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> Result<Vec<Box<dyn plexspaces_facet::Facet>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut facets: Vec<Box<dyn plexspaces_facet::Facet>> = Vec::new();
 
@@ -683,7 +684,7 @@ pub fn create_facets(
         match *name {
             "timer" => {
                 let timer_config =
-                    plexspaces_core::facet_helpers::facet_config_value(config, "timer");
+                    plexspaces_actor::facet_helpers::facet_config_value(config, "timer");
                 let timer = plexspaces_journaling::TimerFacet::new(
                     timer_config,
                     50,
@@ -693,7 +694,7 @@ pub fn create_facets(
             }
             "virtual_actor" => {
                 let facet_config =
-                    plexspaces_core::facet_helpers::default_virtual_actor_facet_config(Some(
+                    plexspaces_actor::facet_helpers::default_virtual_actor_facet_config(Some(
                         config,
                     ));
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
@@ -752,7 +753,7 @@ pub fn create_facets_with_storage(
     facet_names: &[&str],
     config: &serde_json::Value,
     storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
 ) -> Result<Vec<Box<dyn plexspaces_facet::Facet>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut facets: Vec<Box<dyn plexspaces_facet::Facet>> = Vec::new();
 
@@ -760,7 +761,7 @@ pub fn create_facets_with_storage(
         match *name {
             "timer" => {
                 let timer_config =
-                    plexspaces_core::facet_helpers::facet_config_value(config, "timer");
+                    plexspaces_actor::facet_helpers::facet_config_value(config, "timer");
                 let timer = plexspaces_journaling::TimerFacet::new(
                     timer_config,
                     50,
@@ -770,7 +771,7 @@ pub fn create_facets_with_storage(
             }
             "virtual_actor" => {
                 let facet_config =
-                    plexspaces_core::facet_helpers::default_virtual_actor_facet_config(Some(
+                    plexspaces_actor::facet_helpers::default_virtual_actor_facet_config(Some(
                         config,
                     ));
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
@@ -783,7 +784,7 @@ pub fn create_facets_with_storage(
             "durability" => {
                 if let Some(ref storage) = storage {
                     let facet_config =
-                        plexspaces_core::facet_helpers::facet_config_value(config, "durability");
+                        plexspaces_actor::facet_helpers::facet_config_value(config, "durability");
                     let durability_facet = plexspaces_journaling::DurabilityFacet::new(
                         storage.clone(),
                         facet_config,
@@ -795,7 +796,7 @@ pub fn create_facets_with_storage(
             "reminder" => {
                 if let Some(ref storage) = storage {
                     let facet_config =
-                        plexspaces_core::facet_helpers::facet_config_value(config, "reminder");
+                        plexspaces_actor::facet_helpers::facet_config_value(config, "reminder");
                     let reminder_facet = plexspaces_journaling::ReminderFacet::new(
                         storage.clone(),
                         facet_config,
@@ -869,7 +870,7 @@ pub use elastic_pool_client::ElasticPoolClient;
 pub use node_client::{HealthCheckConfig, NodeClient};
 /// Re-export pool service error for elastic pool client callers
 #[cfg(feature = "native")]
-pub use plexspaces_core::PoolServiceError;
+pub use plexspaces_actor::PoolServiceError;
 #[cfg(feature = "grpc")]
 #[cfg(all(feature = "native", feature = "grpc"))]
 pub use shard_group::{ShardGroupClient, ShardGroupClientGrpc};
@@ -927,13 +928,13 @@ pub use plexspaces_actor::{EventError, EventRef};
 #[cfg(feature = "native")]
 pub async fn spawn_fsm_actor<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<FsmRef, FsmError>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let actor_ref = spawn_with_facets(
         ctx,
@@ -967,13 +968,13 @@ where
 #[cfg(feature = "native")]
 pub async fn spawn_event_actor<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<EventRef, EventError>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let actor_ref = spawn_with_facets(
         ctx,
@@ -1007,13 +1008,13 @@ where
 #[cfg(feature = "native")]
 pub async fn spawn_gen_server<B>(
     ctx: &RequestContext,
-    service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: std::sync::Arc<dyn plexspaces_actor::ServiceLocator>,
     actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<GenServerRef, GenServerError>
 where
-    B: plexspaces_core::Actor + Send + 'static,
+    B: plexspaces_actor::actor_types::Actor + Send + 'static,
 {
     let actor_ref = spawn_with_facets(
         ctx,
@@ -1033,7 +1034,7 @@ mod tests {
     use super::{actor_ref_from_sender, create_facets, create_facets_with_storage};
     use async_trait::async_trait;
     use plexspaces_actor::{ActorRef, TestServiceLocatorStub};
-    use plexspaces_core::{Message, MessageSender, ServiceLocator};
+    use plexspaces_actor::{Message, MessageSender, ServiceLocator};
     use plexspaces_proto::actor::v1::ActorVisibility;
     use plexspaces_journaling::SqliteJournalStorage;
     use std::sync::Arc;
@@ -1044,7 +1045,7 @@ mod tests {
     impl MessageSender for NonActorRefSender {
         async fn tell(
             &self,
-            _ctx: &plexspaces_core::RequestContext,
+            _ctx: &plexspaces_actor::RequestContext,
             _message: Message,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())

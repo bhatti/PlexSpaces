@@ -23,7 +23,7 @@ use entity_recognition::{
     loader::{LoaderBehavior, LoaderRequest},
     processor::ProcessorBehavior,
 };
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
 use plexspaces_sdk::{cast_message, spawn_with_facets};
 use std::time::Instant;

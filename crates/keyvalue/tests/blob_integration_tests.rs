@@ -23,7 +23,7 @@
 
 #[cfg(feature = "blob-backend")]
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_keyvalue::{
         blob::{BlobKVConfig, BlobKVStore},
         KeyValueStore,

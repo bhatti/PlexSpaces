@@ -19,9 +19,8 @@
 
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
-use plexspaces_actor::Actor;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use std::sync::atomic::{AtomicBool, Ordering};

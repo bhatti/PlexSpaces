@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use tonic::Request;
 
-use plexspaces_core::{RequestContext, ServiceLocator};
+use plexspaces_actor::{RequestContext, ServiceLocator};
 
 /// List node IDs that can run workers (peers + self). Excludes none; filter by cluster if needed.
 ///
@@ -75,7 +75,7 @@ pub async fn spawn_actor_on_node(
         .map_err(|e| anyhow::anyhow!("get_actor_service_client failed: {}", e))?;
     let mut client = ActorServiceClient::new(channel);
 
-    let (role_opt, args) = plexspaces_core::legacy_spawn_init_json_to_role_and_args(&initial_state);
+    let (role_opt, args) = plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
     let spec = ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: actor_name,

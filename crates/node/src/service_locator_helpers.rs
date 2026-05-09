@@ -18,7 +18,7 @@
 
 //! ServiceLocator helper functions for tests and examples
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 use std::sync::Arc;
 
 /// Create a ServiceLocator with all default services registered

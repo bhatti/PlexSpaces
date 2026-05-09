@@ -31,8 +31,8 @@
 //! - Local supervision only (follows user requirement for simplicity)
 //! - Converts proto enums to Rust enums for type safety
 
-use crate::{ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorError};
-use plexspaces_proto::application::v1::{
+use crate::{RestartPolicy, SupervisionStrategy, Supervisor, SupervisorError};
+use plexspaces_proto::supervision::v1::{
     ChildSpec as ProtoChildSpec, RestartPolicy as ProtoRestartPolicy,
     SupervisionStrategy as ProtoSupervisionStrategy, SupervisorSpec as ProtoSupervisorSpec,
 };
@@ -51,7 +51,7 @@ use ulid::Ulid;
 /// use plexspaces_proto::application::v1::{SupervisorSpec, SupervisionStrategy};
 /// use std::sync::Arc;
 ///
-/// # async fn example(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn example(service_locator: Arc<dyn crate::core::ServiceLocator>) -> Result<(), Box<dyn std::error::Error>> {
 /// let proto_spec = SupervisorSpec {
 ///     strategy: SupervisionStrategy::SupervisionStrategyOneForOne as i32,
 ///     max_restarts: 3,
@@ -79,7 +79,7 @@ impl ProtoSupervisorBuilder {
     /// - `SupervisorError::ConfigError` if spec is invalid
     pub async fn from_proto_spec(
         spec: &ProtoSupervisorSpec,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn crate::core::ServiceLocator>,
     ) -> Result<Arc<Supervisor>, SupervisorError> {
         // Convert proto supervision strategy to Rust enum
         let strategy = Self::convert_supervision_strategy(spec)?;
@@ -130,6 +130,28 @@ impl ProtoSupervisorBuilder {
                     within_seconds,
                 })
             }
+            Ok(ProtoSupervisionStrategy::SupervisionStrategySimpleOneForOne) => {
+                // SIMPLE_ONE_FOR_ONE maps to OneForOne: the pool-of-identical-workers
+                // distinction is managed at the application level (via ChildSpec template),
+                // not at the supervision-strategy level in the runtime.
+                Ok(SupervisionStrategy::OneForOne {
+                    max_restarts,
+                    within_seconds,
+                })
+            }
+            Ok(ProtoSupervisionStrategy::SupervisionStrategyAdaptive) => {
+                Ok(SupervisionStrategy::Adaptive {
+                    initial_strategy: Box::new(SupervisionStrategy::OneForOne {
+                        max_restarts,
+                        within_seconds,
+                    }),
+                    learning_rate: spec
+                        .adaptive
+                        .as_ref()
+                        .map(|a| a.learning_rate)
+                        .unwrap_or(0.1),
+                })
+            }
             Err(_) => Err(SupervisorError::ConfigError(format!(
                 "Unknown supervision strategy: {}",
                 spec.strategy
@@ -144,9 +166,7 @@ impl ProtoSupervisorBuilder {
     ) -> Result<(), SupervisorError> {
         // Convert proto restart policy to Rust enum
         let restart = Self::convert_restart_policy(child_spec)?;
-
-        // Convert proto child type to Rust enum
-        let child_type = Self::convert_child_type(child_spec)?;
+        let role = if child_spec.role.is_empty() { "worker" } else { child_spec.role.as_str() };
 
         // Extract shutdown timeout
         let _shutdown_timeout = child_spec
@@ -154,10 +174,6 @@ impl ProtoSupervisorBuilder {
             .as_ref()
             .map(|d| Duration::from_secs(d.seconds as u64))
             .unwrap_or(Duration::from_secs(30));
-
-        // TODO: Actually spawn the actor
-        // For now, we just validate the spec
-        // Future: Use ActorFactory to spawn actors
 
         let Some(id) = child_spec.actor_identity.as_ref() else {
             return Err(SupervisorError::ConfigError(
@@ -170,12 +186,11 @@ impl ProtoSupervisorBuilder {
             ));
         }
 
-        // Log child spec for now (actual spawning in next phase)
         tracing::debug!(
             child_name = %id.name,
             actor_type = %id.actor_type,
             restart_policy = ?restart,
-            child_type = ?child_type,
+            role = %role,
             "Validated child spec (spawning not yet implemented)"
         );
 
@@ -191,6 +206,14 @@ impl ProtoSupervisorBuilder {
             | Ok(ProtoRestartPolicy::RestartPolicyPermanent) => Ok(RestartPolicy::Permanent),
             Ok(ProtoRestartPolicy::RestartPolicyTransient) => Ok(RestartPolicy::Transient),
             Ok(ProtoRestartPolicy::RestartPolicyTemporary) => Ok(RestartPolicy::Temporary),
+            Ok(ProtoRestartPolicy::RestartPolicyExponentialBackoff) => {
+                let eb = child_spec.exponential_backoff.as_ref();
+                Ok(RestartPolicy::ExponentialBackoff {
+                    initial_delay_ms: eb.map(|e| e.initial_delay_ms).unwrap_or(100),
+                    max_delay_ms: eb.map(|e| e.max_delay_ms).unwrap_or(30_000),
+                    factor: eb.map(|e| e.factor).unwrap_or(2.0),
+                })
+            }
             Err(_) => Err(SupervisorError::ConfigError(format!(
                 "Unknown restart policy for child {:?}: {}",
                 child_spec.actor_identity.as_ref().map(|i| i.name.as_str()),
@@ -199,13 +222,6 @@ impl ProtoSupervisorBuilder {
         }
     }
 
-    /// Convert proto ChildSpec role string to Rust ChildType
-    fn convert_child_type(child_spec: &ProtoChildSpec) -> Result<ChildType, SupervisorError> {
-        match child_spec.role.as_str() {
-            "supervisor" => Ok(ChildType::Supervisor),
-            _ => Ok(ChildType::Worker),
-        }
-    }
 }
 
 // ============================================================================
@@ -216,11 +232,9 @@ impl ProtoSupervisorBuilder {
 mod tests {
     use super::*;
     use crate::SupervisionStrategy;
-    use plexspaces_proto::application::v1::{
+    use plexspaces_proto::supervision::v1::{
         ChildSpec, RestartPolicy, SupervisionStrategy as ProtoSupervisionStrategy, SupervisorSpec,
     };
-    use plexspaces_services::ServiceLocatorImpl;
-
     /// Helper function to create a basic supervisor spec
     fn create_test_supervisor_spec() -> SupervisorSpec {
         SupervisorSpec {
@@ -243,6 +257,7 @@ mod tests {
                 }),
                 ..Default::default()
             }],
+            ..Default::default()
         }
     }
 
@@ -250,8 +265,8 @@ mod tests {
     #[tokio::test]
     async fn test_build_supervisor_from_proto() {
         let spec = create_test_supervisor_spec();
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-            Arc::new(ServiceLocatorImpl::new());
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn crate::core::ServiceLocator>;
 
         let result = ProtoSupervisorBuilder::from_proto_spec(&spec, service_locator).await;
         assert!(result.is_ok(), "Should build supervisor from valid spec");
@@ -271,6 +286,7 @@ mod tests {
                 nanos: 0,
             }),
             children: vec![],
+            ..Default::default()
         };
 
         let result = ProtoSupervisorBuilder::convert_supervision_strategy(&spec);
@@ -296,6 +312,7 @@ mod tests {
             max_restarts: 3,
             max_restart_window: None,
             children: vec![],
+            ..Default::default()
         };
 
         let result = ProtoSupervisorBuilder::convert_supervision_strategy(&spec);

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{Router, extract::{Query, State}, http::StatusCode, response::Json, routing::get};
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ServiceLocator;
 use plexspaces_proto::node::v1::node_service_server::NodeService as NodeServiceTrait;
 use plexspaces_proto::node::v1::ListConnectedNodesRequest;
 use plexspaces_services::node_service::NodeServiceImpl;

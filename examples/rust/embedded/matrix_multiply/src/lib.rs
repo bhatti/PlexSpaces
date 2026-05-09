@@ -6,7 +6,7 @@
 // Exposes MatrixWorker actor and compute_rows function for testing
 
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json};
-use plexspaces_core::{ActorId, BehaviorError, ActorContext, Message};
+use plexspaces_actor::{ActorId, BehaviorError, ActorContext, Message};
 use std::time::Instant;
 
 // =============================================================================

@@ -36,7 +36,7 @@
 //! ## Usage
 //! ```rust,no_run
 //! use plexspaces_keyvalue::RedisKVStore;
-//! use plexspaces_common::RequestContext;
+//! use plexspaces_common::{RequestContext, RequestContextExt};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let store = RedisKVStore::new("redis://localhost:6379", "myapp").await?;
@@ -50,7 +50,7 @@
 
 use crate::{KVError, KVEvent, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use redis::{aio::ConnectionManager, AsyncCommands, Client, RedisResult};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -473,7 +473,7 @@ mod tests {
     use super::*;
     use plexspaces_common::skip_if_unavailable;
     use plexspaces_common::test_helpers::redis_available;
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
 
     // Helper to create test store (requires running Redis instance)
     async fn create_test_store() -> RedisKVStore {

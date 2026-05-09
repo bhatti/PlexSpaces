@@ -35,6 +35,7 @@
 //! - Uses proto-generated types from `plexspaces_proto`
 
 // Application trait is defined in this crate (application_trait.rs)
+
 pub mod application_trait;
 pub use application_trait::{Application, ApplicationError, ApplicationNode};
 

@@ -10,34 +10,14 @@ categories.workspace = true
 description = "OTP-style behaviors for PlexSpaces actor system"
 
 [dependencies]
-# Core types
-plexspaces-core = { workspace = true }
-plexspaces-proto = { workspace = true }
-plexspaces-mailbox = { workspace = true }
-plexspaces-persistence = { workspace = true }
-
-# Core dependencies
-tokio = { workspace = true }
-async-trait = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-chrono = { workspace = true }
-thiserror = { workspace = true }
-uuid = { workspace = true }
-rand = "0.8"
-
-# Observability (CRITICAL - production-ready observability)
-metrics = "0.23"
-tracing = { workspace = true }
+# Shim: behavior is now part of plexspaces-actor
+plexspaces-actor = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { version = "0.4" }
-plexspaces-node = { path = "../node" }
-plexspaces-services = { path = "../services" }
-ulid = { workspace = true }
 
 [features]
-tracing = ["plexspaces-core/tracing"]
+tracing = []
 
 [lib]
 name = "plexspaces_behavior"

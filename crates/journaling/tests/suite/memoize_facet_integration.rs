@@ -4,8 +4,9 @@
 // Integration tests for MemoizeFacet using the full ServiceLocator stack.
 
 use async_trait::async_trait;
-use plexspaces_core::{
-    JournalStorage, KeyValueStore, KeyValueStoreError, LockManager, RequestContext, ServiceLocator,
+use plexspaces_actor::{
+    InitializableServiceLocator, JournalStorage, KeyValueStore, KeyValueStoreError, LockManager,
+    RequestContext, ServiceLocator,
 };
 use plexspaces_facet::{Facet, FacetFactory, InterceptResult};
 use plexspaces_journaling::{
@@ -78,7 +79,7 @@ impl KeyValueStore for MemKv {
 // Helpers
 // ---------------------------------------------------------------------------
 async fn build_service_locator() -> Arc<dyn ServiceLocator> {
-    let sl: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+    let sl = Arc::new(ServiceLocatorImpl::new());
 
     let journal: Arc<dyn JournalStorage> =
         Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
@@ -91,7 +92,7 @@ async fn build_service_locator() -> Arc<dyn ServiceLocator> {
     let kv: Arc<dyn KeyValueStore> = MemKv::new();
     sl.register_keyvalue_store(kv).await;
 
-    sl
+    sl as Arc<dyn ServiceLocator>
 }
 
 fn make_facet(kv: Arc<dyn KeyValueStore>, ttl: u32, max: u32, handlers: Vec<&str>) -> MemoizeFacet {

@@ -26,6 +26,7 @@
 #[cfg(test)]
 #[cfg(feature = "component-model")]
 mod tests {
+    use plexspaces_actor::ActorId;
     use plexspaces_wasm_runtime::{ResourceLimits, WasmCapabilities, WasmConfig, WasmRuntime};
     use std::sync::Arc;
     use std::time::Duration;
@@ -67,7 +68,7 @@ mod tests {
 
     /// Helper: create a WasmInstance from the shared calculator fixture.
     /// Returns None if the fixture is not available or incompatible (test should be skipped).
-    async fn create_instance(actor_id: &str) -> Option<plexspaces_wasm_runtime::WasmInstance> {
+    async fn create_instance(actor_name: &str) -> Option<plexspaces_wasm_runtime::WasmInstance> {
         let runtime = WasmRuntime::new().await.expect("Failed to create runtime");
         let wasm_bytes = get_shared_wasm_bytes().await?;
 
@@ -88,12 +89,13 @@ mod tests {
             }
         };
 
+        let actor_id = ActorId::new(actor_name, "wasm", "default", "test-node").unwrap();
         let config = test_config();
         let result = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
                 module,
-                actor_id.to_string(),
+                actor_id,
                 &[],
                 config,
                 None,

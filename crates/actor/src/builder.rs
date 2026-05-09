@@ -32,7 +32,7 @@
 //! ### Simple Actor Creation
 //! ```rust,ignore
 //! use plexspaces_actor::ActorBuilder;
-//! use plexspaces_core::Actor;
+//! use crate::core::Actor;
 //!
 //! struct MyBehavior;
 //! impl Actor for MyBehavior { /* ... */ }
@@ -53,16 +53,13 @@
 //!     .await?;
 //! ```
 
-use crate::resource::ResourceProfile;
-use crate::Actor as ActorStruct;
-use plexspaces_core::{Actor, ActorId};
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use crate::ActorInstance as ActorStruct;
+use crate::core::{Actor, ActorId, RequestContextExt};
+use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
-use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::actor::ActorConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
-// Note: mailbox_config_default() is not exported, so we'll use MailboxConfig::default() and set capacity
 
 /// Builder for creating actors with a fluent API
 ///
@@ -72,26 +69,13 @@ use std::sync::Arc;
 ///
 /// ## Design
 /// - Uses builder pattern for configuration
-/// - Provides sensible defaults (mailbox, namespace, etc.)
+/// - Uses [`ActorSpawnSpec`] as the configuration source of truth
 /// - Supports facet-based extensibility
 /// - Single entry point for all actor types
 pub struct ActorBuilder {
     behavior: Box<dyn Actor>,
-    actor_id: Option<ActorId>,
-    actor_name: Option<String>,
-    tenant_id: String,
-    namespace: String,
-    mailbox_config: Option<MailboxConfig>,
+    spawn_spec: ActorSpawnSpec,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
-    resource_profile: Option<ResourceProfile>,
-    config: Option<ActorConfig>,
-    node_id: Option<String>,
-    /// Spawn visibility from [`ActorSpawnSpec`]. Defaults to PUBLIC for programmatic builders.
-    visibility: ActorVisibility,
-    role: String,
-    behavior_kind: String,
-    args: HashMap<String, String>,
-    labels: HashMap<String, String>,
 }
 
 impl ActorBuilder {
@@ -107,20 +91,19 @@ impl ActorBuilder {
     pub fn new(behavior: Box<dyn Actor>) -> Self {
         Self {
             behavior,
-            actor_id: None,
-            actor_name: None,
-            tenant_id: String::new(), // Empty if auth disabled
-            namespace: String::new(), // Must be set via with_namespace()
-            mailbox_config: None,
+            spawn_spec: ActorSpawnSpec {
+                identity: None,
+                role: String::new(),
+                namespace: String::new(),
+                tenant_id: String::new(),
+                visibility: ActorVisibility::ActorVisibilityPublic as i32,
+                behavior_kind: String::new(),
+                args: HashMap::new(),
+                facets: vec![],
+                labels: HashMap::new(),
+                config: None,
+            },
             facets: Vec::new(),
-            resource_profile: None,
-            config: None,
-            node_id: None,
-            visibility: ActorVisibility::ActorVisibilityPublic,
-            role: String::new(),
-            behavior_kind: String::new(),
-            args: HashMap::new(),
-            labels: HashMap::new(),
         }
     }
 
@@ -141,24 +124,11 @@ impl ActorBuilder {
         behavior: Box<dyn Actor>,
         spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
     ) -> Self {
-        let mut builder = Self::new(behavior);
-        if let Some(ref identity) = spec.identity {
-            if !identity.name.is_empty() {
-                builder.actor_name = Some(identity.name.clone());
-            }
+        Self {
+            behavior,
+            spawn_spec: spec.clone(),
+            facets: Vec::new(),
         }
-        builder.namespace = spec.namespace.clone();
-        builder.tenant_id = spec.tenant_id.clone();
-        builder.visibility = ActorVisibility::try_from(spec.visibility)
-            .unwrap_or(ActorVisibility::ActorVisibilityPublic);
-        builder.role = spec.role.clone();
-        builder.behavior_kind = spec.behavior_kind.clone();
-        builder.args = spec.args.clone();
-        builder.labels = spec.labels.clone();
-        if let Some(config) = spec.config.clone() {
-            builder.config = Some(config);
-        }
-        builder
     }
 
     /// Snapshot builder fields into an [`ActorSpawnSpec`] for factory / RPC boundaries.
@@ -166,32 +136,22 @@ impl ActorBuilder {
     /// `runtime_actor_type` must be the resolved behavior class (for example after virtual-name
     /// resolution), matching [`ActorFactory`] expectations.
     pub fn to_spawn_spec(&self, runtime_actor_type: impl Into<String>) -> ActorSpawnSpec {
+        let mut spec = self.spawn_spec.clone();
         let actor_type = runtime_actor_type.into();
-        let name = self
-            .actor_name
-            .clone()
-            .or_else(|| self.actor_id.as_ref().map(|id| id.name().to_string()))
-            .unwrap_or_default();
-        ActorSpawnSpec {
-            identity: Some(ActorIdentity { name, actor_type }),
-            role: self.role.clone(),
-            namespace: self.namespace.clone(),
-            tenant_id: self.tenant_id.clone(),
-            visibility: self.visibility.clone() as i32,
-            behavior_kind: self.behavior_kind.clone(),
-            args: self.args.clone(),
-            facets: vec![],
-            config: self.config.clone(),
-            labels: self.labels.clone(),
+        let mut identity = spec.identity.take().unwrap_or_default();
+        if !actor_type.is_empty() {
+            identity.actor_type = actor_type;
         }
+        spec.identity = Some(identity);
+        spec
     }
 
     /// Consume the builder into `(spec, behavior, runtime_facets)` without creating a mailbox.
     ///
-    /// Use with [`ActorFactory::spawn_actor`](plexspaces_core::ActorFactory::spawn_actor) when the
-    /// behavior is created from [`plexspaces_core::BehaviorRegistry`], or with
+    /// Use with [`ActorFactory::spawn_actor`](crate::core::ActorFactory::spawn_actor) when the
+    /// behavior is created from [`crate::core::BehaviorRegistry`], or with
     /// [`ActorFactoryImpl::spawn_built_actor_impl`](crate::ActorFactoryImpl::spawn_built_actor_impl)
-    /// when the caller already holds a concrete [`Actor`](plexspaces_core::Actor). Proto facets
+    /// when the caller already holds a concrete [`Actor`](crate::core::Actor). Proto facets
     /// belong on [`ActorSpawnSpec::facets`](plexspaces_proto::actor::v1::ActorSpawnSpec::facets);
     /// this type’s `facets` vector is Rust-only instantiated facets.
     pub fn into_spawn_inputs(
@@ -219,29 +179,9 @@ impl ActorBuilder {
     ///     .with_name("counter-actor");
     /// ```
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.actor_name = Some(name.into());
-        self
-    }
-
-    /// Set a fully constructed actor ID.
-    ///
-    /// ## Design
-    /// Client-facing code should prefer [`Self::with_name`], letting the runtime assemble the
-    /// full [`ActorId`] from actor name, behavior type, namespace, and node placement. This
-    /// method exists for advanced runtime and test scenarios that already hold a validated
-    /// structured actor identity.
-    ///
-    /// ## Arguments
-    /// * `id` - Fully constructed canonical actor ID
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let actor_id = plexspaces_core::ActorId::new("my-actor", "worker", "prod", "node1")?;
-    /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_id(actor_id);
-    /// ```
-    pub fn with_id(mut self, id: impl Into<ActorId>) -> Self {
-        self.actor_id = Some(id.into());
+        let mut identity = self.spawn_spec.identity.take().unwrap_or_default();
+        identity.name = name.into();
+        self.spawn_spec.identity = Some(identity);
         self
     }
 
@@ -256,7 +196,7 @@ impl ActorBuilder {
     ///     .with_namespace("production");
     /// ```
     pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
-        self.namespace = namespace.into();
+        self.spawn_spec.namespace = namespace.into();
         self
     }
 
@@ -271,63 +211,7 @@ impl ActorBuilder {
     ///     .with_tenant_id("tenant-123");
     /// ```
     pub fn with_tenant_id(mut self, tenant_id: impl Into<String>) -> Self {
-        self.tenant_id = tenant_id.into();
-        self
-    }
-
-    /// Set the node ID for this actor.
-    ///
-    /// Use this to give the actor a fully-qualified identity at build time.
-    /// If omitted, `spawn_built_actor_impl` normalizes the node_id to the
-    /// actual local node at spawn time.
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let actor = ActorBuilder::new(MyBehavior::new())
-    ///     .with_name("counter")
-    ///     .with_node_id("node-1")
-    ///     .build()
-    ///     .await?;
-    /// ```
-    pub fn with_node_id(mut self, node_id: impl Into<String>) -> Self {
-        self.node_id = Some(node_id.into());
-        self
-    }
-
-    /// Configure the mailbox for this actor
-    ///
-    /// ## Arguments
-    /// * `config` - Mailbox configuration
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let config = MailboxConfig {
-    ///     max_size: 1000,
-    ///     ..Default::default()
-    /// };
-    /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_mailbox_config(config);
-    /// ```
-    pub fn with_mailbox_config(mut self, config: MailboxConfig) -> Self {
-        self.mailbox_config = Some(config);
-        self
-    }
-
-    /// Set the mailbox capacity (convenience method)
-    ///
-    /// ## Arguments
-    /// * `capacity` - Maximum number of messages in mailbox (default: 10000)
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_mailbox_capacity(5000);
-    /// ```
-    pub fn with_mailbox_capacity(mut self, capacity: u32) -> Self {
-        use plexspaces_mailbox::mailbox_config_default;
-        let mut config = mailbox_config_default();
-        config.capacity = capacity;
-        self.mailbox_config = Some(config);
+        self.spawn_spec.tenant_id = tenant_id.into();
         self
     }
 
@@ -351,7 +235,7 @@ impl ActorBuilder {
     /// ```
     pub fn with_durability(mut self) -> Self {
         // Store durability config in actor config properties
-        let mut config = self.config.take().unwrap_or_default();
+        let mut config = self.spawn_spec.config.take().unwrap_or_default();
         config.properties.insert(
             "facet.durability.enabled".to_string(),
             prost_types::Any {
@@ -359,7 +243,7 @@ impl ActorBuilder {
                 value: vec![1], // true
             },
         );
-        self.config = Some(config);
+        self.spawn_spec.config = Some(config);
         self
     }
 
@@ -410,7 +294,7 @@ impl ActorBuilder {
     /// ```
     pub fn with_virtual_actor(mut self) -> Self {
         // Store virtual actor config in actor config properties
-        let mut config = self.config.take().unwrap_or_default();
+        let mut config = self.spawn_spec.config.take().unwrap_or_default();
         config.properties.insert(
             "facet.virtual_actor.enabled".to_string(),
             prost_types::Any {
@@ -418,50 +302,7 @@ impl ActorBuilder {
                 value: vec![1], // true
             },
         );
-        self.config = Some(config);
-        self
-    }
-
-    /// Enable TupleSpace access for this actor (convenience method)
-    ///
-    /// ## Purpose
-    /// Marks that this actor needs access to TupleSpace for coordination.
-    /// The actor will have TupleSpace available in its ActorContext.
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let actor = ActorBuilder::new(MyBehavior::new())
-    ///     .with_name("coordinator")
-    ///     .with_tuplespace()
-    ///     .build()
-    ///     .await?;
-    /// ```
-    pub fn with_tuplespace(mut self) -> Self {
-        // Store tuplespace requirement in actor config properties
-        let mut config = self.config.take().unwrap_or_default();
-        config.properties.insert(
-            "capability.tuplespace.required".to_string(),
-            prost_types::Any {
-                type_url: "type.googleapis.com/google.protobuf.BoolValue".to_string(),
-                value: vec![1], // true
-            },
-        );
-        self.config = Some(config);
-        self
-    }
-
-    /// Set the resource profile for this actor
-    ///
-    /// ## Arguments
-    /// * `profile` - Resource profile (CPU-intensive, IO-intensive, etc.)
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_resource_profile(ResourceProfile::CpuIntensive);
-    /// ```
-    pub fn with_resource_profile(mut self, profile: ResourceProfile) -> Self {
-        self.resource_profile = Some(profile);
+        self.spawn_spec.config = Some(config);
         self
     }
 
@@ -478,7 +319,7 @@ impl ActorBuilder {
     ///     .with_config(Some(actor_config));
     /// ```
     pub fn with_config(mut self, config: Option<ActorConfig>) -> Self {
-        self.config = config;
+        self.spawn_spec.config = config;
         self
     }
 
@@ -522,14 +363,14 @@ impl ActorBuilder {
         // Create ResourceContract
         let _resource_contract = ResourceContract {
             max_cpu_percent,
-            max_memory_bytes: memory_bytes,
+            max_memory_bytes: memory_bytes as u64,
             max_io_ops_per_sec: None,
             guaranteed_bandwidth_mbps: None,
-            max_execution_time: Some(std::time::Duration::from_secs(300)),
+            max_execution_time: Some(prost_types::Duration { seconds: 300, nanos: 0 }),
         };
 
         // Get or create ActorConfig
-        let mut config = self.config.take().unwrap_or_default();
+        let mut config = self.spawn_spec.config.take().unwrap_or_default();
 
         // Set resource contract in config (if ActorConfig has this field)
         // For now, store in properties
@@ -549,42 +390,10 @@ impl ActorBuilder {
             },
         );
 
-        // Store labels
-        for (key, value) in labels {
-            config.properties.insert(
-                format!("label.{}", key),
-                Any {
-                    type_url: "type.googleapis.com/google.protobuf.StringValue".to_string(),
-                    value: value.into_bytes(),
-                },
-            );
-        }
+        self.spawn_spec.labels.extend(labels);
+        config.actor_groups = actor_groups;
 
-        // Store actor groups
-        if !actor_groups.is_empty() {
-            // Store as comma-separated string in properties
-            let groups_str = actor_groups.join(",");
-            config.properties.insert(
-                "actor_groups".to_string(),
-                Any {
-                    type_url: "type.googleapis.com/google.protobuf.StringValue".to_string(),
-                    value: groups_str.into_bytes(),
-                },
-            );
-        }
-
-        self.config = Some(config);
-
-        // Also set resource profile based on CPU/memory ratio
-        use crate::resource::ResourceProfile;
-        let profile = if cpu_cores > memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0) {
-            ResourceProfile::CpuIntensive
-        } else if memory_bytes > 1024 * 1024 * 1024 {
-            ResourceProfile::MemoryIntensive
-        } else {
-            ResourceProfile::Balanced
-        };
-        self.resource_profile = Some(profile);
+        self.spawn_spec.config = Some(config);
 
         self
     }
@@ -618,7 +427,7 @@ impl ActorBuilder {
         module_hash: impl Into<String>,
     ) -> Self {
         // Get or create ActorConfig
-        let mut config = self.config.take().unwrap_or_default();
+        let mut config = self.spawn_spec.config.take().unwrap_or_default();
 
         // Store WASM module info in properties map
         use prost_types::Any;
@@ -645,46 +454,7 @@ impl ActorBuilder {
             },
         );
 
-        self.config = Some(config);
-        self
-    }
-
-    /// Configure actor to run in a Firecracker VM
-    ///
-    /// ## Purpose
-    /// Deploys actor to a Firecracker microVM for application-level isolation.
-    /// The VM must be created and running before actor deployment.
-    ///
-    /// ## Arguments
-    /// * `vm_id` - ID of the Firecracker VM where the actor should run
-    ///
-    /// ## Design Notes
-    /// - Firecracker provides strong isolation at the application level
-    /// - VM contains entire application (framework + actors), not individual actors
-    /// - Use ApplicationDeployment builder for deploying full applications to VMs
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_name("isolated-actor")
-    ///     .with_firecracker_vm("vm-001");
-    /// ```
-    pub fn with_firecracker_vm(mut self, vm_id: impl Into<String>) -> Self {
-        // Get or create ActorConfig
-        let mut config = self.config.take().unwrap_or_default();
-
-        // Store Firecracker VM ID in properties map
-        use prost_types::Any;
-
-        config.properties.insert(
-            "firecracker.vm_id".to_string(),
-            Any {
-                type_url: "type.googleapis.com/google.protobuf.StringValue".to_string(),
-                value: vm_id.into().into_bytes(),
-            },
-        );
-
-        self.config = Some(config);
+        self.spawn_spec.config = Some(config);
         self
     }
 
@@ -698,7 +468,7 @@ impl ActorBuilder {
     ///
     /// ## Defaults
     /// - Actor ID: Generated ULID if not provided
-    /// - Mailbox: Default MailboxConfig if not provided
+    /// - Mailbox: derived from `ActorSpawnSpec.config.max_mailbox_size` when present
     ///
     /// ## Example
     /// ```rust,ignore
@@ -710,70 +480,49 @@ impl ActorBuilder {
     /// ```
     pub async fn build(self) -> Result<ActorStruct, std::io::Error> {
         let behavior_type = self.behavior.behavior_type();
-        let actor_type = match &behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "gen_server",
-            plexspaces_core::BehaviorType::GenEvent => "gen_event",
-            plexspaces_core::BehaviorType::GenStateMachine => "gen_state_machine",
-            plexspaces_core::BehaviorType::Workflow => "workflow",
-            plexspaces_core::BehaviorType::Custom(s) => s.as_str(),
+        let derived_actor_type = match &behavior_type {
+            crate::core::BehaviorType::GenServer => "gen_server",
+            crate::core::BehaviorType::GenEvent => "gen_event",
+            crate::core::BehaviorType::GenStateMachine => "gen_state_machine",
+            crate::core::BehaviorType::Workflow => "workflow",
+            crate::core::BehaviorType::Custom(s) => s.as_str(),
         };
-
-        let actor_id = if let Some(actor_id) = self.actor_id.clone() {
-            if let Some(ref node_id) = self.node_id {
-                if actor_id.node_id() != node_id {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!(
-                            "Actor ID '{}' specifies node '{}' but builder has node_id '{}'.",
-                            actor_id,
-                            actor_id.node_id(),
-                            node_id
-                        ),
-                    ));
-                }
-            }
-            actor_id
+        let mut spawn_spec = self.spawn_spec;
+        let identity = spawn_spec.identity.take().unwrap_or_default();
+        let actor_type = if identity.actor_type.is_empty() {
+            derived_actor_type.to_string()
         } else {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-            let generated_name = self
-                .actor_name
-                .clone()
-                .unwrap_or_else(|| format!("actor_{timestamp}"));
-            // If node_id is not set, use a placeholder — spawn_built_actor_impl will
-            // normalize to the real node_id at spawn time. No "local" magic strings.
-            let node_id = self
-                .node_id
-                .clone()
-                .unwrap_or_else(|| "unassigned".to_string());
-            let namespace = if self.namespace.is_empty() {
-                "default".to_string()
-            } else {
-                self.namespace.clone()
-            };
-            ActorId::new(generated_name, actor_type, namespace, node_id).map_err(|e| {
+            identity.actor_type
+        };
+        let actor_name = if identity.name.is_empty() {
+            ulid::Ulid::new().to_string()
+        } else {
+            identity.name
+        };
+        let namespace = if spawn_spec.namespace.is_empty() {
+            "default".to_string()
+        } else {
+            spawn_spec.namespace.clone()
+        };
+        let actor_id =
+            ActorId::new(actor_name, actor_type, namespace.clone(), "unassigned").map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("failed to construct actor id: {e}"),
                 )
-            })?
-        };
+            })?;
+        let tenant_id = spawn_spec.tenant_id.clone();
 
-        // Namespace is required - must be set via with_namespace()
-        // Namespace can be empty - no validation needed
-        let namespace = self.namespace.clone();
-        let tenant_id = self.tenant_id.clone();
-
-        // Use default mailbox config if not provided
-        // Use mailbox_config_default() to ensure capacity is set (default is 10000)
-        let mailbox_config = self.mailbox_config.unwrap_or_else(|| {
+        let mailbox_config = spawn_spec.config.as_ref().map(|config| {
+            let mut cfg = plexspaces_mailbox::mailbox_config_default();
+            if config.max_mailbox_size > 0 {
+                cfg.capacity = config.max_mailbox_size;
+            }
+            cfg
+        }).unwrap_or_else(|| {
             use plexspaces_mailbox::mailbox_config_default;
             mailbox_config_default()
         });
-        // Mailbox::new() is async, so build() must be async too
         let mailbox_id = format!("mailbox_{actor_id}");
         let mailbox = Mailbox::new(mailbox_config, mailbox_id)
             .await
@@ -784,22 +533,21 @@ impl ActorBuilder {
                 )
             })?;
 
-        let node_id = self.node_id.clone();
+        let node_id = Some("unassigned".to_string());
 
         // Create actor with config if provided
-        let mut actor = if let Some(config) = self.config {
+        let actor = if let Some(config) = spawn_spec.config {
             // Create actor with config in context
-            use plexspaces_core::ActorContext;
-            let node_id_str = node_id.clone().unwrap_or_else(|| "unassigned".to_string());
+            use crate::core::ActorContext;
             // Create ServiceLocator for context
             // Note: This is a sync function, so we can't use create_default_service_locator
             // For ActorBuilder, we create a minimal ServiceLocator stub that will be replaced
             // when the actor is actually spawned by Node
             use crate::TestServiceLocatorStub;
-            let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            let service_locator: Arc<dyn crate::core::ServiceLocator> =
                 Arc::new(TestServiceLocatorStub::new());
             let context = Arc::new(ActorContext::new(
-                node_id_str,
+                "unassigned".to_string(),
                 tenant_id.clone(),
                 namespace.clone(),
                 service_locator,
@@ -825,11 +573,6 @@ impl ActorBuilder {
                 node_id,
             )
         };
-
-        // Apply resource profile if provided
-        if let Some(profile) = self.resource_profile {
-            actor = actor.with_resource_profile(profile);
-        }
 
         // Attach facets after building
         for facet in self.facets {
@@ -863,13 +606,13 @@ impl ActorBuilder {
     /// ```
     pub async fn spawn(
         mut self,
-        ctx: &plexspaces_core::RequestContext,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        ctx: &crate::core::RequestContext,
+        service_locator: Arc<dyn crate::core::ServiceLocator>,
     ) -> Result<crate::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         // Use tenant_id and namespace from RequestContext
         // If auth is disabled, tenant_id will be empty string
-        self.tenant_id = ctx.tenant_id().to_string();
-        self.namespace = ctx.namespace().to_string();
+        self.spawn_spec.tenant_id = ctx.tenant_id().to_string();
+        self.spawn_spec.namespace = ctx.namespace().to_string();
 
         // Get required services from ServiceLocator
         let registry = service_locator.actor_registry().await.ok_or_else(|| {
@@ -882,21 +625,21 @@ impl ActorBuilder {
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
 
-        // Build with the local node id up front so the actor registers itself exactly once with
-        // the canonical runtime identity and behavior metadata.
         let local_node_id = registry.local_node_id();
-        self.node_id = Some(local_node_id.to_string());
-
-        // CRITICAL: Clone tenant_id before self is moved by build()
-        let tenant_id_for_ref = self.tenant_id.clone();
+        let tenant_id_for_ref = self.spawn_spec.tenant_id.clone();
         let namespace_for_ref = ctx.namespace().to_string();
-        let spawn_visibility = self.visibility.clone();
+        let spawn_visibility = ActorVisibility::try_from(self.spawn_spec.visibility)
+            .unwrap_or(ActorVisibility::ActorVisibilityPublic);
 
         // Build the actor (facets are attached during build). One mailbox `Arc` is shared by the
         // runtime [`Actor`](ActorStruct) and the returned [`ActorRef`] (single allocation).
         let mut actor = self.build().await?;
+        let actor_id = actor
+            .id()
+            .with_node_id(local_node_id)
+            .map_err(|e| format!("Failed to normalize actor id to local node: {}", e))?;
+        actor = actor.with_normalized_id(actor_id.clone());
 
-        let actor_id = actor.id().clone();
         let actor_ref = ActorRef::local(
             actor_id.clone(),
             tenant_id_for_ref.clone(),
@@ -905,11 +648,11 @@ impl ActorBuilder {
             service_locator.clone(),
             spawn_visibility.clone(),
         );
-        let self_ref = plexspaces_core::ActorRef::new(actor_id.clone())
+        let self_ref = crate::core::ActorRef::new(actor_id.clone())
             .map_err(|e| format!("Failed to construct actor self_ref: {}", e))?;
 
         // Create ActorContext with proper node ID
-        let actor_context = plexspaces_core::ActorContext::new(
+        let actor_context = crate::core::ActorContext::new(
             local_node_id.to_string(),
             ctx.tenant_id().to_string(),
             ctx.namespace().to_string(),
@@ -958,7 +701,8 @@ impl ActorBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{Actor, BehaviorType};
+    use crate::core::{Actor, BehaviorType};
+    use std::sync::Arc;
 
     struct TestBehavior;
 
@@ -966,13 +710,13 @@ mod tests {
     impl Actor for TestBehavior {
         async fn handle_message(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
+            _ctx: &crate::core::ActorContext,
             _msg: plexspaces_proto::common::v1::Message,
-        ) -> Result<(), plexspaces_core::BehaviorError> {
+        ) -> Result<(), crate::core::BehaviorError> {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        fn behavior_type(&self) -> crate::core::BehaviorType {
             BehaviorType::Custom("test".to_string())
         }
     }
@@ -1017,19 +761,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_builder_with_mailbox_config() {
-        let mut config = MailboxConfig::default();
-        config.capacity = 500;
-
-        let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_mailbox_config(config)
+    async fn test_builder_to_spawn_spec_uses_actor_config() {
+        let spec = ActorBuilder::new(Box::new(TestBehavior))
+            .with_name("config-actor")
             .with_namespace("test".to_string())
-            .build()
-            .await
-            .expect("build should succeed");
+            .with_config(Some(ActorConfig {
+                max_mailbox_size: 500,
+                ..Default::default()
+            }))
+            .to_spawn_spec("test");
 
-        // Mailbox config is applied (verified by actor creation)
-        assert!(!actor.id().is_empty());
+        assert_eq!(spec.config.unwrap().max_mailbox_size, 500);
     }
 
     #[tokio::test]
@@ -1062,24 +804,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_builder_with_tuplespace() {
-        let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_name("coordinator")
-            .with_tuplespace()
-            .with_namespace("test".to_string())
-            .build()
-            .await
-            .expect("build should succeed");
-
-        // Verify actor was created with tuplespace capability
-        assert!(!actor.id().is_empty());
-    }
-
-    #[tokio::test]
     async fn test_builder_with_resource_requirements() {
         use std::collections::HashMap;
         let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id(ActorId::new("resource-actor", "test", "test", "test-node").unwrap())
+            .with_name("resource-actor")
             .with_resource_requirements(
                 2.0,                    // CPU cores
                 8 * 1024 * 1024 * 1024, // 8GB memory
@@ -1093,204 +821,20 @@ mod tests {
             .await
             .expect("build should succeed");
 
-        assert_eq!(actor.id(), "resource-actor//test::test@test-node");
-        // Verify resource profile is set
-        // Verify resource profile is set (check via actor's resource_profile field access)
-        // Note: resource_profile field is private, so we verify via build() success
+        assert_eq!(actor.id(), "resource-actor//test::test@unassigned");
         assert!(!actor.id().is_empty());
     }
 
     #[tokio::test]
-    async fn test_builder_with_id() {
-        let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id(ActorId::new("custom-id", "test", "test", "test-node").unwrap())
-            .with_namespace("test".to_string())
-            .build()
-            .await
-            .expect("build should succeed");
-
-        assert_eq!(actor.id(), "custom-id//test::test@test-node");
-    }
-
-    #[tokio::test]
-    async fn test_builder_spawn_with_node() {
-        use plexspaces_node::NodeBuilder;
-        use std::sync::Arc;
-
-        // Create a test node with unique port to avoid conflicts
-        // Services are automatically initialized in build()
-        let node = Arc::new(
-            NodeBuilder::new("test-node-spawn".to_string())
-                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-                .build()
-                .await,
-        );
-
-        // Spawn actor using ActorBuilder
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
-        let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_name("spawned-actor")
-            .with_namespace("test".to_string())
-            .spawn(&ctx, node.service_locator().clone())
-            .await
-            .expect("Failed to spawn actor");
-
-        let expected_actor_id =
-            ActorId::new("spawned-actor", "test", "test", "test-node-spawn").unwrap();
-        assert_eq!(actor_ref.id(), &expected_actor_id);
-
-        // Verify actor is registered in the node's registry (with retry for async registration)
-        use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
-            .service_locator()
-            .actor_registry()
-            .await
-            .expect("ActorRegistry not found");
-
-        // Retry lookup with timeout (actor registration is async)
-        let mut found = None;
-        for _ in 0..10 {
-            found = actor_registry.lookup_actor(&expected_actor_id).await;
-            if found.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        }
-        assert!(
-            found.is_some(),
-            "Actor should be registered in ActorRegistry"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_builder_spawn_with_resource_requirements() {
-        use plexspaces_node::NodeBuilder;
-        use std::collections::HashMap;
-        use std::sync::Arc;
-
-        // Create a test node with unique port to avoid conflicts
-        // Services are automatically initialized in build()
-        let node = Arc::new(
-            NodeBuilder::new("test-node-resource-spawn".to_string())
-                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-                .build()
-                .await,
-        );
-
-        // Spawn actor with resource requirements
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
-        let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_name("resource-spawned-actor")
-            .with_resource_requirements(
-                1.5,                    // CPU cores
-                4 * 1024 * 1024 * 1024, // 4GB memory
-                0,                      // No disk
-                0,                      // No GPU
-                HashMap::from([("workload".to_string(), "memory-intensive".to_string())]),
-                vec!["test-pool".to_string()],
-            )
-            .with_namespace("test".to_string())
-            .spawn(&ctx, node.service_locator().clone())
-            .await
-            .expect("Failed to spawn actor with resources");
-
-        let expected_actor_id = ActorId::new(
-            "resource-spawned-actor",
-            "test",
-            "test",
-            "test-node-resource-spawn",
-        )
-        .unwrap();
-        assert_eq!(actor_ref.id(), &expected_actor_id);
-
-        // Verify actor is registered (with retry for async registration)
-        use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
-            .service_locator()
-            .actor_registry()
-            .await
-            .expect("ActorRegistry not found");
-
-        // Retry lookup with timeout (actor registration is async)
-        let mut found = None;
-        for _ in 0..10 {
-            found = actor_registry.lookup_actor(&expected_actor_id).await;
-            if found.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        }
-        assert!(found.is_some(), "Actor should be registered");
-    }
-
-    #[tokio::test]
-    async fn test_builder_spawn_with_mailbox_config() {
-        use plexspaces_mailbox::MailboxConfig;
-        use plexspaces_node::NodeBuilder;
-        use std::sync::Arc;
-
-        // Create a test node with unique port to avoid conflicts
-        // Services are automatically initialized in build()
-        let node = Arc::new(
-            NodeBuilder::new("test-node-mailbox-spawn".to_string())
-                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-                .build()
-                .await,
-        );
-
-        // Create custom mailbox config
-        let mut mailbox_config = MailboxConfig::default();
-        mailbox_config.capacity = 5000;
-
-        // Spawn actor with custom mailbox config
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
-        let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_name("mailbox-actor")
-            .with_mailbox_config(mailbox_config)
-            .with_namespace("test".to_string())
-            .spawn(&ctx, node.service_locator().clone())
-            .await
-            .expect("Failed to spawn actor with mailbox config");
-
-        let expected_actor_id =
-            ActorId::new("mailbox-actor", "test", "test", "test-node-mailbox-spawn").unwrap();
-        assert_eq!(actor_ref.id(), &expected_actor_id);
-
-        // Verify actor is registered (with retry for async registration)
-        use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
-            .service_locator()
-            .actor_registry()
-            .await
-            .expect("ActorRegistry not found");
-
-        // Retry lookup with timeout (actor registration is async)
-        let mut found = None;
-        for _ in 0..10 {
-            found = actor_registry.lookup_actor(&expected_actor_id).await;
-            if found.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        }
-        assert!(found.is_some(), "Actor should be registered");
-    }
-
-    #[tokio::test]
     async fn test_builder_spawn_error_when_services_not_registered() {
-        use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
 
-        // Create an empty ServiceLocator without required services
-        // This tests the error case when ActorRegistry is not registered
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-            Arc::new(ServiceLocatorImpl::new());
+        // TestServiceLocatorStub returns None for actor_registry — simulates missing registry
+        let service_locator: Arc<dyn crate::core::ServiceLocator> =
+            Arc::new(crate::TestServiceLocatorStub::new());
 
         // Attempt to spawn actor - should fail because ActorRegistry is not registered
-        use plexspaces_core::RequestContext;
+        use crate::core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let result = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("test-actor")
@@ -1311,69 +855,5 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_builder_spawn_multiple_actors() {
-        use plexspaces_node::NodeBuilder;
-        use std::sync::Arc;
-
-        // Create a test node with unique port to avoid conflicts
-        // Services are automatically initialized in build()
-        let node = Arc::new(
-            NodeBuilder::new("test-node-multi-spawn".to_string())
-                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-                .build()
-                .await,
-        );
-
-        // Spawn multiple actors
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
-        let mut actor_refs = Vec::new();
-        for i in 0..5 {
-            let actor_id = ActorId::new(
-                format!("multi-actor-{i}"),
-                "test",
-                "test",
-                "test-node-multi-spawn",
-            )
-            .unwrap();
-            let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-                .with_id(actor_id)
-                .with_namespace("test".to_string())
-                .spawn(&ctx, node.service_locator().clone())
-                .await
-                .expect(&format!("Failed to spawn actor {}", i));
-            actor_refs.push(actor_ref);
-        }
-
-        assert_eq!(actor_refs.len(), 5);
-
-        // Verify all actors are registered (with retry for async registration)
-        use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
-            .service_locator()
-            .actor_registry()
-            .await
-            .expect("ActorRegistry not found");
-
-        for i in 0..5 {
-            let actor_id = ActorId::new(
-                format!("multi-actor-{i}"),
-                "test",
-                "test",
-                "test-node-multi-spawn",
-            )
-            .unwrap();
-            // Retry lookup with timeout (actor registration is async)
-            let mut found = None;
-            for _ in 0..10 {
-                found = actor_registry.lookup_actor(&actor_id).await;
-                if found.is_some() {
-                    break;
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-            assert!(found.is_some(), "Actor {} should be registered", actor_id);
-        }
-    }
 }
+// Integration tests that need a real Node are in tests/suite/builder_node_integration_tests.rs

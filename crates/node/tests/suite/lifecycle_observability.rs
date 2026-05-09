@@ -34,10 +34,10 @@
 
 use super::test_helpers::{spawn_actor_helper, test_runtime_actor_id};
 
-use plexspaces_actor::Actor;
+use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_behavior::MockBehavior;
-use plexspaces_core::ActorId;
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::ActorId;
+use plexspaces_actor::{RequestContextExt, ServiceLocator, ServiceLocatorBase};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_persistence::MemoryJournal;
@@ -46,8 +46,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -210,7 +210,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Send message to actor to trigger some activity
     let msg = create_test_message(vec![1, 2, 3]);
-    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "test-namespace".to_string(),
     );
@@ -227,8 +227,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Unregister actor to trigger termination
     // Manually publish lifecycle event since watch_actor_termination only fires when join handle completes
-    use plexspaces_core::service_names;
-    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_actor::{ActorRegistry, ExitReason, RequestContextExt};
     use plexspaces_proto::{
         actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
         ActorLifecycleEvent,
@@ -350,8 +349,7 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
     }
 
     // Terminate actor
-    use plexspaces_core::service_names;
-    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_actor::{ActorRegistry, ExitReason};
     use plexspaces_proto::{
         actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
         ActorLifecycleEvent,
@@ -577,7 +575,7 @@ async fn test_lifecycle_event_unsubscribe() {
 /// monitoring systems run on different nodes than the actors they observe.
 #[tokio::test]
 async fn test_remote_actor_termination_with_lifecycle_events() {
-    use plexspaces_actor::Actor;
+    use plexspaces_actor::ActorInstance as Actor;
     use plexspaces_behavior::MockBehavior;
     use plexspaces_persistence::MemoryJournal;
     use plexspaces_proto::ActorServiceServer;
@@ -675,7 +673,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Send message and terminate
     let msg = create_test_message(vec![1, 2, 3]);
-    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "test-namespace".to_string(),
     );
@@ -688,8 +686,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         .await
         .expect("Message processing should complete quickly");
     // Terminate actor on node2
-    use plexspaces_core::service_names;
-    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_actor::{ActorRegistry, ExitReason};
     use plexspaces_proto::{
         actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
         ActorLifecycleEvent,

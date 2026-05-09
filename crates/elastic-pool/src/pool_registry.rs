@@ -5,7 +5,7 @@
 // Holds named ElasticPool instances so the SDK can access them via ServiceLocator.
 
 use async_trait::async_trait;
-use plexspaces_core::{ElasticPoolService, PoolServiceError};
+use plexspaces_actor::{ElasticPoolService, PoolServiceError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

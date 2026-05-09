@@ -57,6 +57,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	v1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	supervision "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
 	wasm "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -130,127 +131,6 @@ func (ApplicationType) EnumDescriptor() ([]byte, []int) {
 	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{0}
 }
 
-// Supervision strategy (Erlang/OTP)
-type SupervisionStrategy int32
-
-const (
-	// Unspecified (default to one_for_one)
-	SupervisionStrategy_SUPERVISION_STRATEGY_UNSPECIFIED SupervisionStrategy = 0
-	// One-for-One: Only restart failed child
-	// If child A crashes, restart only A
-	SupervisionStrategy_SUPERVISION_STRATEGY_ONE_FOR_ONE SupervisionStrategy = 1
-	// One-for-All: Restart all children if one fails
-	// If child A crashes, restart A, B, C
-	SupervisionStrategy_SUPERVISION_STRATEGY_ONE_FOR_ALL SupervisionStrategy = 2
-	// Rest-for-One: Restart failed child and those started after it
-	// If child B crashes (started after A), restart B, C (not A)
-	SupervisionStrategy_SUPERVISION_STRATEGY_REST_FOR_ONE SupervisionStrategy = 3
-)
-
-// Enum value maps for SupervisionStrategy.
-var (
-	SupervisionStrategy_name = map[int32]string{
-		0: "SUPERVISION_STRATEGY_UNSPECIFIED",
-		1: "SUPERVISION_STRATEGY_ONE_FOR_ONE",
-		2: "SUPERVISION_STRATEGY_ONE_FOR_ALL",
-		3: "SUPERVISION_STRATEGY_REST_FOR_ONE",
-	}
-	SupervisionStrategy_value = map[string]int32{
-		"SUPERVISION_STRATEGY_UNSPECIFIED":  0,
-		"SUPERVISION_STRATEGY_ONE_FOR_ONE":  1,
-		"SUPERVISION_STRATEGY_ONE_FOR_ALL":  2,
-		"SUPERVISION_STRATEGY_REST_FOR_ONE": 3,
-	}
-)
-
-func (x SupervisionStrategy) Enum() *SupervisionStrategy {
-	p := new(SupervisionStrategy)
-	*p = x
-	return p
-}
-
-func (x SupervisionStrategy) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (SupervisionStrategy) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[1].Descriptor()
-}
-
-func (SupervisionStrategy) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[1]
-}
-
-func (x SupervisionStrategy) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use SupervisionStrategy.Descriptor instead.
-func (SupervisionStrategy) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{1}
-}
-
-// Restart policy (Erlang/OTP)
-type RestartPolicy int32
-
-const (
-	// Unspecified (default to permanent)
-	RestartPolicy_RESTART_POLICY_UNSPECIFIED RestartPolicy = 0
-	// Permanent: Always restart on failure
-	// Use for critical long-running processes
-	RestartPolicy_RESTART_POLICY_PERMANENT RestartPolicy = 1
-	// Transient: Restart only if abnormal exit (error)
-	// Don't restart if normal exit (shutdown)
-	// Use for tasks that may complete successfully
-	RestartPolicy_RESTART_POLICY_TRANSIENT RestartPolicy = 2
-	// Temporary: Never restart
-	// Use for one-shot tasks
-	RestartPolicy_RESTART_POLICY_TEMPORARY RestartPolicy = 3
-)
-
-// Enum value maps for RestartPolicy.
-var (
-	RestartPolicy_name = map[int32]string{
-		0: "RESTART_POLICY_UNSPECIFIED",
-		1: "RESTART_POLICY_PERMANENT",
-		2: "RESTART_POLICY_TRANSIENT",
-		3: "RESTART_POLICY_TEMPORARY",
-	}
-	RestartPolicy_value = map[string]int32{
-		"RESTART_POLICY_UNSPECIFIED": 0,
-		"RESTART_POLICY_PERMANENT":   1,
-		"RESTART_POLICY_TRANSIENT":   2,
-		"RESTART_POLICY_TEMPORARY":   3,
-	}
-)
-
-func (x RestartPolicy) Enum() *RestartPolicy {
-	p := new(RestartPolicy)
-	*p = x
-	return p
-}
-
-func (x RestartPolicy) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (RestartPolicy) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[2].Descriptor()
-}
-
-func (RestartPolicy) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[2]
-}
-
-func (x RestartPolicy) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use RestartPolicy.Descriptor instead.
-func (RestartPolicy) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{2}
-}
-
 // Shutdown strategy for application.
 //
 // ## Purpose
@@ -311,11 +191,11 @@ func (x ShutdownStrategy) String() string {
 }
 
 func (ShutdownStrategy) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[3].Descriptor()
+	return file_plexspaces_v1_application_application_proto_enumTypes[1].Descriptor()
 }
 
 func (ShutdownStrategy) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[3]
+	return &file_plexspaces_v1_application_application_proto_enumTypes[1]
 }
 
 func (x ShutdownStrategy) Number() protoreflect.EnumNumber {
@@ -324,7 +204,7 @@ func (x ShutdownStrategy) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ShutdownStrategy.Descriptor instead.
 func (ShutdownStrategy) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{3}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{1}
 }
 
 // Health status for application.
@@ -393,11 +273,11 @@ func (x HealthStatus) String() string {
 }
 
 func (HealthStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[4].Descriptor()
+	return file_plexspaces_v1_application_application_proto_enumTypes[2].Descriptor()
 }
 
 func (HealthStatus) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[4]
+	return &file_plexspaces_v1_application_application_proto_enumTypes[2]
 }
 
 func (x HealthStatus) Number() protoreflect.EnumNumber {
@@ -406,7 +286,7 @@ func (x HealthStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use HealthStatus.Descriptor instead.
 func (HealthStatus) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{2}
 }
 
 // Application state in lifecycle.
@@ -482,11 +362,11 @@ func (x ApplicationState) String() string {
 }
 
 func (ApplicationState) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[5].Descriptor()
+	return file_plexspaces_v1_application_application_proto_enumTypes[3].Descriptor()
 }
 
 func (ApplicationState) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[5]
+	return &file_plexspaces_v1_application_application_proto_enumTypes[3]
 }
 
 func (x ApplicationState) Number() protoreflect.EnumNumber {
@@ -495,7 +375,7 @@ func (x ApplicationState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ApplicationState.Descriptor instead.
 func (ApplicationState) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{5}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{3}
 }
 
 // Application status (for deployment service)
@@ -551,11 +431,11 @@ func (x ApplicationStatus) String() string {
 }
 
 func (ApplicationStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_plexspaces_v1_application_application_proto_enumTypes[6].Descriptor()
+	return file_plexspaces_v1_application_application_proto_enumTypes[4].Descriptor()
 }
 
 func (ApplicationStatus) Type() protoreflect.EnumType {
-	return &file_plexspaces_v1_application_application_proto_enumTypes[6]
+	return &file_plexspaces_v1_application_application_proto_enumTypes[4]
 }
 
 func (x ApplicationStatus) Number() protoreflect.EnumNumber {
@@ -564,7 +444,78 @@ func (x ApplicationStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ApplicationStatus.Descriptor instead.
 func (ApplicationStatus) EnumDescriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{6}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{4}
+}
+
+// Error codes for ApplicationError
+type ApplicationErrorCode int32
+
+const (
+	ApplicationErrorCode_APPLICATION_ERROR_UNSPECIFIED        ApplicationErrorCode = 0
+	ApplicationErrorCode_APPLICATION_ERROR_STARTUP_FAILED     ApplicationErrorCode = 1
+	ApplicationErrorCode_APPLICATION_ERROR_SHUTDOWN_FAILED    ApplicationErrorCode = 2
+	ApplicationErrorCode_APPLICATION_ERROR_NOT_FOUND          ApplicationErrorCode = 3
+	ApplicationErrorCode_APPLICATION_ERROR_DEPENDENCY_FAILED  ApplicationErrorCode = 4
+	ApplicationErrorCode_APPLICATION_ERROR_CONFIG_ERROR       ApplicationErrorCode = 5
+	ApplicationErrorCode_APPLICATION_ERROR_SHUTDOWN_TIMEOUT   ApplicationErrorCode = 6
+	ApplicationErrorCode_APPLICATION_ERROR_ACTOR_SPAWN_FAILED ApplicationErrorCode = 7
+	ApplicationErrorCode_APPLICATION_ERROR_ACTOR_STOP_FAILED  ApplicationErrorCode = 8
+	ApplicationErrorCode_APPLICATION_ERROR_OTHER              ApplicationErrorCode = 9
+)
+
+// Enum value maps for ApplicationErrorCode.
+var (
+	ApplicationErrorCode_name = map[int32]string{
+		0: "APPLICATION_ERROR_UNSPECIFIED",
+		1: "APPLICATION_ERROR_STARTUP_FAILED",
+		2: "APPLICATION_ERROR_SHUTDOWN_FAILED",
+		3: "APPLICATION_ERROR_NOT_FOUND",
+		4: "APPLICATION_ERROR_DEPENDENCY_FAILED",
+		5: "APPLICATION_ERROR_CONFIG_ERROR",
+		6: "APPLICATION_ERROR_SHUTDOWN_TIMEOUT",
+		7: "APPLICATION_ERROR_ACTOR_SPAWN_FAILED",
+		8: "APPLICATION_ERROR_ACTOR_STOP_FAILED",
+		9: "APPLICATION_ERROR_OTHER",
+	}
+	ApplicationErrorCode_value = map[string]int32{
+		"APPLICATION_ERROR_UNSPECIFIED":        0,
+		"APPLICATION_ERROR_STARTUP_FAILED":     1,
+		"APPLICATION_ERROR_SHUTDOWN_FAILED":    2,
+		"APPLICATION_ERROR_NOT_FOUND":          3,
+		"APPLICATION_ERROR_DEPENDENCY_FAILED":  4,
+		"APPLICATION_ERROR_CONFIG_ERROR":       5,
+		"APPLICATION_ERROR_SHUTDOWN_TIMEOUT":   6,
+		"APPLICATION_ERROR_ACTOR_SPAWN_FAILED": 7,
+		"APPLICATION_ERROR_ACTOR_STOP_FAILED":  8,
+		"APPLICATION_ERROR_OTHER":              9,
+	}
+)
+
+func (x ApplicationErrorCode) Enum() *ApplicationErrorCode {
+	p := new(ApplicationErrorCode)
+	*p = x
+	return p
+}
+
+func (x ApplicationErrorCode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ApplicationErrorCode) Descriptor() protoreflect.EnumDescriptor {
+	return file_plexspaces_v1_application_application_proto_enumTypes[5].Descriptor()
+}
+
+func (ApplicationErrorCode) Type() protoreflect.EnumType {
+	return &file_plexspaces_v1_application_application_proto_enumTypes[5]
+}
+
+func (x ApplicationErrorCode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ApplicationErrorCode.Descriptor instead.
+func (ApplicationErrorCode) EnumDescriptor() ([]byte, []int) {
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{5}
 }
 
 // Application specification (Erlang/OTP .app file equivalent)
@@ -622,7 +573,7 @@ type ApplicationSpec struct {
 	// Application-level environment variables
 	Env map[string]string `protobuf:"bytes,8,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Supervision tree (only for active applications)
-	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3,oneof" json:"supervisor,omitempty"`
+	Supervisor *supervision.SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3,oneof" json:"supervisor,omitempty"`
 	// Whether application is enabled (false = skip loading)
 	// Default: true
 	Enabled bool `protobuf:"varint,10,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -739,7 +690,7 @@ func (x *ApplicationSpec) GetEnv() map[string]string {
 	return nil
 }
 
-func (x *ApplicationSpec) GetSupervisor() *SupervisorSpec {
+func (x *ApplicationSpec) GetSupervisor() *supervision.SupervisorSpec {
 	if x != nil {
 		return x.Supervisor
 	}
@@ -848,213 +799,6 @@ func (x *ApplicationServiceLinkRequirement) GetPolicyTemplate() string {
 	return ""
 }
 
-// Supervisor specification (Erlang/OTP supervisor)
-//
-// ## Purpose
-// Defines a supervision tree node. Supervisors manage child processes
-// (workers or other supervisors) with fault tolerance strategies.
-//
-// ## Why This Exists
-// - Fault tolerance (automatic restarts)
-// - Organized process hierarchy
-// - Declarative restart strategies
-// - Local supervision only (simpler than distributed)
-type SupervisorSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Supervision strategy
-	Strategy SupervisionStrategy `protobuf:"varint,1,opt,name=strategy,proto3,enum=plexspaces.application.v1.SupervisionStrategy" json:"strategy,omitempty"`
-	// Maximum restarts allowed
-	MaxRestarts uint32 `protobuf:"varint,2,opt,name=max_restarts,json=maxRestarts,proto3" json:"max_restarts,omitempty"`
-	// Time window for restart counting (seconds)
-	MaxRestartWindow *durationpb.Duration `protobuf:"bytes,3,opt,name=max_restart_window,json=maxRestartWindow,proto3" json:"max_restart_window,omitempty"`
-	// Child processes
-	Children      []*ChildSpec `protobuf:"bytes,4,rep,name=children,proto3" json:"children,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SupervisorSpec) Reset() {
-	*x = SupervisorSpec{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SupervisorSpec) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SupervisorSpec) ProtoMessage() {}
-
-func (x *SupervisorSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SupervisorSpec.ProtoReflect.Descriptor instead.
-func (*SupervisorSpec) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *SupervisorSpec) GetStrategy() SupervisionStrategy {
-	if x != nil {
-		return x.Strategy
-	}
-	return SupervisionStrategy_SUPERVISION_STRATEGY_UNSPECIFIED
-}
-
-func (x *SupervisorSpec) GetMaxRestarts() uint32 {
-	if x != nil {
-		return x.MaxRestarts
-	}
-	return 0
-}
-
-func (x *SupervisorSpec) GetMaxRestartWindow() *durationpb.Duration {
-	if x != nil {
-		return x.MaxRestartWindow
-	}
-	return nil
-}
-
-func (x *SupervisorSpec) GetChildren() []*ChildSpec {
-	if x != nil {
-		return x.Children
-	}
-	return nil
-}
-
-// Child process specification
-//
-// ## Purpose
-// Defines a child process (worker or supervisor) managed by a supervisor.
-//
-// ## Why This Exists
-// - Clear child identity and lifecycle
-// - Restart policy per child
-// - Shutdown timeout specification
-// - Support for nested supervisors
-type ChildSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Instance name + behavior class (canonical ActorId is derived at deploy time).
-	ActorIdentity *v1.ActorIdentity `protobuf:"bytes,1,opt,name=actor_identity,json=actorIdentity,proto3" json:"actor_identity,omitempty"`
-	// Role of this child within the application (e.g. "worker", "leader", "supervisor").
-	// Maps 1:1 to the TOML `role` field in [[supervisor.children]].
-	// Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
-	Role string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
-	// Arguments to pass to start function
-	Args map[string]string `protobuf:"bytes,3,rep,name=args,proto3" json:"args,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Restart policy
-	Restart RestartPolicy `protobuf:"varint,4,opt,name=restart,proto3,enum=plexspaces.application.v1.RestartPolicy" json:"restart,omitempty"`
-	// Shutdown timeout
-	ShutdownTimeout *durationpb.Duration `protobuf:"bytes,5,opt,name=shutdown_timeout,json=shutdownTimeout,proto3" json:"shutdown_timeout,omitempty"`
-	// Nested supervisor (if type=SUPERVISOR)
-	Supervisor *SupervisorSpec `protobuf:"bytes,6,opt,name=supervisor,proto3,oneof" json:"supervisor,omitempty"`
-	// Facet configuration (for automatic attachment during actor creation)
-	// Facets are attached in priority order (high priority first) before actor.init() is called
-	// All facets are automatically restored during supervisor restart
-	// Phase 1: Unified Lifecycle - Multiple facets support
-	Facets []*v1.Facet `protobuf:"bytes,7,rep,name=facets,proto3" json:"facets,omitempty"`
-	// OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent", "GenStateMachine", "Workflow").
-	// When set, process_message spans and actor registration logs show this instead of the child id.
-	BehaviorKind  *string `protobuf:"bytes,8,opt,name=behavior_kind,json=behaviorKind,proto3,oneof" json:"behavior_kind,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChildSpec) Reset() {
-	*x = ChildSpec{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChildSpec) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChildSpec) ProtoMessage() {}
-
-func (x *ChildSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChildSpec.ProtoReflect.Descriptor instead.
-func (*ChildSpec) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ChildSpec) GetActorIdentity() *v1.ActorIdentity {
-	if x != nil {
-		return x.ActorIdentity
-	}
-	return nil
-}
-
-func (x *ChildSpec) GetRole() string {
-	if x != nil {
-		return x.Role
-	}
-	return ""
-}
-
-func (x *ChildSpec) GetArgs() map[string]string {
-	if x != nil {
-		return x.Args
-	}
-	return nil
-}
-
-func (x *ChildSpec) GetRestart() RestartPolicy {
-	if x != nil {
-		return x.Restart
-	}
-	return RestartPolicy_RESTART_POLICY_UNSPECIFIED
-}
-
-func (x *ChildSpec) GetShutdownTimeout() *durationpb.Duration {
-	if x != nil {
-		return x.ShutdownTimeout
-	}
-	return nil
-}
-
-func (x *ChildSpec) GetSupervisor() *SupervisorSpec {
-	if x != nil {
-		return x.Supervisor
-	}
-	return nil
-}
-
-func (x *ChildSpec) GetFacets() []*v1.Facet {
-	if x != nil {
-		return x.Facets
-	}
-	return nil
-}
-
-func (x *ChildSpec) GetBehaviorKind() string {
-	if x != nil && x.BehaviorKind != nil {
-		return *x.BehaviorKind
-	}
-	return ""
-}
-
 // Application instance (runtime representation).
 //
 // ## Purpose
@@ -1084,7 +828,7 @@ type Application struct {
 
 func (x *Application) Reset() {
 	*x = Application{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1096,7 +840,7 @@ func (x *Application) String() string {
 func (*Application) ProtoMessage() {}
 
 func (x *Application) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[4]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1109,7 +853,7 @@ func (x *Application) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Application.ProtoReflect.Descriptor instead.
 func (*Application) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{4}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Application) GetSpec() *ApplicationSpec {
@@ -1173,7 +917,7 @@ type ApplicationStatistics struct {
 
 func (x *ApplicationStatistics) Reset() {
 	*x = ApplicationStatistics{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1185,7 +929,7 @@ func (x *ApplicationStatistics) String() string {
 func (*ApplicationStatistics) ProtoMessage() {}
 
 func (x *ApplicationStatistics) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[5]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1198,7 +942,7 @@ func (x *ApplicationStatistics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplicationStatistics.ProtoReflect.Descriptor instead.
 func (*ApplicationStatistics) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{5}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ApplicationStatistics) GetActorsSpawned() uint64 {
@@ -1258,7 +1002,7 @@ type ApplicationRuntimeState struct {
 
 func (x *ApplicationRuntimeState) Reset() {
 	*x = ApplicationRuntimeState{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1270,7 +1014,7 @@ func (x *ApplicationRuntimeState) String() string {
 func (*ApplicationRuntimeState) ProtoMessage() {}
 
 func (x *ApplicationRuntimeState) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[6]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1283,7 +1027,7 @@ func (x *ApplicationRuntimeState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplicationRuntimeState.ProtoReflect.Descriptor instead.
 func (*ApplicationRuntimeState) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{6}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ApplicationRuntimeState) GetName() string {
@@ -1339,14 +1083,14 @@ type DeployApplicationRequest struct {
 	Config *ApplicationSpec `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
 	// Initial state (optional, for stateful applications)
 	// Passed to application's start() method.
-	InitialState  []byte `protobuf:"bytes,7,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
+	InitialState  []byte `protobuf:"bytes,6,opt,name=initial_state,json=initialState,proto3" json:"initial_state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeployApplicationRequest) Reset() {
 	*x = DeployApplicationRequest{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1358,7 +1102,7 @@ func (x *DeployApplicationRequest) String() string {
 func (*DeployApplicationRequest) ProtoMessage() {}
 
 func (x *DeployApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[7]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1371,7 +1115,7 @@ func (x *DeployApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployApplicationRequest.ProtoReflect.Descriptor instead.
 func (*DeployApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{7}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeployApplicationRequest) GetApplicationId() string {
@@ -1433,7 +1177,7 @@ type DeployApplicationResponse struct {
 
 func (x *DeployApplicationResponse) Reset() {
 	*x = DeployApplicationResponse{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1445,7 +1189,7 @@ func (x *DeployApplicationResponse) String() string {
 func (*DeployApplicationResponse) ProtoMessage() {}
 
 func (x *DeployApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[8]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1458,7 +1202,7 @@ func (x *DeployApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployApplicationResponse.ProtoReflect.Descriptor instead.
 func (*DeployApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{8}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeployApplicationResponse) GetSuccess() bool {
@@ -1502,7 +1246,7 @@ type UndeployApplicationRequest struct {
 
 func (x *UndeployApplicationRequest) Reset() {
 	*x = UndeployApplicationRequest{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1514,7 +1258,7 @@ func (x *UndeployApplicationRequest) String() string {
 func (*UndeployApplicationRequest) ProtoMessage() {}
 
 func (x *UndeployApplicationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[9]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1527,7 +1271,7 @@ func (x *UndeployApplicationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndeployApplicationRequest.ProtoReflect.Descriptor instead.
 func (*UndeployApplicationRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{9}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UndeployApplicationRequest) GetApplicationId() string {
@@ -1557,7 +1301,7 @@ type UndeployApplicationResponse struct {
 
 func (x *UndeployApplicationResponse) Reset() {
 	*x = UndeployApplicationResponse{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1569,7 +1313,7 @@ func (x *UndeployApplicationResponse) String() string {
 func (*UndeployApplicationResponse) ProtoMessage() {}
 
 func (x *UndeployApplicationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[10]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1582,7 +1326,7 @@ func (x *UndeployApplicationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndeployApplicationResponse.ProtoReflect.Descriptor instead.
 func (*UndeployApplicationResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{10}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UndeployApplicationResponse) GetSuccess() bool {
@@ -1610,7 +1354,7 @@ type ListApplicationsRequest struct {
 
 func (x *ListApplicationsRequest) Reset() {
 	*x = ListApplicationsRequest{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1622,7 +1366,7 @@ func (x *ListApplicationsRequest) String() string {
 func (*ListApplicationsRequest) ProtoMessage() {}
 
 func (x *ListApplicationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[11]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1635,7 +1379,7 @@ func (x *ListApplicationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationsRequest.ProtoReflect.Descriptor instead.
 func (*ListApplicationsRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{11}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListApplicationsRequest) GetStatusFilter() ApplicationStatus {
@@ -1656,7 +1400,7 @@ type ListApplicationsResponse struct {
 
 func (x *ListApplicationsResponse) Reset() {
 	*x = ListApplicationsResponse{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1668,7 +1412,7 @@ func (x *ListApplicationsResponse) String() string {
 func (*ListApplicationsResponse) ProtoMessage() {}
 
 func (x *ListApplicationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[12]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1681,7 +1425,7 @@ func (x *ListApplicationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListApplicationsResponse.ProtoReflect.Descriptor instead.
 func (*ListApplicationsResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{12}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListApplicationsResponse) GetApplications() []*ApplicationInfo {
@@ -1716,7 +1460,7 @@ type ApplicationInfo struct {
 
 func (x *ApplicationInfo) Reset() {
 	*x = ApplicationInfo{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1728,7 +1472,7 @@ func (x *ApplicationInfo) String() string {
 func (*ApplicationInfo) ProtoMessage() {}
 
 func (x *ApplicationInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[13]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1741,7 +1485,7 @@ func (x *ApplicationInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplicationInfo.ProtoReflect.Descriptor instead.
 func (*ApplicationInfo) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{13}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ApplicationInfo) GetApplicationId() string {
@@ -1840,7 +1584,7 @@ type ApplicationMetrics struct {
 
 func (x *ApplicationMetrics) Reset() {
 	*x = ApplicationMetrics{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1852,7 +1596,7 @@ func (x *ApplicationMetrics) String() string {
 func (*ApplicationMetrics) ProtoMessage() {}
 
 func (x *ApplicationMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[14]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1865,7 +1609,7 @@ func (x *ApplicationMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplicationMetrics.ProtoReflect.Descriptor instead.
 func (*ApplicationMetrics) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{14}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ApplicationMetrics) GetActorCounts() map[string]uint64 {
@@ -1942,7 +1686,7 @@ type GetApplicationStatusRequest struct {
 
 func (x *GetApplicationStatusRequest) Reset() {
 	*x = GetApplicationStatusRequest{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[15]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1954,7 +1698,7 @@ func (x *GetApplicationStatusRequest) String() string {
 func (*GetApplicationStatusRequest) ProtoMessage() {}
 
 func (x *GetApplicationStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[15]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1967,7 +1711,7 @@ func (x *GetApplicationStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetApplicationStatusRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{15}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetApplicationStatusRequest) GetApplicationId() string {
@@ -1996,7 +1740,7 @@ type GetApplicationStatusResponse struct {
 
 func (x *GetApplicationStatusResponse) Reset() {
 	*x = GetApplicationStatusResponse{}
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[16]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2008,7 +1752,7 @@ func (x *GetApplicationStatusResponse) String() string {
 func (*GetApplicationStatusResponse) ProtoMessage() {}
 
 func (x *GetApplicationStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_application_application_proto_msgTypes[16]
+	mi := &file_plexspaces_v1_application_application_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2021,7 +1765,7 @@ func (x *GetApplicationStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetApplicationStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetApplicationStatusResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{16}
+	return file_plexspaces_v1_application_application_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetApplicationStatusResponse) GetApplication() *ApplicationInfo {
@@ -2063,7 +1807,7 @@ var File_plexspaces_v1_application_application_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\n" +
-	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf4\a\n" +
+	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf4\a\n" +
 	"\x0fApplicationSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1c\n" +
@@ -2074,7 +1818,7 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\fdependencies\x18\a \x03(\tR\fdependencies\x12E\n" +
 	"\x03env\x18\b \x03(\v23.plexspaces.application.v1.ApplicationSpec.EnvEntryR\x03env\x12N\n" +
 	"\n" +
-	"supervisor\x18\t \x01(\v2).plexspaces.application.v1.SupervisorSpecH\x00R\n" +
+	"supervisor\x18\t \x01(\v2).plexspaces.supervision.v1.SupervisorSpecH\x00R\n" +
 	"supervisor\x88\x01\x01\x12\x18\n" +
 	"\aenabled\x18\n" +
 	" \x01(\bR\aenabled\x12\x1d\n" +
@@ -2094,28 +1838,7 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\tlink_name\x18\x01 \x01(\tBn\x92A@2.Must match ServiceLinkConfig.name on the node.J\x0e\"payments-api\"\xe0A\x02\xbaH%r#\x10\x01\x18\x80\x022\x1c^[a-zA-Z0-9][a-zA-Z0-9._-]*$R\blinkName\x12\x88\x01\n" +
 	"\x0fpolicy_template\x18\x02 \x01(\tBZ\x92AL2JOptional RuntimeConfig.outbound_policy_templates key merged for this link.\xe0A\x01\xbaH\x05r\x03\x18\x80\x01H\x00R\x0epolicyTemplate\x88\x01\x01:\x89\x01\x92A\x85\x01\n" +
 	"\x82\x01*!ApplicationServiceLinkRequirement2]Application-level requirement for a named outbound service link and optional policy template.B\x12\n" +
-	"\x10_policy_template\"\x8a\x02\n" +
-	"\x0eSupervisorSpec\x12J\n" +
-	"\bstrategy\x18\x01 \x01(\x0e2..plexspaces.application.v1.SupervisionStrategyR\bstrategy\x12!\n" +
-	"\fmax_restarts\x18\x02 \x01(\rR\vmaxRestarts\x12G\n" +
-	"\x12max_restart_window\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x10maxRestartWindow\x12@\n" +
-	"\bchildren\x18\x04 \x03(\v2$.plexspaces.application.v1.ChildSpecR\bchildren\"\xcc\x04\n" +
-	"\tChildSpec\x12J\n" +
-	"\x0eactor_identity\x18\x01 \x01(\v2#.plexspaces.common.v1.ActorIdentityR\ractorIdentity\x12\x1c\n" +
-	"\x04role\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x04role\x12B\n" +
-	"\x04args\x18\x03 \x03(\v2..plexspaces.application.v1.ChildSpec.ArgsEntryR\x04args\x12B\n" +
-	"\arestart\x18\x04 \x01(\x0e2(.plexspaces.application.v1.RestartPolicyR\arestart\x12D\n" +
-	"\x10shutdown_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0fshutdownTimeout\x12N\n" +
-	"\n" +
-	"supervisor\x18\x06 \x01(\v2).plexspaces.application.v1.SupervisorSpecH\x00R\n" +
-	"supervisor\x88\x01\x01\x123\n" +
-	"\x06facets\x18\a \x03(\v2\x1b.plexspaces.common.v1.FacetR\x06facets\x12(\n" +
-	"\rbehavior_kind\x18\b \x01(\tH\x01R\fbehaviorKind\x88\x01\x01\x1a7\n" +
-	"\tArgsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\r\n" +
-	"\v_supervisorB\x10\n" +
-	"\x0e_behavior_kind\"\xde\x02\n" +
+	"\x10_policy_template\"\xde\x02\n" +
 	"\vApplication\x12>\n" +
 	"\x04spec\x18\x01 \x01(\v2*.plexspaces.application.v1.ApplicationSpecR\x04spec\x12A\n" +
 	"\x05state\x18\x02 \x01(\x0e2+.plexspaces.application.v1.ApplicationStateR\x05state\x12?\n" +
@@ -2148,7 +1871,7 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\vwasm_module\x18\x04 \x01(\v2\x1e.plexspaces.wasm.v1.WasmModuleH\x00R\n" +
 	"wasmModule\x88\x01\x01\x12B\n" +
 	"\x06config\x18\x05 \x01(\v2*.plexspaces.application.v1.ApplicationSpecR\x06config\x12#\n" +
-	"\rinitial_state\x18\a \x01(\fR\finitialStateB\x0e\n" +
+	"\rinitial_state\x18\x06 \x01(\fR\finitialStateB\x0e\n" +
 	"\f_wasm_module\"\xc7\x01\n" +
 	"\x19DeployApplicationResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
@@ -2222,17 +1945,7 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\x0fApplicationType\x12 \n" +
 	"\x1cAPPLICATION_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18APPLICATION_TYPE_LIBRARY\x10\x01\x12\x1b\n" +
-	"\x17APPLICATION_TYPE_ACTIVE\x10\x02*\xae\x01\n" +
-	"\x13SupervisionStrategy\x12$\n" +
-	" SUPERVISION_STRATEGY_UNSPECIFIED\x10\x00\x12$\n" +
-	" SUPERVISION_STRATEGY_ONE_FOR_ONE\x10\x01\x12$\n" +
-	" SUPERVISION_STRATEGY_ONE_FOR_ALL\x10\x02\x12%\n" +
-	"!SUPERVISION_STRATEGY_REST_FOR_ONE\x10\x03*\x89\x01\n" +
-	"\rRestartPolicy\x12\x1e\n" +
-	"\x1aRESTART_POLICY_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18RESTART_POLICY_PERMANENT\x10\x01\x12\x1c\n" +
-	"\x18RESTART_POLICY_TRANSIENT\x10\x02\x12\x1c\n" +
-	"\x18RESTART_POLICY_TEMPORARY\x10\x03*v\n" +
+	"\x17APPLICATION_TYPE_ACTIVE\x10\x02*v\n" +
 	"\x10ShutdownStrategy\x12!\n" +
 	"\x1dSHUTDOWN_STRATEGY_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aSHUTDOWN_STRATEGY_GRACEFUL\x10\x01\x12\x1f\n" +
@@ -2257,7 +1970,18 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\x1aAPPLICATION_STATUS_RUNNING\x10\x03\x12\x1f\n" +
 	"\x1bAPPLICATION_STATUS_STOPPING\x10\x04\x12\x1e\n" +
 	"\x1aAPPLICATION_STATUS_STOPPED\x10\x05\x12\x1d\n" +
-	"\x19APPLICATION_STATUS_FAILED\x10\x062\xc8\x05\n" +
+	"\x19APPLICATION_STATUS_FAILED\x10\x06*\x8c\x03\n" +
+	"\x14ApplicationErrorCode\x12!\n" +
+	"\x1dAPPLICATION_ERROR_UNSPECIFIED\x10\x00\x12$\n" +
+	" APPLICATION_ERROR_STARTUP_FAILED\x10\x01\x12%\n" +
+	"!APPLICATION_ERROR_SHUTDOWN_FAILED\x10\x02\x12\x1f\n" +
+	"\x1bAPPLICATION_ERROR_NOT_FOUND\x10\x03\x12'\n" +
+	"#APPLICATION_ERROR_DEPENDENCY_FAILED\x10\x04\x12\"\n" +
+	"\x1eAPPLICATION_ERROR_CONFIG_ERROR\x10\x05\x12&\n" +
+	"\"APPLICATION_ERROR_SHUTDOWN_TIMEOUT\x10\x06\x12(\n" +
+	"$APPLICATION_ERROR_ACTOR_SPAWN_FAILED\x10\a\x12'\n" +
+	"#APPLICATION_ERROR_ACTOR_STOP_FAILED\x10\b\x12\x1b\n" +
+	"\x17APPLICATION_ERROR_OTHER\x10\t2\xc8\x05\n" +
 	"\x12ApplicationService\x12\x9f\x01\n" +
 	"\x11DeployApplication\x123.plexspaces.application.v1.DeployApplicationRequest\x1a4.plexspaces.application.v1.DeployApplicationResponse\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/api/v1/applications\x12\xb3\x01\n" +
 	"\x13UndeployApplication\x125.plexspaces.application.v1.UndeployApplicationRequest\x1a6.plexspaces.application.v1.UndeployApplicationResponse\"-\x82\xd3\xe4\x93\x02'*%/api/v1/applications/{application_id}\x12\x99\x01\n" +
@@ -2277,101 +2001,87 @@ func file_plexspaces_v1_application_application_proto_rawDescGZIP() []byte {
 	return file_plexspaces_v1_application_application_proto_rawDescData
 }
 
-var file_plexspaces_v1_application_application_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_plexspaces_v1_application_application_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_plexspaces_v1_application_application_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_plexspaces_v1_application_application_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_plexspaces_v1_application_application_proto_goTypes = []any{
 	(ApplicationType)(0),                      // 0: plexspaces.application.v1.ApplicationType
-	(SupervisionStrategy)(0),                  // 1: plexspaces.application.v1.SupervisionStrategy
-	(RestartPolicy)(0),                        // 2: plexspaces.application.v1.RestartPolicy
-	(ShutdownStrategy)(0),                     // 3: plexspaces.application.v1.ShutdownStrategy
-	(HealthStatus)(0),                         // 4: plexspaces.application.v1.HealthStatus
-	(ApplicationState)(0),                     // 5: plexspaces.application.v1.ApplicationState
-	(ApplicationStatus)(0),                    // 6: plexspaces.application.v1.ApplicationStatus
-	(*ApplicationSpec)(nil),                   // 7: plexspaces.application.v1.ApplicationSpec
-	(*ApplicationServiceLinkRequirement)(nil), // 8: plexspaces.application.v1.ApplicationServiceLinkRequirement
-	(*SupervisorSpec)(nil),                    // 9: plexspaces.application.v1.SupervisorSpec
-	(*ChildSpec)(nil),                         // 10: plexspaces.application.v1.ChildSpec
-	(*Application)(nil),                       // 11: plexspaces.application.v1.Application
-	(*ApplicationStatistics)(nil),             // 12: plexspaces.application.v1.ApplicationStatistics
-	(*ApplicationRuntimeState)(nil),           // 13: plexspaces.application.v1.ApplicationRuntimeState
-	(*DeployApplicationRequest)(nil),          // 14: plexspaces.application.v1.DeployApplicationRequest
-	(*DeployApplicationResponse)(nil),         // 15: plexspaces.application.v1.DeployApplicationResponse
-	(*UndeployApplicationRequest)(nil),        // 16: plexspaces.application.v1.UndeployApplicationRequest
-	(*UndeployApplicationResponse)(nil),       // 17: plexspaces.application.v1.UndeployApplicationResponse
-	(*ListApplicationsRequest)(nil),           // 18: plexspaces.application.v1.ListApplicationsRequest
-	(*ListApplicationsResponse)(nil),          // 19: plexspaces.application.v1.ListApplicationsResponse
-	(*ApplicationInfo)(nil),                   // 20: plexspaces.application.v1.ApplicationInfo
-	(*ApplicationMetrics)(nil),                // 21: plexspaces.application.v1.ApplicationMetrics
-	(*GetApplicationStatusRequest)(nil),       // 22: plexspaces.application.v1.GetApplicationStatusRequest
-	(*GetApplicationStatusResponse)(nil),      // 23: plexspaces.application.v1.GetApplicationStatusResponse
-	nil,                                       // 24: plexspaces.application.v1.ApplicationSpec.EnvEntry
-	nil,                                       // 25: plexspaces.application.v1.ChildSpec.ArgsEntry
-	nil,                                       // 26: plexspaces.application.v1.ApplicationRuntimeState.EnvEntry
-	nil,                                       // 27: plexspaces.application.v1.ApplicationMetrics.ActorCountsEntry
-	nil,                                       // 28: plexspaces.application.v1.ApplicationMetrics.CounterMetricsEntry
-	nil,                                       // 29: plexspaces.application.v1.ApplicationMetrics.LatencyTotalsMsEntry
-	nil,                                       // 30: plexspaces.application.v1.ApplicationMetrics.LatencyMaxMsEntry
-	nil,                                       // 31: plexspaces.application.v1.ApplicationMetrics.LatencySamplesEntry
-	(*durationpb.Duration)(nil),               // 32: google.protobuf.Duration
-	(*v1.Metadata)(nil),                       // 33: plexspaces.common.v1.Metadata
-	(*v1.ActorIdentity)(nil),                  // 34: plexspaces.common.v1.ActorIdentity
-	(*v1.Facet)(nil),                          // 35: plexspaces.common.v1.Facet
-	(*timestamppb.Timestamp)(nil),             // 36: google.protobuf.Timestamp
-	(*wasm.WasmModule)(nil),                   // 37: plexspaces.wasm.v1.WasmModule
+	(ShutdownStrategy)(0),                     // 1: plexspaces.application.v1.ShutdownStrategy
+	(HealthStatus)(0),                         // 2: plexspaces.application.v1.HealthStatus
+	(ApplicationState)(0),                     // 3: plexspaces.application.v1.ApplicationState
+	(ApplicationStatus)(0),                    // 4: plexspaces.application.v1.ApplicationStatus
+	(ApplicationErrorCode)(0),                 // 5: plexspaces.application.v1.ApplicationErrorCode
+	(*ApplicationSpec)(nil),                   // 6: plexspaces.application.v1.ApplicationSpec
+	(*ApplicationServiceLinkRequirement)(nil), // 7: plexspaces.application.v1.ApplicationServiceLinkRequirement
+	(*Application)(nil),                       // 8: plexspaces.application.v1.Application
+	(*ApplicationStatistics)(nil),             // 9: plexspaces.application.v1.ApplicationStatistics
+	(*ApplicationRuntimeState)(nil),           // 10: plexspaces.application.v1.ApplicationRuntimeState
+	(*DeployApplicationRequest)(nil),          // 11: plexspaces.application.v1.DeployApplicationRequest
+	(*DeployApplicationResponse)(nil),         // 12: plexspaces.application.v1.DeployApplicationResponse
+	(*UndeployApplicationRequest)(nil),        // 13: plexspaces.application.v1.UndeployApplicationRequest
+	(*UndeployApplicationResponse)(nil),       // 14: plexspaces.application.v1.UndeployApplicationResponse
+	(*ListApplicationsRequest)(nil),           // 15: plexspaces.application.v1.ListApplicationsRequest
+	(*ListApplicationsResponse)(nil),          // 16: plexspaces.application.v1.ListApplicationsResponse
+	(*ApplicationInfo)(nil),                   // 17: plexspaces.application.v1.ApplicationInfo
+	(*ApplicationMetrics)(nil),                // 18: plexspaces.application.v1.ApplicationMetrics
+	(*GetApplicationStatusRequest)(nil),       // 19: plexspaces.application.v1.GetApplicationStatusRequest
+	(*GetApplicationStatusResponse)(nil),      // 20: plexspaces.application.v1.GetApplicationStatusResponse
+	nil,                                       // 21: plexspaces.application.v1.ApplicationSpec.EnvEntry
+	nil,                                       // 22: plexspaces.application.v1.ApplicationRuntimeState.EnvEntry
+	nil,                                       // 23: plexspaces.application.v1.ApplicationMetrics.ActorCountsEntry
+	nil,                                       // 24: plexspaces.application.v1.ApplicationMetrics.CounterMetricsEntry
+	nil,                                       // 25: plexspaces.application.v1.ApplicationMetrics.LatencyTotalsMsEntry
+	nil,                                       // 26: plexspaces.application.v1.ApplicationMetrics.LatencyMaxMsEntry
+	nil,                                       // 27: plexspaces.application.v1.ApplicationMetrics.LatencySamplesEntry
+	(*supervision.SupervisorSpec)(nil),        // 28: plexspaces.supervision.v1.SupervisorSpec
+	(*durationpb.Duration)(nil),               // 29: google.protobuf.Duration
+	(*v1.Metadata)(nil),                       // 30: plexspaces.common.v1.Metadata
+	(*timestamppb.Timestamp)(nil),             // 31: google.protobuf.Timestamp
+	(*wasm.WasmModule)(nil),                   // 32: plexspaces.wasm.v1.WasmModule
 }
 var file_plexspaces_v1_application_application_proto_depIdxs = []int32{
 	0,  // 0: plexspaces.application.v1.ApplicationSpec.type:type_name -> plexspaces.application.v1.ApplicationType
-	24, // 1: plexspaces.application.v1.ApplicationSpec.env:type_name -> plexspaces.application.v1.ApplicationSpec.EnvEntry
-	9,  // 2: plexspaces.application.v1.ApplicationSpec.supervisor:type_name -> plexspaces.application.v1.SupervisorSpec
-	32, // 3: plexspaces.application.v1.ApplicationSpec.shutdown_timeout:type_name -> google.protobuf.Duration
-	3,  // 4: plexspaces.application.v1.ApplicationSpec.shutdown_strategy:type_name -> plexspaces.application.v1.ShutdownStrategy
-	33, // 5: plexspaces.application.v1.ApplicationSpec.metadata:type_name -> plexspaces.common.v1.Metadata
-	8,  // 6: plexspaces.application.v1.ApplicationSpec.required_service_links:type_name -> plexspaces.application.v1.ApplicationServiceLinkRequirement
-	1,  // 7: plexspaces.application.v1.SupervisorSpec.strategy:type_name -> plexspaces.application.v1.SupervisionStrategy
-	32, // 8: plexspaces.application.v1.SupervisorSpec.max_restart_window:type_name -> google.protobuf.Duration
-	10, // 9: plexspaces.application.v1.SupervisorSpec.children:type_name -> plexspaces.application.v1.ChildSpec
-	34, // 10: plexspaces.application.v1.ChildSpec.actor_identity:type_name -> plexspaces.common.v1.ActorIdentity
-	25, // 11: plexspaces.application.v1.ChildSpec.args:type_name -> plexspaces.application.v1.ChildSpec.ArgsEntry
-	2,  // 12: plexspaces.application.v1.ChildSpec.restart:type_name -> plexspaces.application.v1.RestartPolicy
-	32, // 13: plexspaces.application.v1.ChildSpec.shutdown_timeout:type_name -> google.protobuf.Duration
-	9,  // 14: plexspaces.application.v1.ChildSpec.supervisor:type_name -> plexspaces.application.v1.SupervisorSpec
-	35, // 15: plexspaces.application.v1.ChildSpec.facets:type_name -> plexspaces.common.v1.Facet
-	7,  // 16: plexspaces.application.v1.Application.spec:type_name -> plexspaces.application.v1.ApplicationSpec
-	5,  // 17: plexspaces.application.v1.Application.state:type_name -> plexspaces.application.v1.ApplicationState
-	4,  // 18: plexspaces.application.v1.Application.health:type_name -> plexspaces.application.v1.HealthStatus
-	36, // 19: plexspaces.application.v1.Application.started_at:type_name -> google.protobuf.Timestamp
-	12, // 20: plexspaces.application.v1.Application.statistics:type_name -> plexspaces.application.v1.ApplicationStatistics
-	6,  // 21: plexspaces.application.v1.ApplicationRuntimeState.status:type_name -> plexspaces.application.v1.ApplicationStatus
-	26, // 22: plexspaces.application.v1.ApplicationRuntimeState.env:type_name -> plexspaces.application.v1.ApplicationRuntimeState.EnvEntry
-	37, // 23: plexspaces.application.v1.DeployApplicationRequest.wasm_module:type_name -> plexspaces.wasm.v1.WasmModule
-	7,  // 24: plexspaces.application.v1.DeployApplicationRequest.config:type_name -> plexspaces.application.v1.ApplicationSpec
-	6,  // 25: plexspaces.application.v1.DeployApplicationResponse.status:type_name -> plexspaces.application.v1.ApplicationStatus
-	32, // 26: plexspaces.application.v1.UndeployApplicationRequest.timeout:type_name -> google.protobuf.Duration
-	6,  // 27: plexspaces.application.v1.ListApplicationsRequest.status_filter:type_name -> plexspaces.application.v1.ApplicationStatus
-	20, // 28: plexspaces.application.v1.ListApplicationsResponse.applications:type_name -> plexspaces.application.v1.ApplicationInfo
-	6,  // 29: plexspaces.application.v1.ApplicationInfo.status:type_name -> plexspaces.application.v1.ApplicationStatus
-	36, // 30: plexspaces.application.v1.ApplicationInfo.deployed_at:type_name -> google.protobuf.Timestamp
-	21, // 31: plexspaces.application.v1.ApplicationInfo.metrics:type_name -> plexspaces.application.v1.ApplicationMetrics
-	27, // 32: plexspaces.application.v1.ApplicationMetrics.actor_counts:type_name -> plexspaces.application.v1.ApplicationMetrics.ActorCountsEntry
-	28, // 33: plexspaces.application.v1.ApplicationMetrics.counter_metrics:type_name -> plexspaces.application.v1.ApplicationMetrics.CounterMetricsEntry
-	29, // 34: plexspaces.application.v1.ApplicationMetrics.latency_totals_ms:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencyTotalsMsEntry
-	30, // 35: plexspaces.application.v1.ApplicationMetrics.latency_max_ms:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencyMaxMsEntry
-	31, // 36: plexspaces.application.v1.ApplicationMetrics.latency_samples:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencySamplesEntry
-	20, // 37: plexspaces.application.v1.GetApplicationStatusResponse.application:type_name -> plexspaces.application.v1.ApplicationInfo
-	13, // 38: plexspaces.application.v1.GetApplicationStatusResponse.state:type_name -> plexspaces.application.v1.ApplicationRuntimeState
-	14, // 39: plexspaces.application.v1.ApplicationService.DeployApplication:input_type -> plexspaces.application.v1.DeployApplicationRequest
-	16, // 40: plexspaces.application.v1.ApplicationService.UndeployApplication:input_type -> plexspaces.application.v1.UndeployApplicationRequest
-	18, // 41: plexspaces.application.v1.ApplicationService.ListApplications:input_type -> plexspaces.application.v1.ListApplicationsRequest
-	22, // 42: plexspaces.application.v1.ApplicationService.GetApplicationStatus:input_type -> plexspaces.application.v1.GetApplicationStatusRequest
-	15, // 43: plexspaces.application.v1.ApplicationService.DeployApplication:output_type -> plexspaces.application.v1.DeployApplicationResponse
-	17, // 44: plexspaces.application.v1.ApplicationService.UndeployApplication:output_type -> plexspaces.application.v1.UndeployApplicationResponse
-	19, // 45: plexspaces.application.v1.ApplicationService.ListApplications:output_type -> plexspaces.application.v1.ListApplicationsResponse
-	23, // 46: plexspaces.application.v1.ApplicationService.GetApplicationStatus:output_type -> plexspaces.application.v1.GetApplicationStatusResponse
-	43, // [43:47] is the sub-list for method output_type
-	39, // [39:43] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	21, // 1: plexspaces.application.v1.ApplicationSpec.env:type_name -> plexspaces.application.v1.ApplicationSpec.EnvEntry
+	28, // 2: plexspaces.application.v1.ApplicationSpec.supervisor:type_name -> plexspaces.supervision.v1.SupervisorSpec
+	29, // 3: plexspaces.application.v1.ApplicationSpec.shutdown_timeout:type_name -> google.protobuf.Duration
+	1,  // 4: plexspaces.application.v1.ApplicationSpec.shutdown_strategy:type_name -> plexspaces.application.v1.ShutdownStrategy
+	30, // 5: plexspaces.application.v1.ApplicationSpec.metadata:type_name -> plexspaces.common.v1.Metadata
+	7,  // 6: plexspaces.application.v1.ApplicationSpec.required_service_links:type_name -> plexspaces.application.v1.ApplicationServiceLinkRequirement
+	6,  // 7: plexspaces.application.v1.Application.spec:type_name -> plexspaces.application.v1.ApplicationSpec
+	3,  // 8: plexspaces.application.v1.Application.state:type_name -> plexspaces.application.v1.ApplicationState
+	2,  // 9: plexspaces.application.v1.Application.health:type_name -> plexspaces.application.v1.HealthStatus
+	31, // 10: plexspaces.application.v1.Application.started_at:type_name -> google.protobuf.Timestamp
+	9,  // 11: plexspaces.application.v1.Application.statistics:type_name -> plexspaces.application.v1.ApplicationStatistics
+	4,  // 12: plexspaces.application.v1.ApplicationRuntimeState.status:type_name -> plexspaces.application.v1.ApplicationStatus
+	22, // 13: plexspaces.application.v1.ApplicationRuntimeState.env:type_name -> plexspaces.application.v1.ApplicationRuntimeState.EnvEntry
+	32, // 14: plexspaces.application.v1.DeployApplicationRequest.wasm_module:type_name -> plexspaces.wasm.v1.WasmModule
+	6,  // 15: plexspaces.application.v1.DeployApplicationRequest.config:type_name -> plexspaces.application.v1.ApplicationSpec
+	4,  // 16: plexspaces.application.v1.DeployApplicationResponse.status:type_name -> plexspaces.application.v1.ApplicationStatus
+	29, // 17: plexspaces.application.v1.UndeployApplicationRequest.timeout:type_name -> google.protobuf.Duration
+	4,  // 18: plexspaces.application.v1.ListApplicationsRequest.status_filter:type_name -> plexspaces.application.v1.ApplicationStatus
+	17, // 19: plexspaces.application.v1.ListApplicationsResponse.applications:type_name -> plexspaces.application.v1.ApplicationInfo
+	4,  // 20: plexspaces.application.v1.ApplicationInfo.status:type_name -> plexspaces.application.v1.ApplicationStatus
+	31, // 21: plexspaces.application.v1.ApplicationInfo.deployed_at:type_name -> google.protobuf.Timestamp
+	18, // 22: plexspaces.application.v1.ApplicationInfo.metrics:type_name -> plexspaces.application.v1.ApplicationMetrics
+	23, // 23: plexspaces.application.v1.ApplicationMetrics.actor_counts:type_name -> plexspaces.application.v1.ApplicationMetrics.ActorCountsEntry
+	24, // 24: plexspaces.application.v1.ApplicationMetrics.counter_metrics:type_name -> plexspaces.application.v1.ApplicationMetrics.CounterMetricsEntry
+	25, // 25: plexspaces.application.v1.ApplicationMetrics.latency_totals_ms:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencyTotalsMsEntry
+	26, // 26: plexspaces.application.v1.ApplicationMetrics.latency_max_ms:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencyMaxMsEntry
+	27, // 27: plexspaces.application.v1.ApplicationMetrics.latency_samples:type_name -> plexspaces.application.v1.ApplicationMetrics.LatencySamplesEntry
+	17, // 28: plexspaces.application.v1.GetApplicationStatusResponse.application:type_name -> plexspaces.application.v1.ApplicationInfo
+	10, // 29: plexspaces.application.v1.GetApplicationStatusResponse.state:type_name -> plexspaces.application.v1.ApplicationRuntimeState
+	11, // 30: plexspaces.application.v1.ApplicationService.DeployApplication:input_type -> plexspaces.application.v1.DeployApplicationRequest
+	13, // 31: plexspaces.application.v1.ApplicationService.UndeployApplication:input_type -> plexspaces.application.v1.UndeployApplicationRequest
+	15, // 32: plexspaces.application.v1.ApplicationService.ListApplications:input_type -> plexspaces.application.v1.ListApplicationsRequest
+	19, // 33: plexspaces.application.v1.ApplicationService.GetApplicationStatus:input_type -> plexspaces.application.v1.GetApplicationStatusRequest
+	12, // 34: plexspaces.application.v1.ApplicationService.DeployApplication:output_type -> plexspaces.application.v1.DeployApplicationResponse
+	14, // 35: plexspaces.application.v1.ApplicationService.UndeployApplication:output_type -> plexspaces.application.v1.UndeployApplicationResponse
+	16, // 36: plexspaces.application.v1.ApplicationService.ListApplications:output_type -> plexspaces.application.v1.ListApplicationsResponse
+	20, // 37: plexspaces.application.v1.ApplicationService.GetApplicationStatus:output_type -> plexspaces.application.v1.GetApplicationStatusResponse
+	34, // [34:38] is the sub-list for method output_type
+	30, // [30:34] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_plexspaces_v1_application_application_proto_init() }
@@ -2381,22 +2091,21 @@ func file_plexspaces_v1_application_application_proto_init() {
 	}
 	file_plexspaces_v1_application_application_proto_msgTypes[0].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[1].OneofWrappers = []any{}
-	file_plexspaces_v1_application_application_proto_msgTypes[3].OneofWrappers = []any{}
+	file_plexspaces_v1_application_application_proto_msgTypes[4].OneofWrappers = []any{}
+	file_plexspaces_v1_application_application_proto_msgTypes[5].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[6].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[7].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[8].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[9].OneofWrappers = []any{}
-	file_plexspaces_v1_application_application_proto_msgTypes[10].OneofWrappers = []any{}
 	file_plexspaces_v1_application_application_proto_msgTypes[11].OneofWrappers = []any{}
-	file_plexspaces_v1_application_application_proto_msgTypes[13].OneofWrappers = []any{}
-	file_plexspaces_v1_application_application_proto_msgTypes[16].OneofWrappers = []any{}
+	file_plexspaces_v1_application_application_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_application_application_proto_rawDesc), len(file_plexspaces_v1_application_application_proto_rawDesc)),
-			NumEnums:      7,
-			NumMessages:   25,
+			NumEnums:      6,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

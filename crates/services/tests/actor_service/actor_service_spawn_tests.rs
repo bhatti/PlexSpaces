@@ -3,10 +3,9 @@
 //
 // Tests for ActorServiceImpl::spawn_actor - local-only design (TDD)
 
-use plexspaces_core::{
+use plexspaces_actor::{
     actor_context::ActorService as CoreActorSpawnService,
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext,
-};
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext, RequestContextExt};
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
 use plexspaces_proto::common::v1::ActorIdentity;
@@ -53,7 +52,7 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<
@@ -75,7 +74,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn lookup_full(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<
@@ -95,7 +94,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn register(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
@@ -108,7 +107,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn discover(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         _name: Option<String>,
         _labels: Option<Vec<String>>,
@@ -125,7 +124,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn unregister(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -142,7 +141,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn heartbeat(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -178,7 +177,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -188,7 +187,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 
     // Register ActorFactory (required for spawn_actor to work)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
+    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
@@ -198,7 +197,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
         .await;
     service_locator.register_service(facet_manager).await;
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator
@@ -298,7 +297,7 @@ async fn test_spawn_actor_rejects_remote_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -313,7 +312,7 @@ async fn test_spawn_actor_rejects_remote_node_id() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
     let spec = spawn_spec_for_test(
         &ctx,
-        "test-actor@remote-node",
+        "test-actor//test-type::test-namespace@remote-node",
         "test-type",
         None,
         HashMap::new(),
@@ -356,7 +355,7 @@ async fn test_spawn_actor_design_principle() {
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -366,7 +365,7 @@ async fn test_spawn_actor_design_principle() {
 
     // Register ActorFactory (required for spawn_actor to work)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
+    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
@@ -376,7 +375,7 @@ async fn test_spawn_actor_design_principle() {
         .await;
     service_locator.register_service(facet_manager).await;
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator
@@ -411,7 +410,7 @@ async fn test_spawn_actor_design_principle() {
 #[tokio::test]
 async fn test_spawn_actor_with_callback() {
     // Test: spawn_actor should work when callback is set
-    use plexspaces_core::ActorRef;
+    use plexspaces_actor::ActorRef;
     use std::sync::Arc;
 
     let object_repo = Arc::new(
@@ -430,7 +429,7 @@ async fn test_spawn_actor_with_callback() {
 
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
+    let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -441,7 +440,7 @@ async fn test_spawn_actor_with_callback() {
     // Register ActorFactory (required for spawn_actor)
     use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
     let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
     )
     .await;
     service_locator

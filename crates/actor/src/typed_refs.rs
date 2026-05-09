@@ -54,7 +54,7 @@
 //! ```
 
 use crate::ActorRef;
-use plexspaces_core::{Message, RequestContext};
+use crate::core::{Message, RequestContext};
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
@@ -106,6 +106,19 @@ pub enum GenServerError {
     Spawn(String),
 }
 
+impl GenServerError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::actor::v1::GenServerErrorCode {
+        use plexspaces_proto::actor::v1::GenServerErrorCode;
+        match self {
+            GenServerError::Serialization(_) => GenServerErrorCode::GenServerErrorSerialization,
+            GenServerError::Call(_) => GenServerErrorCode::GenServerErrorCall,
+            GenServerError::Cast(_) => GenServerErrorCode::GenServerErrorCast,
+            GenServerError::Spawn(_) => GenServerErrorCode::GenServerErrorSpawn,
+        }
+    }
+}
+
 /// Error type for FSM operations.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum FsmError {
@@ -126,6 +139,19 @@ pub enum FsmError {
     Spawn(String),
 }
 
+impl FsmError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::actor::v1::FsmErrorCode {
+        use plexspaces_proto::actor::v1::FsmErrorCode;
+        match self {
+            FsmError::Serialization(_) => FsmErrorCode::FsmErrorSerialization,
+            FsmError::Transition(_) => FsmErrorCode::FsmErrorTransition,
+            FsmError::Query(_) => FsmErrorCode::FsmErrorQuery,
+            FsmError::Spawn(_) => FsmErrorCode::FsmErrorSpawn,
+        }
+    }
+}
+
 /// Error type for event operations.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum EventError {
@@ -140,6 +166,18 @@ pub enum EventError {
     /// Spawn error
     #[error("Event spawn error: {0}")]
     Spawn(String),
+}
+
+impl EventError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::actor::v1::EventErrorCode {
+        use plexspaces_proto::actor::v1::EventErrorCode;
+        match self {
+            EventError::Serialization(_) => EventErrorCode::EventErrorSerialization,
+            EventError::Emit(_) => EventErrorCode::EventErrorEmit,
+            EventError::Spawn(_) => EventErrorCode::EventErrorSpawn,
+        }
+    }
 }
 
 /// Error type for workflow operations.
@@ -158,6 +196,18 @@ pub enum WorkflowRefError {
     /// Spawn error
     #[error("Workflow spawn error: {0}")]
     Spawn(String),
+}
+
+impl WorkflowRefError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::actor::v1::WorkflowRefErrorCode {
+        use plexspaces_proto::actor::v1::WorkflowRefErrorCode;
+        match self {
+            WorkflowRefError::Serialization(_) => WorkflowRefErrorCode::WorkflowRefErrorSerialization,
+            WorkflowRefError::Execution(_) => WorkflowRefErrorCode::WorkflowRefErrorExecution,
+            WorkflowRefError::Spawn(_) => WorkflowRefErrorCode::WorkflowRefErrorSpawn,
+        }
+    }
 }
 
 // ============================================================================

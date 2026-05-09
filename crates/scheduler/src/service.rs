@@ -21,7 +21,7 @@
 use crate::capacity_tracker::CapacityTracker;
 use crate::state_store::SchedulingStateStore;
 use plexspaces_channel::Channel;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::{
     common::v1::Message,
     prost_types,
@@ -306,7 +306,7 @@ mod tests {
     use crate::capacity_tracker::CapacityTracker;
     use crate::state_store::sql::SqliteSchedulingStateStore;
     use plexspaces_channel::InMemoryChannel;
-    use plexspaces_core::ObjectRegistry;
+    use plexspaces_actor::ObjectRegistry;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::{
         actor::v1::ActorResourceRequirements, channel::v1::ChannelConfig, common::v1::ResourceSpec,

@@ -92,7 +92,7 @@ impl Counter {
 ### Example
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_sdk::{call_message, cast_message, json};
 use std::time::Duration;
 
@@ -372,7 +372,7 @@ supervisor.add_child(ChildSpec::new("worker")
 ### Example
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());
 
@@ -397,7 +397,7 @@ remote_ref.tell(&ctx, message).await?;
 ### Example
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_sdk::{call_message, cast_message, json};
 
 let ctx = RequestContext::new_without_auth("tenant-id".into(), "namespace".into());

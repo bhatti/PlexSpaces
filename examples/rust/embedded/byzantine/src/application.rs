@@ -14,7 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use plexspaces_actor::ActorRef;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{BehaviorRegistry, RequestContext};
+use plexspaces_actor::{BehaviorRegistry, RequestContext, RequestContextExt};
 use plexspaces_node::CoordinationComputeTracker;
 use plexspaces_sdk::{call_message, cast_message, json, spawn_with_behavior_type};
 use std::collections::HashMap;
@@ -99,7 +99,7 @@ impl Application for ByzantineApplication {
                 Box::pin(async move {
                     let state: serde_json::Value =
                         serde_json::from_slice(&initial_state).map_err(|e| {
-                            plexspaces_core::BehaviorFactoryError::InvalidArguments(
+                            plexspaces_actor::BehaviorFactoryError::InvalidArguments(
                                 BYZANTINE_GENERAL_BEHAVIOR.to_string(),
                                 format!("Invalid JSON: {}", e),
                             )
@@ -110,7 +110,7 @@ impl Application for ByzantineApplication {
                     let num_rounds = state["num_rounds"].as_u64().unwrap_or(1) as usize;
 
                     Ok(Box::new(General::new(id, source_id, num_rounds))
-                        as Box<dyn plexspaces_core::Actor>)
+                        as Box<dyn plexspaces_actor::Actor>)
                 })
             })
             .await;

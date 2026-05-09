@@ -60,8 +60,8 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
-use plexspaces_core::actor_context::{ObjectRegistry, ProcessGroupService};
-use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_actor::actor_context::{ObjectRegistry, ProcessGroupService};
+use plexspaces_actor::{RequestContext, ServiceLocator as ServiceLocatorTrait, RequestContextExt};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 
@@ -763,7 +763,7 @@ impl ProcessGroupServiceGrpc {
         &self,
         metadata: &tonic::metadata::MetadataMap,
     ) -> Result<RequestContext, Status> {
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         crate::request_context_from_grpc_request(metadata, &std::collections::HashMap::new(), &sl)
             .await
             .map_err(|e| Status::unauthenticated(format!("Invalid request context: {}", e)))

@@ -3,9 +3,9 @@
 //
 //! Tests for get_or_activate_actor (automatic activation pattern)
 
-use plexspaces_actor::Actor;
+use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_behavior::MockBehavior;
-use plexspaces_core::{ActorId, ActorRef};
+use plexspaces_actor::{ActorId, ActorRef};
 use plexspaces_mailbox::{mailbox_config_default, Mailbox};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
@@ -53,7 +53,7 @@ async fn test_get_or_activate_actor_new_actor() {
     }
 
     // Additional verification: Check ActorRegistry registration
-    use plexspaces_core::ActorRegistry;
+    use plexspaces_actor::ActorRegistry;
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     assert!(
         actor_registry.lookup_actor(&actor_id).await.is_some(),

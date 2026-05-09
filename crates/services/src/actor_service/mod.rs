@@ -127,18 +127,19 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 use crate::ServiceLocatorImpl;
+use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_actor::parallel::{
     build_collective_message, reduce_values, resolve_timeout, scatter_stats_from_results,
     select_collective_value, shard_group_config, shard_query_responses_from_results,
 };
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_core::{
+use plexspaces_actor::{
     monitoring::{
         record_node_shard_groups_created, record_node_shard_messages_received,
         record_node_shard_messages_sent, record_node_shard_operation,
         record_node_shard_operation_failed,
     },
-    ActorId, ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    ActorId, ActorRegistry, RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
@@ -183,8 +184,6 @@ use plexspaces_proto::actor::v1::{
     ListShardGroupsResponse,
     MapShardGroupRequest,
     MapShardGroupResponse,
-    MigrateActorRequest,
-    MigrateActorResponse,
     MonitorActorRequest,
     MonitorActorResponse,
     ReduceShardGroupRequest,
@@ -199,8 +198,6 @@ use plexspaces_proto::actor::v1::{
     SendMessageResponse,
     SendToShardRequest,
     SendToShardResponse,
-    SetActorStateRequest,
-    SetActorStateResponse,
     ShardGroup,
     ShardGroupAggregationStrategy,
     ShardGroupState,
@@ -441,7 +438,7 @@ impl ActorServiceImpl {
         if requested_actor_type.contains("//") {
             // Canonical actor ID passed directly — prime instance from named definition
             // so reactivation after explicit stop re-derives init from declaration args.
-            if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(requested_actor_type) {
+            if let Ok(actor_id) = plexspaces_actor::ActorId::from_canonical(requested_actor_type) {
                 if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                     let name = actor_id.name();
                     if let Some(def) = manager
@@ -736,17 +733,17 @@ impl ActorServiceImpl {
         Ok(())
     }
 
-    /// Spawn a new actor locally from an [`plexspaces_core::ActorSpawnSpec`].
+    /// Spawn a new actor locally from an [`plexspaces_actor::ActorSpawnSpec`].
     ///
     /// Always materializes on this node via [`ActorFactory`]. Callers targeting another node must
     /// use that node's service.
     pub async fn spawn_actor_local_from_spec(
         &self,
-        ctx: &plexspaces_core::RequestContext,
-        input_spec: &plexspaces_core::ActorSpawnSpec,
+        ctx: &plexspaces_actor::RequestContext,
+        input_spec: &plexspaces_actor::ActorSpawnSpec,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_actor::ActorFactory;
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
 
         let identity = input_spec
@@ -902,7 +899,7 @@ impl ActorServiceImpl {
             .await?;
 
         let registry = self.get_actor_registry().await;
-        let routing_ctx = plexspaces_core::RequestContext::new_without_auth(
+        let routing_ctx = plexspaces_actor::RequestContext::new_without_auth(
             ctx.tenant_id().to_string(),
             effective_namespace,
         );
@@ -1104,7 +1101,7 @@ impl ActorServiceImpl {
                 .ask(&ctx, &target_actor_id, message, timeout_duration)
                 .await
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                    use plexspaces_core::ActorRegistryError;
+                    use plexspaces_actor::ActorRegistryError;
                     match e {
                         ActorRegistryError::ActorNotFound(_) => "Actor not found".into(),
                         ActorRegistryError::Timeout => "Request timed out".into(),
@@ -1269,17 +1266,17 @@ impl ActorServiceImpl {
 
 /// Implement ActorService trait from core (for ActorContext)
 #[async_trait]
-impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
+impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
     async fn spawn_actor(
         &self,
         ctx: &RequestContext,
         spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-    ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<plexspaces_service_traits::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ref_impl = self
             .spawn_actor_local_from_spec(ctx, spec)
             .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-        plexspaces_core::ActorRef::new(actor_ref_impl.id().clone())
+        plexspaces_service_traits::ActorRef::new(actor_ref_impl.id().clone())
             .map_err(|e| format!("Failed to create ActorRef: {}", e).into())
     }
 
@@ -1538,7 +1535,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             .parse_canonical_actor_id(actor_id)
             .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let node_id = target.node_id();
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
             .get_actor_service_client(node_id)
             .await
@@ -1549,7 +1546,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             supervisor_id: supervisor_id.to_string(),
             supervisor_callback: supervisor_callback.to_string(),
         });
-        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
         let resp = client
             .monitor_actor(req)
             .await
@@ -1570,7 +1567,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             .parse_canonical_actor_id(actor_id)
             .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let node_id = target.node_id();
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
             .get_actor_service_client(node_id)
             .await
@@ -1581,7 +1578,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             supervisor_id: supervisor_id.to_string(),
             monitor_ref: monitor_ref.to_string(),
         });
-        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
         client
             .demonitor_actor(req)
             .await
@@ -1601,7 +1598,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             .parse_canonical_actor_id(actor_id)
             .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let node_id = target.node_id();
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
             .get_actor_service_client(node_id)
             .await
@@ -1611,7 +1608,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });
-        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
         client
             .link_actor(req)
             .await
@@ -1631,7 +1628,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             .parse_canonical_actor_id(actor_id)
             .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let node_id = target.node_id();
-        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
             .get_actor_service_client(node_id)
             .await
@@ -1641,7 +1638,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });
-        plexspaces_core::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
+        plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
         client
             .unlink_actor(req)
             .await
@@ -1653,7 +1650,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
 }
 
 /// Implement Service trait for ActorServiceImpl (for ServiceLocator registration)
-impl plexspaces_core::Service for ActorServiceImpl {
+impl plexspaces_actor::Service for ActorServiceImpl {
     fn service_name(&self) -> String {
         "ActorServiceImpl".to_string()
     }
@@ -1668,7 +1665,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<SendMessageResponse>, Status> {
         self.check_accepting_requests().await?;
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -1798,7 +1795,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<SpawnActorRequest>,
     ) -> Result<Response<SpawnActorResponse>, Status> {
         // Check if service is accepting requests (not shutting down)
-        if self.service_locator.is_shutdown_requested() {
+        if self.service_locator.is_shutting_down().await {
             return Err(Status::unavailable(
                 "Service is shutting down and not accepting new requests",
             ));
@@ -1817,7 +1814,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             .unwrap_or_default();
 
         // Create RequestContext from request metadata (before consuming request)
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -1956,7 +1953,7 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         // Use ActorFactory to spawn the actor locally
         use plexspaces_actor::ActorFactory;
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
 
         let spawn_spec = ActorSpawnSpec {
@@ -2000,7 +1997,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             .actor_id()
             .unwrap_or_else(|| actor_id.to_string());
 
-        let actor_state_bytes = plexspaces_core::wasm_init_payload(&spawn_spec, &actor_id);
+        let actor_state_bytes = plexspaces_actor::wasm_init_payload(&spawn_spec, &actor_id);
 
         // Build proto Actor message for response
         use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
@@ -2047,7 +2044,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<DeleteActorRequest>,
     ) -> Result<Response<Empty>, Status> {
         self.check_accepting_requests().await?;
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -2075,7 +2072,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             .await
             .unwrap_or_else(|| req.actor_id.clone());
 
-        let actor_id = plexspaces_core::ActorId::from_canonical(&canonical_id).map_err(|e| {
+        let actor_id = plexspaces_actor::ActorId::from_canonical(&canonical_id).map_err(|e| {
             Status::invalid_argument(format!("Invalid actor_id '{}': {}", req.actor_id, e))
         })?;
 
@@ -2096,20 +2093,6 @@ impl ActorServiceTrait for ActorServiceImpl {
     // ========================================================================
     // Actor State Management RPCs
     // ========================================================================
-
-    async fn set_actor_state(
-        &self,
-        _request: Request<SetActorStateRequest>,
-    ) -> Result<Response<SetActorStateResponse>, Status> {
-        Err(Status::unimplemented("set_actor_state not yet implemented"))
-    }
-
-    async fn migrate_actor(
-        &self,
-        _request: Request<MigrateActorRequest>,
-    ) -> Result<Response<MigrateActorResponse>, Status> {
-        Err(Status::unimplemented("migrate_actor not yet implemented"))
-    }
 
     // ========================================================================
     // Streaming & Monitoring RPCs
@@ -2132,7 +2115,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<MonitorActorResponse>, Status> {
         self.check_accepting_requests().await?;
         let metadata = request.metadata().clone();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
@@ -2155,10 +2138,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             .monitor(&routing_ctx, &target_id, &supervisor_id)
             .await
             .map_err(|e| match e {
-                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                plexspaces_actor::ActorRegistryError::LinkMonitorDenied(m) => {
                     Status::permission_denied(m)
                 }
-                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
                     Status::permission_denied(m)
                 }
                 other => Status::internal(format!("monitor failed: {}", other)),
@@ -2173,7 +2156,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<Empty>, Status> {
         self.check_accepting_requests().await?;
         let metadata = request.metadata().clone();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
@@ -2203,10 +2186,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             .demonitor(&routing_ctx, &target_id, &supervisor_id, &req.monitor_ref)
             .await
             .map_err(|e| match e {
-                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
                     Status::permission_denied(m)
                 }
-                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                plexspaces_actor::ActorRegistryError::LinkMonitorDenied(m) => {
                     Status::permission_denied(m)
                 }
                 other => Status::internal(format!("demonitor failed: {}", other)),
@@ -2221,7 +2204,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<Empty>, Status> {
         self.check_accepting_requests().await?;
         let metadata = request.metadata().clone();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let req = request.into_inner();
 
@@ -2239,7 +2222,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         )
         .await
         .unwrap_or_else(|_| {
-            plexspaces_core::RequestContext::new_without_auth(
+            plexspaces_actor::RequestContext::new_without_auth(
                 "system".into(),
                 supervisor_id.namespace().to_string(),
             )
@@ -2250,16 +2233,16 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         if req.is_link_signal && req.reason != "normal" && req.reason != "shutdown" {
             // Link EXIT signal: kill the linked actor on this node.
-            let linked_reason = plexspaces_core::ExitReason::Linked {
+            let linked_reason = plexspaces_actor::ExitReason::Linked {
                 actor_id: terminated_id,
-                reason: Box::new(plexspaces_core::ExitReason::Error(req.reason)),
+                reason: Box::new(plexspaces_actor::ExitReason::Error(req.reason)),
             };
             registry
                 .handle_actor_termination(&supervisor_id, linked_reason)
                 .await;
         } else {
             // Monitor DOWN: deliver __DOWN__ message to the supervisor's mailbox.
-            let down_msg = plexspaces_core::actor_monitor::create_down_message(
+            let down_msg = plexspaces_actor::actor_monitor::create_down_message(
                 &terminated_id,
                 &req.monitor_ref,
                 &req.reason,
@@ -2268,7 +2251,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 .tell(&routing_ctx, &supervisor_id, down_msg)
                 .await
                 .map_err(|e| match e {
-                    plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                    plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
                         Status::permission_denied(m)
                     }
                     other => Status::internal(format!("tell failed: {}", other)),
@@ -2284,7 +2267,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<LinkActorResponse>, Status> {
         self.check_accepting_requests().await?;
         let metadata = request.metadata().clone();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
@@ -2303,10 +2286,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             .link(&routing_ctx, &a, &b)
             .await
             .map_err(|e| match e {
-                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
                     Status::permission_denied(m)
                 }
-                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                plexspaces_actor::ActorRegistryError::LinkMonitorDenied(m) => {
                     Status::permission_denied(m)
                 }
                 other => Status::internal(format!("link failed: {}", other)),
@@ -2321,7 +2304,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     ) -> Result<Response<UnlinkActorResponse>, Status> {
         self.check_accepting_requests().await?;
         let metadata = request.metadata().clone();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let routing_ctx = crate::request_context_from_grpc_request(
             &metadata,
@@ -2340,10 +2323,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             .unlink(&routing_ctx, &a, &b)
             .await
             .map_err(|e| match e {
-                plexspaces_core::ActorRegistryError::VisibilityDenied(m) => {
+                plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
                     Status::permission_denied(m)
                 }
-                plexspaces_core::ActorRegistryError::LinkMonitorDenied(m) => {
+                plexspaces_actor::ActorRegistryError::LinkMonitorDenied(m) => {
                     Status::permission_denied(m)
                 }
                 other => Status::internal(format!("unlink failed: {}", other)),
@@ -2392,7 +2375,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<AskReplyRequest>,
     ) -> Result<Response<AskReplyResponse>, Status> {
         self.check_accepting_requests().await?;
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -2526,7 +2509,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2547,12 +2530,12 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
         let req = request.into_inner();
-        let resp = plexspaces_core::actor_context::ActorService::spawn_actors(self, &ctx, req)
+        let resp = plexspaces_actor::actor_context::ActorService::spawn_actors(self, &ctx, req)
             .await
             .map_err(|e| Status::internal(format!("Failed to spawn actors: {}", e)))?;
         Ok(Response::new(resp))
@@ -2566,7 +2549,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2586,7 +2569,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2611,7 +2594,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2631,7 +2614,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2651,7 +2634,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2671,7 +2654,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2691,7 +2674,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2711,7 +2694,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2801,7 +2784,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         let _ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -2861,7 +2844,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<SendToShardRequest>,
     ) -> Result<Response<SendToShardResponse>, Status> {
         self.check_accepting_requests().await?;
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -3061,10 +3044,10 @@ impl ActorServiceImpl {
             .await
             .ok_or_else(|| "Actor factory not available".to_string())?;
 
-        // Resolve the declaration name (e.g. "worker") to the actual WASM behavior class
+        // Resolve the role (e.g. "worker") to the actual WASM behavior class
         // (e.g. "streaming_pipeline_wasm") via the VirtualActorManager name index.
         // When actor_type is already the behavior class the lookup returns it unchanged.
-        let declaration_name = req.actor_type.clone();
+        let role = req.actor_type.clone();
         let resolved_actor_type =
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 manager
@@ -3076,7 +3059,7 @@ impl ActorServiceImpl {
         let definition_spec =
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 manager
-                    .get_virtual_actor_definition(ctx.namespace(), &declaration_name)
+                    .get_virtual_actor_definition(ctx.namespace(), &role)
                     .await
                     .map(|metadata| metadata.spec)
             } else {
@@ -3110,14 +3093,14 @@ impl ActorServiceImpl {
                     .map_err(|e| e.to_string())?;
 
                 let shard_spawn_spec = {
-                    use plexspaces_core::ActorSpawnSpec;
+                    use plexspaces_actor::ActorSpawnSpec;
                     use plexspaces_proto::common::v1::ActorIdentity;
                     ActorSpawnSpec {
                         identity: Some(ActorIdentity {
                             name: full_id.name().to_string(),
                             actor_type: resolved_actor_type.clone(),
                         }),
-                        role: declaration_name.clone(),
+                        role: role.clone(),
                         namespace: ctx.namespace().to_string(),
                         tenant_id: ctx.tenant_id().to_string(),
                         visibility: definition_spec
@@ -3168,14 +3151,14 @@ impl ActorServiceImpl {
                     )
                     .map_err(|e| e.to_string())?;
                 let remote_spawn_spec = {
-                    use plexspaces_core::ActorSpawnSpec;
+                    use plexspaces_actor::ActorSpawnSpec;
                     use plexspaces_proto::common::v1::ActorIdentity;
                     ActorSpawnSpec {
                         identity: Some(ActorIdentity {
                             name: remote_actor_id.name().to_string(),
                             actor_type: resolved_actor_type.clone(),
                         }),
-                        role: declaration_name.clone(),
+                        role: role.clone(),
                         namespace: ctx.namespace().to_string(),
                         tenant_id: ctx.tenant_id().to_string(),
                         visibility: definition_spec
@@ -3203,11 +3186,16 @@ impl ActorServiceImpl {
                 let mut client = plexspaces_proto::ActorServiceClient::new(channel);
                 let spawn_req = SpawnActorRequest {
                     spec: Some(remote_spawn_spec),
-                    namespace: String::new(),
+                    namespace: ctx.namespace().to_string(),
                     instances_count: 1,
                 };
+                let mut remote_req = tonic::Request::new(spawn_req);
+                plexspaces_actor::apply_request_context_to_grpc_metadata(
+                    ctx,
+                    remote_req.metadata_mut(),
+                );
                 let spawn_response = client
-                    .spawn_actor(tonic::Request::new(spawn_req))
+                    .spawn_actor(remote_req)
                     .await
                     .map_err(|e| format!("Remote spawn to {} failed: {}", target_node, e))?;
                 let actor_ref = spawn_response.into_inner().actor_ref;
@@ -3518,12 +3506,12 @@ impl ActorServiceImpl {
         // Each shard gets its own correlation_id (format: "req-shard-{shard_id}-{ulid}" for debugging)
         // All replies go to the same temporary sender ActorRef, but are routed to the correct ReplyWaiter
         // by correlation_id via ReplyWaiterRegistry (which supports multiple correlation_ids)
-        use plexspaces_core::TEMP_SENDER_PREFIX;
+        use plexspaces_actor::TEMP_SENDER_PREFIX;
         let operation_id = Ulid::new().to_string();
         let temp_sender_id = self
             .build_canonical_actor_id(
                 &format!("{}_{}", TEMP_SENDER_PREFIX, operation_id),
-                plexspaces_core::TEMP_SENDER_ACTOR_TYPE,
+                plexspaces_actor::TEMP_SENDER_ACTOR_TYPE,
                 ctx.namespace(),
                 &self.local_node_id,
             )
@@ -4228,7 +4216,7 @@ impl ActorServiceImpl {
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
             &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>),
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
@@ -4320,7 +4308,7 @@ impl ActorServiceImpl {
                     {
                         // Eventual consistency: send all updates, don't wait
                         for (_key, message) in updates_clone {
-                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> =
+                            let actor_registry: Option<Arc<plexspaces_actor::ActorRegistry>> =
                                 service_locator.actor_registry().await;
                             if let Some(registry) = actor_registry {
                                 if let Ok(receiver_id) =
@@ -4351,7 +4339,7 @@ impl ActorServiceImpl {
                         // Stronger consistency: send sequentially or with coordination
                         // For now, send sequentially (can be optimized later)
                         for (_key, message) in updates_clone {
-                            let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> =
+                            let actor_registry: Option<Arc<plexspaces_actor::ActorRegistry>> =
                                 service_locator.actor_registry().await;
                             if let Some(registry) = actor_registry {
                                 let receiver_id =
@@ -4543,20 +4531,6 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.delete_actor(request).await
     }
 
-    async fn set_actor_state(
-        &self,
-        request: Request<SetActorStateRequest>,
-    ) -> Result<Response<SetActorStateResponse>, Status> {
-        self.0.set_actor_state(request).await
-    }
-
-    async fn migrate_actor(
-        &self,
-        request: Request<MigrateActorRequest>,
-    ) -> Result<Response<MigrateActorResponse>, Status> {
-        self.0.migrate_actor(request).await
-    }
-
     type StreamMessagesStream =
         Pin<Box<dyn Stream<Item = Result<StreamMessageResponse, Status>> + Send>>;
 
@@ -4727,7 +4701,7 @@ pub mod partition;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::{MessageSender, ObjectRegistry as ObjectRegistryTrait};
+    use plexspaces_actor::{InitializableServiceLocator, MessageSender, ObjectRegistry as ObjectRegistryTrait};
     use plexspaces_mailbox::{mailbox_config_default, Mailbox};
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
@@ -4779,7 +4753,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl plexspaces_core::NodeRegistryTrait for MockNodeRegistry {
+    impl plexspaces_actor::NodeRegistryTrait for MockNodeRegistry {
         async fn lookup_node(
             &self,
             _ctx: &RequestContext,
@@ -4866,7 +4840,7 @@ mod tests {
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -4885,7 +4859,7 @@ mod tests {
 
         async fn lookup_full(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -4902,7 +4876,7 @@ mod tests {
 
         async fn register(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             self.inner.register(ctx, registration).await.map_err(
@@ -4917,7 +4891,7 @@ mod tests {
 
         async fn discover(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
             object_category: Option<String>,
             capabilities: Option<Vec<String>>,
@@ -4948,7 +4922,7 @@ mod tests {
 
         async fn unregister(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -4965,7 +4939,7 @@ mod tests {
 
         async fn heartbeat(
             &self,
-            ctx: &plexspaces_core::RequestContext,
+            ctx: &plexspaces_actor::RequestContext,
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -5004,7 +4978,7 @@ mod tests {
         node_id: String,
     ) -> ActorServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
-        use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
+        use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
         // Create ServiceLocatorImpl directly
         let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
         // Disable auth so tests can call gRPC methods without JWT
@@ -5035,7 +5009,7 @@ mod tests {
         // Override actor_registry with the test-specific one (which has test actors).
         // VirtualActorManager must always be present in the actor-registry; set it here.
         {
-            use plexspaces_core::VirtualActorManager;
+            use plexspaces_actor::VirtualActorManager;
             let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
             actor_registry
                 .set_virtual_actor_manager(virtual_actor_manager)
@@ -5052,7 +5026,7 @@ mod tests {
     ) -> ActorServiceImpl {
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry, "node1".to_string()).await;
-        let mock_registry: Arc<dyn plexspaces_core::NodeRegistryTrait> =
+        let mock_registry: Arc<dyn plexspaces_actor::NodeRegistryTrait> =
             Arc::new(MockNodeRegistry { nodes });
         service
             .service_locator
@@ -5080,7 +5054,7 @@ mod tests {
             plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
         ));
         // Tenant comes from auth, not config - use empty strings for test actor registration
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::RequestContext;
         let ctx = RequestContext::new_without_auth(String::new(), namespace.to_string());
         actor_registry
             .register_actor(
@@ -5114,7 +5088,7 @@ mod tests {
 
         // Register node using ObjectTypeNode
         // Use internal context for system operations (node registration is system-level)
-        let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new())
             .with_admin(true);
         let registration = ObjectRegistration {
             object_id: node_id.to_string(),
@@ -5143,7 +5117,7 @@ mod tests {
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry, "node1".to_string()).await;
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
-        let mock_registry: Arc<dyn plexspaces_core::NodeRegistryTrait> =
+        let mock_registry: Arc<dyn plexspaces_actor::NodeRegistryTrait> =
             Arc::new(MockNodeRegistry {
                 nodes: vec![
                     NodeRegistration {
@@ -5240,7 +5214,7 @@ mod tests {
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry, "node1".to_string()).await;
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
-        let mock_registry: Arc<dyn plexspaces_core::NodeRegistryTrait> =
+        let mock_registry: Arc<dyn plexspaces_actor::NodeRegistryTrait> =
             Arc::new(MockNodeRegistry { nodes: Vec::new() });
         service
             .service_locator
@@ -5279,7 +5253,7 @@ mod tests {
                 .await
                 .expect("Failed to create mailbox"),
         );
-        let _actor_ref = plexspaces_core::ActorRef::new(actor_id.clone()).unwrap();
+        let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
 
         // ACT: Register actor
         register_test_actor(
@@ -5563,7 +5537,7 @@ mod tests {
                 .await
                 .expect("Failed to create mailbox"),
         );
-        let _actor_ref = plexspaces_core::ActorRef::new(actor_id.clone()).unwrap();
+        let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
         register_test_actor(
             actor_registry.clone(),
             actor_id.clone(),
@@ -5666,7 +5640,7 @@ mod tests {
                 .await
                 .expect("Failed to create mailbox"),
         );
-        let _actor_ref = plexspaces_core::ActorRef::new(actor_id.clone()).unwrap();
+        let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
         register_test_actor(
             actor_registry.clone(),
             actor_id.clone(),
@@ -5716,7 +5690,7 @@ mod tests {
                 .await
                 .expect("Failed to create mailbox"),
         );
-        let _actor_ref = plexspaces_core::ActorRef::new(actor_id.clone()).unwrap();
+        let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
         register_test_actor(
             actor_registry.clone(),
             actor_id.clone(),
@@ -5774,7 +5748,7 @@ mod tests {
                 .await
                 .expect("Failed to create mailbox"),
         );
-        let _actor_ref = plexspaces_core::ActorRef::new(actor_id.clone()).unwrap();
+        let _actor_ref = plexspaces_service_traits::ActorRef::new(actor_id.clone()).unwrap();
         register_test_actor(
             actor_registry.clone(),
             actor_id.clone(),
@@ -5823,7 +5797,6 @@ mod tests {
         let service = create_test_actor_service(registry.clone(), "node1".to_string()).await;
 
         // Service registration is synchronous - verify immediately
-        use plexspaces_core::service_names;
         assert!(
             service.service_locator.actor_registry().await.is_some(),
             "ActorRegistry should be registered synchronously"

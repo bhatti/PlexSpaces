@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces Node & Scheduler Error Types
+//
+// ## Purpose
+// Proto-first error code enums for node lifecycle, health, scheduling, and release
+// management. Rust error types in the corresponding crates map to these codes via
+// a `code() -> XyzErrorCode` method, enabling consistent wire representation across
+// languages.
+//
+// ## Integration
+// - `crates/node/src/shutdown_coordinator.rs` → `ShutdownErrorCode`
+// - `crates/node/src/health/checker.rs` → `HealthCheckErrorCode`
+// - `crates/scheduler/src/background.rs` → `BackgroundSchedulerErrorCode`
+// - `crates/scheduler/src/capacity_tracker.rs` → `CapacityTrackerErrorCode`
+// - `crates/scheduler/src/node_selector.rs` → `NodeSelectionErrorCode`
+// - `crates/scheduler/src/task_router.rs` → `TaskRouterErrorCode`
+// - `crates/common/src/release_parser/mod.rs` → `ReleaseErrorCode`
+
+syntax = "proto3";
+
+package plexspaces.node.v1;
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
+
+// Shutdown coordinator error codes
+enum ShutdownErrorCode {
+  SHUTDOWN_ERROR_UNSPECIFIED = 0;
+
+  // A shutdown phase failed (phase name + error in message)
+  SHUTDOWN_ERROR_PHASE_FAILED = 1;
+
+  // Shutdown sequence timed out
+  SHUTDOWN_ERROR_TIMEOUT = 2;
+
+  // Other shutdown error
+  SHUTDOWN_ERROR_OTHER = 3;
+}
+
+// Health check error codes
+enum HealthCheckErrorCode {
+  HEALTH_CHECK_ERROR_UNSPECIFIED = 0;
+
+  // A health check returned a failure result
+  HEALTH_CHECK_ERROR_CHECK_FAILED = 1;
+
+  // Health check did not complete within deadline
+  HEALTH_CHECK_ERROR_TIMEOUT = 2;
+
+  // Unexpected error running a health check
+  HEALTH_CHECK_ERROR_OTHER = 3;
+}
+
+// Background scheduler error codes
+enum BackgroundSchedulerErrorCode {
+  BACKGROUND_SCHEDULER_ERROR_UNSPECIFIED = 0;
+
+  // Scheduler already running for this node in the current process
+  BACKGROUND_SCHEDULER_ERROR_ALREADY_STARTED = 1;
+
+  // Lock manager error (lease acquisition)
+  BACKGROUND_SCHEDULER_ERROR_LOCK_ERROR = 2;
+
+  // Internal channel error
+  BACKGROUND_SCHEDULER_ERROR_CHANNEL_ERROR = 3;
+
+  // State store error
+  BACKGROUND_SCHEDULER_ERROR_STATE_STORE_ERROR = 4;
+
+  // Node selection error during scheduling
+  BACKGROUND_SCHEDULER_ERROR_NODE_SELECTION_ERROR = 5;
+}
+
+// Capacity tracker error codes
+enum CapacityTrackerErrorCode {
+  CAPACITY_TRACKER_ERROR_UNSPECIFIED = 0;
+
+  // ObjectRegistry error reading capacity data
+  CAPACITY_TRACKER_ERROR_REGISTRY_ERROR = 1;
+
+  // Capacity data is malformed or out of range
+  CAPACITY_TRACKER_ERROR_INVALID_DATA = 2;
+}
+
+// Node selection error codes
+enum NodeSelectionErrorCode {
+  NODE_SELECTION_ERROR_UNSPECIFIED = 0;
+
+  // No node matched the resource requirements
+  NODE_SELECTION_ERROR_NO_MATCHING_NODE = 1;
+
+  // Resource requirements are invalid or contradictory
+  NODE_SELECTION_ERROR_INVALID_REQUIREMENTS = 2;
+}
+
+// Task router error codes
+enum TaskRouterErrorCode {
+  TASK_ROUTER_ERROR_UNSPECIFIED = 0;
+
+  // Shard group not found
+  TASK_ROUTER_ERROR_GROUP_NOT_FOUND = 1;
+
+  // Shard group has no actors registered
+  TASK_ROUTER_ERROR_NO_ACTORS_IN_GROUP = 2;
+
+  // Internal channel error
+  TASK_ROUTER_ERROR_CHANNEL_ERROR = 3;
+
+  // Routing strategy is not valid for this request
+  TASK_ROUTER_ERROR_INVALID_STRATEGY = 4;
+}
+
+// Release parser error codes are defined in release.proto (ReleaseErrorCode).

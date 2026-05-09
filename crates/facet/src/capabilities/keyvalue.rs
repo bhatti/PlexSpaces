@@ -33,6 +33,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::{Facet, FacetError, InterceptResult};
+use plexspaces_common::RequestContextExt;
 
 #[cfg(feature = "ddb-backend")]
 pub use keyvalue_ddb::DynamoDBStore;

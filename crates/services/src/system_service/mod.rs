@@ -35,7 +35,7 @@
 //! - Integrates with PlexSpacesHealthReporter for dependency checks
 
 // Use HealthReporter trait from core - no dependency on node
-use plexspaces_core::HealthReporter;
+use plexspaces_actor::HealthReporter;
 use plexspaces_proto::system::v1::system_service_server::SystemService;
 use plexspaces_proto::system::v1::*;
 use regex::Regex;
@@ -747,7 +747,7 @@ impl SystemService for SystemServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::PlexSpacesHealthReporter;
+    use plexspaces_actor::PlexSpacesHealthReporter;
     use plexspaces_proto::system::v1::{DependencyRegistrationConfig, HealthProbeConfig};
 
     #[tokio::test]

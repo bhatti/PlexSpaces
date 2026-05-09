@@ -457,7 +457,7 @@ async fn test_node_startup_is_not_blocked_by_auto_deploy() {
         let _ = node_clone.start().await;
     });
 
-    let http_addr = format!("127.0.0.1:{}", grpc_port + 1);
+    let http_addr = format!("127.0.0.1:{}", grpc_port);
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut connected = false;
     while Instant::now() < deadline {

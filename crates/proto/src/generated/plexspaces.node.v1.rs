@@ -1816,82 +1816,226 @@ impl MemberState {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
+/// Shutdown coordinator error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ShutdownErrorCode {
+    ShutdownErrorUnspecified = 0,
+    /// A shutdown phase failed (phase name + error in message)
+    ShutdownErrorPhaseFailed = 1,
+    /// Shutdown sequence timed out
+    ShutdownErrorTimeout = 2,
+    /// Other shutdown error
+    ShutdownErrorOther = 3,
+}
+impl ShutdownErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ShutdownErrorCode::ShutdownErrorUnspecified => "SHUTDOWN_ERROR_UNSPECIFIED",
+            ShutdownErrorCode::ShutdownErrorPhaseFailed => "SHUTDOWN_ERROR_PHASE_FAILED",
+            ShutdownErrorCode::ShutdownErrorTimeout => "SHUTDOWN_ERROR_TIMEOUT",
+            ShutdownErrorCode::ShutdownErrorOther => "SHUTDOWN_ERROR_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "SHUTDOWN_ERROR_UNSPECIFIED" => Some(Self::ShutdownErrorUnspecified),
+            "SHUTDOWN_ERROR_PHASE_FAILED" => Some(Self::ShutdownErrorPhaseFailed),
+            "SHUTDOWN_ERROR_TIMEOUT" => Some(Self::ShutdownErrorTimeout),
+            "SHUTDOWN_ERROR_OTHER" => Some(Self::ShutdownErrorOther),
+            _ => None,
+        }
+    }
+}
+/// Health check error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum HealthCheckErrorCode {
+    HealthCheckErrorUnspecified = 0,
+    /// A health check returned a failure result
+    HealthCheckErrorCheckFailed = 1,
+    /// Health check did not complete within deadline
+    HealthCheckErrorTimeout = 2,
+    /// Unexpected error running a health check
+    HealthCheckErrorOther = 3,
+}
+impl HealthCheckErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            HealthCheckErrorCode::HealthCheckErrorUnspecified => "HEALTH_CHECK_ERROR_UNSPECIFIED",
+            HealthCheckErrorCode::HealthCheckErrorCheckFailed => "HEALTH_CHECK_ERROR_CHECK_FAILED",
+            HealthCheckErrorCode::HealthCheckErrorTimeout => "HEALTH_CHECK_ERROR_TIMEOUT",
+            HealthCheckErrorCode::HealthCheckErrorOther => "HEALTH_CHECK_ERROR_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "HEALTH_CHECK_ERROR_UNSPECIFIED" => Some(Self::HealthCheckErrorUnspecified),
+            "HEALTH_CHECK_ERROR_CHECK_FAILED" => Some(Self::HealthCheckErrorCheckFailed),
+            "HEALTH_CHECK_ERROR_TIMEOUT" => Some(Self::HealthCheckErrorTimeout),
+            "HEALTH_CHECK_ERROR_OTHER" => Some(Self::HealthCheckErrorOther),
+            _ => None,
+        }
+    }
+}
+/// Background scheduler error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum BackgroundSchedulerErrorCode {
+    BackgroundSchedulerErrorUnspecified = 0,
+    /// Scheduler already running for this node in the current process
+    BackgroundSchedulerErrorAlreadyStarted = 1,
+    /// Lock manager error (lease acquisition)
+    BackgroundSchedulerErrorLockError = 2,
+    /// Internal channel error
+    BackgroundSchedulerErrorChannelError = 3,
+    /// State store error
+    BackgroundSchedulerErrorStateStoreError = 4,
+    /// Node selection error during scheduling
+    BackgroundSchedulerErrorNodeSelectionError = 5,
+}
+impl BackgroundSchedulerErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorUnspecified => "BACKGROUND_SCHEDULER_ERROR_UNSPECIFIED",
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorAlreadyStarted => "BACKGROUND_SCHEDULER_ERROR_ALREADY_STARTED",
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorLockError => "BACKGROUND_SCHEDULER_ERROR_LOCK_ERROR",
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorChannelError => "BACKGROUND_SCHEDULER_ERROR_CHANNEL_ERROR",
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorStateStoreError => "BACKGROUND_SCHEDULER_ERROR_STATE_STORE_ERROR",
+            BackgroundSchedulerErrorCode::BackgroundSchedulerErrorNodeSelectionError => "BACKGROUND_SCHEDULER_ERROR_NODE_SELECTION_ERROR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "BACKGROUND_SCHEDULER_ERROR_UNSPECIFIED" => Some(Self::BackgroundSchedulerErrorUnspecified),
+            "BACKGROUND_SCHEDULER_ERROR_ALREADY_STARTED" => Some(Self::BackgroundSchedulerErrorAlreadyStarted),
+            "BACKGROUND_SCHEDULER_ERROR_LOCK_ERROR" => Some(Self::BackgroundSchedulerErrorLockError),
+            "BACKGROUND_SCHEDULER_ERROR_CHANNEL_ERROR" => Some(Self::BackgroundSchedulerErrorChannelError),
+            "BACKGROUND_SCHEDULER_ERROR_STATE_STORE_ERROR" => Some(Self::BackgroundSchedulerErrorStateStoreError),
+            "BACKGROUND_SCHEDULER_ERROR_NODE_SELECTION_ERROR" => Some(Self::BackgroundSchedulerErrorNodeSelectionError),
+            _ => None,
+        }
+    }
+}
+/// Capacity tracker error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum CapacityTrackerErrorCode {
+    CapacityTrackerErrorUnspecified = 0,
+    /// ObjectRegistry error reading capacity data
+    CapacityTrackerErrorRegistryError = 1,
+    /// Capacity data is malformed or out of range
+    CapacityTrackerErrorInvalidData = 2,
+}
+impl CapacityTrackerErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            CapacityTrackerErrorCode::CapacityTrackerErrorUnspecified => "CAPACITY_TRACKER_ERROR_UNSPECIFIED",
+            CapacityTrackerErrorCode::CapacityTrackerErrorRegistryError => "CAPACITY_TRACKER_ERROR_REGISTRY_ERROR",
+            CapacityTrackerErrorCode::CapacityTrackerErrorInvalidData => "CAPACITY_TRACKER_ERROR_INVALID_DATA",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "CAPACITY_TRACKER_ERROR_UNSPECIFIED" => Some(Self::CapacityTrackerErrorUnspecified),
+            "CAPACITY_TRACKER_ERROR_REGISTRY_ERROR" => Some(Self::CapacityTrackerErrorRegistryError),
+            "CAPACITY_TRACKER_ERROR_INVALID_DATA" => Some(Self::CapacityTrackerErrorInvalidData),
+            _ => None,
+        }
+    }
+}
+/// Node selection error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NodeSelectionErrorCode {
+    NodeSelectionErrorUnspecified = 0,
+    /// No node matched the resource requirements
+    NodeSelectionErrorNoMatchingNode = 1,
+    /// Resource requirements are invalid or contradictory
+    NodeSelectionErrorInvalidRequirements = 2,
+}
+impl NodeSelectionErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            NodeSelectionErrorCode::NodeSelectionErrorUnspecified => "NODE_SELECTION_ERROR_UNSPECIFIED",
+            NodeSelectionErrorCode::NodeSelectionErrorNoMatchingNode => "NODE_SELECTION_ERROR_NO_MATCHING_NODE",
+            NodeSelectionErrorCode::NodeSelectionErrorInvalidRequirements => "NODE_SELECTION_ERROR_INVALID_REQUIREMENTS",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NODE_SELECTION_ERROR_UNSPECIFIED" => Some(Self::NodeSelectionErrorUnspecified),
+            "NODE_SELECTION_ERROR_NO_MATCHING_NODE" => Some(Self::NodeSelectionErrorNoMatchingNode),
+            "NODE_SELECTION_ERROR_INVALID_REQUIREMENTS" => Some(Self::NodeSelectionErrorInvalidRequirements),
+            _ => None,
+        }
+    }
+}
+/// Task router error codes
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TaskRouterErrorCode {
+    TaskRouterErrorUnspecified = 0,
+    /// Shard group not found
+    TaskRouterErrorGroupNotFound = 1,
+    /// Shard group has no actors registered
+    TaskRouterErrorNoActorsInGroup = 2,
+    /// Internal channel error
+    TaskRouterErrorChannelError = 3,
+    /// Routing strategy is not valid for this request
+    TaskRouterErrorInvalidStrategy = 4,
+}
+impl TaskRouterErrorCode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            TaskRouterErrorCode::TaskRouterErrorUnspecified => "TASK_ROUTER_ERROR_UNSPECIFIED",
+            TaskRouterErrorCode::TaskRouterErrorGroupNotFound => "TASK_ROUTER_ERROR_GROUP_NOT_FOUND",
+            TaskRouterErrorCode::TaskRouterErrorNoActorsInGroup => "TASK_ROUTER_ERROR_NO_ACTORS_IN_GROUP",
+            TaskRouterErrorCode::TaskRouterErrorChannelError => "TASK_ROUTER_ERROR_CHANNEL_ERROR",
+            TaskRouterErrorCode::TaskRouterErrorInvalidStrategy => "TASK_ROUTER_ERROR_INVALID_STRATEGY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "TASK_ROUTER_ERROR_UNSPECIFIED" => Some(Self::TaskRouterErrorUnspecified),
+            "TASK_ROUTER_ERROR_GROUP_NOT_FOUND" => Some(Self::TaskRouterErrorGroupNotFound),
+            "TASK_ROUTER_ERROR_NO_ACTORS_IN_GROUP" => Some(Self::TaskRouterErrorNoActorsInGroup),
+            "TASK_ROUTER_ERROR_CHANNEL_ERROR" => Some(Self::TaskRouterErrorChannelError),
+            "TASK_ROUTER_ERROR_INVALID_STRATEGY" => Some(Self::TaskRouterErrorInvalidStrategy),
+            _ => None,
+        }
+    }
+}
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

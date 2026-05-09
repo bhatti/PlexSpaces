@@ -6,9 +6,9 @@
 //! Host functions provided to WASM actors
 
 use async_trait::async_trait;
-use plexspaces_core::actor_context::ObjectRegistry;
-use plexspaces_core::JournalStorage;
-use plexspaces_core::{
+use plexspaces_actor::actor_context::ObjectRegistry;
+use plexspaces_actor::JournalStorage;
+use plexspaces_actor::{
     ChannelService, ElasticPoolService, KeyValueStore, LockManager, RequestContext,
 };
 use plexspaces_process_groups::ProcessGroupRegistry;
@@ -315,7 +315,7 @@ pub struct HostFunctions {
     elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
     /// Resilient outbound HTTP client for named service links (optional).
     /// Populated from RuntimeConfig.service_links via ServiceLocator.
-    outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
+    outbound_http_client: Option<Arc<dyn plexspaces_actor::OutboundHttpClient>>,
     /// Shared send_after timer handles for this actor across all re-instantiations.
     /// Aborted en-masse on application undeploy so stale timers don't fire after cleanup.
     pub timer_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
@@ -414,7 +414,7 @@ impl HostFunctions {
         journal_storage: Option<Arc<dyn JournalStorage>>,
         blob_service: Option<Arc<BlobService>>,
         elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
-        outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
+        outbound_http_client: Option<Arc<dyn plexspaces_actor::OutboundHttpClient>>,
         shared_timer_pool: Option<Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Self {
         let timer_handles = shared_timer_pool
@@ -480,7 +480,7 @@ impl HostFunctions {
     }
 
     /// Get outbound HTTP client if available
-    pub fn outbound_http_client(&self) -> Option<&Arc<dyn plexspaces_core::OutboundHttpClient>> {
+    pub fn outbound_http_client(&self) -> Option<&Arc<dyn plexspaces_actor::OutboundHttpClient>> {
         self.outbound_http_client.as_ref()
     }
 
@@ -491,17 +491,18 @@ impl HostFunctions {
         method: &str,
         path_and_query: &str,
         request: HttpFetchRequest,
-    ) -> Result<plexspaces_core::OutboundHttpResponse, String> {
-        use plexspaces_core::OutboundHttpRequest;
+    ) -> Result<plexspaces_actor::OutboundHttpResponse, String> {
+        use plexspaces_actor::OutboundHttpRequest;
         let client = match &self.outbound_http_client {
             Some(client) => client,
             None => return Err("outbound HTTP client not configured".to_string()),
         };
 
+        use plexspaces_actor::HttpHeader;
         let outbound_request = OutboundHttpRequest {
             method: method.to_string(),
             path_and_query: path_and_query.to_string(),
-            headers: request.headers.into_iter().collect(),
+            headers: request.headers.into_iter().map(|(k, v)| HttpHeader { key: k, value: v }).collect(),
             body: request.body,
         };
 
@@ -958,7 +959,7 @@ impl Default for HostFunctions {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use plexspaces_core::ChannelService;
+    use plexspaces_actor::ChannelService;
     use plexspaces_proto::common::v1::Message;
     use std::collections::HashMap;
     use std::sync::Arc;

@@ -57,6 +57,7 @@
 //! ```
 
 use plexspaces_behavior::MockBehavior;
+use plexspaces_actor::RequestContextExt;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::ActorLifecycleEvent;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -176,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use plexspaces_actor::ActorBuilder;
     let mut actors = Vec::new();
     for i in 1..=3 {
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(
             "internal".to_string(),
             "system".to_string(),
         )

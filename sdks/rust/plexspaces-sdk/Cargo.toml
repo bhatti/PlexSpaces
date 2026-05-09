@@ -11,7 +11,6 @@ description = "Rust SDK for PlexSpaces (re-exports, helpers, and attribute macro
 
 [dependencies]
 plexspaces-sdk-macros = { path = "../plexspaces-sdk-macros" }
-plexspaces-core = { path = "../../../crates/core", optional = true }
 plexspaces-actor = { path = "../../../crates/actor", optional = true }
 plexspaces-node = { path = "../../../crates/node", optional = true }
 plexspaces-proto = { path = "../../../crates/proto", default-features = false }
@@ -43,7 +42,6 @@ native = [
     "dep:plexspaces-actor",
     "dep:plexspaces-behavior",
     "dep:plexspaces-common",
-    "dep:plexspaces-core",
     "dep:plexspaces-facet",
     "dep:plexspaces-journaling",
     "dep:plexspaces-node",

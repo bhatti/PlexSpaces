@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use plexspaces_actor::InitializableServiceLocator;
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use sqlx::any::AnyPoolOptions;
 
@@ -68,10 +69,10 @@ pub fn blob_config_from_release_spec(
 
 /// Connect SQL pool, construct [`BlobService`], register on `service_locator`, and return the service.
 ///
-/// Registers [`plexspaces_core::BlobServiceTrait`] on the locator (object-safe; callers that need
+/// Registers [`plexspaces_actor::BlobServiceTrait`] on the locator (object-safe; callers that need
 /// the concrete [`BlobService`] should retain the returned `Arc`).
 pub async fn create_and_register_blob_service(
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator + Send + Sync>,
+    service_locator: Arc<dyn InitializableServiceLocator + Send + Sync>,
     db_url: &str,
     blob_config: ProtoBlobConfig,
 ) -> Result<Arc<BlobService>, BlobError> {
@@ -98,7 +99,7 @@ pub async fn create_and_register_blob_service(
 
     let service_arc = Arc::new(service);
 
-    let blob_trait: Arc<dyn plexspaces_core::BlobServiceTrait> = service_arc.clone();
+    let blob_trait: Arc<dyn plexspaces_actor::BlobServiceTrait> = service_arc.clone();
     service_locator.register_blob_service(blob_trait).await;
 
     Ok(service_arc)

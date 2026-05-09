@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::Workflow;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext};
+use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext, RequestContextExt};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_workflow::WorkflowRef;
 use serde::{Deserialize, Serialize};
@@ -348,9 +348,10 @@ async fn test_workflow_ref_with_timeout() {
     // Create WorkflowRef (no global timeout - per-operation timeouts instead)
     let workflow = WorkflowRef::new(actor_ref);
 
-    let workflow_id = plexspaces_core::ActorId::from_canonical(workflow.id()).unwrap();
+    let workflow_id = plexspaces_actor::ActorId::from_canonical(workflow.id()).unwrap();
     assert_eq!(workflow_id.name(), "test-workflow-3");
-    assert_eq!(workflow_id.namespace(), "test");
+    // namespace comes from RequestContext, not with_namespace() which is overridden by spawn()
+    assert_eq!(workflow_id.namespace(), "test-namespace");
     assert_eq!(workflow_id.node_id(), "test-node-3");
 
     // Run workflow with custom timeout (for long-running workflows)

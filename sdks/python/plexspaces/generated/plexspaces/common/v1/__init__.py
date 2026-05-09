@@ -53,6 +53,37 @@ class ResourceState(betterproto.Enum):
     UNKNOWN = 7
 
 
+class RequestContextErrorCode(betterproto.Enum):
+    """
+    RequestContext error codes
+
+     TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
+     type, these codes will be the single source of truth for all context errors.
+     See plan: Phase 4 — Consolidate RequestContext to proto-only.
+    """
+
+    REQUEST_CONTEXT_ERROR_UNSPECIFIED = 0
+    REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID = 1
+    """tenant_id is required but was not provided (auth enabled)"""
+
+    REQUEST_CONTEXT_ERROR_INVALID_TENANT_ID = 2
+    """tenant_id exceeds max length"""
+
+    REQUEST_CONTEXT_ERROR_INVALID_NAMESPACE = 3
+    """namespace exceeds max length"""
+
+
+class OutboundHttpClientErrorCode(betterproto.Enum):
+    """Error codes for outbound HTTP client operations."""
+
+    OUTBOUND_HTTP_ERROR_UNSPECIFIED = 0
+    OUTBOUND_HTTP_ERROR_UNKNOWN_LINK = 1
+    OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN = 2
+    OUTBOUND_HTTP_ERROR_INVALID_URL = 3
+    OUTBOUND_HTTP_ERROR_REQUEST_FAILED = 4
+    OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE = 5
+
+
 @dataclass(eq=False, repr=False)
 class Empty(betterproto.Message):
     """
@@ -621,3 +652,46 @@ class Message(betterproto.Message):
     HTTP method for HTTP-based requests (optional)
      Example: "GET", "POST", "PUT", "DELETE"
     """
+
+
+@dataclass(eq=False, repr=False)
+class HttpHeader(betterproto.Message):
+    """A single HTTP header key-value pair."""
+
+    key: str = betterproto.string_field(1)
+    value: str = betterproto.string_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class OutboundHttpRequest(betterproto.Message):
+    """
+    Outbound HTTP request to an external service via a named service link.
+    """
+
+    method: str = betterproto.string_field(1)
+    """HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)"""
+
+    path_and_query: str = betterproto.string_field(2)
+    """
+    Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
+    """
+
+    headers: List["HttpHeader"] = betterproto.message_field(3)
+    """Extra headers merged with link defaults and auth headers"""
+
+    body: bytes = betterproto.bytes_field(4)
+    """Request body bytes"""
+
+
+@dataclass(eq=False, repr=False)
+class OutboundHttpResponse(betterproto.Message):
+    """Outbound HTTP response from an external service call."""
+
+    status: int = betterproto.uint32_field(1)
+    """HTTP status code"""
+
+    headers: List["HttpHeader"] = betterproto.message_field(2)
+    """Response headers"""
+
+    body: bytes = betterproto.bytes_field(3)
+    """Response body bytes"""

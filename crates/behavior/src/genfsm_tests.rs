@@ -24,7 +24,7 @@
 mod tests {
     use super::super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
+    use plexspaces_actor::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
     use std::sync::{Arc, Mutex};
 
@@ -65,7 +65,7 @@ mod tests {
     impl StateHandler<TrafficLightState, TrafficLightEvent> for LoggingStateHandler {
         async fn handle(
             &mut self,
-            _ctx: &plexspaces_core::ActorContext,
+            _ctx: &plexspaces_actor::ActorContext,
             state: &TrafficLightState,
             event: TrafficLightEvent,
         ) -> Result<Option<TrafficLightState>, BehaviorError> {
@@ -79,7 +79,7 @@ mod tests {
 
     // Helper to create test context and message (Go-style)
     fn create_test_context_and_message(message: Message) -> (Arc<ActorContext>, Message) {
-        use plexspaces_core::ServiceLocator;
+        use plexspaces_actor::ServiceLocator;
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
@@ -299,7 +299,7 @@ mod tests {
         impl StateHandler<TrafficLightState, TrafficLightEvent> for FailingHandler {
             async fn handle(
                 &mut self,
-                _ctx: &plexspaces_core::ActorContext,
+                _ctx: &plexspaces_actor::ActorContext,
                 _state: &TrafficLightState,
                 _event: TrafficLightEvent,
             ) -> Result<Option<TrafficLightState>, BehaviorError> {
@@ -337,7 +337,7 @@ mod tests {
         impl StateHandler<TrafficLightState, TrafficLightEvent> for OverrideHandler {
             async fn handle(
                 &mut self,
-                _ctx: &plexspaces_core::ActorContext,
+                _ctx: &plexspaces_actor::ActorContext,
                 _state: &TrafficLightState,
                 _event: TrafficLightEvent,
             ) -> Result<Option<TrafficLightState>, BehaviorError> {
@@ -547,7 +547,7 @@ mod tests {
         impl StateHandler<TrafficLightState, TrafficLightEvent> for EntryExitHandler {
             async fn handle(
                 &mut self,
-                _ctx: &plexspaces_core::ActorContext,
+                _ctx: &plexspaces_actor::ActorContext,
                 _state: &TrafficLightState,
                 _event: TrafficLightEvent,
             ) -> Result<Option<TrafficLightState>, BehaviorError> {

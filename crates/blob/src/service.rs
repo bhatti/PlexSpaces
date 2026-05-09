@@ -33,7 +33,7 @@ use crate::{
     repository::ListFilters,
     BlobConfigExt, BlobError, BlobRepository, BlobResult,
 };
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
 /// Ensures the S3/MinIO bucket exists, creating it if necessary.
@@ -636,7 +636,7 @@ impl BlobService {
 }
 
 // Implement Service trait for ServiceLocator registration
-impl plexspaces_core::Service for BlobService {
+impl plexspaces_actor::Service for BlobService {
     fn service_name(&self) -> String {
         "BlobService".to_string()
     }
@@ -644,7 +644,7 @@ impl plexspaces_core::Service for BlobService {
 
 // Implement BlobServiceTrait for ServiceLocator access
 #[async_trait::async_trait]
-impl plexspaces_core::BlobServiceTrait for BlobService {
+impl plexspaces_actor::BlobServiceTrait for BlobService {
     async fn upload(
         &self,
         ctx: &RequestContext,

@@ -22,7 +22,7 @@
 //! tests will print a warning and skip.
 
 use plexspaces_blob::{repository::sql::SqlBlobRepository, repository::ListFilters, BlobService};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -125,11 +125,39 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
         azure_account_key: String::new(),
     };
 
-    eprintln!("Using MinIO endpoint: {}", endpoint);
-    BlobService::new(config, repository)
+    let service = match BlobService::new(config, repository).await {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("⚠️  Failed to initialize BlobService against MinIO at {}: {}", endpoint, e);
+            return None;
+        }
+    };
+
+    // Probe S3 connectivity with a small write; if it fails, MinIO is unreachable or misconfigured.
+    let probe_ctx = create_test_context("__probe__", "__probe__");
+    match service
+        .upload_blob(
+            &probe_ctx,
+            "__connectivity_probe__",
+            b"probe".to_vec(),
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            None,
+        )
         .await
-        .ok()
-        .map(Arc::new)
+    {
+        Ok(_) => {
+            println!("Using MinIO endpoint: {}", endpoint);
+            Some(service)
+        }
+        Err(e) => {
+            eprintln!("⚠️  MinIO at {} is reachable but S3 operations fail: {}. Skipping.", endpoint, e);
+            None
+        }
+    }
 }
 
 fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {

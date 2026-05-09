@@ -24,13 +24,13 @@
 //! 3. All metrics are populated correctly
 //! 4. Both home page and node page show actors correctly
 
-use plexspaces_core::ApplicationManager;
+use plexspaces_actor::ApplicationManager;
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ChildSpec,
-    DeployApplicationRequest, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+    application_service_server::ApplicationService, ApplicationSpec, DeployApplicationRequest,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
@@ -91,7 +91,7 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     // NodeBuilder::build() already initialized services.
 
     // Create HealthReporterAccess implementation
-    use plexspaces_core::PlexSpacesHealthReporter;
+    use plexspaces_actor::PlexSpacesHealthReporter;
     let (health_reporter, _service) = PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
 
@@ -221,6 +221,8 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
             seconds: 5,
             nanos: 0,
         }),
+        adaptive: None,
+        metadata: std::collections::HashMap::new(),
         children: vec![
             ChildSpec {
                 actor_identity: Some(ActorIdentity {

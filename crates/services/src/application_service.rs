@@ -35,17 +35,17 @@
 //! This enables clean separation and avoids circular dependencies.
 
 use plexspaces_application::ApplicationError as AppError;
-use plexspaces_core::{
+use plexspaces_actor::{
     wasm_worker_actor_type_from_application_name, ApplicationManager as ApplicationManagerTrait,
-    ServiceLocator,
-};
+    ServiceLocator, RequestContextExt};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationRuntimeState, ApplicationSpec,
-    ApplicationStatus, ApplicationType, ChildSpec, DeployApplicationRequest,
-    DeployApplicationResponse, GetApplicationStatusRequest, GetApplicationStatusResponse,
-    ListApplicationsRequest, ListApplicationsResponse, RestartPolicy, ShutdownStrategy,
-    SupervisionStrategy, SupervisorSpec, UndeployApplicationRequest, UndeployApplicationResponse,
+    ApplicationStatus, ApplicationType, DeployApplicationRequest, DeployApplicationResponse,
+    GetApplicationStatusRequest, GetApplicationStatusResponse, ListApplicationsRequest,
+    ListApplicationsResponse, ShutdownStrategy, UndeployApplicationRequest,
+    UndeployApplicationResponse,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::application::ApplicationState as CoreApplicationState;
 use plexspaces_wasm_runtime::WasmDeploymentService;
@@ -87,6 +87,7 @@ pub fn create_default_application_spec(
             behavior_kind: behavior_kind.map(String::from),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     ApplicationSpec {
@@ -118,7 +119,7 @@ pub fn create_default_application_spec(
 pub struct ApplicationServiceImpl {
     service_locator: Arc<dyn ServiceLocator>,
     /// Injected NodeConnectivity for connecting to ApplicationSpec.seed_nodes on deploy (set by node).
-    node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
+    node_connectivity: Option<Arc<dyn plexspaces_actor::NodeConnectivity>>,
 }
 
 impl ApplicationServiceImpl {
@@ -129,7 +130,7 @@ impl ApplicationServiceImpl {
     /// * `node_connectivity` - Optional; when set (e.g. by node), deploy will connect to spec.seed_nodes.
     pub fn new(
         service_locator: Arc<dyn ServiceLocator>,
-        node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
+        node_connectivity: Option<Arc<dyn plexspaces_actor::NodeConnectivity>>,
     ) -> Self {
         Self {
             service_locator,
@@ -150,14 +151,14 @@ impl ApplicationServiceImpl {
             })?;
         // Downcast to concrete type to access methods like register, start, stop
         // Note: as_any takes self: Arc<Self>, so we pass the cloned Arc
-        let manager_any = plexspaces_core::ApplicationManager::as_any(manager_trait.clone());
+        let manager_any = plexspaces_actor::ApplicationManager::as_any(manager_trait.clone());
         manager_any
             .downcast::<plexspaces_application::ApplicationManagerImpl>()
             .map_err(|_| Status::internal("Failed to downcast ApplicationManager to concrete type"))
     }
 
     /// Get WASM runtime from ServiceLocator
-    async fn get_wasm_runtime(&self) -> Result<Arc<dyn plexspaces_core::WasmRuntimeTrait>, Status> {
+    async fn get_wasm_runtime(&self) -> Result<Arc<dyn plexspaces_actor::WasmRuntimeTrait>, Status> {
         self.service_locator
             .get_wasm_runtime()
             .await
@@ -175,23 +176,27 @@ impl ApplicationServiceImpl {
             .await
             .filter(|c| !c.id.is_empty())
             .map(|c| c.id)
-            .ok_or_else(|| Status::failed_precondition("NodeConfig not registered"))?;
+            .unwrap_or_default();
 
-        let ctx = self
-            .service_locator
-            .request_context_for_system_operations()
-            .await;
-        let node_registry = self
-            .service_locator
-            .get_node_registry()
-            .await
-            .ok_or_else(|| Status::failed_precondition("NodeRegistry not registered"))?;
-        let registration = node_registry
-            .lookup_node(&ctx, &node_id)
-            .await
-            .map_err(|e| Status::internal(format!("NodeRegistry lookup failed: {}", e)))?
-            .ok_or_else(|| Status::not_found(format!("Local node not found: {}", node_id)))?;
-        Ok((node_id, registration.node_address))
+        let node_address = if node_id.is_empty() {
+            String::new()
+        } else {
+            let ctx = self
+                .service_locator
+                .request_context_for_system_operations()
+                .await;
+            match self.service_locator.get_node_registry().await {
+                Some(node_registry) => node_registry
+                    .lookup_node(&ctx, &node_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|r| r.node_address)
+                    .unwrap_or_default(),
+                None => String::new(),
+            }
+        };
+        Ok((node_id, node_address))
     }
 
     /// Remove the on-disk WASM app directory for `application_id` if it exists.
@@ -234,7 +239,7 @@ impl ApplicationServiceImpl {
         application_id: &str,
     ) -> Result<(), Status> {
         let namespace = application_id.to_string();
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(
             tenant_id.to_string(),
             namespace.clone(),
         );
@@ -243,7 +248,7 @@ impl ApplicationServiceImpl {
             if let Some(manager) = self.service_locator.virtual_actor_manager().await {
                 manager.unregister_namespace(&namespace).await
             } else {
-                plexspaces_core::virtual_actor_manager::VirtualActorNamespaceCleanup::default()
+                plexspaces_actor::virtual_actor_manager::VirtualActorNamespaceCleanup::default()
             };
 
         let mut purged_records = 0_u64;
@@ -293,7 +298,7 @@ impl ApplicationService for ApplicationServiceImpl {
         request: Request<DeployApplicationRequest>,
     ) -> Result<Response<DeployApplicationResponse>, Status> {
         // Extract RequestContext from gRPC request - tenant_id/namespace come from API request
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let metadata = request.metadata().clone();
         let ctx = crate::request_context_from_grpc_request(
@@ -376,10 +381,9 @@ impl ApplicationService for ApplicationServiceImpl {
                     Status::internal(format!("Failed to deploy WASM module: {}", e))
                 })?;
 
-            // Create WASM application
-            // Use application_id as the app name for consistent lookup in undeploy
-            // The display name is stored in config
+            // Store in ApplicationManager by application_id; use name (or application_id) as display name
             let app_name = req.application_id.clone();
+            let app_display_name = if req.name.is_empty() { req.application_id.clone() } else { req.name.clone() };
             let app_version = req.version.clone();
 
             // Get or create ApplicationSpec with default supervisor tree
@@ -411,8 +415,8 @@ impl ApplicationService for ApplicationServiceImpl {
             // This is the source of truth for tenant isolation
             let final_tenant_id = tenant_id.clone();
             merged_config.tenant_id = final_tenant_id.clone();
-            merged_config.name = req.application_id.clone();
-            merged_config.namespace = req.application_id.clone();
+            merged_config.name = app_display_name.clone();
+            merged_config.namespace = app_display_name.clone();
             let final_namespace = merged_config.namespace.clone();
             if final_namespace.is_empty() {
                 return Err(Status::invalid_argument(
@@ -451,6 +455,7 @@ impl ApplicationService for ApplicationServiceImpl {
             let wasm_runtime_for_app = self.get_wasm_runtime().await?;
 
             let wasm_app = WasmApplication::new(
+                app_display_name.clone(),
                 app_name.clone(),
                 app_version,
                 module_hash,
@@ -614,7 +619,7 @@ impl ApplicationService for ApplicationServiceImpl {
         }
         let seed_nodes = merged_config.seed_nodes.clone();
 
-        // Create Application instance from config
+        // Create Application instance from config; store by application_id
         let app_name = req.application_id.clone();
         use plexspaces_application::application_impl::SpecApplication;
         let spec_app = SpecApplication::new(merged_config);
@@ -694,7 +699,7 @@ impl ApplicationService for ApplicationServiceImpl {
         request: Request<UndeployApplicationRequest>,
     ) -> Result<Response<UndeployApplicationResponse>, Status> {
         // Extract RequestContext for observability (tenant_id in logs)
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
@@ -946,14 +951,14 @@ mod tests {
     use super::*;
     use crate::ServiceLocatorImpl;
     use plexspaces_application::ApplicationManagerImpl;
-    use plexspaces_core::NodeConnectivity;
+    use plexspaces_actor::NodeConnectivity;
     use plexspaces_proto::node::v1::NodeConfig;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tonic::metadata::MetadataValue;
 
     struct TestNode {
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     }
     impl plexspaces_application::ApplicationNode for TestNode {
         fn id(&self) -> &str {
@@ -962,7 +967,7 @@ mod tests {
         fn listen_addr(&self) -> &str {
             "127.0.0.1:0"
         }
-        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
             Some(self.service_locator.clone())
         }
     }
@@ -978,12 +983,12 @@ mod tests {
             &self,
             node_addresses: Vec<String>,
             _timeout_secs: Option<u64>,
-        ) -> Result<plexspaces_core::ConnectNodesResult, String> {
+        ) -> Result<plexspaces_actor::ConnectNodesResult, String> {
             self.calls
                 .lock()
                 .expect("recording connectivity lock poisoned")
                 .push(node_addresses.clone());
-            Ok(plexspaces_core::ConnectNodesResult {
+            Ok(plexspaces_actor::ConnectNodesResult {
                 connected: node_addresses
                     .into_iter()
                     .map(|address| (address.clone(), address))

@@ -7,7 +7,7 @@
 
 #[cfg(feature = "sql-backend")]
 mod security_tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
 
     /// Create RequestContext for tenant1

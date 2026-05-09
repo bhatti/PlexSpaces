@@ -28,7 +28,7 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 # PlexSpaces crates
 plexspaces-proto = { path = "../proto" }
 plexspaces-locks = { path = "../locks" }
-plexspaces-core = { path = "../core" }
+plexspaces-actor = { path = "../actor" }
 plexspaces-common = { path = "../common" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-channel = { path = "../channel" }

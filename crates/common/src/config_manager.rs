@@ -952,12 +952,13 @@ mod tests {
     // Tests that set/remove PLEXSPACES_* env vars use #[serial] — env is process-global.
 
     #[test]
+    #[serial]
     fn test_initialize_with_env_config() {
         use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
         use plexspaces_proto::storage::v1::SharedDbConfig;
 
-        // Create EnvConfig directly (simulates env vars without actually setting them)
-        // This tests the initialize logic without global env var pollution
+        env::remove_var(ENV_CLUSTER_NAME);
+
         let mut spec = ReleaseSpec {
             name: "test".to_string(),
             version: "1.0.0".to_string(),
@@ -999,6 +1000,8 @@ mod tests {
             DEFAULT_CLUSTER_NAME,
             "empty cluster_name in file and env should default"
         );
+
+        env::remove_var(ENV_CLUSTER_NAME);
     }
 
     #[test]

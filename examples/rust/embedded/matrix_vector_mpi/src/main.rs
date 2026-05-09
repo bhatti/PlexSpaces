@@ -30,8 +30,7 @@ use matrix_vector_mpi::*;
 
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
 use plexspaces_sdk::{
-    spawn, cast_message, RequestContext, json,
-};
+    spawn, cast_message, RequestContext, json,, RequestContextExt};
 use plexspaces_tuplespace::TupleSpace;
 use std::sync::Arc;
 use anyhow::Result;

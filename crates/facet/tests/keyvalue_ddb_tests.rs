@@ -23,7 +23,7 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_facet::capabilities::keyvalue::{DynamoDBStore, KeyValueStore};
 
     use plexspaces_common::test_helpers::dynamodb_local_available;

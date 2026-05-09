@@ -3,6 +3,7 @@ members = [
     ".",
     "db",
     "crates/proto",
+    "crates/service-traits",
     "crates/lattice",
     "crates/mailbox",
     "crates/persistence",
@@ -11,7 +12,7 @@ members = [
     "crates/common",
     "crates/keyvalue",
     "crates/facet",
-    "crates/core",
+    # "crates/core" - merged into plexspaces-actor (Phase 9)
     "crates/application",
     "crates/behavior",
     "crates/actor",
@@ -43,6 +44,7 @@ default-members = [
     ".",
     "db",
     "crates/proto",
+    "crates/service-traits",
     "crates/lattice",
     "crates/mailbox",
     "crates/persistence",
@@ -51,7 +53,7 @@ default-members = [
     "crates/common",
     "crates/keyvalue",
     "crates/facet",
-    "crates/core",
+    # "crates/core" - merged into plexspaces-actor (Phase 9)
     "crates/application",
     "crates/behavior",
     "crates/actor",
@@ -104,12 +106,12 @@ description = "Distributed actor framework with 5 foundational pillars"
 
 # Independent crates - no circular dependencies
 plexspaces-proto = { path = "crates/proto" }
+plexspaces-service-traits = { path = "crates/service-traits" }
 plexspaces-lattice = { path = "crates/lattice" }
 plexspaces-mailbox = { path = "crates/mailbox" }
 plexspaces-persistence = { path = "crates/persistence" }
 plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-facet = { path = "crates/facet" }
-plexspaces-core = { path = "crates/core" }
 plexspaces-application = { path = "crates/application" }
 plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }
@@ -266,11 +268,11 @@ metrics-exporter-prometheus = { version = "0.15", default-features = false }
 plexspaces-proto = { path = "crates/proto" }
 plexspaces-lattice = { path = "crates/lattice" }
 plexspaces-mailbox = { path = "crates/mailbox" }
+plexspaces-common = { path = "crates/common" }
 plexspaces-persistence = { path = "crates/persistence" }
 plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-keyvalue = { path = "crates/keyvalue" }
 plexspaces-facet = { path = "crates/facet" }
-plexspaces-core = { path = "crates/core" }
 plexspaces-application = { path = "crates/application" }
 plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }

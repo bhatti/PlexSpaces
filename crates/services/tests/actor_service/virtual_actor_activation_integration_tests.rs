@@ -14,10 +14,10 @@
 use async_trait::async_trait;
 use plexspaces_behavior::GenServer;
 use plexspaces_common::ActivationStrategy;
-use plexspaces_core::behavior_factory::{BehaviorFactoryError, BehaviorRegistry};
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, Message,
-    RequestContext, ServiceLocator,
+use plexspaces_actor::behavior_factory::{BehaviorFactoryError, BehaviorRegistry};
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
+    InitializableServiceLocator, Message, RequestContext, ServiceLocator, RequestContextExt,
 };
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeBuilder, ReleaseSpec};
@@ -81,7 +81,7 @@ async fn build_test_node(node_id: &str) -> (Node, TempDir) {
         })
         .build()
         .await;
-    let process_group_service: Arc<dyn plexspaces_core::ProcessGroupService> = Arc::new(
+    let process_group_service: Arc<dyn plexspaces_actor::ProcessGroupService> = Arc::new(
         ProcessGroupServiceImpl::new(node.service_locator(), node_id.to_string()),
     );
     node.service_locator()
@@ -180,19 +180,19 @@ impl ActorTrait for DurableWorkflowProbeActor {
     async fn capture_checkpoint_state(
         &mut self,
         _ctx: &ActorContext,
-    ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+    ) -> Result<Option<Vec<u8>>, plexspaces_actor::ActorError> {
         serde_json::to_vec(&serde_json::json!({ "count": self.count }))
             .map(Some)
-            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+            .map_err(|e| plexspaces_actor::ActorError::BehaviorError(e.to_string()))
     }
 
     async fn restore_checkpoint_state(
         &mut self,
         _ctx: &ActorContext,
         state_data: &[u8],
-    ) -> Result<bool, plexspaces_core::ActorError> {
+    ) -> Result<bool, plexspaces_actor::ActorError> {
         let payload: serde_json::Value = serde_json::from_slice(state_data)
-            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+            .map_err(|e| plexspaces_actor::ActorError::BehaviorError(e.to_string()))?;
         self.count = payload["count"].as_i64().unwrap_or_default() as i32;
         Ok(true)
     }
@@ -215,19 +215,19 @@ impl ActorTrait for DurableCounterActor {
     async fn capture_checkpoint_state(
         &mut self,
         _ctx: &ActorContext,
-    ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+    ) -> Result<Option<Vec<u8>>, plexspaces_actor::ActorError> {
         serde_json::to_vec(&serde_json::json!({ "count": self.count }))
             .map(Some)
-            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+            .map_err(|e| plexspaces_actor::ActorError::BehaviorError(e.to_string()))
     }
 
     async fn restore_checkpoint_state(
         &mut self,
         _ctx: &ActorContext,
         state_data: &[u8],
-    ) -> Result<bool, plexspaces_core::ActorError> {
+    ) -> Result<bool, plexspaces_actor::ActorError> {
         let payload: serde_json::Value = serde_json::from_slice(state_data)
-            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+            .map_err(|e| plexspaces_actor::ActorError::BehaviorError(e.to_string()))?;
         self.count = payload["count"].as_i64().unwrap_or_default() as i32;
         Ok(true)
     }
@@ -505,7 +505,7 @@ impl GenServer for DurableWorkflowProbeActor {
 
 async fn ask_for_count(
     ctx: &RequestContext,
-    actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
+    actor_ref: &(dyn plexspaces_actor::MessageSender + Send + Sync),
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
     let reply = actor_ref
         .ask(
@@ -525,7 +525,7 @@ async fn ask_for_count(
 
 async fn increment_count(
     ctx: &RequestContext,
-    actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
+    actor_ref: &(dyn plexspaces_actor::MessageSender + Send + Sync),
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
     let reply = actor_ref
         .ask(
@@ -720,7 +720,7 @@ struct LocalInvokeResponse {
 }
 
 async fn wait_for_actor_registration(
-    actor_registry: &Arc<plexspaces_core::ActorRegistry>,
+    actor_registry: &Arc<plexspaces_actor::ActorRegistry>,
     actor_id: &ActorId,
 ) {
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -736,7 +736,7 @@ async fn wait_for_actor_registration(
 }
 
 async fn wait_for_actor_unregistration(
-    actor_registry: &Arc<plexspaces_core::ActorRegistry>,
+    actor_registry: &Arc<plexspaces_actor::ActorRegistry>,
     actor_id: &ActorId,
 ) {
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -752,7 +752,7 @@ async fn wait_for_actor_unregistration(
 }
 
 async fn wait_for_virtual_registration(
-    virtual_actor_manager: &Arc<plexspaces_core::VirtualActorManager>,
+    virtual_actor_manager: &Arc<plexspaces_actor::VirtualActorManager>,
     actor_id: &ActorId,
 ) {
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -1198,8 +1198,8 @@ async fn test_virtual_actor_activation_error_missing_metadata() {
 async fn test_virtual_actor_actor_id_format() {
     let (node, _db_dir) = build_test_node("test-node").await;
     let service_locator = node.service_locator();
-    let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
 
     // Register virtual actor type
     let virtual_actor_manager = service_locator_trait.virtual_actor_manager().await.unwrap();
@@ -1669,9 +1669,9 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
 
     // Type-level registration stores facet_config so activate_virtual_actor can recreate
     // timer and reminder facets on reactivation. init_config_template supplies initial_count.
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)
@@ -1812,9 +1812,9 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
     let actor_id = canonical_actor_id("cart-1", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)
@@ -1971,9 +1971,9 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
     let actor_id = canonical_actor_id("alerts", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)
@@ -2085,11 +2085,11 @@ async fn test_abstractions_example_runtime_send_primes_channel_definition_metada
 
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
 
     for (instance_name, initial_count) in [("abstractions", 2u32), ("channel", 9u32)] {
-        plexspaces_core::register_virtual_actor_definition(
+        plexspaces_actor::register_virtual_actor_definition(
             &sl_dyn,
             plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
@@ -2183,11 +2183,11 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
 
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
 
     for (instance_name, initial_count) in [("abstractions", 2u32), ("ephemeral", 5u32)] {
-        plexspaces_core::register_virtual_actor_definition(
+        plexspaces_actor::register_virtual_actor_definition(
             &sl_dyn,
             plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
@@ -2394,9 +2394,9 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
     let actor_type = "durable-workflow-probe";
     register_durable_workflow_probe_behavior(&service_locator, actor_type).await;
 
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)
@@ -2659,9 +2659,9 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
     // This is required for activate_virtual_actor to recreate timer+reminder from stored config
     // (the else-if facet_config branch in activate_virtual_actor). instance-level spawn()
     // does NOT store facet_config, so we must use the type-level registration path.
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)
@@ -2830,9 +2830,9 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
 
     // Call the same helper used by wasm_application.rs.
     // Coerce ServiceLocatorImpl → Arc<dyn ServiceLocator> as the function expects.
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    let result = plexspaces_core::register_virtual_actor_type_consistent(
+    let sl_dyn: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
+    let result = plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         String::new(), // instance_name — empty when name == type (standalone virtual actors)

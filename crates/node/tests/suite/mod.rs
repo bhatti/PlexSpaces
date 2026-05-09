@@ -5,6 +5,7 @@
 // All test files are included as modules to compile into a single binary
 
 // Shared test helpers (must be first for other modules to use)
+
 pub mod test_helpers;
 
 // Test modules

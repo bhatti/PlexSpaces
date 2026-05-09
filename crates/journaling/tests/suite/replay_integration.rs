@@ -9,8 +9,7 @@
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod sqlite_integration_tests {
     use async_trait::async_trait;
-    use plexspaces_core::Message;
-    use plexspaces_core::{ActorContext, ServiceLocator};
+    use plexspaces_actor::Message;
     use plexspaces_facet::Facet;
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
@@ -134,7 +133,6 @@ mod sqlite_integration_tests {
         async fn replay_message(
             &self,
             message: Message,
-            _context: &ActorContext,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if message.message_type == "increment" {
                 let mut counter = self.counter.write().await;
@@ -221,22 +219,10 @@ mod sqlite_integration_tests {
         };
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        // Create test ActorContext for replay
-        use plexspaces_services::ServiceLocatorImpl;
-        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
-        let test_context = Arc::new(ActorContext::new(
-            "local".to_string(),
-            "default".to_string(),
-            "default".to_string(),
-            service_locator,
-            None,
-        ));
         new_facet
-            .set_replay_handler(Box::new(handler), test_context)
+            .set_replay_handler(Box::new(handler))
             .await;
 
-        // Note: Replay happens in on_attach, but we need ActorContext for replay_journal_with_handler
-        // For now, test that replay handler is set correctly
         new_facet
             .on_attach(actor_id, serde_json::json!({}))
             .await

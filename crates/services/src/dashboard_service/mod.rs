@@ -35,11 +35,10 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
-use plexspaces_core::{
+use plexspaces_actor::{
     actor_metrics_from_exposition_for_namespace, max_histogram_bucket_upper_bound_for_labels,
     sum_counter_for_labels, sum_sample_values_for_labels, ActorId, ActorRegistry,
-    ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator,
-};
+    ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator, RequestContextExt};
 use plexspaces_proto::application::v1::application_service_client::ApplicationServiceClient;
 use plexspaces_proto::application::v1::ApplicationInfo;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
@@ -1390,11 +1389,11 @@ impl DashboardService for DashboardServiceImpl {
                 .await
                 .unwrap_or_else(|| {
                     let behavior_type = match actor_type.as_str() {
-                        "gen_server" => plexspaces_core::BehaviorType::GenServer,
-                        "gen_event" => plexspaces_core::BehaviorType::GenEvent,
-                        "gen_state_machine" => plexspaces_core::BehaviorType::GenStateMachine,
-                        "workflow" => plexspaces_core::BehaviorType::Workflow,
-                        other => plexspaces_core::BehaviorType::Custom(other.to_string()),
+                        "gen_server" => plexspaces_actor::BehaviorType::GenServer,
+                        "gen_event" => plexspaces_actor::BehaviorType::GenEvent,
+                        "gen_state_machine" => plexspaces_actor::BehaviorType::GenStateMachine,
+                        "workflow" => plexspaces_actor::BehaviorType::Workflow,
+                        other => plexspaces_actor::BehaviorType::Custom(other.to_string()),
                     };
                     ActorRegistry::behavior_kind_key(&behavior_type)
                 });
@@ -1619,10 +1618,9 @@ impl DashboardService for DashboardServiceImpl {
             let definition = storage
                 .get_definition(&execution.definition_id, &execution.definition_version)
                 .await
-                .ok()
-                .map(|definition| Self::workflow_definition_to_proto(&definition));
+                .ok();
             workflows.push(plexspaces_proto::dashboard::v1::WorkflowInfo {
-                execution: Some(Self::workflow_execution_to_proto(&execution)),
+                execution: Some(execution),
                 definition,
             });
         }
@@ -1712,74 +1710,18 @@ impl DashboardServiceImpl {
     fn workflow_statuses(status: i32) -> Result<Vec<ExecutionStatus>, Status> {
         if status == 0 {
             return Ok(vec![
-                ExecutionStatus::Pending,
-                ExecutionStatus::Running,
-                ExecutionStatus::Completed,
-                ExecutionStatus::Failed,
-                ExecutionStatus::Cancelled,
-                ExecutionStatus::TimedOut,
+                ExecutionStatus::ExecutionStatusPending,
+                ExecutionStatus::ExecutionStatusRunning,
+                ExecutionStatus::ExecutionStatusCompleted,
+                ExecutionStatus::ExecutionStatusFailed,
+                ExecutionStatus::ExecutionStatusCancelled,
+                ExecutionStatus::ExecutionStatusTimedOut,
             ]);
         }
 
-        use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-        let status = match ProtoExecutionStatus::try_from(status) {
-            Ok(ProtoExecutionStatus::ExecutionStatusPending) => ExecutionStatus::Pending,
-            Ok(ProtoExecutionStatus::ExecutionStatusRunning) => ExecutionStatus::Running,
-            Ok(ProtoExecutionStatus::ExecutionStatusCompleted) => ExecutionStatus::Completed,
-            Ok(ProtoExecutionStatus::ExecutionStatusFailed) => ExecutionStatus::Failed,
-            Ok(ProtoExecutionStatus::ExecutionStatusCancelled) => ExecutionStatus::Cancelled,
-            Ok(ProtoExecutionStatus::ExecutionStatusTimedOut) => ExecutionStatus::TimedOut,
-            _ => return Err(Status::invalid_argument("Invalid workflow status filter")),
-        };
+        let status = ExecutionStatus::try_from(status)
+            .map_err(|_| Status::invalid_argument("Invalid workflow status filter"))?;
         Ok(vec![status])
-    }
-
-    fn workflow_execution_to_proto(
-        execution: &plexspaces_workflow::types::WorkflowExecution,
-    ) -> plexspaces_proto::workflow::v1::WorkflowExecution {
-        use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-
-        let status = match execution.status {
-            ExecutionStatus::Pending => ProtoExecutionStatus::ExecutionStatusPending,
-            ExecutionStatus::Running => ProtoExecutionStatus::ExecutionStatusRunning,
-            ExecutionStatus::Completed => ProtoExecutionStatus::ExecutionStatusCompleted,
-            ExecutionStatus::Failed => ProtoExecutionStatus::ExecutionStatusFailed,
-            ExecutionStatus::Cancelled => ProtoExecutionStatus::ExecutionStatusCancelled,
-            ExecutionStatus::TimedOut => ProtoExecutionStatus::ExecutionStatusTimedOut,
-        };
-
-        plexspaces_proto::workflow::v1::WorkflowExecution {
-            execution_id: execution.execution_id.clone(),
-            definition_id: execution.definition_id.clone(),
-            definition_version: execution.definition_version.clone(),
-            status: status as i32,
-            current_step_id: execution.current_step_id.clone().unwrap_or_default(),
-            input: None,
-            output: None,
-            error: execution.error.clone().unwrap_or_default(),
-            node_id: execution.node_id.clone().unwrap_or_default(),
-            created_at: None,
-            started_at: None,
-            completed_at: None,
-            updated_at: None,
-            labels: HashMap::new(),
-        }
-    }
-
-    fn workflow_definition_to_proto(
-        definition: &plexspaces_workflow::types::WorkflowDefinition,
-    ) -> plexspaces_proto::workflow::v1::WorkflowDefinition {
-        plexspaces_proto::workflow::v1::WorkflowDefinition {
-            id: definition.id.clone(),
-            name: definition.name.clone(),
-            version: definition.version.clone(),
-            steps: Vec::new(),
-            default_timeout: None,
-            default_retry: None,
-            labels: HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        }
     }
 
     fn actor_state_label(state: Option<ProtoActorState>, activated: bool) -> String {
@@ -1847,7 +1789,7 @@ mod tests {
     // For now, tests are disabled since dashboard doesn't depend on node
     // use plexspaces_node::{Node, NodeBuilder};
     use chrono::{DateTime, Utc};
-    use plexspaces_core::ServiceLocator;
+    use plexspaces_actor::ServiceLocator;
     use std::sync::Arc;
     use tonic::Request;
 

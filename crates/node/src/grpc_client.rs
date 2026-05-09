@@ -21,7 +21,7 @@
 //! Provides low-level client for sending messages to actors on remote nodes.
 //! This is the foundation for the future high-level SDK.
 
-use plexspaces_core::{apply_request_context_to_grpc_metadata, RequestContext};
+use plexspaces_actor::{apply_request_context_to_grpc_metadata, RequestContext};
 use plexspaces_proto::{
     actor::v1::{ActorSpawnSpec, ActorVisibility},
     common::v1::{ActorIdentity, Message as ProtoMessage},
@@ -77,7 +77,7 @@ impl RemoteActorClient {
     /// Construct from an already-established pooled channel.
     ///
     /// Prefer this over [`Self::connect`] when a
-    /// [`plexspaces_core::GrpcConnectionManager`] is available so that TCP
+    /// [`plexspaces_actor::GrpcConnectionManager`] is available so that TCP
     /// connections are reused across calls.
     pub fn from_channel(node_address: impl Into<String>, channel: Channel) -> Self {
         RemoteActorClient {
@@ -222,7 +222,7 @@ impl RemoteActorClient {
         init_args: std::collections::HashMap<String, String>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
-    ) -> Result<plexspaces_core::ActorRef, String> {
+    ) -> Result<plexspaces_service_traits::ActorRef, String> {
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: String::new(),
@@ -251,7 +251,7 @@ impl RemoteActorClient {
             .map_err(|e| format!("spawn_actor failed: {}", e.message()))?;
 
         let resp: SpawnActorResponse = response.into_inner();
-        let actor_ref = plexspaces_core::ActorRef::new(resp.actor_ref.into())
+        let actor_ref = plexspaces_service_traits::ActorRef::new(resp.actor_ref.into())
             .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
         Ok(actor_ref)

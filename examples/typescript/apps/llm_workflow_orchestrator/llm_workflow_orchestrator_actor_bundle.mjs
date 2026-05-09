@@ -1886,7 +1886,7 @@ var ActorRouter = class {
       const config = text.trim() ? JSON.parse(text) : {};
       const actorId = config.actor_id || "";
       const actorType = config.actor_type || normalizeActorRole(actorId);
-      const declarationName = config.declaration_name || "";
+      const role = config.role || "";
       const findFactory = (key) => {
         let bestPrefix = "";
         let bestFactory2 = null;
@@ -1900,12 +1900,12 @@ var ActorRouter = class {
         }
         return [bestPrefix, bestFactory2];
       };
-      let [, bestFactory] = declarationName ? findFactory(declarationName) : ["", null];
+      let [, bestFactory] = role ? findFactory(role) : ["", null];
       if (!bestFactory) {
         [, bestFactory] = findFactory(actorType);
       }
       if (!bestFactory) {
-        throw new Error("ERROR: no actor registered for declaration_name='" + declarationName + "' actor_type='" + actorType + "'");
+        throw new Error("ERROR: no actor registered for role='" + role + "' actor_type='" + actorType + "'");
       }
       this.active = bestFactory();
       this.active.init(text);

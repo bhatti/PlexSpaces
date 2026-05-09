@@ -305,12 +305,12 @@ async fn test_sqs_channel_market_feed() {
         ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
         backend_config: Some(
             plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(
-                plexspaces_proto::channel::v1::SqsConfig {
+                plexspaces_proto::config::v1::SqsConfig {
                     region,
                     queue_prefix: prefix,
                     endpoint_url: endpoint.unwrap_or_default(),
                     visibility_timeout_seconds: 30,
-                    message_retention_period_seconds: 345600,
+                    message_retention_seconds: 345600,
                     ..Default::default()
                 },
             ),

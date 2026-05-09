@@ -90,7 +90,6 @@ use crate::{
     StateLoader,
 };
 use async_trait::async_trait;
-use plexspaces_core::ActorContext;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
@@ -155,11 +154,11 @@ pub struct DurabilityFacet {
     resolved_promises:
         Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>,
 
-    /// Replay handler for deterministic message replay
+    /// Replay handler for deterministic message replay.
+    ///
+    /// Implementations carry their own `ActorContext` internally; the context is
+    /// no longer stored separately here.
     replay_handler: Arc<RwLock<Option<Box<dyn ReplayHandler>>>>,
-
-    /// Actor context (stored when replay handler is set, used for replay)
-    actor_context: Arc<RwLock<Option<Arc<ActorContext>>>>,
 
     /// State loader for automatic checkpoint state deserialization (optional)
     state_loader: Arc<RwLock<Option<Box<dyn StateLoader>>>>,
@@ -239,7 +238,6 @@ impl DurabilityFacet {
             pending_promises: Arc::new(RwLock::new(HashSet::new())),
             resolved_promises: Arc::new(RwLock::new(HashMap::new())),
             replay_handler: Arc::new(RwLock::new(None)),
-            actor_context: Arc::new(RwLock::new(None)),
             state_loader: Arc::new(RwLock::new(None)),
             checkpoint_state_adapter: Arc::new(RwLock::new(None)),
         }
@@ -286,25 +284,19 @@ impl DurabilityFacet {
         }
     }
 
-    /// Set replay handler for deterministic message replay
+    /// Set replay handler for deterministic message replay.
     ///
-    /// ## Arguments
-    /// * `handler` - Replay handler that will replay messages through actor's handler
-    /// * `context` - Actor context to use during replay (should match the handler's stored context)
+    /// # Arguments
+    /// * `handler` - Replay handler that will replay messages through the actor's handler.
+    ///   The handler is responsible for storing whatever context (e.g. `Arc<ActorContext>`)
+    ///   it needs during replay.
     ///
-    /// ## Notes
+    /// # Notes
     /// - Must be called before `on_attach()` if replay is enabled
     /// - Handler will be used during `replay_journal_with_handler()`
-    /// - Context is stored and used instead of creating a dummy context
-    pub async fn set_replay_handler(
-        &self,
-        handler: Box<dyn ReplayHandler>,
-        context: Arc<ActorContext>,
-    ) {
+    pub async fn set_replay_handler(&self, handler: Box<dyn ReplayHandler>) {
         let mut h = self.replay_handler.write().await;
         *h = Some(handler);
-        let mut ctx = self.actor_context.write().await;
-        *ctx = Some(context);
     }
 
     /// Set state loader for automatic checkpoint state deserialization
@@ -540,16 +532,6 @@ impl DurabilityFacet {
                         ..Default::default()
                     };
 
-                    // Replay message through handler (ExecutionContext is in REPLAY mode)
-                    // Use the stored ActorContext instead of creating a dummy one
-                    let stored_context = self.actor_context.read().await;
-                    let context = stored_context.as_ref().ok_or_else(|| {
-                        JournalError::Replay(
-                            "ActorContext not set - call set_replay_handler with context first"
-                                .to_string(),
-                        )
-                    })?;
-
                     tracing::debug!(
                         actor_id = %actor_id,
                         sequence = entry.sequence,
@@ -557,8 +539,11 @@ impl DurabilityFacet {
                         "Replaying message"
                     );
 
+                    // Replay message through handler.
+                    // The handler carries its own ActorContext internally;
+                    // no context parameter is passed here.
                     handler
-                        .replay_message(message, context)
+                        .replay_message(message)
                         .await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;
                     replayed_count += 1;

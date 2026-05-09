@@ -53,7 +53,7 @@ use tonic::{Request, Response, Status};
 /// gRPC service implementation for TupleSpace operations
 pub struct TupleSpaceServiceImpl {
     /// ServiceLocator for accessing TupleSpaceProvider
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     /// Operation counters for stats
     stats: Arc<tokio::sync::RwLock<TupleSpaceOperationStats>>,
 }
@@ -77,7 +77,7 @@ impl Default for TupleSpaceOperationStats {
 
 impl TupleSpaceServiceImpl {
     /// Create new TupleSpace service
-    pub fn new(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn plexspaces_actor::ServiceLocator>) -> Self {
         Self {
             service_locator,
             stats: Arc::new(tokio::sync::RwLock::new(TupleSpaceOperationStats::default())),
@@ -159,7 +159,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -222,7 +222,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -279,7 +279,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -340,7 +340,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -387,7 +387,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -470,7 +470,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -538,7 +538,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-        let _ctx = plexspaces_core::request_context_from_grpc_request(
+        let _ctx = plexspaces_actor::request_context_from_grpc_request(
             &metadata,
             labels,
             &self.service_locator,
@@ -1000,7 +1000,7 @@ mod tests {
 
     async fn make_test_service() -> TupleSpaceServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
-        use plexspaces_core::{service_wrappers::TupleSpaceProviderWrapper, ServiceLocator};
+        use plexspaces_actor::{service_wrappers::TupleSpaceProviderWrapper, ServiceLocator, RequestContextExt};
 
         let sl = Arc::new(ServiceLocatorImpl::new());
         sl.register_security_config(plexspaces_proto::node::v1::SecurityConfig {

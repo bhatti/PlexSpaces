@@ -251,7 +251,7 @@ Actors are defined in `ApplicationSpec` and spawned automatically. Applications 
 - Behaviors must be **explicitly registered** in `BehaviorRegistry` before spawning
 - Registration pattern:
   ```rust
-  use plexspaces_core::BehaviorRegistry;
+  use plexspaces_actor::BehaviorRegistry;
   use std::sync::Arc;
   
   let behavior_registry = BehaviorRegistry::new();
@@ -667,7 +667,7 @@ Behaviors must be registered in `BehaviorRegistry` before actors can be spawned 
 Native Rust applications must explicitly register behaviors:
 
 ```rust
-use plexspaces_core::BehaviorRegistry;
+use plexspaces_actor::BehaviorRegistry;
 use std::sync::Arc;
 
 // Create registry and register behaviors
@@ -1201,7 +1201,7 @@ sequenceDiagram
 **Example** (high-level API; `RequestContext` is always first after `&self`, same as `monitor` / `demonitor`):
 
 ```rust
-use plexspaces_core::{ActorId, RequestContext};
+use plexspaces_actor::{ActorId, RequestContext};
 // `node` is the PlexSpaces `Node` where the call is made (location-transparent routing).
 let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
 node

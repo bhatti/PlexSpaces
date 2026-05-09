@@ -247,13 +247,13 @@ pub trait ShardGroupClientTrait: Send + Sync {
 
 /// ShardGroup client for WASM/internal apps (uses ServiceLocator directly)
 pub struct ShardGroupClientLocal {
-    actor_service: Arc<dyn plexspaces_core::ActorService>,
-    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    actor_service: Arc<dyn plexspaces_actor::ActorService>,
+    service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
 }
 
 impl ShardGroupClientLocal {
     /// Create a new ShardGroupClientLocal from ServiceLocator
-    pub async fn new(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<Self> {
+    pub async fn new(service_locator: Arc<dyn plexspaces_actor::ServiceLocator>) -> Result<Self> {
         let actor_service = service_locator
             .get_actor_service()
             .await
@@ -854,7 +854,7 @@ pub type ShardGroupClient = ShardGroupClientLocal;
 impl ShardGroupClientLocal {
     /// Connect using ServiceLocator (for WASM/internal apps)
     pub async fn connect(
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     ) -> Result<Self> {
         Self::new(service_locator).await
     }
@@ -878,7 +878,7 @@ pub enum UnifiedShardGroupClient {
 impl UnifiedShardGroupClient {
     /// Create client from ServiceLocator (WASM/internal)
     pub async fn from_service_locator(
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     ) -> Result<Self> {
         Ok(Self::Local(
             ShardGroupClientLocal::new(service_locator).await?,

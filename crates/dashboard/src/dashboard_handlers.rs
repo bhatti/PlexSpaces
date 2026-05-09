@@ -36,9 +36,9 @@ use axum::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use plexspaces_core::{
+use plexspaces_actor::{
     local_prometheus_recorder_chart_summary, request_context_from_grpc_request, ActorId,
-    ServiceLocator,
+    RequestContextExt, ServiceLocator,
 };
 use plexspaces_proto::application::v1::ApplicationMetrics;
 use plexspaces_proto::common::v1::PageRequest;
@@ -1115,7 +1115,7 @@ async fn api_application_detail(
 
     // Get node count from object-registry
     let node_count = {
-        use plexspaces_core::RequestContext;
+        use plexspaces_actor::RequestContext;
         use plexspaces_proto::object_registry::v1::ObjectType;
 
         // Dashboard API path: use empty tenant/namespace (tenant comes from auth, not config)

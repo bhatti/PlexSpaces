@@ -39,6 +39,7 @@
 #![warn(clippy::all)]
 
 // Export the lattice module
+
 mod r#mod;
 
 // Re-export all public items

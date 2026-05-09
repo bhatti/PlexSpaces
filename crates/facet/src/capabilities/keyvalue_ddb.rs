@@ -34,7 +34,7 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::Utc;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{debug, error, instrument, warn};

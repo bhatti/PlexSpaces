@@ -32,15 +32,16 @@
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::{service_names, ActorRegistry, RequestContext, ServiceLocator};
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_actor::Message;
+use plexspaces_actor::{ActorRegistry, RequestContext, ServiceLocator};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
+    DeployApplicationRequest, ShutdownStrategy,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::common::Facet;
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -59,8 +60,8 @@ use super::test_helpers::{
 };
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -361,7 +362,7 @@ async fn test_eager_virtual_actors_activation() {
         let actor_id_1 = test_runtime_actor_id("eager-worker-1", node_id);
         let behavior = Box::new(TestActor);
         let actor = ActorBuilder::new(behavior)
-            .with_id(actor_id_1.clone())
+            .with_name(actor_id_1.name().to_string())
             .build()
             .await
             .unwrap();
@@ -412,7 +413,7 @@ async fn test_lazy_virtual_actors_registration() {
         let actor_id = test_runtime_actor_id("lazy-worker-1", node_id);
         let behavior = Box::new(TestActor);
         let actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.clone())
+            .with_name(actor_id.name().to_string())
             .build()
             .await
             .unwrap();
@@ -473,7 +474,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         let eager_id = test_runtime_actor_id("eager-mixed-1", node_id);
         let behavior = Box::new(TestActor);
         let actor = ActorBuilder::new(behavior)
-            .with_id(eager_id.clone())
+            .with_name(eager_id.name().to_string())
             .build()
             .await
             .unwrap();
@@ -491,7 +492,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         let lazy_id = test_runtime_actor_id("lazy-mixed-1", node_id);
         let behavior = Box::new(TestActor);
         let actor = ActorBuilder::new(behavior)
-            .with_id(lazy_id.clone())
+            .with_name(lazy_id.name().to_string())
             .build()
             .await
             .unwrap();
@@ -580,6 +581,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
                 facets: vec![create_virtual_actor_facet("eager")],
                 ..Default::default()
             }],
+            ..Default::default()
         };
 
         let app_spec = ApplicationSpec {

@@ -60,11 +60,14 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
+use crate::RequestContextExt;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
-    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, RestartPolicy, ShutdownStrategy,
-    SupervisionStrategy, SupervisorSpec,
+    ApplicationServiceLinkRequirement, ApplicationSpec, ShutdownStrategy,
+};
+pub use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{
     GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, OutboundTransport, ReleaseSpec,
@@ -106,6 +109,27 @@ pub enum ReleaseError {
     /// Invalid configuration
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+}
+
+impl ReleaseError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::node::v1::ReleaseErrorCode {
+        use plexspaces_proto::node::v1::ReleaseErrorCode;
+        match self {
+            ReleaseError::IoError(_) => ReleaseErrorCode::ReleaseErrorCodeIoError,
+            ReleaseError::TomlError(_) => ReleaseErrorCode::ReleaseErrorCodeTomlParseError,
+            ReleaseError::CircularDependency(_) => {
+                ReleaseErrorCode::ReleaseErrorCodeCircularDependency
+            }
+            ReleaseError::MissingDependency { .. } => {
+                ReleaseErrorCode::ReleaseErrorCodeMissingDependency
+            }
+            ReleaseError::ApplicationNotFound(_) => {
+                ReleaseErrorCode::ReleaseErrorCodeApplicationNotFound
+            }
+            ReleaseError::InvalidConfig(_) => ReleaseErrorCode::ReleaseErrorCodeInvalidConfig,
+        }
+    }
 }
 
 /// Intermediate TOML representation (for parsing)

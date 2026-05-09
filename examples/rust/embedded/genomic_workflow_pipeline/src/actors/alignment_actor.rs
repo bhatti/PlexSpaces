@@ -7,7 +7,7 @@
 
 use crate::types::{QCResult, AlignmentResult};
 use crate::processor;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType};
 use plexspaces_sdk::{new_message, Message};
 use tracing::info;
 

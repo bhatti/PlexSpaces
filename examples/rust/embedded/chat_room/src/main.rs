@@ -30,7 +30,7 @@
 
 use plexspaces_keyvalue::SqliteKVStore;
 use plexspaces_process_groups::ProcessGroupRegistry;
-use plexspaces_core::{ActorId, RequestContext};
+use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
 use plexspaces_node::CoordinationComputeTracker;
 use serde::Serialize;
 use std::sync::Arc;

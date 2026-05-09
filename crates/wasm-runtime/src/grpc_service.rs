@@ -72,7 +72,7 @@ pub struct WasmRuntimeServiceImpl {
 
 impl WasmRuntimeServiceImpl {
     /// Create new gRPC service
-    pub fn new(runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) -> Self {
+    pub fn new(runtime: Arc<dyn plexspaces_actor::WasmRuntimeTrait>) -> Self {
         let deployment_service = Arc::new(WasmDeploymentService::new(runtime));
         Self { deployment_service }
     }
@@ -316,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn test_deploy_module_via_grpc() {
         let runtime = WasmRuntime::new().await.unwrap();
-        let runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = Arc::new(runtime);
+        let runtime_trait: Arc<dyn plexspaces_actor::WasmRuntimeTrait> = Arc::new(runtime);
         let service = WasmRuntimeServiceImpl::new(runtime_trait);
 
         let module = ProtoWasmModule {

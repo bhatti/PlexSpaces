@@ -6,7 +6,7 @@
 // These tests verify that all SDK annotations generate correct code
 // and integrate properly with the behavior system.
 
-use plexspaces_core::{Actor, BehaviorType};
+use plexspaces_actor::{Actor, BehaviorType};
 use plexspaces_sdk::{
     actor, event_actor, fsm_actor, gen_server_actor, handler, init_handler, json,
     plexspaces_handlers, query_handler, run_handler, signal_handler,

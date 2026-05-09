@@ -22,8 +22,8 @@
 //! from accumulating in mailboxes.
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::ActorId;
-use plexspaces_core::{Message, ServiceLocator};
+use plexspaces_actor::ActorId;
+use plexspaces_actor::{Message, ServiceLocator, RequestContextExt};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 use std::time::Duration;
@@ -141,11 +141,11 @@ async fn test_actor_ref_tell_with_ttl_message() {
     );
 
     // Register actor before calling tell()
-    use plexspaces_core::{ActorRegistry, RequestContext};
+    use plexspaces_actor::{ActorRegistry, RequestContext};
     let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
         let actor_id = actor_ref.id().clone();
-        let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
+        let sender: Arc<dyn plexspaces_actor::MessageSender> = Arc::new(actor_ref.clone());
         registry
             .register_actor(
                 &tell_ctx,

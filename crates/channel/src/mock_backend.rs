@@ -34,7 +34,7 @@
 //! use plexspaces_channel::MockChannel;
 //! use plexspaces_proto::channel::v1::*;
 //!
-//! let config = ChannelConfig { /* ... */ };
+//! let config = ChannelConfig { name: "test".to_string(), ..Default::default() };
 //! let channel = MockChannel::new(config);
 //! ```
 

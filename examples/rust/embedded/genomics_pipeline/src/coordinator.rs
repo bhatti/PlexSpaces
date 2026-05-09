@@ -23,7 +23,7 @@
 //! - Worker failures handled by OneForOne supervision
 
 use crate::models::*;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use std::collections::HashMap;
 use tracing::{info, warn};

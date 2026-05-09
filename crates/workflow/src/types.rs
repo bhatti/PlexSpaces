@@ -19,27 +19,156 @@
 //! Workflow type definitions
 //!
 //! ## Purpose
-//! Core types for workflow orchestration following TDD principles.
-//! Minimal implementation to support tests.
+//! Core types for workflow orchestration following proto-first design.
+//! All data models are defined in `workflow.proto` — this module re-exports
+//! the proto-generated types as the canonical types and adds extension traits
+//! for SQL string serialization.
 //!
 //! ## Proto-First Design
-//! Error types are defined in proto and wrapped here for thiserror compatibility.
 //! See `proto/plexspaces/v1/workflow.proto` for the source of truth.
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::fmt;
+// Re-export proto-generated types as the canonical types
+pub use plexspaces_proto::workflow::v1::{
+    ExecutionStatus, RetryConfig, Step, StepExecution, StepStatus, StepType,
+    WorkflowDefinition, WorkflowExecution,
+};
 
 // Re-export proto-generated error enum
 pub use plexspaces_proto::workflow::v1::WorkflowError as WorkflowErrorProto;
 
+/// Extension trait for WorkflowExecution — ergonomic status access
+pub trait WorkflowExecutionExt {
+    /// Get the execution status as the proto enum variant
+    fn execution_status(&self) -> ExecutionStatus;
+}
+
+impl WorkflowExecutionExt for WorkflowExecution {
+    fn execution_status(&self) -> ExecutionStatus {
+        ExecutionStatus::try_from(self.status).unwrap_or(ExecutionStatus::ExecutionStatusUnspecified)
+    }
+}
+
+/// Extension trait for StepExecution — ergonomic status access
+pub trait StepExecutionExt {
+    /// Get the step status as the proto enum variant
+    fn step_status(&self) -> StepStatus;
+    /// Get output as serde_json Value
+    fn output_value(&self) -> Option<serde_json::Value>;
+    /// Get input as serde_json Value
+    fn input_value(&self) -> Option<serde_json::Value>;
+}
+
+impl StepExecutionExt for StepExecution {
+    fn step_status(&self) -> StepStatus {
+        StepStatus::try_from(self.status).unwrap_or(StepStatus::StepStatusUnspecified)
+    }
+
+    fn output_value(&self) -> Option<serde_json::Value> {
+        self.output.as_ref().map(prost_struct_to_value)
+    }
+
+    fn input_value(&self) -> Option<serde_json::Value> {
+        self.input.as_ref().map(prost_struct_to_value)
+    }
+}
+
+/// Extension trait for WorkflowExecution — ergonomic output access
+pub trait WorkflowExecutionOutputExt {
+    /// Get output as serde_json Value
+    fn output_value(&self) -> Option<serde_json::Value>;
+}
+
+impl WorkflowExecutionOutputExt for WorkflowExecution {
+    fn output_value(&self) -> Option<serde_json::Value> {
+        self.output.as_ref().map(prost_struct_to_value)
+    }
+}
+
+/// Convert a serde_json::Value to prost_types::Struct.
+/// Returns None if the value is not an object (or on any error).
+pub fn json_value_to_prost_struct(v: &serde_json::Value) -> Option<prost_types::Struct> {
+    match v {
+        serde_json::Value::Object(map) => {
+            let fields: prost::alloc::collections::BTreeMap<String, prost_types::Value> = map
+                .iter()
+                .map(|(k, v)| (k.clone(), json_value_to_prost_value(v)))
+                .collect();
+            Some(prost_types::Struct { fields })
+        }
+        // For non-object values, wrap in a sentinel struct so we can round-trip
+        _ => {
+            let mut fields: prost::alloc::collections::BTreeMap<String, prost_types::Value> =
+                prost::alloc::collections::BTreeMap::new();
+            fields.insert("__value__".to_string(), json_value_to_prost_value(v));
+            Some(prost_types::Struct { fields })
+        }
+    }
+}
+
+fn json_value_to_prost_value(v: &serde_json::Value) -> prost_types::Value {
+    let kind = match v {
+        serde_json::Value::Null => prost_types::value::Kind::NullValue(0),
+        serde_json::Value::Bool(b) => prost_types::value::Kind::BoolValue(*b),
+        serde_json::Value::Number(n) => {
+            prost_types::value::Kind::NumberValue(n.as_f64().unwrap_or(0.0))
+        }
+        serde_json::Value::String(s) => prost_types::value::Kind::StringValue(s.clone()),
+        serde_json::Value::Array(arr) => {
+            prost_types::value::Kind::ListValue(prost_types::ListValue {
+                values: arr.iter().map(json_value_to_prost_value).collect(),
+            })
+        }
+        serde_json::Value::Object(_) => {
+            if let Some(s) = json_value_to_prost_struct(v) {
+                prost_types::value::Kind::StructValue(s)
+            } else {
+                prost_types::value::Kind::NullValue(0)
+            }
+        }
+    };
+    prost_types::Value { kind: Some(kind) }
+}
+
+/// Convert a prost_types::Struct to serde_json::Value
+/// Detects the "__value__" sentinel wrapper used for non-object values.
+fn prost_struct_to_value(s: &prost_types::Struct) -> serde_json::Value {
+    // Detect sentinel wrapper for non-object values (arrays, scalars)
+    if s.fields.len() == 1 {
+        if let Some(inner) = s.fields.get("__value__") {
+            return prost_value_to_json(inner);
+        }
+    }
+    let mut map = serde_json::Map::new();
+    for (k, v) in &s.fields {
+        map.insert(k.clone(), prost_value_to_json(v));
+    }
+    serde_json::Value::Object(map)
+}
+
+fn prost_value_to_json(v: &prost_types::Value) -> serde_json::Value {
+    match &v.kind {
+        None => serde_json::Value::Null,
+        Some(prost_types::value::Kind::NullValue(_)) => serde_json::Value::Null,
+        Some(prost_types::value::Kind::BoolValue(b)) => serde_json::Value::Bool(*b),
+        Some(prost_types::value::Kind::NumberValue(n)) => {
+            serde_json::Number::from_f64(*n)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)
+        }
+        Some(prost_types::value::Kind::StringValue(s)) => serde_json::Value::String(s.clone()),
+        Some(prost_types::value::Kind::ListValue(list)) => {
+            serde_json::Value::Array(list.values.iter().map(prost_value_to_json).collect())
+        }
+        Some(prost_types::value::Kind::StructValue(s)) => prost_struct_to_value(s),
+    }
+}
+
 /// Workflow error type (wraps proto enum for thiserror compatibility)
 ///
 /// ## Proto-First Design
-/// The proto enum is the source of truth. This wrapper provides:
-/// - String messages (proto enum doesn't have payloads)
-/// - thiserror::Error implementation
-/// - Backward compatibility with existing code
+/// The proto enum (`WorkflowErrorProto`) is the wire contract. This wrapper adds:
+/// - String payloads (proto enum values carry no message)
+/// - `thiserror::Error` implementation for `?` ergonomics
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowError {
     /// Storage operation failed
@@ -67,18 +196,23 @@ pub enum WorkflowError {
     ConcurrentUpdate(String),
 }
 
-impl From<WorkflowError> for WorkflowErrorProto {
-    fn from(err: WorkflowError) -> Self {
-        match err {
+impl WorkflowError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> WorkflowErrorProto {
+        match self {
             WorkflowError::Storage(_) => WorkflowErrorProto::WorkflowErrorStorage,
             WorkflowError::Serialization(_) => WorkflowErrorProto::WorkflowErrorSerialization,
             WorkflowError::NotFound(_) => WorkflowErrorProto::WorkflowErrorNotFound,
-            WorkflowError::InvalidDefinition(_) => {
-                WorkflowErrorProto::WorkflowErrorInvalidDefinition
-            }
+            WorkflowError::InvalidDefinition(_) => WorkflowErrorProto::WorkflowErrorInvalidDefinition,
             WorkflowError::Execution(_) => WorkflowErrorProto::WorkflowErrorExecution,
-            WorkflowError::ConcurrentUpdate(_) => WorkflowErrorProto::WorkflowErrorExecution, // Map to Execution for proto
+            WorkflowError::ConcurrentUpdate(_) => WorkflowErrorProto::WorkflowErrorConcurrentUpdate,
         }
+    }
+}
+
+impl From<WorkflowError> for WorkflowErrorProto {
+    fn from(err: WorkflowError) -> Self {
+        err.code()
     }
 }
 
@@ -103,341 +237,78 @@ impl From<WorkflowErrorProto> for WorkflowError {
             WorkflowErrorProto::WorkflowErrorExecution => {
                 WorkflowError::Execution("Execution error".to_string())
             }
+            WorkflowErrorProto::WorkflowErrorConcurrentUpdate => {
+                WorkflowError::ConcurrentUpdate("Concurrent update".to_string())
+            }
         }
     }
 }
 
-/// Workflow definition - template for workflow execution
-///
-/// ## TDD Note
-/// Minimal implementation to pass `test_workflow_definition_persistence`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowDefinition {
-    /// Workflow ID (unique identifier)
-    pub id: String,
-
-    /// Workflow name (human-readable)
-    pub name: String,
-
-    /// Workflow version (semantic versioning)
-    pub version: String,
-
-    /// Workflow steps (ordered)
-    pub steps: Vec<Step>,
-
-    /// Optional timeout for entire workflow
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<std::time::Duration>,
-
-    /// Optional retry policy
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_policy: Option<RetryPolicy>,
+/// Extension trait for ExecutionStatus — needed by SQL/DDB storage for string serialization
+pub trait ExecutionStatusExt {
+    /// Serialize to SQL string representation
+    fn as_sql_str(&self) -> &'static str;
+    /// Parse from SQL string representation
+    fn from_sql_str(s: &str) -> Result<ExecutionStatus, WorkflowError>;
 }
 
-impl Default for WorkflowDefinition {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            version: String::new(),
-            steps: Vec::new(),
-            timeout: None,
-            retry_policy: None,
+impl ExecutionStatusExt for ExecutionStatus {
+    fn as_sql_str(&self) -> &'static str {
+        match self {
+            ExecutionStatus::ExecutionStatusPending => "PENDING",
+            ExecutionStatus::ExecutionStatusRunning => "RUNNING",
+            ExecutionStatus::ExecutionStatusCompleted => "COMPLETED",
+            ExecutionStatus::ExecutionStatusFailed => "FAILED",
+            ExecutionStatus::ExecutionStatusCancelled => "CANCELLED",
+            ExecutionStatus::ExecutionStatusTimedOut => "TIMED_OUT",
+            ExecutionStatus::ExecutionStatusUnspecified => "UNSPECIFIED",
         }
     }
-}
 
-/// Individual workflow step
-///
-/// ## TDD Note
-/// Minimal implementation to support `test_simple_single_step_workflow`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Step {
-    /// Step ID (unique within workflow)
-    pub id: String,
-
-    /// Step name (human-readable)
-    pub name: String,
-
-    /// Step type (task, parallel, map, choice, wait, signal)
-    pub step_type: StepType,
-
-    /// Step configuration (JSON object)
-    pub config: Value,
-
-    /// Optional next step (if not specified, uses next in array)
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
-
-    /// Optional error handler step
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_error: Option<String>,
-
-    /// Optional retry policy for this step
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_policy: Option<RetryPolicy>,
-}
-
-impl Default for Step {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            step_type: StepType::Task,
-            config: Value::Null,
-            next: None,
-            on_error: None,
-            retry_policy: None,
-        }
-    }
-}
-
-/// Step types
-///
-/// ## Design
-/// Following AWS Step Functions patterns with PlexSpaces actor integration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StepType {
-    /// Task: Invoke an actor method (GenServer call)
-    Task,
-
-    /// Parallel: Execute multiple branches concurrently
-    Parallel,
-
-    /// Map: Execute same step for each item in array
-    Map,
-
-    /// Choice: Conditional branching based on state
-    Choice,
-
-    /// Wait: Delay execution for duration or until timestamp
-    Wait,
-
-    /// Signal: Wait for external signal (Awakeable pattern)
-    Signal,
-}
-
-/// Workflow execution - runtime instance of workflow definition
-///
-/// ## TDD Note
-/// Minimal fields to pass `test_execution_status_transitions`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkflowExecution {
-    /// Execution ID (ULID for sortability)
-    pub execution_id: String,
-
-    /// Definition ID this execution is based on
-    pub definition_id: String,
-
-    /// Definition version this execution is based on
-    pub definition_version: String,
-
-    /// Current execution status
-    pub status: ExecutionStatus,
-
-    /// Current step ID (if running)
-    pub current_step_id: Option<String>,
-
-    /// Initial input (for display/debugging)
-    pub input: Option<Value>,
-
-    /// Final output (if completed)
-    pub output: Option<Value>,
-
-    /// Error message (if failed)
-    pub error: Option<String>,
-
-    /// Node ID executing this workflow (node_owner)
-    pub node_id: Option<String>,
-
-    /// Version for optimistic locking
-    pub version: u64,
-
-    /// Last heartbeat timestamp (for health monitoring)
-    pub last_heartbeat: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Execution status states
-///
-/// ## Design
-/// State machine for workflow execution lifecycle
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExecutionStatus {
-    /// Execution created but not started
-    Pending,
-
-    /// Execution in progress
-    Running,
-
-    /// Execution completed successfully
-    Completed,
-
-    /// Execution failed with error
-    Failed,
-
-    /// Execution cancelled by user
-    Cancelled,
-
-    /// Execution timed out
-    TimedOut,
-}
-
-impl ExecutionStatus {
-    /// Parse status from string (for SQL storage)
-    pub fn from_string(s: &str) -> Result<Self, WorkflowError> {
+    fn from_sql_str(s: &str) -> Result<ExecutionStatus, WorkflowError> {
         match s.to_uppercase().as_str() {
-            "PENDING" => Ok(Self::Pending),
-            "RUNNING" => Ok(Self::Running),
-            "COMPLETED" => Ok(Self::Completed),
-            "FAILED" => Ok(Self::Failed),
-            "CANCELLED" => Ok(Self::Cancelled),
-            "TIMED_OUT" | "TIMEDOUT" => Ok(Self::TimedOut),
-            _ => Err(WorkflowError::InvalidDefinition(format!(
-                "Unknown status: {}",
-                s
-            ))),
+            "PENDING" => Ok(ExecutionStatus::ExecutionStatusPending),
+            "RUNNING" => Ok(ExecutionStatus::ExecutionStatusRunning),
+            "COMPLETED" => Ok(ExecutionStatus::ExecutionStatusCompleted),
+            "FAILED" => Ok(ExecutionStatus::ExecutionStatusFailed),
+            "CANCELLED" => Ok(ExecutionStatus::ExecutionStatusCancelled),
+            "TIMED_OUT" | "TIMEDOUT" => Ok(ExecutionStatus::ExecutionStatusTimedOut),
+            _ => Err(WorkflowError::InvalidDefinition(format!("Unknown status: {}", s))),
         }
     }
 }
 
-impl fmt::Display for ExecutionStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Pending => "PENDING",
-            Self::Running => "RUNNING",
-            Self::Completed => "COMPLETED",
-            Self::Failed => "FAILED",
-            Self::Cancelled => "CANCELLED",
-            Self::TimedOut => "TIMED_OUT",
-        };
-        write!(f, "{}", s)
-    }
+/// Extension trait for StepStatus — needed by SQL/DDB storage for string serialization
+pub trait StepStatusExt {
+    /// Serialize to SQL string representation
+    fn as_sql_str(&self) -> &'static str;
+    /// Parse from SQL string representation
+    fn from_sql_str(s: &str) -> Result<StepStatus, WorkflowError>;
 }
 
-/// Retry policy for steps and workflows
-///
-/// ## Design
-/// Exponential backoff with jitter (best practice for distributed systems)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetryPolicy {
-    /// Maximum number of retry attempts
-    pub max_attempts: u32,
-
-    /// Initial backoff duration
-    pub initial_backoff: std::time::Duration,
-
-    /// Backoff multiplier (e.g., 2.0 for exponential)
-    pub backoff_multiplier: f64,
-
-    /// Maximum backoff duration (cap for exponential growth)
-    pub max_backoff: std::time::Duration,
-
-    /// Add random jitter to prevent thundering herd (0.0-1.0)
-    pub jitter: f64,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            initial_backoff: std::time::Duration::from_secs(1),
-            backoff_multiplier: 2.0,
-            max_backoff: std::time::Duration::from_secs(60),
-            jitter: 0.1,
+impl StepStatusExt for StepStatus {
+    fn as_sql_str(&self) -> &'static str {
+        match self {
+            StepStatus::StepStatusPending => "PENDING",
+            StepStatus::StepStatusRunning => "RUNNING",
+            StepStatus::StepStatusCompleted => "COMPLETED",
+            StepStatus::StepStatusFailed => "FAILED",
+            StepStatus::StepStatusRetrying => "RETRYING",
+            StepStatus::StepStatusCancelled => "CANCELLED",
+            StepStatus::StepStatusUnspecified => "UNSPECIFIED",
         }
     }
-}
 
-/// Step execution - runtime instance of a workflow step
-///
-/// ## TDD Note
-/// Minimal implementation to pass step execution tests
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StepExecution {
-    /// Step execution ID (ULID)
-    pub step_execution_id: String,
-
-    /// Workflow execution ID this belongs to
-    pub execution_id: String,
-
-    /// Step ID from workflow definition
-    pub step_id: String,
-
-    /// Current step status
-    pub status: StepExecutionStatus,
-
-    /// Step input (for display/debugging)
-    pub input: Option<Value>,
-
-    /// Step output (if completed)
-    pub output: Option<Value>,
-
-    /// Error message (if failed)
-    pub error: Option<String>,
-
-    /// Retry attempt number (1 = first attempt)
-    pub attempt: u32,
-}
-
-/// Step execution status states
-///
-/// ## Design
-/// State machine for individual step lifecycle
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StepExecutionStatus {
-    /// Step waiting to run
-    Pending,
-
-    /// Step currently executing
-    Running,
-
-    /// Step completed successfully
-    Completed,
-
-    /// Step failed with error
-    Failed,
-
-    /// Step retrying after failure
-    Retrying,
-
-    /// Step cancelled by user
-    Cancelled,
-}
-
-impl StepExecutionStatus {
-    /// Parse status from string (for SQL storage)
-    pub fn from_string(s: &str) -> Result<Self, WorkflowError> {
+    fn from_sql_str(s: &str) -> Result<StepStatus, WorkflowError> {
         match s.to_uppercase().as_str() {
-            "PENDING" => Ok(Self::Pending),
-            "RUNNING" => Ok(Self::Running),
-            "COMPLETED" => Ok(Self::Completed),
-            "FAILED" => Ok(Self::Failed),
-            "RETRYING" => Ok(Self::Retrying),
-            "CANCELLED" => Ok(Self::Cancelled),
-            _ => Err(WorkflowError::InvalidDefinition(format!(
-                "Unknown step status: {}",
-                s
-            ))),
+            "PENDING" => Ok(StepStatus::StepStatusPending),
+            "RUNNING" => Ok(StepStatus::StepStatusRunning),
+            "COMPLETED" => Ok(StepStatus::StepStatusCompleted),
+            "FAILED" => Ok(StepStatus::StepStatusFailed),
+            "RETRYING" => Ok(StepStatus::StepStatusRetrying),
+            "CANCELLED" => Ok(StepStatus::StepStatusCancelled),
+            _ => Err(WorkflowError::InvalidDefinition(format!("Unknown step status: {}", s))),
         }
-    }
-}
-
-impl fmt::Display for StepExecutionStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Pending => "PENDING",
-            Self::Running => "RUNNING",
-            Self::Completed => "COMPLETED",
-            Self::Failed => "FAILED",
-            Self::Retrying => "RETRYING",
-            Self::Cancelled => "CANCELLED",
-        };
-        write!(f, "{}", s)
     }
 }
 
@@ -446,97 +317,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_execution_status_from_string() {
+    fn test_execution_status_from_sql_str() {
         assert_eq!(
-            ExecutionStatus::from_string("PENDING").unwrap(),
-            ExecutionStatus::Pending
+            ExecutionStatus::from_sql_str("PENDING").unwrap(),
+            ExecutionStatus::ExecutionStatusPending
         );
         assert_eq!(
-            ExecutionStatus::from_string("running").unwrap(),
-            ExecutionStatus::Running
+            ExecutionStatus::from_sql_str("running").unwrap(),
+            ExecutionStatus::ExecutionStatusRunning
         );
         assert_eq!(
-            ExecutionStatus::from_string("COMPLETED").unwrap(),
-            ExecutionStatus::Completed
+            ExecutionStatus::from_sql_str("COMPLETED").unwrap(),
+            ExecutionStatus::ExecutionStatusCompleted
         );
-        assert!(ExecutionStatus::from_string("INVALID").is_err());
+        assert!(ExecutionStatus::from_sql_str("INVALID").is_err());
     }
 
     #[test]
-    fn test_execution_status_to_string() {
-        assert_eq!(ExecutionStatus::Pending.to_string(), "PENDING");
-        assert_eq!(ExecutionStatus::Running.to_string(), "RUNNING");
-        assert_eq!(ExecutionStatus::Completed.to_string(), "COMPLETED");
-        assert_eq!(ExecutionStatus::Failed.to_string(), "FAILED");
+    fn test_execution_status_as_sql_str() {
+        assert_eq!(ExecutionStatus::ExecutionStatusPending.as_sql_str(), "PENDING");
+        assert_eq!(ExecutionStatus::ExecutionStatusRunning.as_sql_str(), "RUNNING");
+        assert_eq!(ExecutionStatus::ExecutionStatusCompleted.as_sql_str(), "COMPLETED");
+        assert_eq!(ExecutionStatus::ExecutionStatusFailed.as_sql_str(), "FAILED");
     }
 
     #[test]
-    fn test_workflow_definition_serialization() {
-        let def = WorkflowDefinition {
-            id: "test".to_string(),
-            name: "Test Workflow".to_string(),
-            version: "1.0".to_string(),
-            steps: vec![],
-            timeout: None,
-            retry_policy: None,
-        };
-
-        let json = serde_json::to_string(&def).unwrap();
-        let parsed: WorkflowDefinition = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(parsed.id, "test");
-        assert_eq!(parsed.name, "Test Workflow");
-        assert_eq!(parsed.version, "1.0");
-    }
-
-    #[test]
-    fn test_step_execution_status_all_variants() {
-        // Test from_string for all variants
+    fn test_step_status_all_variants() {
         assert_eq!(
-            StepExecutionStatus::from_string("PENDING").unwrap(),
-            StepExecutionStatus::Pending
+            StepStatus::from_sql_str("PENDING").unwrap(),
+            StepStatus::StepStatusPending
         );
         assert_eq!(
-            StepExecutionStatus::from_string("RUNNING").unwrap(),
-            StepExecutionStatus::Running
+            StepStatus::from_sql_str("RUNNING").unwrap(),
+            StepStatus::StepStatusRunning
         );
         assert_eq!(
-            StepExecutionStatus::from_string("COMPLETED").unwrap(),
-            StepExecutionStatus::Completed
+            StepStatus::from_sql_str("COMPLETED").unwrap(),
+            StepStatus::StepStatusCompleted
         );
         assert_eq!(
-            StepExecutionStatus::from_string("FAILED").unwrap(),
-            StepExecutionStatus::Failed
+            StepStatus::from_sql_str("FAILED").unwrap(),
+            StepStatus::StepStatusFailed
         );
         assert_eq!(
-            StepExecutionStatus::from_string("RETRYING").unwrap(),
-            StepExecutionStatus::Retrying
+            StepStatus::from_sql_str("RETRYING").unwrap(),
+            StepStatus::StepStatusRetrying
         );
         assert_eq!(
-            StepExecutionStatus::from_string("CANCELLED").unwrap(),
-            StepExecutionStatus::Cancelled
+            StepStatus::from_sql_str("CANCELLED").unwrap(),
+            StepStatus::StepStatusCancelled
         );
+        assert!(StepStatus::from_sql_str("INVALID").is_err());
 
-        // Test error case
-        assert!(StepExecutionStatus::from_string("INVALID").is_err());
-
-        // Test to_string for all variants
-        assert_eq!(StepExecutionStatus::Pending.to_string(), "PENDING");
-        assert_eq!(StepExecutionStatus::Running.to_string(), "RUNNING");
-        assert_eq!(StepExecutionStatus::Completed.to_string(), "COMPLETED");
-        assert_eq!(StepExecutionStatus::Failed.to_string(), "FAILED");
-        assert_eq!(StepExecutionStatus::Retrying.to_string(), "RETRYING");
-        assert_eq!(StepExecutionStatus::Cancelled.to_string(), "CANCELLED");
-    }
-
-    #[test]
-    fn test_retry_policy_default() {
-        // Test RetryPolicy::default() to cover default implementation
-        let policy = RetryPolicy::default();
-        assert_eq!(policy.max_attempts, 3);
-        assert_eq!(policy.initial_backoff, std::time::Duration::from_secs(1));
-        assert_eq!(policy.backoff_multiplier, 2.0);
-        assert_eq!(policy.max_backoff, std::time::Duration::from_secs(60));
-        assert_eq!(policy.jitter, 0.1);
+        assert_eq!(StepStatus::StepStatusPending.as_sql_str(), "PENDING");
+        assert_eq!(StepStatus::StepStatusRunning.as_sql_str(), "RUNNING");
+        assert_eq!(StepStatus::StepStatusCompleted.as_sql_str(), "COMPLETED");
+        assert_eq!(StepStatus::StepStatusFailed.as_sql_str(), "FAILED");
+        assert_eq!(StepStatus::StepStatusRetrying.as_sql_str(), "RETRYING");
+        assert_eq!(StepStatus::StepStatusCancelled.as_sql_str(), "CANCELLED");
     }
 }

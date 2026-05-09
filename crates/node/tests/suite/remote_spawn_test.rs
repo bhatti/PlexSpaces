@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-use plexspaces_core::{ActorId, ServiceLocator};
+use plexspaces_actor::{ActorId, ServiceLocator, ServiceLocatorBase, RequestContextExt};
 use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_proto::{
     actor::v1::{
@@ -62,6 +62,15 @@ fn spawn_actor_grpc_request(
     }
 }
 
+fn grpc_request_with_ctx<T>(body: T, namespace: &str) -> Request<T> {
+    let mut req = Request::new(body);
+    req.metadata_mut()
+        .insert("x-tenant-id", "test-tenant".parse().unwrap());
+    req.metadata_mut()
+        .insert("x-namespace", namespace.parse().unwrap());
+    req
+}
+
 /// Helper to create a test node
 fn create_test_node(id: &str, port: u16) -> Node {
     let mut config = default_node_config();
@@ -77,6 +86,19 @@ async fn test_spawn_actor_basic() {
     let node = Arc::new(create_test_node("test-node", 9501));
     node.initialize_services().await.unwrap();
 
+    // Register a behavior so ActorFactory can create "test_actor" type actors
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
+    use plexspaces_behavior::MockBehavior;
+    let behavior_registry = BehaviorRegistry::new();
+    behavior_registry
+        .register_simple("test_actor", || {
+            Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+        })
+        .await;
+    node.service_locator()
+        .register_behavior_registry(Arc::new(behavior_registry))
+        .await;
+
     // Create gRPC service
     let service = plexspaces_services::actor_service::ActorServiceImpl::new(
         node.service_locator(),
@@ -84,13 +106,16 @@ async fn test_spawn_actor_basic() {
     );
 
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
-    let request = Request::new(spawn_actor_grpc_request("", "test_actor", "test_actor", ""));
+    let request = grpc_request_with_ctx(
+        spawn_actor_grpc_request("default", "test_actor", "test_actor", ""),
+        "default",
+    );
 
     // Spawn actor via gRPC
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
     // Should succeed
-    assert!(response.is_ok(), "spawn_actor should succeed");
+    assert!(response.is_ok(), "spawn_actor should succeed: {:?}", response.as_ref().err());
 
     let resp = response.unwrap().into_inner();
 
@@ -160,6 +185,20 @@ async fn test_spawn_remote_actor_missing_actor_type() {
 async fn test_spawn_remote_actor_wrong_node() {
     let node = Arc::new(create_test_node("node1", 9504));
     node.initialize_services().await.unwrap();
+
+    // Register behavior so ActorFactory can create "test_actor" type actors
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
+    use plexspaces_behavior::MockBehavior;
+    let behavior_registry = BehaviorRegistry::new();
+    behavior_registry
+        .register_simple("test_actor", || {
+            Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+        })
+        .await;
+    node.service_locator()
+        .register_behavior_registry(Arc::new(behavior_registry))
+        .await;
+
     let service = plexspaces_services::actor_service::ActorServiceImpl::new(
         node.service_locator(),
         node.id().as_str().to_string(),
@@ -168,19 +207,17 @@ async fn test_spawn_remote_actor_wrong_node() {
     // gRPC spawn_actor always spawns on the node receiving the request
     // The test for "wrong node" doesn't make sense anymore since target is implicit
     // This test is now redundant - spawn_actor always succeeds on the receiving node
-    let request = Request::new(spawn_actor_grpc_request(
+    let request = grpc_request_with_ctx(
+        spawn_actor_grpc_request("default", "test_actor", "test_actor", ""),
         "default",
-        "test_actor",
-        "test_actor",
-        "",
-    ));
+    );
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
     // Should succeed - spawns on node1 (the node receiving the request)
     assert!(
         response.is_ok(),
-        "spawn_actor should succeed on receiving node"
+        "spawn_actor should succeed on receiving node: {:?}", response.as_ref().err()
     );
 }
 
@@ -188,6 +225,23 @@ async fn test_spawn_remote_actor_wrong_node() {
 async fn test_spawn_multiple_remote_actors() {
     let node = Arc::new(create_test_node("test-node", 9505));
     node.initialize_services().await.unwrap();
+
+    // Register behavior so ActorFactory can create each actor type
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
+    use plexspaces_behavior::MockBehavior;
+    let behavior_registry = BehaviorRegistry::new();
+    for i in 0..3 {
+        let type_name = format!("test_actor_{}", i);
+        behavior_registry
+            .register_simple(&type_name, || {
+                Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+            })
+            .await;
+    }
+    node.service_locator()
+        .register_behavior_registry(Arc::new(behavior_registry))
+        .await;
+
     let service = plexspaces_services::actor_service::ActorServiceImpl::new(
         node.service_locator(),
         node.id().as_str().to_string(),
@@ -195,12 +249,10 @@ async fn test_spawn_multiple_remote_actors() {
 
     // Spawn 3 actors
     for i in 0..3 {
-        let request = Request::new(spawn_actor_grpc_request(
-            "",
-            &format!("test_actor_{}", i),
-            &format!("test_actor_{}", i),
-            "",
-        ));
+        let request = grpc_request_with_ctx(
+            spawn_actor_grpc_request("default", &format!("test_actor_{}", i), &format!("test_actor_{}", i), ""),
+            "default",
+        );
 
         let response = ActorServiceTrait::spawn_actor(&service, request).await;
         assert!(response.is_ok(), "spawn {} should succeed", i);
@@ -217,43 +269,58 @@ async fn test_spawn_multiple_remote_actors() {
 
 #[tokio::test]
 async fn test_spawn_remote_actor_via_grpc() {
-    // Start node with gRPC server
-    let node = Arc::new(create_test_node("node1", 9601));
+    use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
+    use plexspaces_behavior::MockBehavior;
+    use plexspaces_node::NodeBuilder;
+    use plexspaces_services::actor_service::ActorServiceImpl;
+    use tonic::transport::Server;
 
-    // Start gRPC server in background
-    let node_clone = node.clone();
-    let server_handle = tokio::spawn(async move { node_clone.start().await });
+    let node = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
 
-    // Wait for server to start
-    sleep(Duration::from_millis(500)).await;
-
-    // Connect gRPC client
-    use plexspaces_proto::ActorServiceClient;
-    let mut client = ActorServiceClient::connect("http://127.0.0.1:9601")
-        .await
-        .expect("should connect");
-
-    // Spawn actor via gRPC using RemoteActorClient
-    use plexspaces_node::grpc_client::RemoteActorClient;
-    let mut remote_client = RemoteActorClient::connect("http://127.0.0.1:9601")
-        .await
-        .expect("should connect");
-    let response = remote_client
-        .spawn_actor(
-            "node1",
-            "remote_test_actor",
-            std::collections::HashMap::new(),
-            None,
-            std::collections::HashMap::new(),
-        )
+    // Register a behavior so spawn can succeed
+    let behavior_registry = BehaviorRegistry::new();
+    behavior_registry
+        .register_simple("remote_test_actor", || {
+            Box::pin(async move {
+                Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
+        })
         .await;
-    assert!(response.is_ok(), "gRPC spawn should succeed");
+    node.service_locator()
+        .register_behavior_registry(Arc::new(behavior_registry))
+        .await;
 
-    let actor_ref = response.unwrap();
-    assert_eq!(actor_ref.id().node_id(), "node1");
+    // Start gRPC server on a random port
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let service = ActorServiceImpl::new(node.service_locator(), "node1".to_string());
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let bound_addr = listener.local_addr().unwrap();
+    let server_url = format!("http://{}", bound_addr);
+    tokio::spawn(async move {
+        Server::builder()
+            .add_service(ActorServiceServer::new(service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .ok();
+    });
+    tokio::task::yield_now().await;
+    sleep(Duration::from_millis(100)).await;
 
-    // Cleanup
-    server_handle.abort();
+    // Spawn actor via gRPC using direct proto client with namespace headers
+    use plexspaces_proto::ActorServiceClient;
+    let mut grpc_client = ActorServiceClient::connect(server_url.clone())
+        .await
+        .expect("should connect");
+    let spawn_req = spawn_actor_grpc_request("default", "remote_test_actor", "", "test-actor-1");
+    let response = grpc_client
+        .spawn_actor(grpc_request_with_ctx(spawn_req, "default"))
+        .await;
+    assert!(response.is_ok(), "gRPC spawn should succeed: {:?}", response.err());
+
+    let resp = response.unwrap().into_inner();
+    assert!(!resp.actor_ref.is_empty(), "actor_ref should not be empty");
+    let actor_id = ActorId::from_canonical(&resp.actor_ref).expect("valid actor id");
+    assert_eq!(actor_id.node_id(), "node1");
 }
 
 // =============================================================================
@@ -261,7 +328,7 @@ async fn test_spawn_remote_actor_via_grpc() {
 // =============================================================================
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{Message, MessageSender};
+use plexspaces_actor::{Message, MessageSender};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_services::actor_service::ActorServiceImpl;
 use tonic::transport::Server;
@@ -269,8 +336,8 @@ use tonic::transport::Server;
 use super::test_helpers::{lookup_actor_ref, test_runtime_actor_id};
 
 /// Helper to create a test message
-fn create_routing_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_routing_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -331,7 +398,7 @@ async fn test_node_route_local_message() {
         service_locator.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+    let actor_registry: Arc<plexspaces_actor::ActorRegistry> = node
         .service_locator()
         .actor_registry()
         .await
@@ -339,7 +406,7 @@ async fn test_node_route_local_message() {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })
         .unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -398,7 +465,7 @@ async fn test_node_route_remote_message() {
         service_locator2.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2
+    let actor_registry2: Arc<plexspaces_actor::ActorRegistry> = node2
         .service_locator()
         .actor_registry()
         .await
@@ -406,7 +473,7 @@ async fn test_node_route_remote_message() {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })
         .unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -422,31 +489,15 @@ async fn test_node_route_remote_message() {
         )
         .await;
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "internal".to_string(),
-        "system".to_string(),
-    );
     let remote_actor_id = actor_ref2.id().clone();
-    let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
-    actor_registry2
-        .register_actor(
-            &ctx,
-            remote_actor_id.clone(),
-            sender,
-            "TestActor".to_string(),
-            None,
-            None,
-            None,
-        )
-        .await;
 
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> =
+    let object_registry: Arc<dyn plexspaces_actor::ObjectRegistry> =
         node1.service_locator().get_object_registry().await.unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "internal".to_string(),
-        "system".to_string(),
-    );
+    // Use empty tenant/namespace so the system context lookup in get_actor_service_client
+    // (which uses request_context_for_system_operations with empty tenant) can find it.
+    let reg_ctx =
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = if node2_address.starts_with("http://") {
         node2_address.strip_prefix("http://").unwrap().to_string()
     } else {
@@ -460,7 +511,7 @@ async fn test_node_route_remote_message() {
         ..Default::default()
     };
     object_registry
-        .register(&ctx, node_registration)
+        .register(&reg_ctx, node_registration)
         .await
         .unwrap();
 
@@ -476,15 +527,20 @@ async fn test_node_route_remote_message() {
         service_locator1,
         ActorVisibility::ActorVisibilityPublic,
     );
-    let message = create_routing_test_message(vec![4, 5, 6]);
-    let result = remote_actor_ref.tell(&ctx, message).await;
+    let payload = b"{\"data\":\"routing-test\"}".to_vec();
+    let message = create_routing_test_message(payload.clone());
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
+    let result = remote_actor_ref.tell(&tell_ctx, message).await;
 
-    assert!(result.is_ok(), "Remote routing should succeed");
+    assert!(result.is_ok(), "Remote routing should succeed: {:?}", result.err());
     let received_opt = mailbox2
         .dequeue_with_timeout(Some(tokio::time::Duration::from_secs(5)))
         .await;
     let received = received_opt.expect("Message should arrive within 5 seconds");
-    assert_eq!(received.payload, vec![4, 5, 6]);
+    assert_eq!(received.payload, payload);
 }
 
 #[tokio::test]
@@ -495,7 +551,7 @@ async fn test_node_route_to_unregistered_remote() {
     let missing_actor_id = test_runtime_actor_id("actor", "node999");
 
     let message = create_routing_test_message(vec![7, 8, 9]);
-    let tell_ctx = plexspaces_core::RequestContext::new_without_auth(
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -548,7 +604,7 @@ async fn test_connection_pooling() {
         service_locator2.clone(),
         ActorVisibility::ActorVisibilityPublic,
     ));
-    let actor_registry2: Arc<plexspaces_core::ActorRegistry> = node2
+    let actor_registry2: Arc<plexspaces_actor::ActorRegistry> = node2
         .service_locator()
         .actor_registry()
         .await
@@ -556,7 +612,7 @@ async fn test_connection_pooling() {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })
         .unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -572,31 +628,15 @@ async fn test_connection_pooling() {
         )
         .await;
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "internal".to_string(),
-        "system".to_string(),
-    );
     let remote_actor_id = actor_ref2.id().clone();
-    let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
-    actor_registry2
-        .register_actor(
-            &ctx,
-            remote_actor_id.clone(),
-            sender,
-            "TestActor".to_string(),
-            None,
-            None,
-            None,
-        )
-        .await;
 
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> =
+    let object_registry: Arc<dyn plexspaces_actor::ObjectRegistry> =
         node1.service_locator().get_object_registry().await.unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "internal".to_string(),
-        "system".to_string(),
-    );
+    // Use empty tenant/namespace so the system context lookup in get_actor_service_client
+    // (which uses request_context_for_system_operations with empty tenant) can find it.
+    let reg_ctx =
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = if node2_address.starts_with("http://") {
         node2_address.strip_prefix("http://").unwrap().to_string()
     } else {
@@ -610,7 +650,7 @@ async fn test_connection_pooling() {
         ..Default::default()
     };
     object_registry
-        .register(&ctx, node_registration)
+        .register(&reg_ctx, node_registration)
         .await
         .unwrap();
 
@@ -627,10 +667,15 @@ async fn test_connection_pooling() {
         ActorVisibility::ActorVisibilityPublic,
     );
 
+    let tell_ctx = plexspaces_actor::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
     for i in 0..5 {
-        let message = create_routing_test_message(vec![i]);
-        let result = remote_actor_ref.tell(&ctx, message).await;
-        assert!(result.is_ok(), "Message {} should succeed", i);
+        let payload = format!("{{\"seq\":{}}}", i).into_bytes();
+        let message = create_routing_test_message(payload);
+        let result = remote_actor_ref.tell(&tell_ctx, message).await;
+        assert!(result.is_ok(), "Message {} should succeed: {:?}", i, result.err());
     }
 
     let mut count = 0;
@@ -666,7 +711,7 @@ async fn test_node_discovery() {
         object_category: "Node".to_string(),
         ..Default::default()
     };
-    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> =
+    let object_registry: Arc<dyn plexspaces_actor::ObjectRegistry> =
         node1.service_locator().object_registry().await.unwrap();
     object_registry.register(&ctx, registration).await.unwrap();
 

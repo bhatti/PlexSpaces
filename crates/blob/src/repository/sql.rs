@@ -26,7 +26,7 @@ use std::sync::Arc;
 use super::{BlobRepository, ListFilters};
 use crate::helpers::{datetime_to_timestamp, timestamp_to_datetime};
 use crate::{BlobError, BlobResult};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::BlobMetadata;
 
 /// SQL-based blob metadata repository

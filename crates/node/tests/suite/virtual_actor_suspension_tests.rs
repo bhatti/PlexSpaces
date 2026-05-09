@@ -4,10 +4,10 @@
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::Message;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
-};
+use plexspaces_actor::Message;
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
+    ServiceLocator, ServiceLocatorBase, RequestContextExt};
 use plexspaces_journaling::{
     DurabilityFacet, JournalError, JournalResult, JournalStorage, SqliteJournalStorage,
     StateLoader, VirtualActorFacet,
@@ -26,8 +26,8 @@ use super::test_helpers::{
 };
 
 /// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         ..Default::default()
@@ -35,8 +35,8 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_core::Message {
-    plexspaces_core::Message {
+fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+    plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
         message_type: message_type.to_string(),
@@ -270,12 +270,12 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // CRITICAL: Register CounterActor in BehaviorRegistry so it can be rebuilt after suspension
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
             Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;
@@ -292,7 +292,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     // Register eager virtual actor with DurabilityFacet
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();
@@ -327,7 +327,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
 
     let increment_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -422,14 +422,14 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Test: Suspend an active virtual actor, then call tell() - should reactivate
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     // Create new registry and register CounterActor
     // actor_type is "GenServer" (extracted from behavior.behavior_type())
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
             Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
             )
         })
         .await;
@@ -443,7 +443,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     // Register eager virtual actor
     let behavior = Box::new(CounterActor::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
         .build()
         .await
         .unwrap();

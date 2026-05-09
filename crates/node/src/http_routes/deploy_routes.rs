@@ -14,7 +14,7 @@ use axum::{
     response::Json,
     routing::{delete, post},
 };
-use plexspaces_core::{NodeConnectivity, ServiceLocator};
+use plexspaces_actor::{NodeConnectivity, ServiceLocator};
 
 const MAX_WASM_BODY_SIZE: usize = 100 * 1024 * 1024; // 100MB
 

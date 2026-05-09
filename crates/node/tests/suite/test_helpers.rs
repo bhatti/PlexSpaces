@@ -19,7 +19,7 @@
 //! Test helper functions to replace deprecated Node methods
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{ActorId, ActorRegistry, MessageSender, RequestContext, VirtualActorMetadata};
+use plexspaces_actor::{ActorId, ActorRegistry, MessageSender, RequestContext, VirtualActorMetadata, RequestContextExt};
 use plexspaces_node::Node;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -142,7 +142,7 @@ pub async fn lookup_actor_ref(
 pub async fn registry_tell(
     node: &Node,
     actor_id: &ActorId,
-    message: plexspaces_core::Message,
+    message: plexspaces_actor::Message,
 ) -> Result<(), plexspaces_node::NodeError> {
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
@@ -167,9 +167,9 @@ pub async fn registry_tell(
 pub async fn registry_ask(
     node: &Node,
     actor_id: &ActorId,
-    message: plexspaces_core::Message,
+    message: plexspaces_actor::Message,
     timeout: std::time::Duration,
-) -> Result<plexspaces_core::Message, plexspaces_node::NodeError> {
+) -> Result<plexspaces_actor::Message, plexspaces_node::NodeError> {
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
         .actor_registry()
@@ -177,7 +177,7 @@ pub async fn registry_ask(
         .ok_or_else(|| {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -195,8 +195,7 @@ pub async fn wait_for_virtual_actor_activation(
     actor_id: &ActorId,
     timeout: Duration,
 ) -> bool {
-    use plexspaces_core::service_names;
-    use plexspaces_core::VirtualActorManager;
+    use plexspaces_actor::VirtualActorManager;
     use tokio::task::yield_now;
     use tokio::time::Instant;
 
@@ -277,7 +276,7 @@ pub async fn register_actor_with_message_sender(
     actor_id: &ActorId,
     mailbox: Arc<plexspaces_mailbox::Mailbox>,
 ) {
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
     let wrapper = Arc::new(ActorRef::local(
         actor_id.clone(),
         String::new(),
@@ -294,7 +293,7 @@ pub async fn register_actor_with_message_sender(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })
         .unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -369,7 +368,7 @@ pub async fn find_actor_helper(
 /// BehaviorRegistry (which is only needed for type-driven spawning via actor_type string).
 pub async fn spawn_actor_helper(
     node: &Node,
-    actor: plexspaces_actor::Actor,
+    actor: plexspaces_actor::ActorInstance,
 ) -> Result<ActorRef, plexspaces_node::NodeError> {
     use plexspaces_actor::ActorFactoryImpl;
 
@@ -389,14 +388,14 @@ pub async fn spawn_actor_helper(
     let actor_id = actor.id().clone();
     let behavior_type = actor.behavior().read().await.behavior_type();
     let actor_type_str = match behavior_type {
-        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-        plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
+        plexspaces_actor::BehaviorType::GenServer => "GenServer".to_string(),
+        plexspaces_actor::BehaviorType::GenEvent => "GenEvent".to_string(),
+        plexspaces_actor::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+        plexspaces_actor::BehaviorType::Workflow => "Workflow".to_string(),
+        plexspaces_actor::BehaviorType::Custom(ref s) => s.clone(),
     };
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );

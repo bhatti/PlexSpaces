@@ -17,7 +17,7 @@
 //! monitoring philosophy.  DOWN notifications are delivered as `__DOWN__` messages into
 //! the supervisor actor's mailbox — no separate notification channel.
 
-use plexspaces_core::{ExitReason, ServiceLocator};
+use plexspaces_actor::{ExitReason, ServiceLocator, ServiceLocatorBase};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use super::test_helpers::{register_actor_with_message_sender, test_runtime_actor
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-async fn node_request_context(node: &Node) -> plexspaces_core::RequestContext {
+async fn node_request_context(node: &Node) -> plexspaces_actor::RequestContext {
     node.service_locator()
         .request_context_for_system_operations()
         .await
@@ -36,7 +36,7 @@ async fn node_request_context(node: &Node) -> plexspaces_core::RequestContext {
 /// Register a supervisor actor that has its own mailbox so DOWN messages can land.
 async fn register_supervisor(
     node: &Node,
-    supervisor_id: &plexspaces_core::ActorId,
+    supervisor_id: &plexspaces_actor::ActorId,
 ) -> Arc<Mailbox> {
     let mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), supervisor_id.to_string())

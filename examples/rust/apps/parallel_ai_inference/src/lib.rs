@@ -73,7 +73,6 @@ struct AppState {
 struct InitConfig {
     actor_id: Option<String>,
     role: Option<String>,
-    declaration_name: Option<String>,
     args: Option<HashMap<String, String>>,
 }
 
@@ -183,7 +182,6 @@ fn resolve_role(config: &InitConfig, actor_id: &str) -> Option<String> {
         .and_then(|args| args.get("role"))
         .cloned()
         .or_else(|| config.role.clone())
-        .or_else(|| config.declaration_name.clone())
         .or_else(|| actor_name_from_actor_id(actor_id))
         .filter(|role| {
             matches!(

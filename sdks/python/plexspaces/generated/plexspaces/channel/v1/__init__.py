@@ -6,13 +6,23 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import (
+    TYPE_CHECKING,
+    AsyncIterator,
     Dict,
     List,
+    Optional,
 )
 
 import betterproto
+import grpclib
+from betterproto.grpc.grpclib_server import ServiceBase
 
 from ...common import v1 as __common_v1__
+
+if TYPE_CHECKING:
+    import grpclib.server
+    from betterproto.grpc.grpclib_client import MetadataLike
+    from grpclib.metadata import Deadline
 
 
 class ChannelProvider(betterproto.Enum):
@@ -125,6 +135,32 @@ class OrderingGuarantee(betterproto.Enum):
 
     TOTAL = 2
     """Total order across all producers (Kafka partition)"""
+
+
+class ChannelErrorCode(betterproto.Enum):
+    """Error codes for channel operations."""
+
+    CHANNEL_ERROR_UNSPECIFIED = 0
+    CHANNEL_ERROR_FULL = 1
+    """Channel has reached its capacity limit (bounded channels only)"""
+
+    CHANNEL_ERROR_CLOSED = 2
+    """Channel has been closed and is no longer accepting messages"""
+
+    CHANNEL_ERROR_TIMEOUT = 3
+    """Operation did not complete within the allotted time"""
+
+    CHANNEL_ERROR_MESSAGE_NOT_FOUND = 4
+    """Requested message does not exist"""
+
+    CHANNEL_ERROR_INVALID_CONFIGURATION = 5
+    """Channel configuration is invalid"""
+
+    CHANNEL_ERROR_NOT_FOUND = 6
+    """Channel does not exist"""
+
+    CHANNEL_ERROR_ALREADY_EXISTS = 7
+    """Channel with this name already exists"""
 
 
 class InMemoryConfigBackpressureStrategy(betterproto.Enum):
@@ -594,3 +630,324 @@ class DeleteChannelResponse(betterproto.Message):
     """DeleteChannel response"""
 
     deleted: bool = betterproto.bool_field(1)
+
+
+class ChannelServiceStub(betterproto.ServiceStub):
+    async def create_channel(
+        self,
+        create_channel_request: "CreateChannelRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "CreateChannelResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/CreateChannel",
+            create_channel_request,
+            CreateChannelResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def delete_channel(
+        self,
+        delete_channel_request: "DeleteChannelRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "DeleteChannelResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/DeleteChannel",
+            delete_channel_request,
+            DeleteChannelResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def send(
+        self,
+        send_request: "SendRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "SendResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/Send",
+            send_request,
+            SendResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def receive(
+        self,
+        receive_request: "ReceiveRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "ReceiveResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/Receive",
+            receive_request,
+            ReceiveResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def subscribe(
+        self,
+        subscribe_request: "SubscribeRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> AsyncIterator[__common_v1__.Message]:
+        async for response in self._unary_stream(
+            "/plexspaces.channel.v1.ChannelService/Subscribe",
+            subscribe_request,
+            __common_v1__.Message,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        ):
+            yield response
+
+    async def publish(
+        self,
+        publish_request: "PublishRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "PublishResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/Publish",
+            publish_request,
+            PublishResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def ack(
+        self,
+        ack_request: "AckRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "AckResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/Ack",
+            ack_request,
+            AckResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def nack(
+        self,
+        nack_request: "NackRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "NackResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/Nack",
+            nack_request,
+            NackResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_stats(
+        self,
+        get_stats_request: "GetStatsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetStatsResponse":
+        return await self._unary_unary(
+            "/plexspaces.channel.v1.ChannelService/GetStats",
+            get_stats_request,
+            GetStatsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+
+class ChannelServiceBase(ServiceBase):
+
+    async def create_channel(
+        self, create_channel_request: "CreateChannelRequest"
+    ) -> "CreateChannelResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def delete_channel(
+        self, delete_channel_request: "DeleteChannelRequest"
+    ) -> "DeleteChannelResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def send(self, send_request: "SendRequest") -> "SendResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def receive(self, receive_request: "ReceiveRequest") -> "ReceiveResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def subscribe(
+        self, subscribe_request: "SubscribeRequest"
+    ) -> AsyncIterator[__common_v1__.Message]:
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+        yield __common_v1__.Message()
+
+    async def publish(self, publish_request: "PublishRequest") -> "PublishResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def ack(self, ack_request: "AckRequest") -> "AckResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def nack(self, nack_request: "NackRequest") -> "NackResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_stats(
+        self, get_stats_request: "GetStatsRequest"
+    ) -> "GetStatsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def __rpc_create_channel(
+        self,
+        stream: "grpclib.server.Stream[CreateChannelRequest, CreateChannelResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.create_channel(request)
+        await stream.send_message(response)
+
+    async def __rpc_delete_channel(
+        self,
+        stream: "grpclib.server.Stream[DeleteChannelRequest, DeleteChannelResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.delete_channel(request)
+        await stream.send_message(response)
+
+    async def __rpc_send(
+        self, stream: "grpclib.server.Stream[SendRequest, SendResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.send(request)
+        await stream.send_message(response)
+
+    async def __rpc_receive(
+        self, stream: "grpclib.server.Stream[ReceiveRequest, ReceiveResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.receive(request)
+        await stream.send_message(response)
+
+    async def __rpc_subscribe(
+        self, stream: "grpclib.server.Stream[SubscribeRequest, __common_v1__.Message]"
+    ) -> None:
+        request = await stream.recv_message()
+        await self._call_rpc_handler_server_stream(
+            self.subscribe,
+            stream,
+            request,
+        )
+
+    async def __rpc_publish(
+        self, stream: "grpclib.server.Stream[PublishRequest, PublishResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.publish(request)
+        await stream.send_message(response)
+
+    async def __rpc_ack(
+        self, stream: "grpclib.server.Stream[AckRequest, AckResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.ack(request)
+        await stream.send_message(response)
+
+    async def __rpc_nack(
+        self, stream: "grpclib.server.Stream[NackRequest, NackResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.nack(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_stats(
+        self, stream: "grpclib.server.Stream[GetStatsRequest, GetStatsResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_stats(request)
+        await stream.send_message(response)
+
+    def __mapping__(self) -> Dict[str, grpclib.const.Handler]:
+        return {
+            "/plexspaces.channel.v1.ChannelService/CreateChannel": grpclib.const.Handler(
+                self.__rpc_create_channel,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                CreateChannelRequest,
+                CreateChannelResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/DeleteChannel": grpclib.const.Handler(
+                self.__rpc_delete_channel,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                DeleteChannelRequest,
+                DeleteChannelResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Send": grpclib.const.Handler(
+                self.__rpc_send,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                SendRequest,
+                SendResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Receive": grpclib.const.Handler(
+                self.__rpc_receive,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                ReceiveRequest,
+                ReceiveResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Subscribe": grpclib.const.Handler(
+                self.__rpc_subscribe,
+                grpclib.const.Cardinality.UNARY_STREAM,
+                SubscribeRequest,
+                __common_v1__.Message,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Publish": grpclib.const.Handler(
+                self.__rpc_publish,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                PublishRequest,
+                PublishResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Ack": grpclib.const.Handler(
+                self.__rpc_ack,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                AckRequest,
+                AckResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/Nack": grpclib.const.Handler(
+                self.__rpc_nack,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                NackRequest,
+                NackResponse,
+            ),
+            "/plexspaces.channel.v1.ChannelService/GetStats": grpclib.const.Handler(
+                self.__rpc_get_stats,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetStatsRequest,
+                GetStatsResponse,
+            ),
+        }

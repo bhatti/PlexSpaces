@@ -35,6 +35,7 @@
 //! ## Design Notes
 //! - All gRPC services consolidated here for easier management
 
+
 pub mod actor_factory_helpers;
 pub mod release_runtime_registration;
 pub mod service_locator;
@@ -42,16 +43,16 @@ pub mod service_wrappers;
 
 // Re-export ServiceLocatorImpl and related types
 /// Single source of truth: RequestContext from gRPC metadata (tenant/namespace propagation).
-pub use plexspaces_core::{
+pub use plexspaces_actor::{
     apply_request_context_to_grpc_metadata, request_context_from_grpc_request,
 };
 pub use service_locator::{ServiceLocatorImpl, ServiceStorage};
 // ActorFactory is now in core crate - use ServiceLocator methods directly:
 // Example: service_locator.get_actor_factory().await
 // Re-export Service trait from core
-pub use plexspaces_core::Service;
+pub use plexspaces_actor::Service;
 // Re-export ServiceLocator trait from core (trait)
-pub use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
+pub use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
 pub use service_wrappers::*;
 
 // Type alias for convenience (ServiceLocatorImpl implements ServiceLocator trait)

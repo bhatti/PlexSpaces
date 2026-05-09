@@ -13,7 +13,7 @@
 // - Maintains its own RwLock<HashMap<String, ServiceLinkConfig>> for the live link catalog
 // - On startup (from the gRPC server setup), seeds the catalog from RuntimeConfig.service_links
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_actor::InitializableServiceLocator;
 use plexspaces_proto::node::v1::{
     service_link_service_server::ServiceLinkService, AddServiceLinkRequest, AddServiceLinkResponse,
     GetServiceLinkRequest, GetServiceLinkResponse, ListServiceLinksRequest,
@@ -26,7 +26,7 @@ use tonic::{Request, Response, Status};
 
 /// gRPC implementation of ServiceLinkService.
 pub struct ServiceLinkServiceImpl {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn InitializableServiceLocator>,
     /// Live catalog of service links (may differ from RuntimeConfig if changed at runtime).
     links: Arc<RwLock<HashMap<String, ServiceLinkConfig>>>,
 }
@@ -36,7 +36,7 @@ impl ServiceLinkServiceImpl {
     ///
     /// Seeds the in-memory link catalog from `RuntimeConfig.service_links` if a
     /// RuntimeConfig is already registered in the ServiceLocator.
-    pub async fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub async fn new(service_locator: Arc<dyn InitializableServiceLocator>) -> Self {
         let mut initial: HashMap<String, ServiceLinkConfig> = HashMap::new();
         if let Some(rc) = service_locator.get_runtime_config().await {
             for link in rc.service_links {
@@ -96,7 +96,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         &self,
         request: Request<AddServiceLinkRequest>,
     ) -> Result<Response<AddServiceLinkResponse>, Status> {
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let metadata = request.metadata().clone();
         let _ctx = crate::request_context_from_grpc_request(
@@ -130,7 +130,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         &self,
         request: Request<RemoveServiceLinkRequest>,
     ) -> Result<Response<()>, Status> {
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let metadata = request.metadata().clone();
         let _ctx = crate::request_context_from_grpc_request(
@@ -164,7 +164,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         &self,
         request: Request<GetServiceLinkRequest>,
     ) -> Result<Response<GetServiceLinkResponse>, Status> {
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let metadata = request.metadata().clone();
         let _ctx = crate::request_context_from_grpc_request(
@@ -192,7 +192,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         &self,
         request: Request<ListServiceLinksRequest>,
     ) -> Result<Response<ListServiceLinksResponse>, Status> {
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        let service_locator_trait: Arc<dyn plexspaces_actor::ServiceLocator> =
             self.service_locator.clone();
         let metadata = request.metadata().clone();
         let _ctx = crate::request_context_from_grpc_request(
@@ -239,7 +239,7 @@ mod tests {
     use super::*;
     use plexspaces_proto::node::v1::OutboundTransport;
 
-    fn make_service_locator() -> Arc<dyn ServiceLocator> {
+    fn make_service_locator() -> Arc<dyn InitializableServiceLocator> {
         Arc::new(crate::service_locator::ServiceLocatorImpl::new())
     }
 

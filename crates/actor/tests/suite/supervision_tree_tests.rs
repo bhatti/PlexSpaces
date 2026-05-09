@@ -35,13 +35,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use plexspaces_actor::child_spec::{ChildType as CSChildType, RestartStrategy};
+use plexspaces_actor::child_spec::ProtoRestartPolicy;
 use plexspaces_actor::supervisor::{
-    ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
+    RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
-use plexspaces_actor::{Actor, ChildSpec};
+use plexspaces_proto::supervision::v1::SupervisorEventType as ProtoSupervisorEventType;
+use plexspaces_actor::{ActorInstance, ChildSpec};
 use plexspaces_behavior::MockBehavior;
-use plexspaces_core::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLocator};
+use plexspaces_actor::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 
@@ -73,10 +74,9 @@ async fn create_supervisor_with_locator(
 }
 
 /// Helper function to create a ChildSpec with sync factory
-/// Accepts RestartPolicy for backward compatibility and converts to RestartStrategy
 fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
     let id_for_factory = id.clone();
-    let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
+    let sync_factory: Arc<dyn Fn() -> Result<ActorInstance, ActorError> + Send + Sync> =
         Arc::new(move || {
             let actor_id = id_for_factory.clone();
             // Create mailbox and actor on a dedicated thread with a single current-thread runtime
@@ -108,16 +108,14 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
     let actor_ref =
         CoreActorRef::new(actor_id_from_legacy_test_id(&id)).expect("Failed to create actor ref");
 
-    // Convert RestartPolicy to RestartStrategy
-    let restart_strategy = match restart {
-        RestartPolicy::Permanent => RestartStrategy::Permanent,
-        RestartPolicy::Transient => RestartStrategy::Transient,
-        RestartPolicy::Temporary => RestartStrategy::Temporary,
-        RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
+    let restart_policy = match restart {
+        RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => ProtoRestartPolicy::RestartPolicyPermanent,
+        RestartPolicy::Transient => ProtoRestartPolicy::RestartPolicyTransient,
+        RestartPolicy::Temporary => ProtoRestartPolicy::RestartPolicyTemporary,
     };
 
     ChildSpec::worker_sync(actor_id_from_legacy_test_id(&id), sync_factory, actor_ref)
-        .with_restart(restart_strategy)
+        .with_restart(restart_policy)
 }
 
 // ============================================================================
@@ -177,12 +175,12 @@ async fn test_two_level_supervision_tree() {
 
         // Consume ChildStarted event from child supervisor
         let event = child_events.recv().await.unwrap();
-        match event {
-            SupervisorEvent::ChildStarted(id) => {
-                println!("  ✅ Actor {} started under child supervisor", id);
-            }
-            _ => panic!("Expected ChildStarted"),
-        }
+        assert_eq!(
+            event.event_type,
+            ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+            "Expected ChildStarted"
+        );
+        println!("  ✅ Actor {} started under child supervisor", event.actor_id);
     }
 
     // TODO: Add child supervisor to root supervisor
@@ -290,22 +288,22 @@ async fn test_three_level_supervision_tree() {
 
     // Consume ChildStarted events for supervisors
     let event1 = root_events.recv().await.unwrap();
-    match event1 {
-        SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id.name(), "mid-supervisor-1");
-            println!("✅ Received ChildStarted event for mid-supervisor-1");
-        }
-        _ => panic!("Expected ChildStarted for mid-supervisor-1"),
-    }
+    assert_eq!(
+        event1.event_type,
+        ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+        "Expected ChildStarted for mid-supervisor-1"
+    );
+    assert_eq!(ActorId::from(event1.actor_id.clone()).name(), "mid-supervisor-1");
+    println!("✅ Received ChildStarted event for mid-supervisor-1");
 
     let event2 = root_events.recv().await.unwrap();
-    match event2 {
-        SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id.name(), "mid-supervisor-2");
-            println!("✅ Received ChildStarted event for mid-supervisor-2");
-        }
-        _ => panic!("Expected ChildStarted for mid-supervisor-2"),
-    }
+    assert_eq!(
+        event2.event_type,
+        ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+        "Expected ChildStarted for mid-supervisor-2"
+    );
+    assert_eq!(ActorId::from(event2.actor_id.clone()).name(), "mid-supervisor-2");
+    println!("✅ Received ChildStarted event for mid-supervisor-2");
 
     println!("✅ Test passed: Three-level tree created with 2 mid-supervisors and 4 actors");
 }
@@ -527,12 +525,12 @@ async fn test_cascading_shutdown() {
             .recv()
             .await
             .expect("ChildStarted for mid supervisor");
-        match event {
-            SupervisorEvent::ChildStarted(id) => {
-                assert_eq!(id.name(), expected, "mid supervisor start order");
-            }
-            other => panic!("expected ChildStarted for {expected}, got {other:?}"),
-        }
+        assert_eq!(
+            event.event_type,
+            ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+            "expected ChildStarted for {expected}, got event_type={}", event.event_type
+        );
+        assert_eq!(ActorId::from(event.actor_id.clone()).name(), expected, "mid supervisor start order");
     }
 
     root_supervisor.shutdown().await.unwrap();
@@ -550,10 +548,10 @@ async fn test_cascading_shutdown() {
         }
 
         match tokio::time::timeout(remaining, root_events.recv()).await {
-            Ok(Some(SupervisorEvent::ChildStopped(id))) => {
-                let name = id.name();
+            Ok(Some(event)) if event.event_type == ProtoSupervisorEventType::SupervisorEventChildStopped as i32 => {
+                let name = ActorId::from(event.actor_id.clone()).name().to_string();
                 if name == "mid-supervisor-1" || name == "mid-supervisor-2" {
-                    stopped.insert(name.to_string());
+                    stopped.insert(name);
                 }
             }
             Ok(Some(_)) => {}
@@ -653,13 +651,13 @@ async fn test_dynamic_tree_modification() {
 
     // Consume ChildStarted event
     let event = root_events.recv().await.unwrap();
-    match event {
-        SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id.name(), "mid-supervisor-1");
-            println!("✅ Added mid-supervisor-1 dynamically");
-        }
-        _ => panic!("Expected ChildStarted for mid-supervisor-1"),
-    }
+    assert_eq!(
+        event.event_type,
+        ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+        "Expected ChildStarted for mid-supervisor-1"
+    );
+    assert_eq!(ActorId::from(event.actor_id.clone()).name(), "mid-supervisor-1");
+    println!("✅ Added mid-supervisor-1 dynamically");
 
     // Create and add second mid-level supervisor dynamically
     let (mid2_supervisor, mid2_events) = Supervisor::new(
@@ -684,13 +682,13 @@ async fn test_dynamic_tree_modification() {
 
     // Consume ChildStarted event
     let event = root_events.recv().await.unwrap();
-    match event {
-        SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id.name(), "mid-supervisor-2");
-            println!("✅ Added mid-supervisor-2 dynamically");
-        }
-        _ => panic!("Expected ChildStarted for mid-supervisor-2"),
-    }
+    assert_eq!(
+        event.event_type,
+        ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+        "Expected ChildStarted for mid-supervisor-2"
+    );
+    assert_eq!(ActorId::from(event.actor_id.clone()).name(), "mid-supervisor-2");
+    println!("✅ Added mid-supervisor-2 dynamically");
 
     // Create and add third mid-level supervisor dynamically (after initial setup)
     println!("\n📝 Adding third supervisor dynamically to running tree...");
@@ -717,13 +715,13 @@ async fn test_dynamic_tree_modification() {
 
     // Consume ChildStarted event
     let event = root_events.recv().await.unwrap();
-    match event {
-        SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id.name(), "mid-supervisor-3");
-            println!("✅ Added mid-supervisor-3 dynamically to running tree");
-        }
-        _ => panic!("Expected ChildStarted for mid-supervisor-3"),
-    }
+    assert_eq!(
+        event.event_type,
+        ProtoSupervisorEventType::SupervisorEventChildStarted as i32,
+        "Expected ChildStarted for mid-supervisor-3"
+    );
+    assert_eq!(ActorId::from(event.actor_id.clone()).name(), "mid-supervisor-3");
+    println!("✅ Added mid-supervisor-3 dynamically to running tree");
 
     println!("\n✅ Test passed: Dynamic tree modification verified");
     println!("   - Successfully added 3 child supervisors dynamically");

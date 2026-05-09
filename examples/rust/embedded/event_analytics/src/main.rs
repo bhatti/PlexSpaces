@@ -40,8 +40,7 @@
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, RequestContext, Message,
-    NodeBuilder, spawn_gen_server, json, Value, GenServerRef,
-};
+    NodeBuilder, spawn_gen_server, json, Value, GenServerRef,, RequestContextExt};
 use plexspaces_node::CoordinationComputeTracker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -51,7 +50,7 @@ use tracing::{info, Level};
 use anyhow::Result;
 
 // Required for macro-generated code
-extern crate plexspaces_core;
+
 extern crate plexspaces_behavior;
 
 // =============================================================================

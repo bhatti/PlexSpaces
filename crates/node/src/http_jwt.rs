@@ -47,6 +47,7 @@ pub use plexspaces_grpc_middleware::jwt::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_actor::RequestContextExt;
 
     fn make_token(secret: &str, tenant_id: &str, exp_offset_secs: i64) -> String {
         #[derive(serde::Serialize)]

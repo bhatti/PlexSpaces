@@ -6,7 +6,7 @@
 
 #[cfg(feature = "sql-backend")]
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
     use std::sync::Arc;

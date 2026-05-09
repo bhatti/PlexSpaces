@@ -20,7 +20,7 @@
 //!
 //! ## Purpose
 //! Provides adapter implementations that wrap Node's services to implement
-//! the traits defined in `plexspaces_core::actor_context`.
+//! the traits defined in `plexspaces_actor::actor_context`.
 //!
 //! ## Design Decision
 //! These wrappers are in the `node` crate (not `core`) to avoid circular dependencies:
@@ -32,10 +32,11 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
-use plexspaces_core::actor_context::{
+use plexspaces_actor::actor_context::{
     ActorService, ChannelService, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_core::Service;
+use plexspaces_common::ServiceNameExt;
+use plexspaces_actor::Service;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
@@ -124,7 +125,7 @@ impl Default for ChannelServiceWrapper {
 
 impl Service for ChannelServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::CHANNEL_SERVICE.to_string()
+        plexspaces_actor::ServiceName::ServiceNameChannelService.as_str().to_string()
     }
 }
 
@@ -183,7 +184,7 @@ impl ProcessGroupServiceWrapper {
 
 impl Service for ProcessGroupServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_core::service_names::PROCESS_GROUP_REGISTRY.to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
     }
 }
 
@@ -191,7 +192,7 @@ impl Service for ProcessGroupServiceWrapper {
 impl ProcessGroupService for ProcessGroupServiceWrapper {
     async fn create_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.registry
@@ -203,7 +204,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn delete_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.registry
@@ -214,7 +215,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn join_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         actor_id: &str,
         topics: Vec<String>,
@@ -223,7 +224,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         // This is a convenience - in production, groups should be created explicitly
         let _ = self.registry.create_group(ctx, group_name).await;
 
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
         let actor_id = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid actor ID for group member '{actor_id}': {e}"))?;
 
@@ -235,11 +236,11 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn leave_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_core::ActorId;
+        use plexspaces_actor::ActorId;
         let actor_id = ActorId::from_canonical(actor_id)
             .map_err(|e| format!("Invalid actor ID for group member '{actor_id}': {e}"))?;
 
@@ -251,7 +252,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn get_members(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ids = self
@@ -266,7 +267,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn get_local_members(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let actor_ids = self
@@ -281,7 +282,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn list_groups(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         self.registry
             .list_groups(ctx)
@@ -291,7 +292,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
 
     async fn publish_to_group(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         group_name: &str,
         topic: Option<&str>,
         message: Message,

@@ -32,9 +32,10 @@
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::v1::application::HealthStatus;
-use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
+use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_actor::{Supervisor, SupervisionStrategy};
-use plexspaces_core::{ActorId, ExitReason};
+use plexspaces_actor::{ActorId, ExitReason};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -64,7 +65,7 @@ pub struct SpecApplication {
     /// Node reference (for spawning actors)
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
     /// Behavior factory for dynamic actor spawning (optional)
-    behavior_factory: Option<Arc<dyn plexspaces_core::behavior_factory::BehaviorFactory + Send + Sync>>,
+    behavior_factory: Option<Arc<dyn plexspaces_actor::behavior_factory::BehaviorFactory + Send + Sync>>,
     /// Root supervisor handle (for graceful shutdown with Supervisor::shutdown())
     root_supervisor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Root supervisor (for shutdown)
@@ -97,7 +98,7 @@ impl SpecApplication {
     ///
     /// ## Example
     /// ```rust
-    /// use plexspaces_core::behavior_factory::BehaviorRegistry;
+    /// use plexspaces_actor::behavior_factory::BehaviorRegistry;
     ///
     /// let mut registry = BehaviorRegistry::new();
     /// registry.register_simple("my_app::Worker", || Worker::new());
@@ -106,7 +107,7 @@ impl SpecApplication {
     /// ```
     pub fn with_behavior_factory(
         spec: ApplicationSpec,
-        behavior_factory: Arc<dyn plexspaces_core::behavior_factory::BehaviorFactory>,
+        behavior_factory: Arc<dyn plexspaces_actor::behavior_factory::BehaviorFactory>,
     ) -> Self {
         Self {
             spec,
@@ -151,7 +152,7 @@ impl SpecApplication {
     async fn initialize_supervisor_tree(
         &self,
         node: Arc<dyn ApplicationNode>,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
     ) -> Result<Vec<String>, ApplicationError> {
         let mut actor_ids = Vec::new();
@@ -200,23 +201,10 @@ impl SpecApplication {
             } else {
                 self.spec.namespace.clone()
             };
-            let actor_id = plexspaces_core::ActorId::new(
-                identity.name.as_str(),
-                &actor_type,
-                &effective_namespace,
-                node.id().as_str(),
-            )
-            .map_err(|e| {
-                ApplicationError::ConfigError(format!(
-                    "Invalid child actor ID for '{}' in application '{}': {}",
-                    identity.name, self.spec.name, e
-                ))
-            })?;
-
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
             // Tenant/namespace: use effective_namespace derived above.
-            use plexspaces_core::{ActorFactory, RequestContext};
+            use plexspaces_actor::{ActorFactory, RequestContext, RequestContextExt};
             let tenant_id = String::new();
             let namespace = effective_namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
@@ -267,34 +255,47 @@ impl SpecApplication {
 
             // Spawn actor with facets using ActorFactory
             // Check if this child is a supervisor - if so, recursively spawn its children
-            use plexspaces_proto::application::v1::ChildType as ProtoChildType;
-            let child_type = ProtoChildType::try_from(child.r#type())
-                .unwrap_or(ProtoChildType::ChildTypeUnspecified);
+            let is_supervisor = child.role == "supervisor";
+            let spawn_spec = {
+                use plexspaces_actor::ActorSpawnSpec;
+                use plexspaces_proto::common::v1::ActorIdentity;
+                ActorSpawnSpec {
+                    identity: Some(ActorIdentity {
+                        name: identity.name.clone(),
+                        actor_type: actor_type.clone(),
+                    }),
+                    role: child.role.clone(),
+                    namespace: effective_namespace.clone(),
+                    tenant_id: String::new(),
+                    visibility: 0,
+                    behavior_kind: String::new(),
+                    args: child.args.clone(),
+                    facets: child.facets.clone(),
+                    config: None,
+                    labels: std::collections::HashMap::new(),
+                }
+            };
 
-            if child_type == ProtoChildType::ChildTypeSupervisor {
+            if is_supervisor {
                 // Spawn the supervisor actor first
-                match actor_factory
-                    .spawn_actor(
-                        &ctx,
-                        &actor_id,
-                        &actor_type,
-                        vec![],             // initial_state
-                        None,               // config
-                        child.args.clone(), // labels (using args as labels for now)
-                        facets,             // facets from ChildSpec
-                    )
-                    .await
-                {
-                    Ok(_message_sender) => {
+                match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
+                    Ok(message_sender) => {
+                        let spawned_actor_id =
+                            message_sender.actor_id().ok_or_else(|| {
+                                ApplicationError::StartupFailed(format!(
+                                    "Spawned supervisor actor '{}' did not return canonical actor ID",
+                                    identity.name
+                                ))
+                            })?;
                         debug!(
                             application = %self.spec.name,
                             child_name = %identity.name,
                             actor_type = %actor_type,
-                            actor_id = %actor_id,
+                            actor_id = %spawned_actor_id,
                             facet_count = child.facets.len(),
                             "Spawned supervisor actor"
                         );
-                        actor_ids.push(actor_id.to_string());
+                        actor_ids.push(spawned_actor_id);
                     }
                     Err(e) => {
                         error!(
@@ -330,28 +331,24 @@ impl SpecApplication {
                 }
             } else {
                 // Regular worker - spawn normally
-                match actor_factory
-                    .spawn_actor(
-                        &ctx,
-                        &actor_id,
-                        &actor_type,
-                        vec![],             // initial_state
-                        None,               // config
-                        child.args.clone(), // labels (using args as labels for now)
-                        facets,             // facets from ChildSpec
-                    )
-                    .await
-                {
-                    Ok(_message_sender) => {
+                match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
+                    Ok(message_sender) => {
+                        let spawned_actor_id =
+                            message_sender.actor_id().ok_or_else(|| {
+                                ApplicationError::StartupFailed(format!(
+                                    "Spawned actor '{}' did not return canonical actor ID",
+                                    identity.name
+                                ))
+                            })?;
                         debug!(
                             application = %self.spec.name,
                             child_name = %identity.name,
                             actor_type = %actor_type,
-                            actor_id = %actor_id,
+                            actor_id = %spawned_actor_id,
                             facet_count = child.facets.len(),
                             "Spawned actor with facets"
                         );
-                        actor_ids.push(actor_id.to_string());
+                        actor_ids.push(spawned_actor_id);
                     }
                     Err(e) => {
                         error!(
@@ -631,7 +628,7 @@ impl Application for SpecApplication {
             
             let mut errors = Vec::new();
             {
-                use plexspaces_core::{ActorFactory, RequestContext};
+                use plexspaces_actor::{ActorFactory, RequestContext, RequestContextExt};
 
                 let actor_factory = service_locator.get_actor_factory().await
                     .ok_or_else(|| ApplicationError::ActorStopFailed(
@@ -738,7 +735,7 @@ impl SpecApplication {
         has_behavior_factory: bool,
     ) -> Result<(), ApplicationError> {
         // Validate supervision strategy
-        use plexspaces_proto::application::v1::SupervisionStrategy as ProtoSupervisionStrategy;
+        use plexspaces_proto::supervision::v1::SupervisionStrategy as ProtoSupervisionStrategy;
         let strategy = ProtoSupervisionStrategy::try_from(supervisor_spec.strategy())
             .unwrap_or(ProtoSupervisionStrategy::SupervisionStrategyUnspecified);
         if strategy == ProtoSupervisionStrategy::SupervisionStrategyUnspecified {
@@ -763,19 +760,16 @@ impl SpecApplication {
                     ))
                 })?;
 
-            // Validate child type
-            use plexspaces_proto::application::v1::ChildType as ProtoChildType;
-            let child_type = ProtoChildType::try_from(child.r#type())
-                .unwrap_or(ProtoChildType::ChildTypeUnspecified);
-            if child_type == ProtoChildType::ChildTypeUnspecified {
+            // Validate child role
+            if child.role.is_empty() {
                 return Err(ApplicationError::ConfigError(format!(
-                    "Child '{}' at index {} has unspecified type in application '{}'",
+                    "Child '{}' at index {} has empty role in application '{}'",
                     identity.name, idx, app_name
                 )));
             }
 
             // Validate restart policy
-            use plexspaces_proto::application::v1::RestartPolicy as ProtoRestartPolicy;
+            use plexspaces_proto::supervision::v1::RestartPolicy as ProtoRestartPolicy;
             let restart_val = child.restart();
             let restart = ProtoRestartPolicy::try_from(restart_val)
                 .unwrap_or(ProtoRestartPolicy::RestartPolicyUnspecified);
@@ -787,7 +781,7 @@ impl SpecApplication {
             }
 
             // Validate nested supervisor spec if child is a supervisor
-            if child_type == ProtoChildType::ChildTypeSupervisor {
+            if child.role == "supervisor" {
                 if child.supervisor.is_none() {
                     return Err(ApplicationError::ConfigError(format!(
                         "Child supervisor '{}' at index {} missing supervisor specification in application '{}'",
@@ -822,10 +816,8 @@ impl SpecApplication {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_proto::application::v1::{
-        ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, SupervisorSpec,
-        SupervisionStrategy,
-    };
+    use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType};
+    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
     use prost_types::Duration as ProtoDuration;
     use tokio::sync::RwLock;
 
@@ -835,7 +827,7 @@ mod tests {
         addr: String,
         spawned_actors: Arc<RwLock<Vec<String>>>,
         stopped_actors: Arc<RwLock<Vec<String>>>,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     }
 
     impl MockNode {
@@ -870,7 +862,7 @@ mod tests {
             &self.addr
         }
 
-        fn service_locator(&self) -> Option<Arc<plexspaces_core::ServiceLocator>> {
+        fn service_locator(&self) -> Option<Arc<plexspaces_actor::ServiceLocator>> {
             Some(self.service_locator.clone())
         }
     }
@@ -898,7 +890,7 @@ mod tests {
                             name: "worker1".to_string(),
                             actor_type: "worker1".to_string(),
                         }),
-                        r#type: ChildType::ChildTypeWorker as i32,
+                        role: "worker".to_string(),
                         restart: RestartPolicy::RestartPolicyPermanent as i32,
                         shutdown_timeout: Some(ProtoDuration {
                             seconds: 10,
@@ -911,7 +903,7 @@ mod tests {
                             name: "worker2".to_string(),
                             actor_type: "worker2".to_string(),
                         }),
-                        r#type: ChildType::ChildTypeWorker as i32,
+                        role: "worker".to_string(),
                         restart: RestartPolicy::RestartPolicyTransient as i32,
                         shutdown_timeout: Some(ProtoDuration {
                             seconds: 5,
@@ -920,6 +912,7 @@ mod tests {
                         ..Default::default()
                     },
                 ],
+                ..Default::default()
             }),
             ..Default::default()
         }

@@ -28,7 +28,7 @@
 use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitAction, ExitReason,
     Message,
 };
@@ -56,7 +56,7 @@ impl EdgeCaseActor {
 }
 
 #[async_trait]
-impl plexspaces_core::Actor for EdgeCaseActor {
+impl plexspaces_actor::Actor for EdgeCaseActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         // Simulate init that might be called multiple times (shouldn't happen, but test it)
         if self
@@ -90,8 +90,8 @@ impl plexspaces_core::Actor for EdgeCaseActor {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -231,7 +231,7 @@ async fn test_init_error_properly_handled() {
     struct FailingInitActor;
 
     #[async_trait]
-    impl plexspaces_core::Actor for FailingInitActor {
+    impl plexspaces_actor::Actor for FailingInitActor {
         async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
             Err(ActorError::InvalidState(
                 "init failed: database connection error".to_string(),
@@ -246,8 +246,8 @@ async fn test_init_error_properly_handled() {
             Ok(())
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 
@@ -281,7 +281,7 @@ async fn test_terminate_error_doesnt_prevent_shutdown() {
     struct FailingTerminateActor;
 
     #[async_trait]
-    impl plexspaces_core::Actor for FailingTerminateActor {
+    impl plexspaces_actor::Actor for FailingTerminateActor {
         async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
             Ok(())
         }
@@ -302,8 +302,8 @@ async fn test_terminate_error_doesnt_prevent_shutdown() {
             Err(ActorError::InvalidState("terminate failed".to_string()))
         }
 
-        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-            plexspaces_core::BehaviorType::GenServer
+        fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+            plexspaces_actor::BehaviorType::GenServer
         }
     }
 

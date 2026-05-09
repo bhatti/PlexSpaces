@@ -27,11 +27,10 @@ use async_trait::async_trait;
 use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
-use plexspaces_core::Message;
-use plexspaces_core::{
+use plexspaces_actor::Message;
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    RequestContext, ServiceLocator,
-};
+    RequestContext, ServiceLocator, RequestContextExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use ulid::Ulid;
@@ -45,7 +44,7 @@ fn make_spawn_spec(
     actor_type: &str,
 ) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
     use plexspaces_proto::common::v1::ActorIdentity;
-    plexspaces_core::ActorSpawnSpec {
+    plexspaces_actor::ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: actor_id.name().to_string(),
             actor_type: actor_type.to_string(),
@@ -89,23 +88,22 @@ impl ActorTrait for TestBehavior {
 }
 
 async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
-    use plexspaces_core::BehaviorRegistry;
+    use plexspaces_actor::{BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_node::create_default_service_locator;
     let sl = create_default_service_locator(Some("test-node".to_string()), None).await;
-    // Register a BehaviorRegistry with test actor types so spawn_actor can create behaviors
     let registry = Arc::new(BehaviorRegistry::new());
     registry
         .register("test", |_args| {
-            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     registry
         .register("gen_server", |_args| {
-            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     sl.register_behavior_registry(registry).await;
-    sl
+    sl as Arc<dyn ServiceLocator>
 }
 
 #[tokio::test]
@@ -118,7 +116,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
 
     // Spawn actor using spawn_actor
     let actor_id = test_actor_id("test-actor");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -151,7 +149,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
 
     // Spawn actor — actor_id type must match spec actor_type
     let actor_id = ActorId::new("test-actor", "test", "default", "test-node").unwrap();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -174,7 +172,7 @@ async fn test_multiple_actors_spawned_via_factory() {
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
 
     // Spawn multiple actors using spawn_actor
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );

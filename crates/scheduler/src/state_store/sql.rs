@@ -21,7 +21,7 @@
 use crate::state_store::SchedulingStateStore;
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::scheduling::v1::{SchedulingRequest, SchedulingStatus};
 use plexspaces_proto::v1::actor::ActorResourceRequirements;
 use prost::Message;

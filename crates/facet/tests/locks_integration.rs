@@ -8,10 +8,9 @@
 // the LockManager from ServiceLocator (based on node config).
 
 use plexspaces_actor::{create_facet_from_proto, ActorRef};
-use plexspaces_core::{
+use plexspaces_actor::{
     service_locator_trait::ServiceLocator, Actor as ActorTrait, ActorContext, ActorId,
-    LockManager as CoreLockManager,
-};
+    InitializableServiceLocator, LockManager as CoreLockManager, RequestContextExt, ServiceLocatorBase};
 use plexspaces_facet::capabilities::locks::LockFacet;
 use plexspaces_mailbox::{new_message, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -65,11 +64,11 @@ async fn get_shared_node() -> Arc<Node> {
             .await,
     );
 
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_actor::Actor>) })
         })
         .await;
     node.service_locator()
@@ -99,12 +98,12 @@ impl ActorTrait for EchoBehavior {
         &mut self,
         _ctx: &ActorContext,
         _message: plexspaces_proto::common::v1::Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -215,7 +214,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
         .expect("LockManager should be registered");
 
     let node_id = node.id();
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
@@ -331,7 +330,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 node_id.as_str(),
             )
             .expect("test actor id should be valid");
-            let ctx1 = plexspaces_core::RequestContext::new_without_auth(
+            let ctx1 = plexspaces_actor::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),
             );
@@ -398,7 +397,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 node_id.as_str(),
             )
             .expect("test actor id should be valid");
-            let ctx2 = plexspaces_core::RequestContext::new_without_auth(
+            let ctx2 = plexspaces_actor::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),
             );

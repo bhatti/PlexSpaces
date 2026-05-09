@@ -5,9 +5,8 @@
 // Tests local/remote scenarios, error handling, and edge cases
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, ServiceLocator,
-};
+use plexspaces_actor::{
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, ServiceLocator, RequestContextExt};
 use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -42,7 +41,7 @@ struct ObjectRegistryAdapter {
 impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn lookup(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_id: &str,
         object_type: Option<ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -60,7 +59,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn lookup_full(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
@@ -77,7 +76,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn register(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
@@ -90,7 +89,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn discover(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: Option<ObjectType>,
         object_category: Option<String>,
         capabilities: Option<Vec<String>>,
@@ -121,7 +120,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn unregister(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -138,7 +137,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
     async fn heartbeat(
         &self,
-        ctx: &plexspaces_core::RequestContext,
+        ctx: &plexspaces_actor::RequestContext,
         object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -190,7 +189,7 @@ async fn test_remote_actor_ref_node_not_found() {
 
     // Send message should fail with node not found
     let message = create_test_message(b"test".to_vec());
-    let ctx = plexspaces_core::RequestContext::new_without_auth("test".into(), "default".into());
+    let ctx = plexspaces_actor::RequestContext::new_without_auth("test".into(), "default".into());
     let result = actor_ref.tell(&ctx, message).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -211,7 +210,7 @@ async fn test_remote_actor_ref_connection_failure() {
         Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
 
     // Register node with unreachable address
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -284,7 +283,7 @@ async fn test_remote_actor_ref_ask_timeout() {
         namespace: "default".to_string(),
         ..Default::default()
     };
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );
@@ -337,7 +336,7 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
         Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
 
     // Register node
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "default".to_string(),
         "default".to_string(),
     );

@@ -6,7 +6,7 @@
 
 #[cfg(feature = "firecracker")]
 mod firecracker_integration_tests {
-    use plexspaces_common::test_helpers::docker_available;
+    use plexspaces_common::test_helpers::{docker_available, firecracker_available};
     use plexspaces_proto::firecracker::v1::{
         firecracker_vm_service_client::FirecrackerVmServiceClient, BootVmRequest, CreateVmRequest,
         DeployApplicationRequest, GetVmStateRequest, ListVmsRequest, StopVmRequest,
@@ -60,8 +60,8 @@ mod firecracker_integration_tests {
 
     /// Helper to build Docker image (using docker-compose)
     fn build_docker_image() -> Result<(), Box<dyn std::error::Error>> {
-        if !docker_available() {
-            return Err("Docker is not available".into());
+        if !docker_available() || !firecracker_available() {
+            return Err("Docker or Firecracker not available".into());
         }
 
         let project_root = get_project_root();
@@ -240,9 +240,9 @@ mod firecracker_integration_tests {
     /// 5. Verifies VM was created successfully
     #[tokio::test]
     async fn test_create_vm_via_grpc() {
-        // Skip test if Docker is not available
-        if !docker_available() {
-            eprintln!("Skipping test: Docker is not available");
+        // Skip test if Docker or Firecracker is not available
+        if !docker_available() || !firecracker_available() {
+            eprintln!("Skipping test: Docker or Firecracker not available");
             return;
         }
 
@@ -292,8 +292,8 @@ mod firecracker_integration_tests {
     /// 3. Verifies the created VM appears in the list
     #[tokio::test]
     async fn test_list_vms_via_grpc() {
-        if !docker_available() {
-            eprintln!("Skipping test: Docker is not available");
+        if !docker_available() || !firecracker_available() {
+            eprintln!("Skipping test: Docker or Firecracker not available");
             return;
         }
         build_docker_image().expect("Failed to build Docker image");
@@ -346,8 +346,8 @@ mod firecracker_integration_tests {
     /// 3. Verifies state is correct
     #[tokio::test]
     async fn test_get_vm_state_via_grpc() {
-        if !docker_available() {
-            eprintln!("Skipping test: Docker is not available");
+        if !docker_available() || !firecracker_available() {
+            eprintln!("Skipping test: Docker or Firecracker not available");
             return;
         }
 
@@ -399,8 +399,8 @@ mod firecracker_integration_tests {
     /// 2. Verifies deployment succeeds (VM is created if needed)
     #[tokio::test]
     async fn test_deploy_application_via_grpc() {
-        if !docker_available() {
-            eprintln!("Skipping test: Docker is not available");
+        if !docker_available() || !firecracker_available() {
+            eprintln!("Skipping test: Docker or Firecracker not available");
             return;
         }
 
@@ -435,8 +435,8 @@ mod firecracker_integration_tests {
     /// 4. Stop VM
     #[tokio::test]
     async fn test_vm_lifecycle_via_grpc() {
-        if !docker_available() {
-            eprintln!("Skipping test: Docker is not available");
+        if !docker_available() || !firecracker_available() {
+            eprintln!("Skipping test: Docker or Firecracker not available");
             return;
         }
 

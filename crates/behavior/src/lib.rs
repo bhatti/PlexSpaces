@@ -16,62 +16,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! OTP-style behaviors for PlexSpaces actors
+//! Shim crate: behavior is now part of plexspaces-actor.
 //!
-//! This module provides Erlang/OTP-inspired behaviors for actors:
-//! - GenServer: Request/reply patterns
-//! - GenEvent: Event handling
-//! - GenStateMachine: Finite state machines
-//! - Workflow: Restate-inspired durable workflows
-//!
-//! ## High-Level Actor References
-//! For cleaner APIs, use the typed actor references from `plexspaces-actor`:
-//! - `WorkflowRef`: Durable workflow operations (run/signal/query)
-//! - `GenServerRef`: Request-reply (call/cast) operations
-//! - `FsmRef`: State machine transitions and queries
-//! - `EventRef`: Fire-and-forget event emission
-//!
-//! ## Example
-//! ```ignore
-//! use plexspaces_actor::{WorkflowRef, GenServerRef, FsmRef, EventRef};
-//!
-//! // Workflow: durable execution
-//! let result: Output = workflow.run(&input).await?;
-//!
-//! // GenServer: request-reply
-//! let result: Response = server.call("operation", &request).await?;
-//!
-//! // FSM: state transitions
-//! fsm.transition("event", &data).await?;
-//!
-//! // Event: fire-and-forget
-//! logger.emit("user_login", &event).await?;
-//! ```
+//! This crate re-exports everything from `plexspaces_actor::behavior` for
+//! backward compatibility during the transition period.
 
-#![warn(missing_docs)]
-#![warn(clippy::all)]
-
-// Main behavior module
-mod r#mod;
-pub use r#mod::*;
-
-// Workflow execution context
-pub mod workflow;
-
-// Simplified behavior (experimental)
-pub mod simplified;
-
-// Comprehensive tests for GenServer behavior
-#[cfg(test)]
-mod genserver_tests;
-
-// Comprehensive tests for GenEvent behavior
-#[cfg(test)]
-mod genevent_tests;
-
-// Comprehensive tests for GenStateMachine (FSM) behavior
-#[cfg(test)]
-mod genfsm_tests;
-
-// Integration tests for reply routing
-// Note: reply_routing_tests.rs was removed - functionality moved to behavior implementations
+// Re-export everything from plexspaces_actor::behavior
+pub use plexspaces_actor::behavior::*;
+// Also re-export the sub-modules
+pub use plexspaces_actor::behavior::workflow;
+pub use plexspaces_actor::behavior::simplified;

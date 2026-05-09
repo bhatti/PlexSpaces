@@ -77,7 +77,7 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::{DateTime, Utc};
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::prost_types::Timestamp;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -89,7 +89,7 @@ use ulid::Ulid;
 /// ## Example
 /// ```rust,no_run
 /// use plexspaces_locks::{LockManager, ddb::DynamoDBLockManager};
-/// use plexspaces_common::RequestContext;
+/// use plexspaces_common::{RequestContext, RequestContextExt};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let manager = DynamoDBLockManager::new(

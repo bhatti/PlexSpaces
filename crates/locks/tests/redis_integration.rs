@@ -38,7 +38,8 @@
 
 #[cfg(feature = "redis-backend")]
 mod tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::test_helpers::redis_available;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_locks::{
         redis::RedisLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions,
         RenewLockOptions,
@@ -53,17 +54,23 @@ mod tests {
 
     /// Helper to check if Redis is available and skip test with warning if not
     async fn check_redis_available() -> bool {
-        let redis_url =
-            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
-        match RedisLockManager::new(&redis_url).await {
-            Ok(_) => true,
-            Err(_) => {
-                eprintln!("⚠️  WARNING: Redis is not available. Skipping Redis test.");
+        if std::env::var("REDIS_URL").is_ok() {
+            let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL just checked");
+            if RedisLockManager::new(&redis_url).await.is_ok() {
+                true
+            } else {
                 eprintln!(
-                    "   To run Redis tests, start Redis: docker run -p 6379:6379 redis:latest"
+                    "⚠️  WARNING: Redis at REDIS_URL={} is not available. Skipping Redis test.",
+                    redis_url
                 );
                 false
             }
+        } else if redis_available().await {
+            true
+        } else {
+            eprintln!("⚠️  WARNING: Redis is not available. Skipping Redis test.");
+            eprintln!("   To run Redis tests, start Redis: docker run -p 6379:6379 redis:latest");
+            false
         }
     }
 

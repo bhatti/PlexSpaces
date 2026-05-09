@@ -52,7 +52,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
 # Integration test dependencies
 plexspaces-actor = { path = "../actor" }
-plexspaces-core = { workspace = true }
 plexspaces-mailbox = { workspace = true }
 plexspaces-node = { path = "../node" }
 plexspaces-locks = { path = "../locks", features = ["sqlite-backend"] }

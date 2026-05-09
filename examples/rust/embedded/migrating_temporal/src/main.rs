@@ -5,7 +5,7 @@
 // example without needing `--bin temporal-comparison`.
 
 use plexspaces_behavior::Workflow;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContextExt};
 use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 use plexspaces_node::NodeBuilder;
 use plexspaces_sdk::new_message;
@@ -309,7 +309,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let actor_name = format!("order-workflow-{}", order.id);
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "workflows".to_string(),
         "orders".to_string(),
     );
@@ -416,7 +416,7 @@ mod tests {
         let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
 
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(
             "workflows".to_string(),
             "orders".to_string(),
         );

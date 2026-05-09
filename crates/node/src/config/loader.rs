@@ -61,6 +61,21 @@ pub enum ConfigLoaderError {
     EnvSubstitutionError(String),
 }
 
+impl ConfigLoaderError {
+    /// Returns the proto error code corresponding to this error variant.
+    pub fn code(&self) -> plexspaces_proto::config::v1::ConfigErrorCode {
+        use plexspaces_proto::config::v1::ConfigErrorCode;
+        match self {
+            ConfigLoaderError::IoError { .. } => ConfigErrorCode::ConfigErrorIo,
+            ConfigLoaderError::YamlError { .. } => ConfigErrorCode::ConfigErrorParse,
+            ConfigLoaderError::SecurityError(_) => ConfigErrorCode::ConfigErrorSecurity,
+            ConfigLoaderError::EnvSubstitutionError(_) => {
+                ConfigErrorCode::ConfigErrorEnvSubstitution
+            }
+        }
+    }
+}
+
 /// Config loader with environment variable precedence and security validation
 pub struct ConfigLoader {
     /// Whether to validate security (default: true)

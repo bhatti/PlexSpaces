@@ -27,7 +27,7 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 [dependencies]
 # PlexSpaces crates
 plexspaces-common = { path = "../common" }
-plexspaces-core = { path = "../core" }
+plexspaces-service-traits = { path = "../service-traits" }
 plexspaces-proto = { path = "../proto" }
 plexspaces-mailbox = { path = "../mailbox" }
 plexspaces-facet = { path = "../facet" }

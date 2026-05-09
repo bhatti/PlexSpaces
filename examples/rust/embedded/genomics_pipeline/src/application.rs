@@ -37,7 +37,7 @@ use plexspaces_actor::supervisor::{
     SupervisionStrategy,
 };
 use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
-use plexspaces_core::{ActorId, ActorRef as CoreActorRef};
+use plexspaces_actor::{ActorId, ActorRef as CoreActorRef};
 use plexspaces_mailbox::{Mailbox, mailbox_config_default, OrderingStrategy, BackpressureStrategy};
 
 /// Genomics Pipeline Application
@@ -70,7 +70,7 @@ fn supervisor_label(pool: &str, node_id: &str) -> String {
 /// Helper to create a ChildSpec from a sync factory
 fn create_child_spec(
     child_actor_id: ActorId,
-    factory: Arc<dyn Fn() -> Result<plexspaces_actor::Actor, plexspaces_core::ActorError> + Send + Sync>,
+    factory: Arc<dyn Fn() -> Result<plexspaces_actor::Actor, plexspaces_actor::ActorError> + Send + Sync>,
     restart: RestartStrategy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
@@ -142,7 +142,7 @@ impl Application for GenomicsPipelineApplication {
         let node_id = node.id().to_string();
 
         // Create ServiceLocator for supervisors (use node's or fallback to stub)
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = node.service_locator()
+        let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> = node.service_locator()
             .unwrap_or_else(|| Arc::new(plexspaces_actor::TestServiceLocatorStub::new()));
 
         // Create supervisor for QC pool

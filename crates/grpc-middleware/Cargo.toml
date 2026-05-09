@@ -14,7 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 plexspaces-proto = { path = "../proto" }
 plexspaces-common = { path = "../common" }
-plexspaces-core = { path = "../core" }
+plexspaces-actor = { path = "../actor" }
 
 # gRPC
 tonic = { workspace = true }

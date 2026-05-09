@@ -384,7 +384,9 @@ import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/actors/types.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/supervision/supervision.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/actor_runtime;plexspaces_actor_v1";
@@ -590,98 +592,7 @@ message Actor {
   }];
 }
 
-// Actor lifecycle states.
-//
-// ## Purpose
-// Defines the state machine for actor lifecycle management and supervision.
-//
-// ## Why This Exists
-// - Enables supervision to track actor health and make restart decisions
-// - Supports graceful activation/deactivation (Orbit-inspired auto-activation)
-// - Allows migration state tracking for mobile agents
-// - Provides clear state transitions for debugging and monitoring
-//
-// ## State Transitions
-// ```
-// CREATING -> ACTIVATING -> ACTIVE -> DEACTIVATING -> INACTIVE
-//                        \-> MIGRATING -> ACTIVE (on new node)
-//                        \-> FAILED -> (supervisor restarts)
-//                        \-> TERMINATED (permanent stop)
-// ```
-//
-// ## Design Notes
-// - UNSPECIFIED should never occur in valid states (indicates error)
-// - ACTIVATING/DEACTIVATING enable graceful lifecycle management
-// - MIGRATING supports actor mobility between nodes
-// - FAILED triggers supervisor restart policies
-// - FAILED state includes error message for debugging (see Actor message for error details)
-enum ActorState {
-  ACTOR_STATE_UNSPECIFIED = 0;
-  ACTOR_STATE_CREATING = 1; // Actor is created but not yet started (replaces "Initializing")
-  ACTOR_STATE_ACTIVE = 2; // Actor is running and processing messages
-  ACTOR_STATE_INACTIVE = 3; // Actor is suspended/not processing (replaces "Suspended")
-  ACTOR_STATE_ACTIVATING = 4; // Actor is activating (loading state, running on_activate)
-  ACTOR_STATE_DEACTIVATING = 5; // Actor is deactivating (saving state, running on_deactivate)
-  ACTOR_STATE_STOPPING = 6; // Actor is stopping (shutdown in progress)
-  ACTOR_STATE_MIGRATING = 7; // Actor is migrating to another node
-  ACTOR_STATE_FAILED = 8; // Actor has crashed (error message in Actor.error_message field)
-  ACTOR_STATE_TERMINATED = 9; // Actor has permanently stopped (replaces "Stopped")
-}
-
-// Exit reason for actor termination (Erlang/OTP-style)
-//
-// ## Purpose
-// Defines why an actor terminated, enabling proper supervision decisions
-// and link/monitor propagation semantics.
-//
-// ## Erlang Equivalent
-// Maps to Erlang's exit reasons:
-// - normal: Normal termination (not an error)
-// - shutdown: Graceful shutdown requested
-// - kill: Forcefully killed
-// - {error, Reason}: Error with message
-// - {linked, Pid, Reason}: Linked actor died
-//
-// ## Usage
-// - Used in Actor::terminate() and Actor::handle_exit() lifecycle hooks
-// - Propagated to linked actors (if trap_exit=false, causes cascading crash)
-// - Used by supervisors to decide restart policies
-enum ExitReason {
-  EXIT_REASON_UNSPECIFIED = 0;
-  EXIT_REASON_NORMAL = 1; // Normal termination (not an error)
-  EXIT_REASON_SHUTDOWN = 2; // Shutdown requested (graceful)
-  EXIT_REASON_KILLED = 3; // Killed forcefully
-  EXIT_REASON_ERROR = 4; // Error with message (error_message field contains details)
-  EXIT_REASON_LINKED = 5; // Linked actor died (linked_actor_id and linked_reason fields)
-}
-
-// Exit action when handling EXIT from linked actor
-//
-// ## Purpose
-// Determines how an actor responds to EXIT signal from a linked actor.
-// Only relevant when ActorContext.trap_exit = true.
-//
-// ## Erlang Equivalent
-// Maps to Erlang's handle_exit behavior:
-// - Propagate: Actor will also terminate (default link behavior)
-// - Handle: Actor continues running (traps the exit)
-enum ExitAction {
-  EXIT_ACTION_UNSPECIFIED = 0;
-  EXIT_ACTION_PROPAGATE = 1; // Propagate exit - this actor will also terminate
-  EXIT_ACTION_HANDLE = 2; // Handle exit - this actor continues running
-}
-
-// Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
-message ExitReasonDetails {
-  // Error message (for EXIT_REASON_ERROR)
-  string error_message = 1 [(buf.validate.field).string.max_len = 2048];
-
-  // Linked actor ID (for EXIT_REASON_LINKED)
-  string linked_actor_id = 2 [(buf.validate.field).string.max_len = 255];
-
-  // Linked actor's exit reason (for EXIT_REASON_LINKED)
-  ExitReason linked_reason = 3;
-}
+// ActorState, ExitReason, ExitAction, ExitReasonDetails moved to types.proto (same package).
 
 // Actor configuration
 message ActorConfig {
@@ -703,7 +614,7 @@ message ActorConfig {
     lte: {seconds: 86400}
   }]; // 1 second to 24 hours
   plexspaces.common.v1.RetryPolicy restart_policy = 5;
-  SupervisionStrategy supervision_strategy = 6;
+  plexspaces.supervision.v1.SupervisionStrategy supervision_strategy = 6;
   map<string, google.protobuf.Any> properties = 7;
 
   // Orleans-inspired stateless worker configuration
@@ -1544,13 +1455,7 @@ enum ConsistencyLevel {
   CONSISTENCY_LEVEL_LINEARIZABLE = 4; // Strict consistency (coordination required)
 }
 
-// Supervision strategies
-enum SupervisionStrategy {
-  SUPERVISION_STRATEGY_UNSPECIFIED = 0;
-  SUPERVISION_STRATEGY_ONE_FOR_ONE = 1;
-  SUPERVISION_STRATEGY_ONE_FOR_ALL = 2;
-  SUPERVISION_STRATEGY_REST_FOR_ONE = 3;
-}
+// SupervisionStrategy moved to supervision.proto (plexspaces.supervision.v1).
 
 // Actor performance metrics
 message ActorMetrics {

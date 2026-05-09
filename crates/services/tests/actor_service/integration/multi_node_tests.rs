@@ -10,9 +10,10 @@
 use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    FacetManager, Message, MessageSender, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
+    FacetManager, InitializableServiceLocator, Message, MessageSender, ReplyWaiterRegistry,
+    RequestContext, VirtualActorManager, RequestContextExt,
 };
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
@@ -74,7 +75,7 @@ async fn create_test_registry_with_remote_actors(
     remote_node_id: &str,
     actor_ids: &[&str],
 ) -> (Arc<ActorRegistry>, Arc<ServiceLocatorImpl>) {
-    use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
 
     let object_repo = Arc::new(
@@ -224,7 +225,7 @@ async fn create_test_registry_with_remote_actors(
 
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    use plexspaces_core::FacetManagerServiceWrapper;
+    use plexspaces_actor::FacetManagerServiceWrapper;
     let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
         FacetManager::new(),
     )));
@@ -253,7 +254,7 @@ async fn create_test_registry_with_remote_actors(
         // Create actor using ActorBuilder
         let echo_actor = EchoActor::new();
         let actor_ref = ActorBuilder::new(Box::new(echo_actor) as Box<dyn ActorTrait>)
-            .with_id(local_actor_id.clone())
+            .with_name(local_actor_id.name().to_string())
             .with_namespace("default".to_string())
             .spawn(&ctx, service_locator.clone())
             .await

@@ -4,7 +4,7 @@ PlexSpaces provides language-specific SDKs for building actors with minimal boil
 
 ## SDK Architecture
 
-The SDK is a **thin decorator layer** over the core framework crates. Core functionality -- actor registry, message routing, supervision, and state management -- lives in the main crates (`crates/behavior`, `crates/services`, `crates/core`). The SDK simplifies the developer experience by removing boilerplate: decorators like `@actor` and `@handler` generate the WIT interface glue, state serialization, and message dispatch that you would otherwise write by hand. This means the SDK adds no new runtime capabilities; it is purely a developer ergonomics layer that compiles down to the same WIT exports the framework already expects.
+The SDK is a **thin decorator layer** over the core framework crates. Core functionality -- actor registry, message routing, supervision, and state management -- lives in the main crates (`crates/behavior`, `crates/services`, `crates/actor`). The SDK simplifies the developer experience by removing boilerplate: decorators like `@actor` and `@handler` generate the WIT interface glue, state serialization, and message dispatch that you would otherwise write by hand. This means the SDK adds no new runtime capabilities; it is purely a developer ergonomics layer that compiles down to the same WIT exports the framework already expects.
 
 **Design Principles**:
 - **Core Functionality**: All business logic and framework capabilities are in main crates
@@ -327,7 +327,7 @@ Client code should usually pass only the actor name to builder and SDK spawn hel
 
 **Internal Structured Form**:
 ```rust
-use plexspaces_core::ActorId;
+use plexspaces_actor::ActorId;
 
 let actor_id = ActorId::new(
     "user-123",
@@ -1127,7 +1127,7 @@ The SDK provides helper functions for creating messages with correct invocation 
 
 **Example:**
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_sdk::{call_message, cast_message, json};
 use std::time::Duration;
 
@@ -1315,7 +1315,7 @@ Multi-node parallelization is **one logical run** with work **split across nodes
 | API | Purpose |
 |-----|---------|
 | `list_worker_node_ids(ctx, service_locator, cluster, page_size)` | Returns node IDs from the registry (after ConnectNodes). Leader uses this to distribute work. |
-| `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s **`SpawnActor`** RPC with **`SpawnActorRequest.spec`** (`ActorSpawnSpec`). Legacy **`initial_state`** bytes (JSON in the WASM init shape) are mapped into **`spec.role`** / **`spec.args`** via **`plexspaces_core::legacy_spawn_init_json_to_role_and_args`**. Prefer building **`ActorSpawnSpec`** directly when you already have structured args. |
+| `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s **`SpawnActor`** RPC with **`SpawnActorRequest.spec`** (`ActorSpawnSpec`). Legacy **`initial_state`** bytes (JSON in the WASM init shape) are mapped into **`spec.role`** / **`spec.args`** via **`plexspaces_actor::legacy_spawn_init_json_to_role_and_args`**. Prefer building **`ActorSpawnSpec`** directly when you already have structured args. |
 
 **Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to the canonical actor ID for the shard, such as `chunk-1//worker::default@node-B`; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
 
@@ -1327,7 +1327,7 @@ Core lives in main crates: NodeRegistry, ActorService, scheduling/placement, and
 
 The framework provides a single unified elastic pool: the **ElasticPool** implementation in `crates/elastic-pool`, exposed via the **ElasticPoolService** trait in core. The node (or app) registers a **PoolRegistry** (which holds named ElasticPool instances) with ServiceLocator. The SDK decorator **ElasticPoolClient** obtains the service from ServiceLocator and exposes checkout/checkin, metrics, and scale without adding new business logic.
 
-- **Core**: `ElasticPoolService` trait and `PoolServiceError` in `plexspaces-core`; ServiceLocator has `get_elastic_pool_service` / `register_elastic_pool_service`.
+- **Core**: `ElasticPoolService` trait and `PoolServiceError` in `plexspaces-actor`; ServiceLocator has `get_elastic_pool_service` / `register_elastic_pool_service`.
 - **Implementation**: `crates/elastic-pool` — `ElasticPool` (one pool), `PoolRegistry` (implements ElasticPoolService, holds multiple named pools).
 - **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` — thin wrapper that calls the registered service.
 
@@ -1589,7 +1589,7 @@ See [Firecracker Multi-Tenant Example](../examples/rust/apps/firecracker_multi_t
 
 ```rust
 use plexspaces_journaling::{TimerFacet, ReminderFacet, SqliteJournalStorage};
-use plexspaces_core::JournalStorage;
+use plexspaces_actor::JournalStorage;
 
 // TimerFacet - TRANSIENT (no storage required)
 let timer_facet = TimerFacet::new(json!({}), 50);

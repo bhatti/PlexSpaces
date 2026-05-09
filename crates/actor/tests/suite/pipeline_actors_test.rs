@@ -7,10 +7,9 @@
 
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{
+use plexspaces_actor::{
     Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
-    ServiceLocator,
-};
+    ServiceLocator, RequestContextExt};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -315,7 +314,7 @@ async fn test_input_actor_processes_messages() {
     let input_actor = InputWorkerActor::new();
     let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id(input_actor_id.to_string())
+        .with_name(input_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -358,7 +357,7 @@ async fn test_processor_actor_filters_events() {
     let processor_actor = ProcessorWorkerActor::new();
     let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id(processor_actor_id.to_string())
+        .with_name(processor_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -401,7 +400,7 @@ async fn test_output_actor_sends_events() {
     let output_actor = OutputWorkerActor::new();
     let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id(output_actor_id.to_string())
+        .with_name(output_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -446,7 +445,7 @@ async fn test_full_pipeline() {
     let input_actor = InputWorkerActor::new();
     let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id(input_actor_id.to_string())
+        .with_name(input_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -455,7 +454,7 @@ async fn test_full_pipeline() {
     let processor_actor = ProcessorWorkerActor::new();
     let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id(processor_actor_id.to_string())
+        .with_name(processor_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -464,7 +463,7 @@ async fn test_full_pipeline() {
     let output_actor = OutputWorkerActor::new();
     let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id(output_actor_id.to_string())
+        .with_name(output_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -544,7 +543,7 @@ async fn test_concurrent_pipeline_processing() {
     let input_actor = InputWorkerActor::new();
     let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id(input_actor_id.to_string())
+        .with_name(input_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -553,7 +552,7 @@ async fn test_concurrent_pipeline_processing() {
     let processor_actor = ProcessorWorkerActor::new();
     let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id(processor_actor_id.to_string())
+        .with_name(processor_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -562,7 +561,7 @@ async fn test_concurrent_pipeline_processing() {
     let output_actor = OutputWorkerActor::new();
     let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id(output_actor_id.to_string())
+        .with_name(output_actor_id.name().to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await

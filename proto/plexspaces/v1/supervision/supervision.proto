@@ -111,10 +111,10 @@
 //
 // ## Restart Intensity Example
 // ```protobuf
-// SupervisorConfig {
-//   strategy: ONE_FOR_ONE
+// SupervisorSpec {
+//   strategy: SUPERVISION_STRATEGY_ONE_FOR_ONE
 //   max_restarts: 3
-//   within_period: "5s"
+//   max_restart_window: "5s"
 // }
 //
 // Timeline:
@@ -186,31 +186,50 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 enum SupervisionStrategy {
   SUPERVISION_STRATEGY_UNSPECIFIED = 0;
 
-  // Restart only the failed child
-  ONE_FOR_ONE = 1;
+  // Restart only the failed child (default, most common)
+  SUPERVISION_STRATEGY_ONE_FOR_ONE = 1;
 
   // Restart all children if one fails
-  ONE_FOR_ALL = 2;
+  SUPERVISION_STRATEGY_ONE_FOR_ALL = 2;
 
   // Restart failed child and all children started after it
-  REST_FOR_ONE = 3;
+  SUPERVISION_STRATEGY_REST_FOR_ONE = 3;
 
-  // Simple one-for-one: all children are identical
-  SIMPLE_ONE_FOR_ONE = 4;
+  // Simple one-for-one: all children are identical (worker pools)
+  SUPERVISION_STRATEGY_SIMPLE_ONE_FOR_ONE = 4;
+
+  // Adaptive: learns from failure patterns and adapts strategy automatically
+  SUPERVISION_STRATEGY_ADAPTIVE = 5;
 }
 
-// Restart strategy for individual children
-enum RestartStrategy {
-  RESTART_STRATEGY_UNSPECIFIED = 0;
+// Configuration for adaptive supervision strategy
+message AdaptiveConfig {
+  // Learning rate (0.0–1.0): how quickly to adapt to failure patterns
+  double learning_rate = 1;
+}
 
-  // Always restart child on failure
-  PERMANENT = 1;
+// Restart policy for individual children
+enum RestartPolicy {
+  RESTART_POLICY_UNSPECIFIED = 0;
 
-  // Restart only on abnormal termination
-  TRANSIENT = 2;
+  // Always restart child on failure (critical long-running processes)
+  RESTART_POLICY_PERMANENT = 1;
 
-  // Never restart child
-  TEMPORARY = 3;
+  // Restart only on abnormal termination (tasks that may complete)
+  RESTART_POLICY_TRANSIENT = 2;
+
+  // Never restart child (one-shot tasks)
+  RESTART_POLICY_TEMPORARY = 3;
+
+  // Exponential backoff: delay restarts with increasing intervals
+  RESTART_POLICY_EXPONENTIAL_BACKOFF = 4;
+}
+
+// Configuration for exponential backoff restart policy
+message ExponentialBackoffConfig {
+  uint64 initial_delay_ms = 1;
+  uint64 max_delay_ms = 2;
+  double factor = 3;
 }
 
 // Child specification
@@ -228,44 +247,54 @@ enum RestartStrategy {
 //
 // Identity uses `ActorIdentity` (name + actor_type). The canonical `ActorId`
 // string is derived at runtime when namespace and node_id are known.
+//
+// This is the canonical merged definition covering both supervision (metadata)
+// and application-level deployment (role, args, behavior_kind, nested supervisor).
 message ChildSpec {
   // Instance name + behavior class for this supervised process.
   plexspaces.common.v1.ActorIdentity actor_identity = 1;
 
+  // Role of this child within the application (e.g. "worker", "leader", "supervisor").
+  // Used for BehaviorRegistry dispatch when multiple children share the same actor_type.
+  string role = 2 [(buf.validate.field).string = {max_len: 128}];
+
+  // Arguments to pass to start function
+  map<string, string> args = 3;
+
   // How to handle child failures
-  RestartStrategy restart_strategy = 2;
+  RestartPolicy restart = 4;
 
   // Shutdown timeout for graceful termination
   // - None/0 = brutal_kill (immediate)
   // - Some(ms) = graceful shutdown with timeout
   // - For supervisors: typically set high or infinity to allow children to shutdown
-  google.protobuf.Duration shutdown_timeout = 3 [(buf.validate.field).duration.lte.seconds = 300]; // Max 5 minutes
+  google.protobuf.Duration shutdown_timeout = 5 [(buf.validate.field).duration.lte.seconds = 300]; // Max 5 minutes
 
-  // Child type: actor (worker) or supervisor
-  ChildType child_type = 4;
-
-  // Metadata for child configuration
-  // Can include:
-  // - "start_module": Module name for recreation
-  // - "start_function": Function to call
-  // - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
-  map<string, string> metadata = 5;
+  // Nested supervisor spec (when role = "supervisor")
+  optional SupervisorSpec supervisor = 6;
 
   // Facet configuration (for automatic attachment during actor creation)
   // Facets are attached in priority order (high priority first) before actor.init() is called
   // All facets are automatically restored during supervisor restart
-  // Phase 1: Unified Lifecycle - Multiple facets support
-  repeated plexspaces.common.v1.Facet facets = 6;
+  repeated plexspaces.common.v1.Facet facets = 7;
+
+  // OTP-style behavior kind for logging and observability (e.g. "GenServer", "GenEvent").
+  // When set, process_message spans and actor registration logs show this instead of the child id.
+  optional string behavior_kind = 8;
+
+  // Metadata for child configuration
+  // Can include: "start_module", "start_function", "supervisor_strategy"
+  map<string, string> metadata = 10;
+
+  // Exponential backoff config (when restart = RESTART_POLICY_EXPONENTIAL_BACKOFF)
+  optional ExponentialBackoffConfig exponential_backoff = 11;
 }
 
-enum ChildType {
-  CHILD_TYPE_UNSPECIFIED = 0;
-  CHILD_TYPE_ACTOR = 1;
-  CHILD_TYPE_SUPERVISOR = 2;
-}
-
-// Supervisor configuration
-message SupervisorConfig {
+// Supervisor specification (canonical definition)
+//
+// Used everywhere supervision trees are configured: application deployment,
+// runtime supervisor creation, and gRPC supervisor management API.
+message SupervisorSpec {
   // Supervision strategy
   SupervisionStrategy strategy = 1;
 
@@ -275,8 +304,8 @@ message SupervisorConfig {
     lte: 1000
   }]; // 1 to 1000 restarts
 
-  // Time period for max_restarts
-  google.protobuf.Duration within_period = 3 [(buf.validate.field).duration = {
+  // Time window for restart counting
+  google.protobuf.Duration max_restart_window = 3 [(buf.validate.field).duration = {
     gte: {seconds: 1}
     lte: {seconds: 3600}
   }]; // 1 second to 1 hour
@@ -286,6 +315,9 @@ message SupervisorConfig {
 
   // Supervisor metadata
   map<string, string> metadata = 5;
+
+  // Adaptive strategy configuration (when strategy = SUPERVISION_STRATEGY_ADAPTIVE)
+  optional AdaptiveConfig adaptive = 6;
 }
 
 // Supervisor state
@@ -293,8 +325,8 @@ message SupervisorState {
   // Supervisor ID
   string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
 
-  // Configuration
-  SupervisorConfig config = 2;
+  // Specification
+  SupervisorSpec spec = 2;
 
   // Current children
   repeated ChildState children = 3 [(buf.validate.field).repeated.max_items = 1000]; // Max 1000 children
@@ -510,69 +542,43 @@ message SupervisorStats {
   map<string, uint32> failure_patterns = 5;
 }
 
-message CreateSupervisorRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  SupervisorConfig config = 2;
+// ============================================================================
+// Supervisor Event Types (for runtime monitoring and observability)
+// ============================================================================
+
+// Event type emitted by a running supervisor
+enum SupervisorEventType {
+  SUPERVISOR_EVENT_UNSPECIFIED = 0;
+  SUPERVISOR_EVENT_CHILD_STARTED = 1;
+  SUPERVISOR_EVENT_CHILD_STOPPED = 2;
+  SUPERVISOR_EVENT_CHILD_RESTARTED = 3;
+  SUPERVISOR_EVENT_CHILD_FAILED = 4;
+  SUPERVISOR_EVENT_MAX_RESTARTS_EXCEEDED = 5;
+  SUPERVISOR_EVENT_STRATEGY_ADAPTED = 6;
 }
 
-message CreateSupervisorResponse {
-  bool success = 1;
-  string supervisor_id = 2 [(buf.validate.field).string.max_len = 255];
-  string error_message = 3 [(buf.validate.field).string.max_len = 1024];
+// Supervisor event with associated data (emitted to the event channel)
+message SupervisorEvent {
+  SupervisorEventType event_type = 1;
+  string actor_id = 2 [(buf.validate.field).string.max_len = 512];
+  uint32 restart_count = 3;
+  string reason = 4 [(buf.validate.field).string.max_len = 1024];
+  SupervisionStrategy new_strategy = 5;
 }
 
-message AddChildRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  ChildSpec child_spec = 2;
+// Child information returned by which_children()
+message ChildInfo {
+  string child_id = 1 [(buf.validate.field).string.max_len = 255];
+  string role = 2 [(buf.validate.field).string.max_len = 128];
+  ChildStatus status = 3;
+  uint32 restart_count = 4;
 }
 
-message AddChildResponse {
-  bool success = 1;
-  string error_message = 2 [(buf.validate.field).string.max_len = 1024];
-}
-
-message RemoveChildRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  string child_id = 2 [(buf.validate.field).string.max_len = 255];
-}
-
-message StartSupervisorRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-}
-
-message StopSupervisorRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 300]; // Max 5 minutes
-}
-
-message GetSupervisorStateRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-}
-
-message GetSupervisorStateResponse {
-  SupervisorState state = 1;
-}
-
-message ListSupervisorsRequest {
-  // Optional filter
-  string namespace = 1 [(buf.validate.field).string.max_len = 128];
-}
-
-message ListSupervisorsResponse {
-  repeated SupervisorState supervisors = 1 [(buf.validate.field).repeated.max_items = 10000]; // Max 10K supervisors
-}
-
-message RestartChildRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  string child_id = 2 [(buf.validate.field).string.max_len = 255];
-}
-
-message GetSupervisorStatsRequest {
-  string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-}
-
-message GetSupervisorStatsResponse {
-  SupervisorStats stats = 1;
+// Child counts returned by count_children()
+message ChildCount {
+  uint32 actors = 1;
+  uint32 supervisors = 2;
+  uint32 total = 3;
 }
 
 // ============================================================================

@@ -28,7 +28,7 @@
 //
 // Use Case: Subscription billing system with trial management, monthly billing, and health monitoring
 
-use plexspaces_core::{JournalStorage, ServiceLocator};
+use plexspaces_actor::{JournalStorage, ServiceLocator, RequestContextExt};
 use plexspaces_facet::Facet;
 use plexspaces_journaling::{ReminderFacet, ReminderRegistration, SqliteJournalStorage, TimerFacet};
 use plexspaces_node::{CoordinationComputeTracker, NodeBuilder};
@@ -45,7 +45,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use anyhow::Result;
 
 // Required for macro-generated code
-extern crate plexspaces_core;
+
 extern crate plexspaces_behavior;
 
 // =============================================================================

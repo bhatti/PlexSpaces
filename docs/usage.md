@@ -111,7 +111,7 @@ println!("Count: {}", result["count"]);
 All operations in PlexSpaces require a `RequestContext` for tenant isolation:
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Create context from JWT claims (typically done in middleware)
 let ctx = RequestContext::new("tenant-123".to_string())
@@ -151,7 +151,7 @@ All repository methods require RequestContext:
 
 ```rust
 use plexspaces_blob::BlobRepository;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Get blob (automatically filtered by tenant_id)
 let metadata = repository.get(&ctx, "blob-123").await?;
@@ -169,7 +169,7 @@ All service methods require RequestContext:
 
 ```rust
 use plexspaces_blob::BlobService;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Upload blob (tenant_id from context)
 let metadata = blob_service.upload_blob(
@@ -196,7 +196,7 @@ let (blobs, total) = blob_service.list_blobs(
 ### Creating RequestContext
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Basic context (required tenant_id)
 let ctx = RequestContext::new("tenant-123".to_string());
@@ -221,7 +221,7 @@ let ctx = RequestContext::new("tenant-123".to_string())
 
 ```rust
 use tonic::Request;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 fn extract_context_from_request<T>(request: &Request<T>) -> Result<RequestContext, String> {
     let metadata = request.metadata();
@@ -253,7 +253,7 @@ fn extract_context_from_request<T>(request: &Request<T>) -> Result<RequestContex
 ### Converting to/from Proto
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use plexspaces_proto::v1::common::RequestContext as ProtoRequestContext;
 
 // Convert to proto (for gRPC)
@@ -569,7 +569,7 @@ tracing::info!("Blob data: {:?}", blob_data);  // Don't log sensitive data
 ### Tenant Isolation Errors
 
 ```rust
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 
 // Repository returns None if tenant doesn't match
 let result = repository.get(&ctx, "blob-123").await?;
@@ -592,7 +592,7 @@ if metadata.tenant_id != ctx.tenant_id() {
 
 ```rust
 use plexspaces_blob::{BlobService, BlobRepository};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::RequestContext;
 use std::collections::HashMap;
 
 async fn upload_file(

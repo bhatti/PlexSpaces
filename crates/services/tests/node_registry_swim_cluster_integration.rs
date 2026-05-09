@@ -8,8 +8,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use plexspaces_core::{
-    GrpcConnectionManager, NodeRegistryTrait, ObjectRegistry as CoreObjectRegistry, ServiceLocator,
+use plexspaces_actor::{
+    GrpcConnectionManager, InitializableServiceLocator, NodeRegistryTrait,
+    ObjectRegistry as CoreObjectRegistry, ServiceLocator,
 };
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::node::v1::{
@@ -70,7 +71,7 @@ async fn spawn_gossip_node(
         })
         .await;
     let grpc_mgr = Arc::new(GrpcConnectionManager::new(Some(2)));
-    ServiceLocator::register_grpc_connection_manager(service_locator.as_ref(), grpc_mgr).await;
+    service_locator.register_grpc_connection_manager(grpc_mgr).await;
     service_locator
         .register_node_registry(node_registry.clone())
         .await;

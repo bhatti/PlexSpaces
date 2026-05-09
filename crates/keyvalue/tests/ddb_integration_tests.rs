@@ -24,7 +24,7 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_common::RequestContext;
+    use plexspaces_common::{RequestContext, RequestContextExt};
     use plexspaces_keyvalue::{DynamoDBKVStore, KeyValueStore};
     use std::time::Duration;
     use ulid::Ulid;

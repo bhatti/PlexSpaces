@@ -32,8 +32,8 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::journal_storage::{Checkpoint, JournalStorage};
+    use plexspaces_actor::ActorId;
     use plexspaces_journaling::sql::SqliteJournalStorage;
 
     fn canonical_actor_id(name: &str) -> String {
@@ -157,7 +157,7 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(plexspaces_core::journal_storage::JournalError::CheckpointNotFound(_)) => {
+            Err(plexspaces_actor::journal_storage::JournalError::CheckpointNotFound(_)) => {
                 // Expected error
             }
             Err(e) => panic!("Expected CheckpointNotFound, got: {:?}", e),
@@ -308,8 +308,8 @@ mod tests {
 /// Integration tests that simulate WASM actor restart scenarios
 #[cfg(test)]
 mod restart_scenario_tests {
-    use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::journal_storage::{Checkpoint, JournalStorage};
+    use plexspaces_actor::ActorId;
     use plexspaces_journaling::sql::SqliteJournalStorage;
 
     fn canonical_actor_id(name: &str) -> String {

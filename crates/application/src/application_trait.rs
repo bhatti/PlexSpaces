@@ -40,7 +40,7 @@
 //!
 //! ### Basic Application Implementation
 //! ```rust
-//! use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
+//! use plexspaces_actor::application::{Application, ApplicationNode, ApplicationError};
 //! use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus};
 //! use async_trait::async_trait;
 //! use std::sync::Arc;
@@ -72,7 +72,7 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_core::BlobServiceTrait;
+use plexspaces_actor::{BlobServiceTrait, InitializableServiceLocator};
 use prost_types;
 use std::sync::Arc;
 use thiserror::Error;
@@ -234,7 +234,19 @@ pub trait ApplicationNode: Send + Sync {
     ///
     /// ## Returns
     /// Some(ServiceLocator) if available, None otherwise
-    fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+    fn service_locator(&self) -> Option<Arc<dyn plexspaces_actor::ServiceLocator>> {
+        None
+    }
+
+    /// Get InitializableServiceLocator (optional - only Node implements this)
+    ///
+    /// ## Purpose
+    /// Allows startup/initialization code to register services.
+    /// Node implementations return Some(...), mocks return None.
+    ///
+    /// ## Returns
+    /// Some(InitializableServiceLocator) if available, None otherwise
+    fn initializable_service_locator(&self) -> Option<Arc<dyn InitializableServiceLocator>> {
         None
     }
 
@@ -257,7 +269,7 @@ pub trait ApplicationNode: Send + Sync {
 /// Errors that can occur during application lifecycle (start, stop, health checks).
 ///
 /// ## Design Notes
-/// - These are Rust-specific error types (not in proto)
+/// - Proto error codes are in `ApplicationErrorCode` (application.proto)
 /// - Proto defines `ApplicationState::ApplicationStateFailed` for state tracking
 /// - Error messages can be logged and reported via proto `Application` message
 #[derive(Debug, Error)]
@@ -297,6 +309,24 @@ pub enum ApplicationError {
     /// Generic application error
     #[error("Application error: {0}")]
     Other(String),
+}
+
+impl ApplicationError {
+    /// Return the proto error code for this error.
+    pub fn code(&self) -> plexspaces_proto::application::v1::ApplicationErrorCode {
+        use plexspaces_proto::application::v1::ApplicationErrorCode;
+        match self {
+            ApplicationError::StartupFailed(_) => ApplicationErrorCode::ApplicationErrorStartupFailed,
+            ApplicationError::ShutdownFailed(_) => ApplicationErrorCode::ApplicationErrorShutdownFailed,
+            ApplicationError::NotFound(_) => ApplicationErrorCode::ApplicationErrorNotFound,
+            ApplicationError::DependencyFailed(_) => ApplicationErrorCode::ApplicationErrorDependencyFailed,
+            ApplicationError::ConfigError(_) => ApplicationErrorCode::ApplicationErrorConfigError,
+            ApplicationError::ShutdownTimeout(_) => ApplicationErrorCode::ApplicationErrorShutdownTimeout,
+            ApplicationError::ActorSpawnFailed(_, _) => ApplicationErrorCode::ApplicationErrorActorSpawnFailed,
+            ApplicationError::ActorStopFailed(_, _) => ApplicationErrorCode::ApplicationErrorActorStopFailed,
+            ApplicationError::Other(_) => ApplicationErrorCode::ApplicationErrorOther,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //
 //! Tests for Node integration with ServiceLocator (TDD)
 
-use plexspaces_core::ActorRegistry;
+use plexspaces_actor::ActorRegistry;
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
 

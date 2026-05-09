@@ -19,8 +19,7 @@
 
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
-    ActorContext, BehaviorError, Message, RequestContext, spawn,
-};
+    ActorContext, BehaviorError, Message, RequestContext, spawn,, RequestContextExt};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -28,7 +27,7 @@ use tokio::time::sleep;
 use tracing::{info, Level};
 
 // Required for macro-generated code
-extern crate plexspaces_core;
+
 extern crate plexspaces_behavior;
 
 // =============================================================================

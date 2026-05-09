@@ -27,12 +27,13 @@
 //! 6. The entire tree is spawned when an application is deployed
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::{service_names, ActorId, ApplicationManager, RequestContext, ServiceLocator};
+use plexspaces_actor::{ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
-    DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
+    DeployApplicationRequest, ShutdownStrategy,
 };
+use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::application::ApplicationState;
 use plexspaces_proto::wasm::v1::WasmModule;
@@ -219,7 +220,7 @@ async fn wait_for_application_state(
     let start = std::time::Instant::now();
     while start.elapsed() < timeout_duration {
         let app_manager = node.application_manager();
-        let current_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let current_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             app_name,
         )
@@ -316,6 +317,7 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }
 
@@ -348,6 +350,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // Root supervisor with workers and a child supervisor
@@ -378,11 +381,12 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }
 
 /// Get all actor IDs from ActorRegistry
-async fn get_all_actor_ids(node: &Node) -> Vec<plexspaces_core::ActorId> {
+async fn get_all_actor_ids(node: &Node) -> Vec<plexspaces_actor::ActorId> {
     let actor_registry = node
         .service_locator()
         .actor_registry()
@@ -394,7 +398,7 @@ async fn get_all_actor_ids(node: &Node) -> Vec<plexspaces_core::ActorId> {
 }
 
 /// Get actor type for an actor ID
-async fn get_actor_type(node: &Node, actor_id: &plexspaces_core::ActorId) -> Option<String> {
+async fn get_actor_type(node: &Node, actor_id: &plexspaces_actor::ActorId) -> Option<String> {
     let actor_registry = node
         .service_locator()
         .actor_registry()
@@ -423,7 +427,7 @@ async fn get_actor_type(node: &Node, actor_id: &plexspaces_core::ActorId) -> Opt
 /// - If BehaviorRegistry is not found or actor_type is unknown, spawn_actor returns an error
 /// - Tests must register behaviors before spawning actors with actor_type strings
 async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
     use std::sync::Arc;
 
     let registry = Arc::new(BehaviorRegistry::new());
@@ -436,7 +440,7 @@ async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
             .register_simple(at.clone(), move || {
                 let at2 = at.clone();
                 async move {
-                    Ok(Box::new(MockActor { actor_type: at2 }) as Box<dyn plexspaces_core::Actor>)
+                    Ok(Box::new(MockActor { actor_type: at2 }) as Box<dyn plexspaces_actor::Actor>)
                 }
             })
             .await;
@@ -455,17 +459,17 @@ struct MockActor {
 }
 
 #[async_trait::async_trait]
-impl plexspaces_core::Actor for MockActor {
+impl plexspaces_actor::Actor for MockActor {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
-        _msg: plexspaces_core::Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+        _ctx: &plexspaces_actor::ActorContext,
+        _msg: plexspaces_actor::Message,
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
@@ -760,7 +764,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "nested-app",
         )
@@ -838,6 +842,7 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
             restart: RestartPolicy::RestartPolicyPermanent.into(),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     // Level 2: Middle supervisor
@@ -868,6 +873,7 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // Level 1: Root supervisor
@@ -898,6 +904,7 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }
 
@@ -930,6 +937,7 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // Supervisor B with workers
@@ -947,6 +955,7 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
             restart: RestartPolicy::RestartPolicyPermanent.into(),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     // Root supervisor with two sibling supervisors
@@ -988,6 +997,7 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }
 
@@ -1142,7 +1152,7 @@ async fn test_actors_tracked_in_application() {
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "actors_tracked_in_-app",
         )
@@ -1236,7 +1246,7 @@ async fn test_complex_supervisor_hierarchy() {
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "complex-app",
         )
@@ -1496,7 +1506,7 @@ async fn test_auto_generated_supervisor_tree() {
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "auto-app",
         )
@@ -1598,7 +1608,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
 
         // Verify application is stopped
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "shutdown-app",
         )
@@ -1720,6 +1730,7 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // my_app_sup supervisor (root level)
@@ -1750,6 +1761,7 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }
 
@@ -1820,7 +1832,7 @@ async fn test_erlang_style_supervision_structure() {
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+        let app_state = plexspaces_actor::service_locator_trait::ApplicationManager::get_state(
             app_manager.as_ref(),
             "my_app",
         )
@@ -1945,6 +1957,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             restart: RestartPolicy::RestartPolicyPermanent.into(),
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     // Level 2: Middle supervisor
@@ -1966,6 +1979,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             supervisor: Some(level3_supervisor), // level3_supervisor is the nested spec for level3-supervisor
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     let level2_supervisor_spec = SupervisorSpec {
@@ -1995,6 +2009,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // Level 1: Root supervisor
@@ -2025,5 +2040,6 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     }
 }

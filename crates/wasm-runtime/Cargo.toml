@@ -14,7 +14,6 @@ path = "src/lib.rs"
 
 [dependencies]
 # Core dependencies
-plexspaces-core = { path = "../core" }
 plexspaces-proto = { path = "../proto" }
 plexspaces-actor = { path = "../actor" }
 plexspaces-tuplespace = { path = "../tuplespace" }
@@ -75,7 +74,6 @@ tempfile = "3.8"
 wat = "1.0"  # WebAssembly Text format for inline WASM tests
 object_store = { version = "0.10", features = ["aws", "gcp", "azure"] }  # For blob integration tests
 plexspaces-mailbox = { path = "../mailbox" }
-plexspaces-core = { path = "../core" }
 plexspaces-journaling = { path = "../journaling" }
 plexspaces-keyvalue = { path = "../keyvalue", features = ["sql-backend"] }
 plexspaces-process-groups = { path = "../process-groups" }

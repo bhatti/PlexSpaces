@@ -65,8 +65,8 @@
 use async_trait::async_trait;
 use metrics;
 use plexspaces_common::{from_config_str, ActivationStrategy};
-use plexspaces_core::VirtualActorLifecycleFacet as VirtualActorLifecycleFacetTrait;
-use plexspaces_core::VirtualActorLifecycleState;
+use plexspaces_facet::VirtualActorLifecycleFacet as VirtualActorLifecycleFacetTrait;
+use plexspaces_facet::VirtualActorLifecycleState;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use serde_json::Value;
 use std::sync::Arc;
@@ -318,7 +318,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
 /// `VirtualActorManager`.
 pub fn facet_to_lifecycle_facet(
     facet: Box<dyn plexspaces_facet::Facet>,
-) -> Option<Box<dyn plexspaces_core::VirtualActorLifecycleFacet>> {
+) -> Option<Box<dyn plexspaces_facet::VirtualActorLifecycleFacet>> {
     // Check if facet is VirtualActorFacet by checking facet_type
     if facet.facet_type() != "virtual_actor" {
         return None;
@@ -348,7 +348,7 @@ pub fn facet_to_lifecycle_facet(
 /// `VirtualActorManager::register()`.
 pub fn virtual_actor_facet_to_lifecycle_facet(
     facet: VirtualActorFacet,
-) -> Box<dyn plexspaces_core::VirtualActorLifecycleFacet> {
+) -> Box<dyn plexspaces_facet::VirtualActorLifecycleFacet> {
     Box::new(facet)
 }
 

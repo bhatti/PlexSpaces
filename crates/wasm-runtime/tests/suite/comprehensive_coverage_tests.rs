@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_core::ChannelService;
+use plexspaces_actor::{ActorId, ChannelService};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::{WasmInstance, WasmRuntime};
 use std::sync::Arc;
@@ -254,7 +254,7 @@ async fn test_handle_request_error() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "error-actor".to_string(),
+        ActorId::new("error-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -320,7 +320,7 @@ async fn test_handle_event_error() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "error-actor".to_string(),
+        ActorId::new("error-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -409,7 +409,7 @@ async fn test_channel_host_function_error_handling() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "error-actor".to_string(),
+        ActorId::new("error-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,

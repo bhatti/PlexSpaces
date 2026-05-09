@@ -29,11 +29,10 @@ use async_trait::async_trait;
 use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
-use plexspaces_core::Message;
-use plexspaces_core::{
+use plexspaces_actor::Message;
+use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    FacetManager, MessageSender, RequestContext, ServiceLocator, VirtualActorManager,
-};
+    FacetManager, MessageSender, RequestContext, ServiceLocator, VirtualActorManager, RequestContextExt};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::collections::HashMap;
@@ -47,7 +46,7 @@ fn make_spawn_spec(
     labels: HashMap<String, String>,
 ) -> plexspaces_proto::actor::v1::ActorSpawnSpec {
     use plexspaces_proto::common::v1::ActorIdentity;
-    plexspaces_core::ActorSpawnSpec {
+    plexspaces_actor::ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: actor_id.name().to_string(),
             actor_type: actor_type.to_string(),
@@ -103,7 +102,7 @@ struct InitReadsActorIdBehavior {
 
 #[async_trait]
 impl ActorTrait for InitReadsActorIdBehavior {
-    async fn init(&mut self, ctx: &ActorContext) -> Result<(), plexspaces_core::ActorError> {
+    async fn init(&mut self, ctx: &ActorContext) -> Result<(), plexspaces_actor::ActorError> {
         self.observed_ids.lock().await.push(ctx.actor_id().clone());
         Ok(())
     }
@@ -128,10 +127,10 @@ struct ObjectRegistryAdapter {
 
 #[async_trait::async_trait]
 #[async_trait::async_trait]
-impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
+impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryAdapter {
     async fn unregister(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _object_type: plexspaces_proto::object_registry::v1::ObjectType,
         _object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -140,7 +139,7 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
 
     async fn heartbeat(
         &self,
-        _ctx: &plexspaces_core::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
         _object_type: plexspaces_proto::object_registry::v1::ObjectType,
         _object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -237,12 +236,10 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
 }
 
 /// Helper to create a test ServiceLocator with all required services
-async fn create_test_service_locator() -> Arc<dyn plexspaces_core::ServiceLocator> {
-    use plexspaces_core::{Actor as ActorTrait2, BehaviorRegistry};
+async fn create_test_service_locator() -> Arc<dyn plexspaces_actor::ServiceLocator> {
+    use plexspaces_actor::{Actor as ActorTrait2, BehaviorRegistry, InitializableServiceLocator};
     use plexspaces_node::create_default_service_locator;
-    // Use create_default_service_locator which sets up all required services
     let sl = create_default_service_locator(Some("test-node".to_string()), None).await;
-    // Register a BehaviorRegistry with test actor types so spawn_actor can create behaviors
     let registry = Arc::new(BehaviorRegistry::new());
     registry
         .register("test-type", |_args| {
@@ -260,7 +257,7 @@ async fn create_test_service_locator() -> Arc<dyn plexspaces_core::ServiceLocato
         })
         .await;
     sl.register_behavior_registry(registry).await;
-    sl
+    sl as Arc<dyn plexspaces_actor::ServiceLocator>
 }
 
 #[tokio::test]
@@ -296,7 +293,7 @@ async fn test_activate_virtual_actor_success() {
         Arc::new(tokio::sync::RwLock::new(f))
     };
     {
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
@@ -345,7 +342,7 @@ async fn test_activate_virtual_actor_already_active() {
         Arc::new(tokio::sync::RwLock::new(f))
     };
     {
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
@@ -367,7 +364,8 @@ async fn test_activate_virtual_actor_already_active() {
     // This is needed for is_active() to return true
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(test_actor_id("test-actor"))
+        .with_name("test-actor")
+        .with_namespace("default".to_string())
         .build()
         .await
         .unwrap();
@@ -387,7 +385,7 @@ async fn test_activate_virtual_actor_already_active() {
     actor.start().await.unwrap();
 
     // Register the actor instance in the registry
-    use plexspaces_core::MessageSender;
+    use plexspaces_actor::MessageSender;
     let actor_id = test_actor_id("test-actor");
     let actor_ref = ActorRef::local(
         actor_id.clone(),
@@ -407,7 +405,7 @@ async fn test_activate_virtual_actor_already_active() {
             wrapper,
             "test_actor".to_string(),
             None,
-            Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorStateHandle>),
+            Some(Arc::new(actor) as Arc<dyn plexspaces_actor::ActorStateHandle>),
             None,
         )
         .await;
@@ -507,7 +505,7 @@ async fn test_spawn_actor_sets_self_ref_before_init() {
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     // Build spec directly — actor_type from spec drives the spawned ActorId
     use plexspaces_proto::common::v1::ActorIdentity;
-    let spec = plexspaces_core::ActorSpawnSpec {
+    let spec = plexspaces_actor::ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: "spawned-actor-init".to_string(),
             actor_type: "self_ref_init".to_string(),
@@ -604,7 +602,7 @@ async fn test_spawn_built_actor_regular() {
 
     // Spawn regular actor using spawn_actor
     let actor_id = test_actor_id("regular-actor");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -625,7 +623,8 @@ async fn test_spawn_built_actor_virtual_eager() {
     // Create virtual actor with eager activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(test_actor_id("virtual-eager"))
+        .with_name("virtual-eager")
+        .with_namespace("default".to_string())
         .build()
         .await
         .unwrap();
@@ -678,7 +677,8 @@ async fn test_spawn_built_actor_virtual_lazy() {
     // Create virtual actor with lazy activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
+        .with_namespace(actor_id.namespace().to_string())
         .build()
         .await
         .unwrap();
@@ -726,7 +726,8 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     // Create virtual actor with prewarm activation
     let behavior = Box::new(TestBehavior::new());
     let actor = ActorBuilder::new(behavior)
-        .with_id(actor_id.clone())
+        .with_name(actor_id.name().to_string())
+        .with_namespace(actor_id.namespace().to_string())
         .build()
         .await
         .unwrap();
@@ -774,7 +775,7 @@ async fn test_spawn_built_actor_multiple_references() {
 
     // Use spawn_actor instead - it doesn't have the multiple references issue
     let actor_id = test_actor_id("multi-ref-actor");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -789,13 +790,13 @@ async fn test_spawn_built_actor_service_not_found() {
     // Create empty service locator WITHOUT initializing services (no ActorRegistry)
     // This tests error handling when ActorRegistry is not registered
     use plexspaces_services::ServiceLocatorImpl;
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+    let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> =
         Arc::new(ServiceLocatorImpl::new());
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Use spawn_actor - should fail when ActorRegistry not found
     let actor_id = test_actor_id("test-actor");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -811,7 +812,7 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
 
     // Use spawn_actor for regular actor (no virtual facet)
     let actor_id = test_actor_id("no-facet-actor");
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
+    let ctx = plexspaces_actor::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
     );
@@ -828,7 +829,7 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
 /// idle_timeout regardless of what was configured in annotations or app-config.toml.
 #[tokio::test]
 async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
-    use plexspaces_core::VirtualActorManager;
+    use plexspaces_actor::VirtualActorManager;
     use plexspaces_facet::Facet as FacetTrait;
 
     let service_locator = create_test_service_locator().await;
@@ -866,7 +867,7 @@ async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
         Arc::new(tokio::sync::RwLock::new(f))
     };
     {
-        use plexspaces_core::ActorSpawnSpec;
+        use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {

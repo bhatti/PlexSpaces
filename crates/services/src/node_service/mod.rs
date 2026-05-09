@@ -32,7 +32,7 @@
 //!
 //! ## Security
 //! - Masks secrets in ReleaseSpec responses (passwords, API keys, tokens)
-//! - Uses `plexspaces_core::mask_release_spec` for consistent masking
+//! - Uses `plexspaces_actor::mask_release_spec` for consistent masking
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -47,10 +47,9 @@ use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
-use plexspaces_core::{
+use plexspaces_actor::{
     mask_release_spec, overlay_node_operational_counters_from_exposition, ConnectNodesResult,
-    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext, ServiceLocator,
-};
+    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, node_service_server::NodeService as NodeServiceTrait,
     CalculateCapacityRequest, ConnectNodesRequest, ConnectNodesResponse, DisconnectNodesRequest,
@@ -1335,6 +1334,7 @@ impl NodeConnectivity for NodeServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_actor::InitializableServiceLocator;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::node::v1::ReleaseSpec;
     use std::collections::HashMap;
@@ -1496,7 +1496,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_to_nodes_impl_skips_local_seed_address_alias() {
-        use plexspaces_core::NodeRegistryTrait;
+        use plexspaces_actor::NodeRegistryTrait;
         use plexspaces_proto::node::v1::NodeConfig;
 
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
@@ -1626,7 +1626,7 @@ mod tests {
     /// Helper to create a test NodeRegistry with SQLite backend
     async fn create_test_node_registry(node_id: &str) -> Arc<crate::node_registry::NodeRegistry> {
         use crate::node_registry::NodeRegistry;
-        use plexspaces_core::ObjectRegistry as ObjectRegistryTrait;
+        use plexspaces_actor::ObjectRegistry as ObjectRegistryTrait;
 
         let object_repo = Arc::new(
             SqliteObjectRegistryRepository::new(":memory:")
@@ -1763,7 +1763,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disconnect_nodes_with_registered_node() {
-        use plexspaces_core::{NodeRegistryTrait, RequestContext};
+        use plexspaces_actor::{NodeRegistryTrait, RequestContext};
         use tonic::Request;
 
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
@@ -1937,7 +1937,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_to_nodes_impl_node_id_in_registry_returns_connected() {
-        use plexspaces_core::{NodeRegistryTrait, RequestContext};
+        use plexspaces_actor::{NodeRegistryTrait, RequestContext};
 
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
@@ -1995,7 +1995,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_to_nodes_impl_mixed_node_id_and_address() {
-        use plexspaces_core::{NodeRegistryTrait, RequestContext};
+        use plexspaces_actor::{NodeRegistryTrait, RequestContext};
 
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;

@@ -26,7 +26,7 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_core::ChannelService;
+use plexspaces_actor::{ActorId, ChannelService};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_wasm_runtime::{WasmInstance, WasmRuntime};
 use std::sync::Arc;
@@ -243,7 +243,7 @@ async fn test_send_to_queue_host_function() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "queue-actor".to_string(),
+        ActorId::new("queue-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -303,7 +303,7 @@ async fn test_publish_to_topic_host_function() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "topic-actor".to_string(),
+        ActorId::new("topic-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
@@ -360,7 +360,7 @@ async fn test_send_to_queue_without_channel_service() {
     let instance = WasmInstance::new(
         runtime.engine(),
         module,
-        "queue-actor".to_string(),
+        ActorId::new("queue-actor", "wasm-actor", "test", "local").unwrap(),
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,

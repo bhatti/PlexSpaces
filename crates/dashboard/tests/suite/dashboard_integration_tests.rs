@@ -25,7 +25,7 @@
 
 use plexspaces_actor::ActorBuilder;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::dashboard::v1::{
@@ -40,54 +40,52 @@ use plexspaces_workflow::types::{ExecutionStatus, WorkflowDefinition};
 use std::sync::Arc;
 use tonic::Request;
 
-// Import trait to enable method calls
-
 /// Simple no-op actor behavior for test spawning
 struct NoopBehavior;
 
 #[async_trait::async_trait]
-impl plexspaces_core::Actor for NoopBehavior {
+impl plexspaces_actor::Actor for NoopBehavior {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
+        _ctx: &plexspaces_actor::ActorContext,
         _message: plexspaces_proto::common::v1::Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenServer
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenServer
     }
 }
 
 struct NoopFsmBehavior;
 
 #[async_trait::async_trait]
-impl plexspaces_core::Actor for NoopFsmBehavior {
+impl plexspaces_actor::Actor for NoopFsmBehavior {
     async fn handle_message(
         &mut self,
-        _ctx: &plexspaces_core::ActorContext,
+        _ctx: &plexspaces_actor::ActorContext,
         _message: plexspaces_proto::common::v1::Message,
-    ) -> Result<(), plexspaces_core::BehaviorError> {
+    ) -> Result<(), plexspaces_actor::BehaviorError> {
         Ok(())
     }
 
-    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
-        plexspaces_core::BehaviorType::GenStateMachine
+    fn behavior_type(&self) -> plexspaces_actor::BehaviorType {
+        plexspaces_actor::BehaviorType::GenStateMachine
     }
 }
 
 /// Register a BehaviorRegistry with multiple actor types for testing
 async fn register_behavior_registry(node: &Node, types: &[&str]) {
-    use plexspaces_core::behavior_factory::BehaviorRegistry;
-    use plexspaces_core::ServiceLocator;
+    use plexspaces_actor::behavior_factory::BehaviorRegistry;
+    use plexspaces_actor::{InitializableServiceLocator, ServiceLocator};
     let registry = BehaviorRegistry::new();
     for actor_type in types {
         let type_str = actor_type.to_string();
         registry
             .register_simple(&type_str, move || {
                 Box::pin(
-                    async move { Ok(Box::new(NoopBehavior) as Box<dyn plexspaces_core::Actor>) },
+                    async move { Ok(Box::new(NoopBehavior) as Box<dyn plexspaces_actor::Actor>) },
                 )
             })
             .await;
@@ -194,7 +192,7 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     // ObjectRegistry is already registered via ServiceLocator initialization
 
     // Create HealthReporterAccess implementation
-    use plexspaces_core::PlexSpacesHealthReporter;
+    use plexspaces_actor::PlexSpacesHealthReporter;
     let (health_reporter, _service) = PlexSpacesHealthReporter::new();
     let health_reporter = Arc::new(health_reporter);
 
@@ -229,6 +227,17 @@ async fn register_application(
     register_application_with_metadata(node, name, version, name, "").await
 }
 
+async fn register_applications(
+    node: Arc<Node>,
+    applications: &[(&str, &str)],
+) -> Result<(), ApplicationError> {
+    for (name, version) in applications {
+        register_application(node.clone(), name, version).await?;
+    }
+
+    Ok(())
+}
+
 async fn register_application_with_metadata(
     node: Arc<Node>,
     name: &str,
@@ -240,8 +249,25 @@ async fn register_application_with_metadata(
         name: name.to_string(),
         version: version.to_string(),
     });
-    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-    node.application_manager().register(&ctx, app).await?;
+    let app_ctx = RequestContext::new_without_auth(tenant_id.to_string(), name.to_string());
+    node.application_manager().register(&app_ctx, app).await?;
+
+    let object_registry = node
+        .service_locator()
+        .object_registry()
+        .await
+        .expect("ObjectRegistry should be registered for dashboard tests");
+    let registry_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+    plexspaces_actor::object_registry_helpers::register_application(
+        &object_registry,
+        &registry_ctx,
+        name,
+        version,
+        node.id().as_str(),
+        &format!("http://{}", node.config().listen_addr),
+    )
+    .await
+    .map_err(|err| ApplicationError::Other(err.to_string()))?;
 
     Ok(())
 }
@@ -349,14 +375,10 @@ async fn test_get_summary_with_applications() {
     // ARRANGE: Create node, register applications, create dashboard service
     let node = create_test_node("test-node-apps").await;
 
-    // Register 3 applications
-    register_application(node.clone(), "app-1", "1.0.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "app-2", "2.0.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "app-3", "1.5.0")
+    register_applications(
+        node.clone(),
+        &[("app-1", "1.0.0"), ("app-2", "2.0.0"), ("app-3", "1.5.0")],
+    )
         .await
         .unwrap();
 
@@ -549,45 +571,18 @@ async fn test_get_applications_empty_returns_empty_list() {
 }
 
 #[tokio::test]
-async fn test_get_applications_empty() {
-    // ARRANGE
-    let node = create_test_node("test-node-apps-empty").await;
-    let service = create_dashboard_service(node.clone()).await;
-
-    // ACT
-    let request = Request::new(GetApplicationsRequest {
-        node_id: String::new(),
-        tenant_id: String::new(),
-        namespace: String::new(),
-        name_pattern: String::new(),
-        page: None,
-    });
-
-    let response = service.get_applications(request).await.unwrap();
-    let apps_response = response.into_inner();
-
-    // ASSERT
-    assert_eq!(
-        apps_response.applications.len(),
-        0,
-        "Should have 0 applications"
-    );
-    assert!(apps_response.page.is_some(), "Should have pagination");
-}
-
-#[tokio::test]
 async fn test_get_applications_with_multiple_apps() {
     // ARRANGE
     let node = create_test_node("test-node-multi-apps").await;
 
-    // Register multiple applications
-    register_application(node.clone(), "calculator-app", "1.0.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "web-server", "2.1.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "data-processor", "1.5.0")
+    register_applications(
+        node.clone(),
+        &[
+            ("calculator-app", "1.0.0"),
+            ("web-server", "2.1.0"),
+            ("data-processor", "1.5.0"),
+        ],
+    )
         .await
         .unwrap();
 
@@ -627,13 +622,14 @@ async fn test_get_applications_with_name_pattern_filter() {
     // ARRANGE
     let node = create_test_node("test-node-filter").await;
 
-    register_application(node.clone(), "calculator-app", "1.0.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "web-server", "2.1.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "calc-helper", "1.5.0")
+    register_applications(
+        node.clone(),
+        &[
+            ("calculator-app", "1.0.0"),
+            ("web-server", "2.1.0"),
+            ("calc-helper", "1.5.0"),
+        ],
+    )
         .await
         .unwrap();
 
@@ -776,7 +772,7 @@ async fn test_get_actors_empty() {
 
 #[tokio::test]
 async fn test_get_actors_respects_authenticated_tenant_scope() {
-    use plexspaces_core::ActorId;
+    use plexspaces_actor::ActorId;
 
     let node = create_test_node("test-node-actors-auth").await;
     register_behavior_registry(node.as_ref(), &["worker"]).await;
@@ -876,8 +872,11 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
             name: "Order Approval".to_string(),
             version: "1.0.0".to_string(),
             steps: Vec::new(),
-            timeout: None,
-            retry_policy: None,
+            default_timeout: None,
+            default_retry: None,
+            labels: std::collections::HashMap::new(),
+            created_at: None,
+            updated_at: None,
         })
         .await
         .unwrap();
@@ -892,7 +891,7 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
         .await
         .unwrap();
     storage
-        .update_execution_status(&execution_id, ExecutionStatus::Running)
+        .update_execution_status(&execution_id, ExecutionStatus::ExecutionStatusRunning)
         .await
         .unwrap();
 
@@ -986,11 +985,7 @@ async fn test_get_summary_comprehensive() {
     // ARRANGE: Create node with apps
     let node = create_test_node("test-node-comprehensive").await;
 
-    // Register applications
-    register_application(node.clone(), "app-1", "1.0.0")
-        .await
-        .unwrap();
-    register_application(node.clone(), "app-2", "2.0.0")
+    register_applications(node.clone(), &[("app-1", "1.0.0"), ("app-2", "2.0.0")])
         .await
         .unwrap();
 
@@ -1507,7 +1502,7 @@ async fn test_dashboard_metrics_not_zero() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_home_page() {
-    use plexspaces_core::{ActorFactory, ActorId};
+    use plexspaces_actor::ActorId;
     use std::collections::HashMap;
 
     // ARRANGE: Create node and spawn actors with different types
@@ -1534,7 +1529,7 @@ async fn test_actors_by_type_on_home_page() {
         )
         .expect("valid counter actor id");
         let spec = {
-            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_actor::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
                 identity: Some(ActorIdentity {
@@ -1568,7 +1563,7 @@ async fn test_actors_by_type_on_home_page() {
         )
         .expect("valid worker actor id");
         let spec = {
-            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_actor::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
                 identity: Some(ActorIdentity {
@@ -1627,7 +1622,7 @@ async fn test_actors_by_type_on_home_page() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_node_page() {
-    use plexspaces_core::{ActorFactory, ActorId};
+    use plexspaces_actor::ActorId;
     use std::collections::HashMap;
 
     // ARRANGE: Create node and spawn actors
@@ -1635,7 +1630,7 @@ async fn test_actors_by_type_on_node_page() {
     let service_locator = node.service_locator();
 
     // Register behavior types so actor spawning works
-    register_behavior_registry(&node, &["Calculator"]).await;
+    register_behavior_registry(&node, &["calculator"]).await;
 
     // Spawn actors
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
@@ -1644,22 +1639,22 @@ async fn test_actors_by_type_on_node_page() {
         .await
         .expect("ActorFactory should be available");
 
-    // Spawn 2 Calculator actors
+    // Spawn 2 calculator actors
     for i in 0..2 {
         let actor_id = ActorId::new(
             format!("calculator-{}", i),
-            "Calculator",
+            "calculator",
             "system",
             "test-node-actors-node-type",
         )
         .expect("valid calculator actor id");
         let spec = {
-            use plexspaces_core::ActorSpawnSpec;
+            use plexspaces_actor::ActorSpawnSpec;
             use plexspaces_proto::common::v1::ActorIdentity;
             ActorSpawnSpec {
                 identity: Some(ActorIdentity {
                     name: actor_id.name().to_string(),
-                    actor_type: "Calculator".to_string(),
+                    actor_type: "calculator".to_string(),
                 }),
                 role: String::new(),
                 namespace: "system".to_string(),
@@ -1702,9 +1697,9 @@ async fn test_actors_by_type_on_node_page() {
         "Actors by type should not be empty on node page"
     );
     assert_eq!(
-        summary.actors_by_type.get("Calculator"),
+        summary.actors_by_type.get("calculator"),
         Some(&2u32),
-        "Should have 2 Calculator actors on node page"
+        "Should have 2 calculator actors on node page"
     );
 }
 

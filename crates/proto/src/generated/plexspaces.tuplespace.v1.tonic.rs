@@ -86,8 +86,6 @@ pub mod tuple_space_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /** Write tuples
-*/
         pub async fn write(
             &mut self,
             request: impl tonic::IntoRequest<super::WriteRequest>,
@@ -524,8 +522,6 @@ pub mod tuple_space_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with TupleSpaceServiceServer.
     #[async_trait]
     pub trait TupleSpaceService: Send + Sync + 'static {
-        /** Write tuples
-*/
         async fn write(
             &self,
             request: tonic::Request<super::WriteRequest>,

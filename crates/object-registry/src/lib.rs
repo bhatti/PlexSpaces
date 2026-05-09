@@ -142,7 +142,7 @@
 pub mod config;
 pub mod repository;
 
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use repository::{DiscoverFilter, ObjectRegistryRepository, RepositoryError};
 use std::sync::Arc;
@@ -678,21 +678,21 @@ impl std::fmt::Debug for ObjectRegistryImpl {
 }
 
 // ObjectRegistryImpl implements the Service trait
-impl plexspaces_core::Service for ObjectRegistryImpl {
+impl plexspaces_actor::Service for ObjectRegistryImpl {
     fn service_name(&self) -> String {
         "ObjectRegistry".to_string()
     }
 }
 
 #[async_trait::async_trait]
-impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
+impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
     async fn lookup(
         &self,
         ctx: &RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<
-        Option<plexspaces_core::actor_context::ObjectRegistration>,
+        Option<plexspaces_actor::actor_context::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
         let obj_type = object_type
@@ -711,7 +711,7 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<
-        Option<plexspaces_core::actor_context::ObjectRegistration>,
+        Option<plexspaces_actor::actor_context::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
         self.lookup_full(ctx, object_type, object_id).await
@@ -720,7 +720,7 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
     async fn register(
         &self,
         ctx: &RequestContext,
-        registration: plexspaces_core::actor_context::ObjectRegistration,
+        registration: plexspaces_actor::actor_context::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.register_trait(ctx, registration).await
     }
@@ -736,7 +736,7 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         offset: usize,
         limit: usize,
     ) -> Result<
-        Vec<plexspaces_core::actor_context::ObjectRegistration>,
+        Vec<plexspaces_actor::actor_context::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
         self.discover(

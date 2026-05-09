@@ -60,6 +60,21 @@ pub enum ChannelError {
     InternalError(String),
 }
 
+impl ChannelError {
+    /// Returns the proto error code for this error variant.
+    pub fn code(&self) -> plexspaces_proto::channel::v1::ChannelErrorCode {
+        use plexspaces_proto::channel::v1::ChannelErrorCode;
+        match self {
+            ChannelError::ChannelFull(_) => ChannelErrorCode::ChannelErrorFull,
+            ChannelError::ChannelClosed(_) => ChannelErrorCode::ChannelErrorClosed,
+            ChannelError::Timeout(_) => ChannelErrorCode::ChannelErrorTimeout,
+            ChannelError::MessageNotFound(_) => ChannelErrorCode::ChannelErrorMessageNotFound,
+            ChannelError::InvalidConfiguration(_) => ChannelErrorCode::ChannelErrorInvalidConfiguration,
+            ChannelError::BackendError(_) | ChannelError::SerializationError(_) | ChannelError::InternalError(_) => ChannelErrorCode::ChannelErrorUnspecified,
+        }
+    }
+}
+
 /// Result type for channel operations
 pub type ChannelResult<T> = Result<T, ChannelError>;
 
@@ -95,9 +110,10 @@ pub trait Channel: Send + Sync {
     /// - [`ChannelError::BackendError`]: Backend-specific failure
     ///
     /// ## Examples
-    /// ```rust
+    /// ```rust,no_run
     /// # use plexspaces_channel::*;
-    /// # use plexspaces_proto::plexspaces::channel::v1::*;
+    /// # use plexspaces_proto::channel::v1::*;
+    /// # use plexspaces_proto::common::v1::Message;
     /// # async fn example(channel: &dyn Channel) -> ChannelResult<()> {
     /// let msg = Message {
     ///     id: ulid::Ulid::new().to_string(),
@@ -236,9 +252,9 @@ pub trait Channel: Send + Sync {
 /// - [`ChannelError::BackendError`]: Backend initialization failed
 ///
 /// ## Examples
-/// ```rust
+/// ```rust,no_run
 /// # use plexspaces_channel::*;
-/// # use plexspaces_proto::plexspaces::channel::v1::*;
+/// # use plexspaces_proto::channel::v1::*;
 /// # async fn example() -> ChannelResult<()> {
 /// let config = ChannelConfig {
 ///     name: "my-channel".to_string(),

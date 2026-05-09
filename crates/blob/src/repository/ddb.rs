@@ -79,7 +79,7 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::Utc;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::BlobMetadata;
 use prost_types::Timestamp;
 use std::collections::HashMap;

@@ -18,7 +18,7 @@ use genomics_pipeline::{
     GenomicsPipelineConfig,
 };
 use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker, NodeBuilder};
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_sdk::{cast_message, spawn_with_facets};
 use std::collections::HashMap;
 use std::sync::Arc;

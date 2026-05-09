@@ -38,7 +38,7 @@ This document describes how PlexSpaces models **declarative external dependencie
 
 ## Traits and layering (Rust)
 
-- **Core** (`plexspaces-core`): `OutboundHttpClient` trait, request/response types, errors; `ServiceLocator` extension for registration and lookup.
+- **Core** (`plexspaces-actor`): `OutboundHttpClient` trait, request/response types, errors; `ServiceLocator` extension for registration and lookup.
 - **Implementation** (`plexspaces-http-client`): `ResilientOutboundHttpClient` — reqwest, retries (idempotent methods by default), circuit breaker integration, metrics, tracing spans.
 - **SDKs** (Rust / Python / TypeScript / Go): decorators and ergonomics only; **policy execution for WASM-hosted calls stays on the host** so behavior does not fork per language.
 

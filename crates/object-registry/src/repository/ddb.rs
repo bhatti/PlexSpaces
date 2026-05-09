@@ -63,7 +63,7 @@ use aws_sdk_dynamodb::{
     },
     Client as DynamoDbClient,
 };
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost::Message;
 use std::collections::HashMap;

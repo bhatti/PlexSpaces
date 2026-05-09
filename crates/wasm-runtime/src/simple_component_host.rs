@@ -33,7 +33,7 @@
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
 use plexspaces_blob::BlobService;
-use plexspaces_core::{ActorId, LockManager, RequestContext, TupleSpaceProvider};
+use plexspaces_actor::{ActorId, LockManager, RequestContext, RequestContextExt, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, BarrierShardGroupRequest, BroadcastShardGroupRequest,
@@ -1374,8 +1374,8 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             .http_fetch(&link_name, &method, &path_and_query, request)
             .await?;
         Ok(Self::encode_proto(&HttpFetchResponse {
-            status: u32::from(response.status),
-            headers: response.headers.into_iter().collect(),
+            status: response.status,
+            headers: response.headers.into_iter().map(|h| (h.key, h.value)).collect(),
             body: response.body,
         }))
     }
@@ -1571,7 +1571,7 @@ mod tests {
     use super::*;
     use crate::simple_component_host::plexspaces::actor::host::Host;
     use async_trait::async_trait;
-    use plexspaces_core::{OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse};
+    use plexspaces_actor::{OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse};
     use plexspaces_proto::actor::v1::{
         BroadcastShardGroupRequest, CollectiveReduction, CreateShardGroupRequest,
         CreateShardGroupResponse, DataParallelConfig, MapShardGroupRequest, MapShardGroupResponse,
@@ -1960,12 +1960,13 @@ mod tests {
             &self,
             link_name: &str,
             request: OutboundHttpRequest,
-        ) -> Result<OutboundHttpResponse, plexspaces_core::OutboundHttpClientError> {
+        ) -> Result<OutboundHttpResponse, plexspaces_actor::OutboundHttpClientError> {
+            use plexspaces_actor::HttpHeader;
             Ok(OutboundHttpResponse {
                 status: 200,
                 headers: vec![
-                    ("x-link".to_string(), link_name.to_string()),
-                    ("x-method".to_string(), request.method),
+                    HttpHeader { key: "x-link".to_string(), value: link_name.to_string() },
+                    HttpHeader { key: "x-method".to_string(), value: request.method },
                 ],
                 body: request.body,
             })
@@ -1978,7 +1979,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<CreateShardGroupResponse>(
             host.create_shard_group(
                 CreateShardGroupRequest {
@@ -2013,7 +2014,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<ScatterGatherResponse>(
             host.scatter_gather(
                 ScatterGatherRequest {
@@ -2045,7 +2046,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<MapShardGroupResponse>(
             host.map_shard_group(
                 MapShardGroupRequest {
@@ -2077,7 +2078,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<ApplicationMetrics>(
             host.application_metrics_add(
                 "heat-diffusion-rust".to_string(),
@@ -2101,7 +2102,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<GetApplicationStatusResponse>(
             host.application_get_status(
                 "heat-diffusion-rust".to_string(),
@@ -2125,7 +2126,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<ApplicationMetrics>(
             host.application_get_metrics(
                 "heat-diffusion-rust".to_string(),
@@ -2143,7 +2144,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response =
             decode_proto_response::<plexspaces_proto::actor::v1::BroadcastShardGroupResponse>(
                 host.broadcast_shard_group(
@@ -2177,7 +2178,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<plexspaces_proto::actor::v1::ReduceShardGroupResponse>(
             host.reduce_shard_group(
                 ReduceShardGroupRequest {
@@ -2217,7 +2218,7 @@ mod tests {
             MockMessageSender,
         )));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<SpawnActorsResponse>(
             host.spawn_actors(
                 SpawnActorsRequest {
@@ -2276,7 +2277,7 @@ mod tests {
             None, // shared_timer_pool
         ));
         let mut host =
-            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
         let response = decode_proto_response::<HttpFetchResponse>(
             host.http_fetch(
                 "weather-api".to_string(),

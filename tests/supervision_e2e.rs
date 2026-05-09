@@ -39,10 +39,10 @@ use tokio::time::{sleep, Duration};
 use async_trait::async_trait;
 use plexspaces::ActorId;
 use plexspaces::{ActorContext, BehaviorError, BehaviorType};
-use plexspaces_actor::Actor as ActorStruct;
-use plexspaces_core::Actor as ActorTrait;
-use plexspaces_core::Message;
-use plexspaces_core::RequestContext;
+use plexspaces_actor::ActorInstance as ActorStruct;
+use plexspaces_actor::actor_types::Actor as ActorTrait;
+use plexspaces_actor::Message;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_persistence::MemoryJournal;
 use ulid::Ulid;
@@ -55,12 +55,14 @@ fn create_test_message(payload: Vec<u8>) -> Message {
         ..Default::default()
     }
 }
-use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
+use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent, SupervisorEventType};
 use plexspaces_actor::{
-    child_spec::{RestartStrategy, ShutdownSpec, StartedChild},
+    child_spec::{ShutdownSpec, StartedChild},
     ChildSpec,
 };
-use plexspaces_core::ActorRef as CoreActorRef;
+use plexspaces_proto::supervision::v1::RestartPolicy as RestartStrategy;
+use plexspaces_actor::ActorRef as CoreActorRef;
+use plexspaces_mailbox::MailboxConfig;
 
 fn test_actor_id(name: &str) -> ActorId {
     ActorId::new(name, "gen_server", "test", "local").expect("invalid test actor id")
@@ -79,14 +81,26 @@ fn supervision_test_ctx() -> RequestContext {
 // ============================================================================
 
 /// Helper to create a ChildSpec from a sync factory (replaces ActorSpec pattern)
-fn create_child_spec(
+async fn create_child_spec(
     id: String,
-    factory: Arc<dyn Fn() -> Result<ActorStruct, plexspaces_core::ActorError> + Send + Sync>,
+    factory: Arc<dyn Fn() -> Result<ActorStruct, plexspaces_actor::ActorError> + Send + Sync>,
     restart: RestartStrategy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     let actor_id = test_actor_id(&id);
-    let actor_ref = CoreActorRef::new(actor_id.clone()).expect("Failed to create actor ref");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
+        .await
+        .expect("Failed to create mailbox");
+    let service_locator: std::sync::Arc<dyn plexspaces_actor::core::ServiceLocator> =
+        std::sync::Arc::new(plexspaces_actor::TestServiceLocatorStub::new());
+    let actor_ref = CoreActorRef::local(
+        actor_id.clone(),
+        "test-tenant".to_string(),
+        "test".to_string(),
+        std::sync::Arc::new(mailbox),
+        service_locator,
+        plexspaces_proto::actor::v1::ActorVisibility::ActorVisibilityPublic,
+    );
 
     ChildSpec::worker_sync(actor_id, factory, actor_ref)
         .with_restart(restart)
@@ -223,9 +237,9 @@ async fn test_one_for_one_restart() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     let stable_spec = create_child_spec(
         "stable-worker".to_string(),
@@ -252,9 +266,9 @@ async fn test_one_for_one_restart() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     let faulty_ref = supervisor
         .add_child(faulty_spec)
@@ -287,14 +301,16 @@ async fn test_one_for_one_restart() {
 
     while let Ok(event) = tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await {
         if let Some(event) = event {
-            match event {
-                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "faulty-worker" => {
+            let event_type = SupervisorEventType::try_from(event.event_type)
+                .unwrap_or(SupervisorEventType::SupervisorEventUnspecified);
+            match event_type {
+                SupervisorEventType::SupervisorEventChildFailed if event.actor_id == "faulty-worker" => {
                     failed_event_seen = true;
                 }
-                SupervisorEvent::ChildRestarted(id, _) if id.as_str() == "faulty-worker" => {
+                SupervisorEventType::SupervisorEventChildRestarted if event.actor_id == "faulty-worker" => {
                     restarted_event_seen = true;
                 }
-                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "stable-worker" => {
+                SupervisorEventType::SupervisorEventChildFailed if event.actor_id == "stable-worker" => {
                     panic!("Stable worker should not fail in ONE_FOR_ONE");
                 }
                 _ => {}
@@ -349,9 +365,9 @@ async fn test_one_for_all_restart() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     let worker2_spec = create_child_spec(
         "worker2".to_string(),
@@ -377,9 +393,9 @@ async fn test_one_for_all_restart() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     let worker1_ref = supervisor
         .add_child(worker1_spec)
@@ -458,9 +474,9 @@ async fn test_rest_for_one_restart() {
                     None, // node_id - will be set when spawned
                 ))
             }),
-            RestartStrategy::Permanent,
+            RestartStrategy::RestartPolicyPermanent,
             Some(5000),
-        );
+        ).await;
 
         supervisor
             .add_child(spec)
@@ -516,9 +532,9 @@ async fn test_restart_limits() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     let crasher_ref = supervisor
         .add_child(spec)
@@ -593,9 +609,9 @@ async fn test_hierarchical_supervision() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     child_supervisor
         .add_child(worker_spec)
@@ -648,9 +664,9 @@ async fn test_permanent_restart_policy() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Permanent,
+        RestartStrategy::RestartPolicyPermanent,
         Some(5000),
-    );
+    ).await;
 
     supervisor
         .add_child(permanent_spec)
@@ -698,9 +714,9 @@ async fn test_temporary_restart_policy() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Temporary,
+        RestartStrategy::RestartPolicyTemporary,
         Some(5000),
-    );
+    ).await;
 
     supervisor
         .add_child(temp_spec)
@@ -748,9 +764,9 @@ async fn test_transient_restart_policy() {
                 None, // node_id
             ))
         }),
-        RestartStrategy::Transient,
+        RestartStrategy::RestartPolicyTransient,
         Some(5000),
-    );
+    ).await;
 
     supervisor
         .add_child(transient_spec)
@@ -760,3 +776,4 @@ async fn test_transient_restart_policy() {
 
     // Transient workers restart on error, not on normal exit
 }
+

@@ -23,7 +23,7 @@
 //! in ServiceLocator, ensuring consistent shutdown behavior across Node
 //! and test/example code.
 
-use plexspaces_core::PlexSpacesHealthReporter;
+use plexspaces_actor::PlexSpacesHealthReporter;
 use plexspaces_proto::system::v1::HealthProbeConfig;
 use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
@@ -72,8 +72,8 @@ pub async fn create_and_register_health_service(
 ) {
     // Create HealthService with ServiceLocator reference (cast to trait object for PlexSpacesHealthReporter)
     let config = config.unwrap_or_default();
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        service_locator_impl.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> =
+        service_locator_impl.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     let (health_reporter, health_service) =
         PlexSpacesHealthReporter::with_config_and_service_locator(
             config,

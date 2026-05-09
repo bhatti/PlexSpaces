@@ -30,7 +30,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use plexspaces_core::RequestContext;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 

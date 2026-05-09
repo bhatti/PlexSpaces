@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use plexspaces_core::{NodeConnectivity, ServiceLocator};
+use plexspaces_actor::{NodeConnectivity, ServiceLocator};
 use plexspaces_services::actor_service::ActorServiceImpl;
 
 pub mod actor_routes;

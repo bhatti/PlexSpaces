@@ -29,7 +29,7 @@
 //! - **Consistent Pattern**: All factories follow the same structure
 
 use async_trait::async_trait;
-use plexspaces_core::ServiceLocator;
+use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use serde_json::Value;
 use std::sync::Arc;
@@ -72,7 +72,7 @@ impl FacetFactory for VirtualActorFacetFactory {
 /// Creates DurabilityFacet instances by getting JournalStorage from ServiceLocator.
 /// DurabilityFacet enables checkpoint-based state persistence (Restate-inspired).
 pub struct DurabilityFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 }
 
 impl DurabilityFacetFactory {
@@ -80,7 +80,7 @@ impl DurabilityFacetFactory {
     ///
     /// ## Arguments
     /// * `service_locator` - ServiceLocator to get JournalStorage from
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
         Self { service_locator }
     }
 }
@@ -89,7 +89,6 @@ impl DurabilityFacetFactory {
 impl FacetFactory for DurabilityFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::DurabilityFacet;
-        use plexspaces_core::JournalStorage;
 
         // Get JournalStorage from ServiceLocator
         let journal_storage = self.service_locator.get_journal_storage().await
@@ -126,7 +125,7 @@ impl FacetFactory for DurabilityFacetFactory {
 /// Creates TimerFacet instances by getting ServiceLocator for ActorService lookup.
 /// TimerFacet needs ServiceLocator to send TimerFired messages to actors.
 pub struct TimerFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 }
 
 impl TimerFacetFactory {
@@ -134,7 +133,7 @@ impl TimerFacetFactory {
     ///
     /// ## Arguments
     /// * `service_locator` - ServiceLocator for TimerFacet to use
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
         Self { service_locator }
     }
 }
@@ -165,12 +164,11 @@ impl FacetFactory for TimerFacetFactory {
                         "LockManager not found in ServiceLocator. Required for distributed timer locking.".to_string()
                     ))?;
 
-                let node_id = self
-                    .service_locator
-                    .get_node_config()
-                    .await
-                    .and_then(|cfg| Some(cfg.id.clone()))
-                    .unwrap_or_else(|| "unknown".to_string());
+                let node_id = config
+                    .get("node_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
 
                 TimerFacet::with_lock_manager(
                     lock_manager,
@@ -209,7 +207,7 @@ impl FacetFactory for TimerFacetFactory {
 /// Creates ReminderFacet instances by getting JournalStorage and ServiceLocator.
 /// ReminderFacet needs JournalStorage for persistence and ServiceLocator for sending messages.
 pub struct ReminderFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 }
 
 impl ReminderFacetFactory {
@@ -217,7 +215,7 @@ impl ReminderFacetFactory {
     ///
     /// ## Arguments
     /// * `service_locator` - ServiceLocator to get JournalStorage from
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
         Self { service_locator }
     }
 }
@@ -226,7 +224,6 @@ impl ReminderFacetFactory {
 impl FacetFactory for ReminderFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::reminder_facet::{ReminderFacet, REMINDER_FACET_DEFAULT_PRIORITY};
-        use plexspaces_core::JournalStorage;
 
         // Get JournalStorage from ServiceLocator
         let journal_storage = self.service_locator.get_journal_storage().await
@@ -264,7 +261,7 @@ impl FacetFactory for ReminderFacetFactory {
 /// Creates MemoizeFacet instances by getting KeyValueStore from ServiceLocator.
 /// MemoizeFacet caches handler results in KV storage, skipping actor execution on hits.
 pub struct MemoizeFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 }
 
 impl MemoizeFacetFactory {
@@ -272,7 +269,7 @@ impl MemoizeFacetFactory {
     ///
     /// ## Arguments
     /// * `service_locator` - ServiceLocator to get KeyValueStore from
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
         Self { service_locator }
     }
 }
@@ -324,7 +321,7 @@ impl FacetFactory for MemoizeFacetFactory {
 /// This factory returns an error explaining that EventSourcingFacet needs to be
 /// refactored to use trait objects (like DurabilityFacet) or created with a concrete type.
 pub struct EventSourcingFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
+    service_locator: Arc<dyn ServiceLocatorBase>,
 }
 
 impl EventSourcingFacetFactory {
@@ -332,7 +329,7 @@ impl EventSourcingFacetFactory {
     ///
     /// ## Arguments
     /// * `service_locator` - ServiceLocator to get JournalStorage from
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
         Self { service_locator }
     }
 }
@@ -365,7 +362,8 @@ mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
     use async_trait::async_trait;
-    use plexspaces_core::{JournalStorage, KeyValueStore, KeyValueStoreError, LockManager, RequestContext};
+    use plexspaces_common::RequestContext;
+    use plexspaces_actor::{InitializableServiceLocator, JournalStorage, KeyValueStore, KeyValueStoreError, LockManager};
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_services::ServiceLocatorImpl;
     use std::collections::HashMap;
@@ -411,7 +409,7 @@ mod tests {
     }
 
     /// Helper to create a test ServiceLocator with JournalStorage
-    async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
+    async fn create_test_service_locator() -> Arc<ServiceLocatorImpl> {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
 
         // Register JournalStorage
@@ -435,7 +433,8 @@ mod tests {
         service_locator.register_node_config(node_config).await;
 
         // Register a minimal ActorService for TimerFacet/ReminderFacet
-        use plexspaces_core::{ActorRef, ActorService, Message};
+        use plexspaces_actor::{ActorService, Message};
+        use plexspaces_service_traits::ActorRef;
 
         struct MockActorService;
 
@@ -443,7 +442,7 @@ mod tests {
         impl ActorService for MockActorService {
             async fn spawn_actor(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &plexspaces_common::RequestContext,
                 _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
             ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
                 Err("Not implemented for tests".into())
@@ -451,7 +450,7 @@ mod tests {
 
             async fn send(
                 &self,
-                _ctx: &plexspaces_core::RequestContext,
+                _ctx: &plexspaces_common::RequestContext,
                 _actor_id: &str,
                 _message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

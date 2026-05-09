@@ -55,7 +55,7 @@ pub fn install_metrics_recorder() -> PrometheusHandle {
         .clone()
 }
 
-/// Bridges [`PrometheusHandle`] to [`plexspaces_core::MetricsPrometheusRenderer`].
+/// Bridges [`PrometheusHandle`] to [`plexspaces_actor::MetricsPrometheusRenderer`].
 pub struct PrometheusHandleRenderer(PrometheusHandle);
 
 impl PrometheusHandleRenderer {
@@ -65,7 +65,7 @@ impl PrometheusHandleRenderer {
     }
 }
 
-impl plexspaces_core::MetricsPrometheusRenderer for PrometheusHandleRenderer {
+impl plexspaces_actor::MetricsPrometheusRenderer for PrometheusHandleRenderer {
     fn render_prometheus_text(&self) -> String {
         self.0.render()
     }
@@ -699,7 +699,7 @@ impl MetricsServiceImpl {
 }
 
 #[async_trait::async_trait]
-impl plexspaces_core::MetricsServiceAccess for MetricsServiceImpl {
+impl plexspaces_actor::MetricsServiceAccess for MetricsServiceImpl {
     async fn export_prometheus_text(&self) -> String {
         self.prometheus_handle.render()
     }
@@ -963,7 +963,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_service_access_matches_grpc_read_paths() {
-        use plexspaces_core::MetricsServiceAccess;
+        use plexspaces_actor::MetricsServiceAccess;
 
         let service = test_service();
         metrics::counter!("plexspaces_messages_routed_total", "namespace" => "trait-ns")

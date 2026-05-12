@@ -29,8 +29,8 @@
 //! - Tracks dependency state transitions (healthy → degraded → unhealthy)
 //! - Provides metrics for dashboard monitoring
 
-use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_actor::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
+use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_proto::circuitbreaker::prv::{
     CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy,
 };

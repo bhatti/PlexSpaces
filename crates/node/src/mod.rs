@@ -27,18 +27,18 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use plexspaces_application::{Application, ApplicationError, ApplicationManager, ApplicationNode};
 use plexspaces_actor::actor_context::ObjectRegistry;
 use plexspaces_actor::LinkProvider;
 use plexspaces_actor::{
-    ActorId, ActorRegistry, ActorService, ApplicationManager as ApplicationManagerTrait, ExitReason,
-    InitializableServiceLocator, ProcessResourceSampler, RequestContext, RequestContextExt,
-    ServiceLocator as ServiceLocatorTrait,
+    ActorId, ActorRegistry, ActorService, ApplicationManager as ApplicationManagerTrait,
+    ExitReason, InitializableServiceLocator, ProcessResourceSampler, RequestContext,
+    RequestContextExt, ServiceLocator as ServiceLocatorTrait,
 };
-use plexspaces_service_traits::ServiceLocatorBase;
+use plexspaces_application::{Application, ApplicationError, ApplicationManager, ApplicationNode};
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
+use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_services::ServiceLocatorImpl;
 use std::time::Duration;
 
@@ -400,6 +400,12 @@ impl Node {
         use crate::config::loader::ConfigLoader;
         use std::env;
 
+        if cfg!(test) && env::var("PLEXSPACES_RELEASE_CONFIG_PATH").is_err() {
+            return Err(NodeError::ConfigError(
+                "Implicit release config auto-loading is disabled for test builds".to_string(),
+            ));
+        }
+
         // Check environment variable first
         let config_path = if let Ok(path) = env::var("PLEXSPACES_RELEASE_CONFIG_PATH") {
             Some(path)
@@ -514,6 +520,7 @@ impl Node {
             facets: vec![],
             config,
             labels,
+            ..Default::default()
         };
         actor_factory
             .spawn_actor(ctx, &spec, facets)
@@ -551,7 +558,9 @@ impl Node {
             ActorRegistryError::RegistrationFailed(msg) => NodeError::InvalidArgument(msg),
             ActorRegistryError::LookupFailed(msg) => NodeError::InvalidArgument(msg),
             ActorRegistryError::UnregistrationFailed(msg) => NodeError::InvalidArgument(msg),
-            ActorRegistryError::Timeout => NodeError::InvalidArgument("ActorRegistry timeout".into()),
+            ActorRegistryError::Timeout => {
+                NodeError::InvalidArgument("ActorRegistry timeout".into())
+            }
             ActorRegistryError::DependencyUnavailable(m) => NodeError::InvalidArgument(m),
             ActorRegistryError::VisibilityDenied(m) => NodeError::InvalidArgument(m),
             ActorRegistryError::LinkMonitorDenied(m) => NodeError::InvalidArgument(m),
@@ -858,7 +867,302 @@ impl Node {
             ));
         }
 
+        // Scan for stale object registrations and advance their health lifecycle.
+        // Threshold = 3 × heartbeat_interval (matches default max_heartbeat_failures=3).
+        // Done inline so no extra background task is needed.
+        self.scan_stale_object_heartbeats(self.config.heartbeat_interval_ms).await;
+
         Ok(())
+    }
+
+    /// Scan the object registry for stale registrations and call `record_heartbeat_failure`
+    /// for each one.  Uses an admin context so the scan is cross-tenant.
+    ///
+    /// `heartbeat_interval_ms` is the node's own heartbeat interval; the staleness
+    /// threshold is set to 3× this value to align with `max_heartbeat_failures=3`.
+    async fn scan_stale_object_heartbeats(&self, heartbeat_interval_ms: u64) {
+        let object_registry = match self.service_locator.get_object_registry().await {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Empty tenant_id + is_admin=true → cross-tenant scan.
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+        let threshold_secs = ((heartbeat_interval_ms * 3) / 1000) as i64;
+
+        let stale = match object_registry
+            .find_stale_heartbeats(&admin_ctx, threshold_secs, 1000)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    node_id = %self.id.as_str(),
+                    error = %e,
+                    "Failed to scan stale object heartbeats"
+                );
+                return;
+            }
+        };
+
+        for reg in stale {
+            let tenant_ctx = RequestContext::new_without_auth(
+                reg.tenant_id.clone(),
+                reg.namespace.clone(),
+            );
+            match object_registry
+                .record_heartbeat_failure(&tenant_ctx, &reg.object_id)
+                .await
+            {
+                Ok(new_status) => {
+                    tracing::debug!(
+                        node_id = %self.id.as_str(),
+                        object_id = %reg.object_id,
+                        object_type = %reg.object_type,
+                        grpc_address = %reg.grpc_address,
+                        tenant_id = %reg.tenant_id,
+                        new_status = ?new_status,
+                        "Stale object heartbeat: recorded failure"
+                    );
+                }
+                Err(e) => {
+                    // NotFound is benign — object removed between scan and failure record.
+                    let msg = e.to_string();
+                    if msg.contains("not found") || msg.contains("NotFound") {
+                        tracing::debug!(
+                            object_id = %reg.object_id,
+                            "Stale object scan: object removed before failure recorded (benign)"
+                        );
+                    } else {
+                        tracing::warn!(
+                            node_id = %self.id.as_str(),
+                            object_id = %reg.object_id,
+                            error = %e,
+                            "Stale object scan: record_heartbeat_failure failed"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check liveness of actor object-registry entries and keep health status in sync.
+    ///
+    /// ## Local actors
+    /// Presence in the local `ActorRegistry` is the authoritative liveness signal —
+    /// no round-trip needed.  Actors found in the registry get their object-registry
+    /// heartbeat refreshed; actors NOT found get a failure recorded.
+    ///
+    /// ## Remote actors
+    /// Actor entries hosted on OTHER nodes are checked via a single `GetActorStates`
+    /// batch RPC per remote node (grouped by `node_id`), which is far cheaper than
+    /// individual `__PING__` messages.
+    ///
+    /// This is intentionally sparse — called at 2× the node heartbeat interval.
+    async fn check_actor_liveness(&self) {
+        use plexspaces_proto::object_registry::v1::ObjectType;
+        use plexspaces_proto::v1::actor::{ActorState, GetActorStatesRequest};
+        use plexspaces_proto::ActorServiceClient;
+
+        let actor_registry = match self.service_locator.actor_registry().await {
+            Some(r) => r,
+            None => return,
+        };
+        let object_registry = match self.service_locator.get_object_registry().await {
+            Some(r) => r,
+            None => return,
+        };
+        let node_id_str = self.id.as_str().to_string();
+
+        // Admin context for cross-tenant discovery of all ACTOR entries.
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        // Discover HEALTHY and DEGRADED actors (both are still "live" — DEAD/STOPPING are skipped).
+        // Two queries: one per health status, then merge.
+        let mut registrations = Vec::new();
+        for status in [
+            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy,
+            plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDegraded,
+        ] {
+            match object_registry
+                .discover(
+                    &admin_ctx,
+                    Some(ObjectType::ObjectTypeActor),
+                    None,
+                    None,
+                    None,
+                    Some(status),
+                    0,
+                    10_000,
+                )
+                .await
+            {
+                Ok(mut r) => registrations.append(&mut r),
+                Err(e) => {
+                    tracing::warn!(node_id = %node_id_str, error = %e, "Actor liveness: discover failed");
+                    return;
+                }
+            }
+        }
+
+        if registrations.is_empty() {
+            return;
+        }
+
+        // Partition into local (this node) and remote (other nodes).
+        let mut remote_by_node: std::collections::HashMap<String, Vec<(String, String, String)>> =
+            std::collections::HashMap::new();
+
+        for reg in registrations {
+            let ctx = RequestContext::new_without_auth(
+                reg.tenant_id.clone(),
+                reg.namespace.clone(),
+            );
+
+            if reg.node_id == node_id_str || reg.node_id.is_empty() {
+                // Local: actor_registry presence = alive.
+                let actor_id = match ActorId::from_canonical(&reg.object_id) {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                };
+                if actor_registry.is_actor_activated(&actor_id).await {
+                    // Alive — refresh object-registry heartbeat to prevent stale scan from flagging it.
+                    if let Err(e) = object_registry
+                        .heartbeat(&ctx, ObjectType::ObjectTypeActor, &reg.object_id)
+                        .await
+                    {
+                        let msg = e.to_string();
+                        if !msg.contains("not found") && !msg.contains("NotFound") {
+                            tracing::warn!(
+                                node_id = %node_id_str,
+                                actor_id = %reg.object_id,
+                                error = %e,
+                                "Actor liveness: heartbeat update failed"
+                            );
+                        }
+                    }
+                } else {
+                    // Not in local registry — record failure so health lifecycle advances.
+                    if let Err(e) = object_registry
+                        .record_heartbeat_failure(&ctx, &reg.object_id)
+                        .await
+                    {
+                        let msg = e.to_string();
+                        if !msg.contains("not found") && !msg.contains("NotFound") {
+                            tracing::warn!(
+                                node_id = %node_id_str,
+                                actor_id = %reg.object_id,
+                                error = %e,
+                                "Actor liveness: record_heartbeat_failure failed"
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Remote: group by node_id for batch RPC.
+                remote_by_node
+                    .entry(reg.node_id.clone())
+                    .or_default()
+                    .push((reg.object_id, reg.tenant_id, reg.namespace));
+            }
+        }
+
+        // Check remote actors via GetActorStates batch call per node.
+        if remote_by_node.is_empty() {
+            return;
+        }
+
+        let node_registry = match self.service_locator.get_node_registry().await {
+            Some(r) => r,
+            None => return,
+        };
+        let conn_manager = match self.service_locator.get_grpc_connection_manager().await {
+            Some(m) => m,
+            None => return,
+        };
+        let sys_ctx = self
+            .service_locator()
+            .request_context_for_system_operations()
+            .await;
+
+        for (remote_node_id, actor_entries) in remote_by_node {
+            let node_address = match node_registry.lookup_node(&sys_ctx, &remote_node_id).await {
+                Ok(Some(reg)) => reg.node_address,
+                _ => {
+                    tracing::debug!(node_id = %remote_node_id, "Actor liveness: remote node not found");
+                    continue;
+                }
+            };
+
+            let channel = match conn_manager
+                .get_actor_service_connection(&remote_node_id, &node_address)
+                .await
+            {
+                Ok(ch) => ch,
+                Err(e) => {
+                    tracing::debug!(node_id = %remote_node_id, error = %e, "Actor liveness: connect failed");
+                    continue;
+                }
+            };
+
+            let actor_ids: Vec<String> = actor_entries.iter().map(|(id, _, _)| id.clone()).collect();
+            let mut client = ActorServiceClient::new(channel);
+            let resp = match client
+                .get_actor_states(tonic::Request::new(GetActorStatesRequest { actor_ids }))
+                .await
+            {
+                Ok(r) => r.into_inner(),
+                Err(e) => {
+                    tracing::debug!(node_id = %remote_node_id, error = %e, "Actor liveness: GetActorStates RPC failed");
+                    continue;
+                }
+            };
+
+            for (actor_id, tenant_id, namespace) in &actor_entries {
+                let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
+                let state = resp
+                    .states
+                    .get(actor_id)
+                    .copied()
+                    .unwrap_or(ActorState::ActorStateUnspecified as i32);
+
+                if state == ActorState::ActorStateActive as i32 {
+                    // Still alive on remote node — refresh heartbeat.
+                    if let Err(e) = object_registry
+                        .heartbeat(&ctx, ObjectType::ObjectTypeActor, actor_id)
+                        .await
+                    {
+                        let msg = e.to_string();
+                        if !msg.contains("not found") && !msg.contains("NotFound") {
+                            tracing::warn!(
+                                remote_node = %remote_node_id,
+                                actor_id = %actor_id,
+                                error = %e,
+                                "Actor liveness: remote heartbeat update failed"
+                            );
+                        }
+                    }
+                } else {
+                    // Not active on remote node — record failure.
+                    if let Err(e) = object_registry
+                        .record_heartbeat_failure(&ctx, actor_id)
+                        .await
+                    {
+                        let msg = e.to_string();
+                        if !msg.contains("not found") && !msg.contains("NotFound") {
+                            tracing::warn!(
+                                remote_node = %remote_node_id,
+                                actor_id = %actor_id,
+                                error = %e,
+                                "Actor liveness: remote record_heartbeat_failure failed"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Get the shared database URL from ReleaseSpec config
@@ -960,10 +1264,10 @@ impl Node {
     /// ## Returns
     /// Never returns normally - runs until shutdown signal received
     pub async fn start(self: Arc<Self>) -> Result<(), NodeError> {
+        use plexspaces_grpc_middleware::GrpcHttpServerBuilder;
         use plexspaces_proto::{ActorServiceServer, TupleSpaceServiceServer};
         use plexspaces_services::actor_service::ActorServiceImpl;
         use plexspaces_services::tuple_service::TupleSpaceServiceImpl;
-        use plexspaces_grpc_middleware::GrpcHttpServerBuilder;
         use tonic_web;
 
         // Install sqlx::any default drivers before any database operations
@@ -1155,6 +1459,7 @@ impl Node {
                 tokio::time::sleep(tokio::time::Duration::from_millis(heartbeat_interval)).await;
 
                 // Heartbeat updates this node's own node-registry and object-registry state.
+                // Also scans for stale object registrations inline (no separate background task).
                 if let Err(e) = node_for_heartbeat.send_heartbeat_with_capacity().await {
                     tracing::warn!(
                         node_id = %node_for_heartbeat.id.as_str(),
@@ -1162,6 +1467,20 @@ impl Node {
                         "Failed to send heartbeat"
                     );
                 }
+            }
+        });
+
+        // Sparse actor liveness check using __PING__ messages.
+        // Runs at 2× the node heartbeat interval (e.g. 10 s when heartbeat is 5 s).
+        // Only probes local actors; unresponsive ones are recorded in the object registry.
+        // This is kept intentionally sparse to avoid flooding the actor mailboxes.
+        let node_for_ping = self.clone();
+        let actor_ping_interval = heartbeat_interval * 2;
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(actor_ping_interval)).await;
+                node_for_ping.check_actor_liveness().await;
             }
         });
 
@@ -1828,15 +2147,33 @@ impl Node {
         let server_builder = {
             use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
             use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
-            let sls = ServiceLinkServiceImpl::new(
-                self.service_locator.clone() as Arc<dyn plexspaces_actor::InitializableServiceLocator>
-            )
+            let sls = ServiceLinkServiceImpl::new(self.service_locator.clone()
+                as Arc<dyn plexspaces_actor::InitializableServiceLocator>)
             .await;
             server_builder.grpc_service(tonic_web::enable(
                 ServiceLinkServiceServer::new(sls)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
                     .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
             ))
+        };
+
+        // Add ObjectRegistry gRPC service for network-accessible service discovery
+        let server_builder = {
+            use plexspaces_proto::object_registry::v1::object_registry_server::ObjectRegistryServer;
+            use plexspaces_services::object_registry_service::ObjectRegistryServiceImpl;
+            use plexspaces_services::ServiceLocatorTrait;
+            if let Some(obj_reg) = self.service_locator.get_object_registry().await {
+                server_builder.grpc_service(tonic_web::enable(
+                    ObjectRegistryServer::new(ObjectRegistryServiceImpl::new(
+                        obj_reg,
+                        self.service_locator.clone() as Arc<dyn ServiceLocatorTrait>,
+                    ))
+                    .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
+                ))
+            } else {
+                server_builder
+            }
         };
 
         // Connect to cluster_seed_nodes if configured (non-blocking; node is already listening)
@@ -1864,10 +2201,10 @@ impl Node {
         }
 
         // Build HTTP routes and assemble single-port gRPC+HTTP server
-        let (auth_disabled, jwt_secret) = plexspaces_grpc_middleware::http_jwt_auth_snapshot(
-            self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator + Send + Sync>,
-        )
-        .await;
+        let (auth_disabled, jwt_secret) =
+            plexspaces_grpc_middleware::http_jwt_auth_snapshot(self.service_locator.clone()
+                as Arc<dyn plexspaces_actor::ServiceLocator + Send + Sync>)
+            .await;
         let node_connectivity_for_http =
             node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
         let http_routes = crate::http_routes::all_http_routes(
@@ -1961,6 +2298,10 @@ impl Node {
         actor_id: &ActorId,
         supervisor_id: &ActorId,
     ) -> Result<MonitorRef, NodeError> {
+        if !actor_id.is_on_node(self.id.as_str()) {
+            let remote_node = NodeId::new(actor_id.node_id().to_string());
+            self.lookup_node_address(&remote_node).await?;
+        }
         let registry = self.actor_registry().await?;
         let result = registry
             .monitor(ctx, actor_id, supervisor_id)
@@ -1971,7 +2312,8 @@ impl Node {
                 metrics::counter!("plexspaces_node_monitor_established_total",
                     "node_id" => self.id.as_str().to_string(),
                     "local" => (actor_id.node_id() == self.id.as_str()).to_string()
-                ).increment(1);
+                )
+                .increment(1);
                 tracing::debug!(
                     actor_id = %actor_id,
                     supervisor_id = %supervisor_id,
@@ -2020,7 +2362,8 @@ impl Node {
         } else {
             metrics::counter!("plexspaces_node_monitor_cancelled_total",
                 "node_id" => self.id.as_str().to_string()
-            ).increment(1);
+            )
+            .increment(1);
             tracing::debug!(
                 actor_id = %actor_id,
                 supervisor_id = %supervisor_id,
@@ -2369,6 +2712,8 @@ impl Node {
         tracing::warn!("╚════════════════════════════════════════════════════════════════╝");
         tracing::warn!("Node: {} | Timeout: {:?}\n", self.id.as_str(), timeout);
 
+        self.application_manager.request_shutdown().await;
+
         // Collect initial metrics before shutdown
         let (app_count, actor_count, queue_size, active_reqs, conn_nodes) =
             self.collect_shutdown_metrics().await;
@@ -2436,9 +2781,15 @@ impl Node {
 
         let stop_start = std::time::Instant::now();
 
-        // Try to use Release shutdown order if ReleaseSpec is available
+        // Try to use Release shutdown order if ReleaseSpec is available.
+        // Embedded/test nodes may carry a runtime-only ReleaseSpec (for example to select
+        // in-memory backends) without listing applications. In that case we still need to
+        // stop every running application registered directly with the ApplicationManager.
+        let mut stop_errors = Vec::new();
         let release_spec = self.release_spec.read().await;
         if let Some(ref spec) = *release_spec {
+            let mut stopped_from_release = std::collections::HashSet::new();
+
             // Stop applications in reverse order (simple approach - proper dependency ordering would require Release helper)
             // Reverse iterate to stop dependents before dependencies
             for app_config in spec.applications.iter().rev() {
@@ -2473,12 +2824,48 @@ impl Node {
                         error = %e,
                         "Failed to stop application during shutdown (continuing with others)"
                     );
-                    // Continue with other applications even if one fails
+                    stop_errors.push(format!("{}: {}", app_config.name, e));
+                } else {
+                    stopped_from_release.insert(app_config.name.clone());
+                }
+            }
+
+            // Stop any remaining running applications that were not part of the ReleaseSpec.
+            // This keeps embedded/manual registrations aligned with node shutdown semantics.
+            let remaining_apps =
+                ApplicationManagerTrait::list_applications(self.application_manager.as_ref()).await;
+            for app_name in remaining_apps.into_iter().rev() {
+                if stopped_from_release.contains(&app_name) {
+                    continue;
+                }
+
+                let app_state = ApplicationManagerTrait::get_state(
+                    self.application_manager.as_ref(),
+                    &app_name,
+                )
+                .await;
+                if app_state
+                    != Some(
+                        plexspaces_proto::v1::application::ApplicationState::ApplicationStateRunning,
+                    )
+                {
+                    continue;
+                }
+
+                if let Err(e) = self.application_manager.stop(&app_name, timeout).await {
+                    tracing::warn!(
+                        application = %app_name,
+                        error = %e,
+                        "Failed to stop application during shutdown (continuing with others)"
+                    );
+                    stop_errors.push(format!("{}: {}", app_name, e));
                 }
             }
         } else {
             // No ReleaseSpec - use default stop_all (reverse registration order)
-            self.application_manager.stop_all(timeout).await?;
+            if let Err(e) = self.application_manager.stop_all(timeout).await {
+                stop_errors.push(e.to_string());
+            }
         }
 
         let stop_duration = stop_start.elapsed();
@@ -2568,7 +2955,14 @@ impl Node {
         tracing::warn!("╔════════════════════════════════════════════════════════════════╗");
         tracing::warn!("║  ✅ Graceful Shutdown Complete                                ║");
         tracing::warn!("╚════════════════════════════════════════════════════════════════╝\n");
-        Ok(())
+        if stop_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ApplicationError::Other(format!(
+                "Failed to stop applications: {}",
+                stop_errors.join(", ")
+            )))
+        }
     }
 
     /// Collect shutdown metrics for logging
@@ -2953,8 +3347,8 @@ impl ClusterManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_actor::ActorRef;
     use plexspaces_actor::ActorId;
+    use plexspaces_actor::ActorRef;
     use plexspaces_proto::actor::v1::ActorVisibility;
     use std::time::Duration;
 
@@ -3497,15 +3891,9 @@ mod tests {
                         name: actor_id.name().to_string(),
                         actor_type: actor_id.actor_type().to_string(),
                     }),
-                    role: String::new(),
                     namespace: actor_id.namespace().to_string(),
                     tenant_id: "test-tenant".to_string(),
-                    visibility: 0,
-                    behavior_kind: String::new(),
-                    args: std::collections::HashMap::new(),
-                    facets: vec![],
-                    config: None,
-                    labels: std::collections::HashMap::new(),
+                    ..Default::default()
                 },
                 vec![],
             )
@@ -3592,15 +3980,9 @@ mod tests {
                         name: actor_id.name().to_string(),
                         actor_type: actor_id.actor_type().to_string(),
                     }),
-                    role: String::new(),
                     namespace: actor_id.namespace().to_string(),
                     tenant_id: "test-tenant".to_string(),
-                    visibility: 0,
-                    behavior_kind: String::new(),
-                    args: std::collections::HashMap::new(),
-                    facets: vec![],
-                    config: None,
-                    labels: std::collections::HashMap::new(),
+                    ..Default::default()
                 },
                 vec![],
             )
@@ -3641,9 +4023,19 @@ mod tests {
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
 
         // Create two nodes
-        let node1 = Arc::new(NodeBuilder::new("node1").build().await);
+        let node1 = Arc::new(
+            NodeBuilder::new("node1")
+                .with_in_memory_backends()
+                .build()
+                .await,
+        );
 
-        let node2 = Arc::new(NodeBuilder::new("node2").build().await);
+        let node2 = Arc::new(
+            NodeBuilder::new("node2")
+                .with_in_memory_backends()
+                .build()
+                .await,
+        );
 
         // Note: We no longer use register_remote_node - node discovery goes through ObjectRegistry/NodeRegistry
         // The registration happens below via ObjectRegistry.register()
@@ -3882,7 +4274,10 @@ mod tests {
             "lookup should succeed (returns remote ref)"
         );
         let actor_ref = actor_ref.unwrap();
-        assert!(actor_ref.is_some(), "lookup should return a remote actor ref");
+        assert!(
+            actor_ref.is_some(),
+            "lookup should return a remote actor ref"
+        );
 
         // Sending to an unregistered node fails at delivery time
         let tell_ctx = node
@@ -4239,7 +4634,12 @@ mod tests {
     async fn test_lifecycle_event_unsubscribe() {
         use tokio::sync::mpsc;
 
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node")
+                .with_in_memory_backends()
+                .build()
+                .await,
+        );
         node.initialize_services().await.unwrap();
 
         // Create subscription channel
@@ -4264,7 +4664,10 @@ mod tests {
         let received = tokio::time::timeout(tokio::time::Duration::from_millis(500), rx.recv())
             .await
             .unwrap();
-        assert!(received.is_some(), "subscriber should receive event before unsubscribe");
+        assert!(
+            received.is_some(),
+            "subscriber should receive event before unsubscribe"
+        );
 
         // Unsubscribe
         node.unsubscribe_lifecycle_events().await;
@@ -4287,7 +4690,7 @@ mod tests {
         let after_unsubscribe =
             tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await;
         assert!(
-            after_unsubscribe.is_err(),
+            !matches!(after_unsubscribe, Ok(Some(_))),
             "subscriber should not receive events after unsubscribe"
         );
     }
@@ -4665,7 +5068,10 @@ mod tests {
         let delivered = mailbox
             .dequeue_with_timeout(Some(tokio::time::Duration::from_millis(200)))
             .await;
-        assert!(delivered.is_some(), "message should be delivered to mailbox");
+        assert!(
+            delivered.is_some(),
+            "message should be delivered to mailbox"
+        );
 
         // Unregister actor
         let actor_registry = get_actor_registry(&node).await;
@@ -5965,7 +6371,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_stops_all_applications() {
-        let node = Arc::new(NodeBuilder::new("test-node").build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node")
+                .with_in_memory_backends()
+                .build()
+                .await,
+        );
 
         // Track which apps were stopped
         let stopped_apps = Arc::new(RwLock::new(Vec::new()));
@@ -6040,6 +6451,41 @@ mod tests {
         assert!(stopped.contains(&"app1".to_string()));
         assert!(stopped.contains(&"app2".to_string()));
         assert!(stopped.contains(&"app3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_stops_manual_applications_with_runtime_only_release_spec() {
+        let node = Arc::new(
+            NodeBuilder::new("test-node")
+                .with_in_memory_backends()
+                .build()
+                .await,
+        );
+
+        let app = Box::new(MockTestApplication::new("test-app"));
+        let stop_called = app.stop_called.clone();
+
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
+        node.application_manager()
+            .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
+            .await;
+        node.application_manager().start("test-app").await.unwrap();
+
+        node.shutdown(tokio::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            node.application_manager().get_state("test-app").await,
+            Some(ApplicationState::ApplicationStateStopped)
+        );
+        assert!(
+            *stop_called.read().await,
+            "shutdown should stop manually registered applications even when the node only carries runtime configuration in ReleaseSpec"
+        );
     }
 }
 

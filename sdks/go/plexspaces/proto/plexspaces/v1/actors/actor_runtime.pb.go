@@ -8067,9 +8067,17 @@ type ActorSpawnSpec struct {
 	Labels map[string]string `protobuf:"bytes,9,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Actor runtime configuration (mailbox, restart policy, etc.).
 	// Optional — defaults apply when absent.
-	Config        *ActorConfig `protobuf:"bytes,10,opt,name=config,proto3" json:"config,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Config *ActorConfig `protobuf:"bytes,10,opt,name=config,proto3" json:"config,omitempty"`
+	// If true, auto-register this actor in ObjectRegistry on spawn and unregister on stop.
+	// Auto-enabled when facets include both "virtual_actor" and "durability".
+	RegisterInObjectRegistry bool `protobuf:"varint,11,opt,name=register_in_object_registry,json=registerInObjectRegistry,proto3" json:"register_in_object_registry,omitempty"`
+	// If true, enforce unique placement via alias (requires register_in_object_registry=true or auto-enabled).
+	// Spawn fails with ACTOR_ERROR_PLACEMENT_CONFLICT if another active instance with same identity exists.
+	EnforceUniquePlacement bool `protobuf:"varint,12,opt,name=enforce_unique_placement,json=enforceUniquePlacement,proto3" json:"enforce_unique_placement,omitempty"`
+	// Placement strategy for distributed actor placement (default: PREFER_LOCAL).
+	PlacementStrategy PlacementStrategy `protobuf:"varint,13,opt,name=placement_strategy,json=placementStrategy,proto3,enum=plexspaces.actor.v1.PlacementStrategy" json:"placement_strategy,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ActorSpawnSpec) Reset() {
@@ -8172,15 +8180,36 @@ func (x *ActorSpawnSpec) GetConfig() *ActorConfig {
 	return nil
 }
 
+func (x *ActorSpawnSpec) GetRegisterInObjectRegistry() bool {
+	if x != nil {
+		return x.RegisterInObjectRegistry
+	}
+	return false
+}
+
+func (x *ActorSpawnSpec) GetEnforceUniquePlacement() bool {
+	if x != nil {
+		return x.EnforceUniquePlacement
+	}
+	return false
+}
+
+func (x *ActorSpawnSpec) GetPlacementStrategy() PlacementStrategy {
+	if x != nil {
+		return x.PlacementStrategy
+	}
+	return PlacementStrategy_PLACEMENT_STRATEGY_UNSPECIFIED
+}
+
 var File_plexspaces_v1_actors_actor_runtime_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\n" +
-	"(plexspaces/v1/actors/actor_runtime.proto\x12\x13plexspaces.actor.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a plexspaces/v1/actors/types.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\x8a\x06\n" +
+	"(plexspaces/v1/actors/actor_runtime.proto\x12\x13plexspaces.actor.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a plexspaces/v1/actors/types.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\x90\x06\n" +
 	"\x05Actor\x12(\n" +
-	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12@\n" +
+	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12F\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB!\xe0A\x02\xbaH\x1br\x19\x10\x01\x18\x80\x012\x12^[a-z][a-z0-9_-]*$R\tactorType\x12:\n" +
+	"actor_type\x18\x02 \x01(\tB'\xe0A\x02\xbaH!r\x1f\x10\x01\x18\x80\x012\x18^[a-zA-Z][a-zA-Z0-9_-]*$R\tactorType\x12:\n" +
 	"\x05state\x18\x03 \x01(\x0e2\x1f.plexspaces.actor.v1.ActorStateB\x03\xe0A\x03R\x05state\x12$\n" +
 	"\anode_id\x18\x04 \x01(\tB\v\xe0A\x03\xbaH\x05r\x03\x18\xff\x01R\x06nodeId\x12 \n" +
 	"\x05vm_id\x18\x05 \x01(\tB\v\xe0A\x03\xbaH\x05r\x03\x18\xff\x01R\x04vmId\x12$\n" +
@@ -8744,7 +8773,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"stuckSince\x88\x01\x01\x12*\n" +
 	"\x0efailure_reason\x18\x03 \x01(\tH\x01R\rfailureReason\x88\x01\x01B\x0e\n" +
 	"\f_stuck_sinceB\x11\n" +
-	"\x0f_failure_reason\"\xff\x04\n" +
+	"\x0f_failure_reason\"\xcf\x06\n" +
 	"\x0eActorSpawnSpec\x12D\n" +
 	"\bidentity\x18\x01 \x01(\v2#.plexspaces.common.v1.ActorIdentityB\x03\xe0A\x02R\bidentity\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x1c\n" +
@@ -8758,7 +8787,10 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x06facets\x18\b \x03(\v2\x1b.plexspaces.common.v1.FacetR\x06facets\x12G\n" +
 	"\x06labels\x18\t \x03(\v2/.plexspaces.actor.v1.ActorSpawnSpec.LabelsEntryR\x06labels\x128\n" +
 	"\x06config\x18\n" +
-	" \x01(\v2 .plexspaces.actor.v1.ActorConfigR\x06config\x1a7\n" +
+	" \x01(\v2 .plexspaces.actor.v1.ActorConfigR\x06config\x12=\n" +
+	"\x1bregister_in_object_registry\x18\v \x01(\bR\x18registerInObjectRegistry\x128\n" +
+	"\x18enforce_unique_placement\x18\f \x01(\bR\x16enforceUniquePlacement\x12U\n" +
+	"\x12placement_strategy\x18\r \x01(\x0e2&.plexspaces.actor.v1.PlacementStrategyR\x11placementStrategy\x1a7\n" +
 	"\tArgsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +
@@ -9237,74 +9269,75 @@ var file_plexspaces_v1_actors_actor_runtime_proto_depIdxs = []int32{
 	123, // 134: plexspaces.actor.v1.ActorSpawnSpec.facets:type_name -> plexspaces.common.v1.Facet
 	120, // 135: plexspaces.actor.v1.ActorSpawnSpec.labels:type_name -> plexspaces.actor.v1.ActorSpawnSpec.LabelsEntry
 	19,  // 136: plexspaces.actor.v1.ActorSpawnSpec.config:type_name -> plexspaces.actor.v1.ActorConfig
-	134, // 137: plexspaces.actor.v1.ActorConfig.PropertiesEntry.value:type_name -> google.protobuf.Any
-	131, // 138: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry.value:type_name -> plexspaces.common.v1.Message
-	121, // 139: plexspaces.actor.v1.GetActorStatesResponse.StatesEntry.value:type_name -> plexspaces.actor.v1.ActorState
-	57,  // 140: plexspaces.actor.v1.ActorService.SpawnActor:input_type -> plexspaces.actor.v1.SpawnActorRequest
-	59,  // 141: plexspaces.actor.v1.ActorService.SpawnActors:input_type -> plexspaces.actor.v1.SpawnActorsRequest
-	62,  // 142: plexspaces.actor.v1.ActorService.GetActor:input_type -> plexspaces.actor.v1.GetActorRequest
-	64,  // 143: plexspaces.actor.v1.ActorService.ListActors:input_type -> plexspaces.actor.v1.ListActorsRequest
-	66,  // 144: plexspaces.actor.v1.ActorService.SendMessage:input_type -> plexspaces.actor.v1.SendMessageRequest
-	68,  // 145: plexspaces.actor.v1.ActorService.StreamMessages:input_type -> plexspaces.actor.v1.StreamMessageRequest
-	70,  // 146: plexspaces.actor.v1.ActorService.DeleteActor:input_type -> plexspaces.actor.v1.DeleteActorRequest
-	80,  // 147: plexspaces.actor.v1.ActorService.MonitorActor:input_type -> plexspaces.actor.v1.MonitorActorRequest
-	82,  // 148: plexspaces.actor.v1.ActorService.DemonitorActor:input_type -> plexspaces.actor.v1.DemonitorActorRequest
-	87,  // 149: plexspaces.actor.v1.ActorService.LinkActor:input_type -> plexspaces.actor.v1.LinkActorRequest
-	89,  // 150: plexspaces.actor.v1.ActorService.UnlinkActor:input_type -> plexspaces.actor.v1.UnlinkActorRequest
-	83,  // 151: plexspaces.actor.v1.ActorService.NotifyActorDown:input_type -> plexspaces.actor.v1.ActorDownNotification
-	91,  // 152: plexspaces.actor.v1.ActorService.CheckActorExists:input_type -> plexspaces.actor.v1.CheckActorExistsRequest
-	84,  // 153: plexspaces.actor.v1.ActorService.GetActorStates:input_type -> plexspaces.actor.v1.GetActorStatesRequest
-	93,  // 154: plexspaces.actor.v1.ActorService.AskReply:input_type -> plexspaces.actor.v1.AskReplyRequest
-	27,  // 155: plexspaces.actor.v1.ActorService.CreateShardGroup:input_type -> plexspaces.actor.v1.CreateShardGroupRequest
-	29,  // 156: plexspaces.actor.v1.ActorService.DeleteShardGroup:input_type -> plexspaces.actor.v1.DeleteShardGroupRequest
-	30,  // 157: plexspaces.actor.v1.ActorService.GetShardGroup:input_type -> plexspaces.actor.v1.GetShardGroupRequest
-	32,  // 158: plexspaces.actor.v1.ActorService.ListShardGroups:input_type -> plexspaces.actor.v1.ListShardGroupsRequest
-	54,  // 159: plexspaces.actor.v1.ActorService.ScaleShardGroup:input_type -> plexspaces.actor.v1.ScaleShardGroupRequest
-	34,  // 160: plexspaces.actor.v1.ActorService.SendToShard:input_type -> plexspaces.actor.v1.SendToShardRequest
-	46,  // 161: plexspaces.actor.v1.ActorService.BroadcastShardGroup:input_type -> plexspaces.actor.v1.BroadcastShardGroupRequest
-	48,  // 162: plexspaces.actor.v1.ActorService.ReduceShardGroup:input_type -> plexspaces.actor.v1.ReduceShardGroupRequest
-	50,  // 163: plexspaces.actor.v1.ActorService.AllReduceShardGroup:input_type -> plexspaces.actor.v1.AllReduceShardGroupRequest
-	52,  // 164: plexspaces.actor.v1.ActorService.BarrierShardGroup:input_type -> plexspaces.actor.v1.BarrierShardGroupRequest
-	36,  // 165: plexspaces.actor.v1.ActorService.ScatterGather:input_type -> plexspaces.actor.v1.ScatterGatherRequest
-	40,  // 166: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:input_type -> plexspaces.actor.v1.BulkUpdateShardGroupRequest
-	43,  // 167: plexspaces.actor.v1.ActorService.MapShardGroup:input_type -> plexspaces.actor.v1.MapShardGroupRequest
-	95,  // 168: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:input_type -> plexspaces.actor.v1.LifecycleEventFilter
-	71,  // 169: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:input_type -> plexspaces.actor.v1.ActorLifecycleEvent
-	58,  // 170: plexspaces.actor.v1.ActorService.SpawnActor:output_type -> plexspaces.actor.v1.SpawnActorResponse
-	61,  // 171: plexspaces.actor.v1.ActorService.SpawnActors:output_type -> plexspaces.actor.v1.SpawnActorsResponse
-	63,  // 172: plexspaces.actor.v1.ActorService.GetActor:output_type -> plexspaces.actor.v1.GetActorResponse
-	65,  // 173: plexspaces.actor.v1.ActorService.ListActors:output_type -> plexspaces.actor.v1.ListActorsResponse
-	67,  // 174: plexspaces.actor.v1.ActorService.SendMessage:output_type -> plexspaces.actor.v1.SendMessageResponse
-	69,  // 175: plexspaces.actor.v1.ActorService.StreamMessages:output_type -> plexspaces.actor.v1.StreamMessageResponse
-	135, // 176: plexspaces.actor.v1.ActorService.DeleteActor:output_type -> plexspaces.common.v1.Empty
-	81,  // 177: plexspaces.actor.v1.ActorService.MonitorActor:output_type -> plexspaces.actor.v1.MonitorActorResponse
-	135, // 178: plexspaces.actor.v1.ActorService.DemonitorActor:output_type -> plexspaces.common.v1.Empty
-	88,  // 179: plexspaces.actor.v1.ActorService.LinkActor:output_type -> plexspaces.actor.v1.LinkActorResponse
-	90,  // 180: plexspaces.actor.v1.ActorService.UnlinkActor:output_type -> plexspaces.actor.v1.UnlinkActorResponse
-	135, // 181: plexspaces.actor.v1.ActorService.NotifyActorDown:output_type -> plexspaces.common.v1.Empty
-	92,  // 182: plexspaces.actor.v1.ActorService.CheckActorExists:output_type -> plexspaces.actor.v1.CheckActorExistsResponse
-	85,  // 183: plexspaces.actor.v1.ActorService.GetActorStates:output_type -> plexspaces.actor.v1.GetActorStatesResponse
-	94,  // 184: plexspaces.actor.v1.ActorService.AskReply:output_type -> plexspaces.actor.v1.AskReplyResponse
-	28,  // 185: plexspaces.actor.v1.ActorService.CreateShardGroup:output_type -> plexspaces.actor.v1.CreateShardGroupResponse
-	135, // 186: plexspaces.actor.v1.ActorService.DeleteShardGroup:output_type -> plexspaces.common.v1.Empty
-	31,  // 187: plexspaces.actor.v1.ActorService.GetShardGroup:output_type -> plexspaces.actor.v1.GetShardGroupResponse
-	33,  // 188: plexspaces.actor.v1.ActorService.ListShardGroups:output_type -> plexspaces.actor.v1.ListShardGroupsResponse
-	55,  // 189: plexspaces.actor.v1.ActorService.ScaleShardGroup:output_type -> plexspaces.actor.v1.ScaleShardGroupResponse
-	35,  // 190: plexspaces.actor.v1.ActorService.SendToShard:output_type -> plexspaces.actor.v1.SendToShardResponse
-	47,  // 191: plexspaces.actor.v1.ActorService.BroadcastShardGroup:output_type -> plexspaces.actor.v1.BroadcastShardGroupResponse
-	49,  // 192: plexspaces.actor.v1.ActorService.ReduceShardGroup:output_type -> plexspaces.actor.v1.ReduceShardGroupResponse
-	51,  // 193: plexspaces.actor.v1.ActorService.AllReduceShardGroup:output_type -> plexspaces.actor.v1.AllReduceShardGroupResponse
-	53,  // 194: plexspaces.actor.v1.ActorService.BarrierShardGroup:output_type -> plexspaces.actor.v1.BarrierShardGroupResponse
-	39,  // 195: plexspaces.actor.v1.ActorService.ScatterGather:output_type -> plexspaces.actor.v1.ScatterGatherResponse
-	41,  // 196: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:output_type -> plexspaces.actor.v1.BulkUpdateShardGroupResponse
-	44,  // 197: plexspaces.actor.v1.ActorService.MapShardGroup:output_type -> plexspaces.actor.v1.MapShardGroupResponse
-	71,  // 198: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:output_type -> plexspaces.actor.v1.ActorLifecycleEvent
-	135, // 199: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:output_type -> plexspaces.common.v1.Empty
-	170, // [170:200] is the sub-list for method output_type
-	140, // [140:170] is the sub-list for method input_type
-	140, // [140:140] is the sub-list for extension type_name
-	140, // [140:140] is the sub-list for extension extendee
-	0,   // [0:140] is the sub-list for field type_name
+	0,   // 137: plexspaces.actor.v1.ActorSpawnSpec.placement_strategy:type_name -> plexspaces.actor.v1.PlacementStrategy
+	134, // 138: plexspaces.actor.v1.ActorConfig.PropertiesEntry.value:type_name -> google.protobuf.Any
+	131, // 139: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry.value:type_name -> plexspaces.common.v1.Message
+	121, // 140: plexspaces.actor.v1.GetActorStatesResponse.StatesEntry.value:type_name -> plexspaces.actor.v1.ActorState
+	57,  // 141: plexspaces.actor.v1.ActorService.SpawnActor:input_type -> plexspaces.actor.v1.SpawnActorRequest
+	59,  // 142: plexspaces.actor.v1.ActorService.SpawnActors:input_type -> plexspaces.actor.v1.SpawnActorsRequest
+	62,  // 143: plexspaces.actor.v1.ActorService.GetActor:input_type -> plexspaces.actor.v1.GetActorRequest
+	64,  // 144: plexspaces.actor.v1.ActorService.ListActors:input_type -> plexspaces.actor.v1.ListActorsRequest
+	66,  // 145: plexspaces.actor.v1.ActorService.SendMessage:input_type -> plexspaces.actor.v1.SendMessageRequest
+	68,  // 146: plexspaces.actor.v1.ActorService.StreamMessages:input_type -> plexspaces.actor.v1.StreamMessageRequest
+	70,  // 147: plexspaces.actor.v1.ActorService.DeleteActor:input_type -> plexspaces.actor.v1.DeleteActorRequest
+	80,  // 148: plexspaces.actor.v1.ActorService.MonitorActor:input_type -> plexspaces.actor.v1.MonitorActorRequest
+	82,  // 149: plexspaces.actor.v1.ActorService.DemonitorActor:input_type -> plexspaces.actor.v1.DemonitorActorRequest
+	87,  // 150: plexspaces.actor.v1.ActorService.LinkActor:input_type -> plexspaces.actor.v1.LinkActorRequest
+	89,  // 151: plexspaces.actor.v1.ActorService.UnlinkActor:input_type -> plexspaces.actor.v1.UnlinkActorRequest
+	83,  // 152: plexspaces.actor.v1.ActorService.NotifyActorDown:input_type -> plexspaces.actor.v1.ActorDownNotification
+	91,  // 153: plexspaces.actor.v1.ActorService.CheckActorExists:input_type -> plexspaces.actor.v1.CheckActorExistsRequest
+	84,  // 154: plexspaces.actor.v1.ActorService.GetActorStates:input_type -> plexspaces.actor.v1.GetActorStatesRequest
+	93,  // 155: plexspaces.actor.v1.ActorService.AskReply:input_type -> plexspaces.actor.v1.AskReplyRequest
+	27,  // 156: plexspaces.actor.v1.ActorService.CreateShardGroup:input_type -> plexspaces.actor.v1.CreateShardGroupRequest
+	29,  // 157: plexspaces.actor.v1.ActorService.DeleteShardGroup:input_type -> plexspaces.actor.v1.DeleteShardGroupRequest
+	30,  // 158: plexspaces.actor.v1.ActorService.GetShardGroup:input_type -> plexspaces.actor.v1.GetShardGroupRequest
+	32,  // 159: plexspaces.actor.v1.ActorService.ListShardGroups:input_type -> plexspaces.actor.v1.ListShardGroupsRequest
+	54,  // 160: plexspaces.actor.v1.ActorService.ScaleShardGroup:input_type -> plexspaces.actor.v1.ScaleShardGroupRequest
+	34,  // 161: plexspaces.actor.v1.ActorService.SendToShard:input_type -> plexspaces.actor.v1.SendToShardRequest
+	46,  // 162: plexspaces.actor.v1.ActorService.BroadcastShardGroup:input_type -> plexspaces.actor.v1.BroadcastShardGroupRequest
+	48,  // 163: plexspaces.actor.v1.ActorService.ReduceShardGroup:input_type -> plexspaces.actor.v1.ReduceShardGroupRequest
+	50,  // 164: plexspaces.actor.v1.ActorService.AllReduceShardGroup:input_type -> plexspaces.actor.v1.AllReduceShardGroupRequest
+	52,  // 165: plexspaces.actor.v1.ActorService.BarrierShardGroup:input_type -> plexspaces.actor.v1.BarrierShardGroupRequest
+	36,  // 166: plexspaces.actor.v1.ActorService.ScatterGather:input_type -> plexspaces.actor.v1.ScatterGatherRequest
+	40,  // 167: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:input_type -> plexspaces.actor.v1.BulkUpdateShardGroupRequest
+	43,  // 168: plexspaces.actor.v1.ActorService.MapShardGroup:input_type -> plexspaces.actor.v1.MapShardGroupRequest
+	95,  // 169: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:input_type -> plexspaces.actor.v1.LifecycleEventFilter
+	71,  // 170: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:input_type -> plexspaces.actor.v1.ActorLifecycleEvent
+	58,  // 171: plexspaces.actor.v1.ActorService.SpawnActor:output_type -> plexspaces.actor.v1.SpawnActorResponse
+	61,  // 172: plexspaces.actor.v1.ActorService.SpawnActors:output_type -> plexspaces.actor.v1.SpawnActorsResponse
+	63,  // 173: plexspaces.actor.v1.ActorService.GetActor:output_type -> plexspaces.actor.v1.GetActorResponse
+	65,  // 174: plexspaces.actor.v1.ActorService.ListActors:output_type -> plexspaces.actor.v1.ListActorsResponse
+	67,  // 175: plexspaces.actor.v1.ActorService.SendMessage:output_type -> plexspaces.actor.v1.SendMessageResponse
+	69,  // 176: plexspaces.actor.v1.ActorService.StreamMessages:output_type -> plexspaces.actor.v1.StreamMessageResponse
+	135, // 177: plexspaces.actor.v1.ActorService.DeleteActor:output_type -> plexspaces.common.v1.Empty
+	81,  // 178: plexspaces.actor.v1.ActorService.MonitorActor:output_type -> plexspaces.actor.v1.MonitorActorResponse
+	135, // 179: plexspaces.actor.v1.ActorService.DemonitorActor:output_type -> plexspaces.common.v1.Empty
+	88,  // 180: plexspaces.actor.v1.ActorService.LinkActor:output_type -> plexspaces.actor.v1.LinkActorResponse
+	90,  // 181: plexspaces.actor.v1.ActorService.UnlinkActor:output_type -> plexspaces.actor.v1.UnlinkActorResponse
+	135, // 182: plexspaces.actor.v1.ActorService.NotifyActorDown:output_type -> plexspaces.common.v1.Empty
+	92,  // 183: plexspaces.actor.v1.ActorService.CheckActorExists:output_type -> plexspaces.actor.v1.CheckActorExistsResponse
+	85,  // 184: plexspaces.actor.v1.ActorService.GetActorStates:output_type -> plexspaces.actor.v1.GetActorStatesResponse
+	94,  // 185: plexspaces.actor.v1.ActorService.AskReply:output_type -> plexspaces.actor.v1.AskReplyResponse
+	28,  // 186: plexspaces.actor.v1.ActorService.CreateShardGroup:output_type -> plexspaces.actor.v1.CreateShardGroupResponse
+	135, // 187: plexspaces.actor.v1.ActorService.DeleteShardGroup:output_type -> plexspaces.common.v1.Empty
+	31,  // 188: plexspaces.actor.v1.ActorService.GetShardGroup:output_type -> plexspaces.actor.v1.GetShardGroupResponse
+	33,  // 189: plexspaces.actor.v1.ActorService.ListShardGroups:output_type -> plexspaces.actor.v1.ListShardGroupsResponse
+	55,  // 190: plexspaces.actor.v1.ActorService.ScaleShardGroup:output_type -> plexspaces.actor.v1.ScaleShardGroupResponse
+	35,  // 191: plexspaces.actor.v1.ActorService.SendToShard:output_type -> plexspaces.actor.v1.SendToShardResponse
+	47,  // 192: plexspaces.actor.v1.ActorService.BroadcastShardGroup:output_type -> plexspaces.actor.v1.BroadcastShardGroupResponse
+	49,  // 193: plexspaces.actor.v1.ActorService.ReduceShardGroup:output_type -> plexspaces.actor.v1.ReduceShardGroupResponse
+	51,  // 194: plexspaces.actor.v1.ActorService.AllReduceShardGroup:output_type -> plexspaces.actor.v1.AllReduceShardGroupResponse
+	53,  // 195: plexspaces.actor.v1.ActorService.BarrierShardGroup:output_type -> plexspaces.actor.v1.BarrierShardGroupResponse
+	39,  // 196: plexspaces.actor.v1.ActorService.ScatterGather:output_type -> plexspaces.actor.v1.ScatterGatherResponse
+	41,  // 197: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:output_type -> plexspaces.actor.v1.BulkUpdateShardGroupResponse
+	44,  // 198: plexspaces.actor.v1.ActorService.MapShardGroup:output_type -> plexspaces.actor.v1.MapShardGroupResponse
+	71,  // 199: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:output_type -> plexspaces.actor.v1.ActorLifecycleEvent
+	135, // 200: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:output_type -> plexspaces.common.v1.Empty
+	171, // [171:201] is the sub-list for method output_type
+	141, // [141:171] is the sub-list for method input_type
+	141, // [141:141] is the sub-list for extension type_name
+	141, // [141:141] is the sub-list for extension extendee
+	0,   // [0:141] is the sub-list for field type_name
 }
 
 func init() { file_plexspaces_v1_actors_actor_runtime_proto_init() }

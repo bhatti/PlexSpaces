@@ -2,13 +2,14 @@
 // Comprehensive tests for virtual actors covering all edge cases
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
-use plexspaces_actor::{InitializableServiceLocator, ServiceLocator, ServiceLocatorBase};
+use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    RequestContext, RequestContextExt};
+    RequestContext, RequestContextExt,
+};
+use plexspaces_actor::{InitializableServiceLocator, ServiceLocator, ServiceLocatorBase};
+use plexspaces_behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalStorage, SqliteJournalStorage, StateLoader, VirtualActorFacet,
 };
@@ -41,9 +42,9 @@ async fn register_counter_behavior(node: &plexspaces_node::Node) {
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("gen_server", || {
-            Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
-            )
+            Box::pin(async move {
+                Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -61,7 +62,10 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+fn create_test_message_with_type(
+    payload: Vec<u8>,
+    message_type: &str,
+) -> plexspaces_actor::Message {
     plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
@@ -226,7 +230,9 @@ async fn test_lazy_activation_concurrent_requests() {
                 serde_json::to_vec(&TestMessage::Increment).unwrap(),
                 "call",
             );
-            actor_ref_clone.ask(&messaging_ctx(), msg, Duration::from_secs(5)).await
+            actor_ref_clone
+                .ask(&messaging_ctx(), msg, Duration::from_secs(5))
+                .await
         });
         handles.push(handle);
     }
@@ -334,7 +340,9 @@ async fn test_lazy_activation_activation_failure_handling() {
 
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
-    let result = actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(5)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), msg, Duration::from_secs(5))
+        .await;
     assert!(result.is_ok(), "Message should succeed after activation");
 }
 
@@ -412,14 +420,17 @@ async fn test_lazy_activation_tell_then_ask() {
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
     // Verify actor is active
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_active, "Actor should be active after tell()");
 
     // Send ask() - should work (actor already activated)
     let ask_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
-    let result = actor_ref.ask(&messaging_ctx(), ask_msg, Duration::from_secs(5)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), ask_msg, Duration::from_secs(5))
+        .await;
     let result = result.unwrap();
     let reply: TestMessage = serde_json::from_slice(&result.payload).unwrap();
     assert!(matches!(reply, TestMessage::Count(1)));
@@ -455,7 +466,9 @@ async fn test_eager_activation_immediate_availability() {
     // ask() will automatically set message.receiver to actor_ref.id() if unset (empty or "unknown")
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
-    let result = actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(1)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), msg, Duration::from_secs(1))
+        .await;
     assert!(
         result.is_ok(),
         "Eager actor should be immediately available"
@@ -500,7 +513,9 @@ async fn test_eager_activation_multiple_actors() {
                 "call",
             );
             // ask() will automatically set message.receiver to actor_ref.id() if empty
-            actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(1)).await
+            actor_ref
+                .ask(&messaging_ctx(), msg, Duration::from_secs(1))
+                .await
         });
         handles.push(handle);
     }
@@ -561,7 +576,8 @@ async fn test_passivation_idle_timeout_expiration() {
     sleep(Duration::from_secs(15)).await;
 
     // Actor should be deactivated (but still exists as virtual)
-    let (exists, is_active_after, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active_after, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Virtual actor should still exist");
     assert!(is_virtual, "Actor should still be registered as virtual");
     // Note: is_active_after may be false if deactivation occurred
@@ -609,7 +625,9 @@ async fn test_passivation_reactivation_after_timeout() {
     // Use actor
     let msg1 =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
-    let _ = actor_ref.ask(&messaging_ctx(), msg1, Duration::from_secs(5)).await;
+    let _ = actor_ref
+        .ask(&messaging_ctx(), msg1, Duration::from_secs(5))
+        .await;
 
     // Explicitly passivate the actor (simulates idle timeout passivation)
     let stop_ctx = node
@@ -651,7 +669,9 @@ async fn test_passivation_reactivation_after_timeout() {
     // Send increment (reactivated actor starts fresh with count=0)
     let msg2 =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
-    let _ = actor_ref2.ask(&messaging_ctx(), msg2, Duration::from_secs(5)).await;
+    let _ = actor_ref2
+        .ask(&messaging_ctx(), msg2, Duration::from_secs(5))
+        .await;
 
     // Verify count is 1 (state resets after passivation; no DurabilityFacet used)
     let get_msg =
@@ -776,7 +796,9 @@ async fn test_mixed_lazy_eager_actors() {
     let eager_ref = lookup_actor_ref(&node, &eager_id).await.unwrap().unwrap();
     let eager_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
-    let eager_result = eager_ref.ask(&messaging_ctx(), eager_msg, Duration::from_secs(1)).await;
+    let eager_result = eager_ref
+        .ask(&messaging_ctx(), eager_msg, Duration::from_secs(1))
+        .await;
     assert!(
         eager_result.is_ok(),
         "Eager actor should be immediately available"
@@ -824,7 +846,9 @@ async fn test_virtual_actor_state_preservation() {
             serde_json::to_vec(&TestMessage::Increment).unwrap(),
             "call",
         );
-        let _ = actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(5)).await;
+        let _ = actor_ref
+            .ask(&messaging_ctx(), msg, Duration::from_secs(5))
+            .await;
     }
 
     // Verify count is 5
@@ -923,7 +947,8 @@ async fn test_virtual_actor_manual_deactivation() {
         .unwrap();
 
     // Verify deactivated (but still exists as virtual)
-    let (exists, is_active_after, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active_after, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Virtual actor should still exist");
     assert!(is_virtual, "Actor should still be registered as virtual");
 }
@@ -961,7 +986,8 @@ async fn test_virtual_actor_full_lifecycle() {
     sleep(Duration::from_millis(200)).await;
 
     // 2. Verify actor exists but not active
-    let (exists, _is_active_initial, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, _is_active_initial, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_virtual, "Actor should be registered as virtual");
 
@@ -986,7 +1012,9 @@ async fn test_virtual_actor_full_lifecycle() {
             serde_json::to_vec(&TestMessage::Increment).unwrap(),
             "call",
         );
-        let _ = actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(5)).await;
+        let _ = actor_ref
+            .ask(&messaging_ctx(), msg, Duration::from_secs(5))
+            .await;
     }
 
     // 6. Verify count
@@ -1054,7 +1082,9 @@ async fn test_virtual_actor_high_throughput() {
                 serde_json::to_vec(&TestMessage::Increment).unwrap(),
                 "call",
             );
-            actor_ref_clone.ask(&messaging_ctx(), msg, Duration::from_secs(10)).await
+            actor_ref_clone
+                .ask(&messaging_ctx(), msg, Duration::from_secs(10))
+                .await
         });
         handles.push(handle);
     }
@@ -1323,7 +1353,8 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active immediately (eager activation)
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_virtual, "Actor should be virtual");
     assert!(is_active, "Eager actor should be active immediately");
@@ -1506,7 +1537,8 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor exists but is not active (lazy activation)
-    let (exists, is_active_initial, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active_initial, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_virtual, "Actor should be virtual");
     assert!(
@@ -1578,7 +1610,8 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
         .unwrap();
 
     // Verify actor is suspended
-    let (exists_after, is_active_after, _) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists_after, is_active_after, _) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists_after, "Actor should still exist after suspension");
     assert!(
         !is_active_after,
@@ -1787,7 +1820,8 @@ async fn test_virtual_actor_implicit_activation() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Check that actor is registered as virtual but not yet active
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists, "Virtual actor should exist");
     assert!(is_virtual, "Actor should be registered as virtual");
 
@@ -1799,7 +1833,8 @@ async fn test_virtual_actor_implicit_activation() {
     sleep(Duration::from_millis(100)).await;
 
     // Actor should now be active
-    let (exists_after, is_active_after, _) = check_virtual_actor_exists_triplet(&node, &actor_id).await;
+    let (exists_after, is_active_after, _) =
+        check_virtual_actor_exists_triplet(&node, &actor_id).await;
     assert!(exists_after, "Actor should still exist after activation");
 }
 
@@ -1864,7 +1899,8 @@ async fn test_virtual_actor_idle_deactivation() {
     sleep(Duration::from_millis(12000)).await;
 
     // Actor should be deactivated by idle timeout monitor
-    let (exists, is_active_after, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id2).await;
+    let (exists, is_active_after, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id2).await;
     assert!(exists, "Virtual actor should still exist");
     assert!(is_virtual, "Actor should still be registered as virtual");
 }
@@ -2024,7 +2060,8 @@ async fn test_deactivate_actor_manual() {
         .unwrap();
 
     // Verify deactivated
-    let (exists, is_active_after, is_virtual) = check_virtual_actor_exists_triplet(&node, &actor_id5).await;
+    let (exists, is_active_after, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &actor_id5).await;
     assert!(exists, "Virtual actor should still exist");
     assert!(is_virtual, "Actor should still be registered as virtual");
 }
@@ -2036,7 +2073,8 @@ async fn test_check_actor_exists() {
 
     // Check non-existent actor
     let nonexistent_id = runtime_actor_id("nonexistent");
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(&node, &nonexistent_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(&node, &nonexistent_id).await;
     assert!(!exists, "Non-existent actor should not exist");
     assert!(!is_active, "Non-existent actor should not be active");
     assert!(!is_virtual, "Non-existent actor should not be virtual");
@@ -2130,7 +2168,9 @@ async fn test_tell_with_virtual_actor_eager() {
     let get_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
 
-    let result = actor_ref.ask(&messaging_ctx(), get_msg, Duration::from_secs(5)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), get_msg, Duration::from_secs(5))
+        .await;
 
     assert!(result.is_ok(), "ask() should succeed after tell()");
     let reply = result.unwrap();
@@ -2169,7 +2209,9 @@ async fn test_ask_with_virtual_actor_eager() {
     let msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Ping).unwrap(), "call");
 
-    let result = actor_ref.ask(&messaging_ctx(), msg, Duration::from_secs(5)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), msg, Duration::from_secs(5))
+        .await;
 
     assert!(
         result.is_ok(),
@@ -2220,7 +2262,9 @@ async fn test_tell_with_virtual_actor_lazy() {
     let get_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
 
-    let result = actor_ref.ask(&messaging_ctx(), get_msg, Duration::from_secs(5)).await;
+    let result = actor_ref
+        .ask(&messaging_ctx(), get_msg, Duration::from_secs(5))
+        .await;
 
     assert!(
         result.is_ok(),
@@ -2308,14 +2352,18 @@ async fn test_multiple_ask_with_virtual_actor_lazy() {
     let msg2 =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "call");
 
-    let result2 = actor_ref.ask(&messaging_ctx(), msg2, Duration::from_secs(5)).await;
+    let result2 = actor_ref
+        .ask(&messaging_ctx(), msg2, Duration::from_secs(5))
+        .await;
     assert!(result2.is_ok(), "Second ask() should succeed");
 
     // Verify count is 2
     let get_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::GetCount).unwrap(), "call");
 
-    let result3 = actor_ref.ask(&messaging_ctx(), get_msg, Duration::from_secs(5)).await;
+    let result3 = actor_ref
+        .ask(&messaging_ctx(), get_msg, Duration::from_secs(5))
+        .await;
 
     assert!(result3.is_ok(), "Third ask() should succeed");
     let reply = result3.unwrap();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use plexspaces_actor::TestServiceLocatorStub;
 use plexspaces_actor::ServiceLocator;
+use plexspaces_actor::TestServiceLocatorStub;
 use plexspaces_journaling::SqliteJournalStorage;
 use plexspaces_sdk::{
     create_facets_with_storage, event_actor, gen_server_actor, handler, json, new_message,

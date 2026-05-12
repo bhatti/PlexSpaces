@@ -147,10 +147,7 @@ async fn test_http_deploy_wasm_application_small() {
     );
 
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     // Wait for node to start and HTTP server to be ready
     sleep(Duration::from_millis(2000)).await;
@@ -234,7 +231,6 @@ async fn test_http_deploy_wasm_application_small() {
         .await
         .unwrap_or_else(|_| "No response body".to_string());
 
-
     assert!(
         status.is_success(),
         "Deployment should succeed. Status: {}, Response: {}",
@@ -251,7 +247,6 @@ async fn test_http_deploy_wasm_application_small() {
         response_text
     );
     assert_eq!(json["application_id"], app_id);
-
 
     // Wait a bit for application to fully start
     sleep(Duration::from_millis(1000)).await;
@@ -325,10 +320,7 @@ async fn test_http_deploy_wasm_application() {
     );
 
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     // Wait for node to start and HTTP server to be ready
     sleep(Duration::from_millis(2000)).await;
@@ -396,7 +388,6 @@ async fn test_http_deploy_wasm_application() {
         .await
         .unwrap_or_else(|_| "No response body".to_string());
 
-
     assert!(
         status.is_success(),
         "Deployment should succeed. Status: {}, Response: {}",
@@ -413,7 +404,6 @@ async fn test_http_deploy_wasm_application() {
         response_text
     );
     assert_eq!(json["application_id"], "test-calculator-app");
-
 
     // Wait a bit for application to start
     sleep(Duration::from_millis(500)).await;
@@ -465,10 +455,7 @@ async fn test_http_deploy_wasm_size_limit() {
     );
 
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 

@@ -993,9 +993,17 @@ impl DynamoDBWorkflowStorage {
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| json_value_to_prost_struct(&v));
 
-        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
+        let error = item
+            .get("error")
+            .and_then(|v| v.as_s().ok())
+            .cloned()
+            .unwrap_or_default();
 
-        let node_id = item.get("node_id").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
+        let node_id = item
+            .get("node_id")
+            .and_then(|v| v.as_s().ok())
+            .cloned()
+            .unwrap_or_default();
 
         Ok(WorkflowExecution {
             execution_id,
@@ -1051,7 +1059,11 @@ impl DynamoDBWorkflowStorage {
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| json_value_to_prost_struct(&v));
 
-        let error = item.get("error").and_then(|v| v.as_s().ok()).cloned().unwrap_or_default();
+        let error = item
+            .get("error")
+            .and_then(|v| v.as_s().ok())
+            .cloned()
+            .unwrap_or_default();
 
         let attempt = item
             .get("attempt")

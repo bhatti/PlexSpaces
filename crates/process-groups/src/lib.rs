@@ -72,8 +72,8 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-use plexspaces_common::ServiceNameExt;
 use plexspaces_actor::{ActorId, RequestContext, RequestContextExt, Service};
+use plexspaces_common::ServiceNameExt;
 use plexspaces_keyvalue::{KVError, KeyValueStore};
 use plexspaces_proto::processgroups::v1::{GroupMembership, ProcessGroup};
 use prost::Message as ProstMessage;
@@ -143,7 +143,9 @@ pub struct ProcessGroupRegistry {
 
 impl Service for ProcessGroupRegistry {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry
+            .as_str()
+            .to_string()
     }
 }
 

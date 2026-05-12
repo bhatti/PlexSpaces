@@ -333,10 +333,6 @@ func (ResourceState) EnumDescriptor() ([]byte, []int) {
 }
 
 // RequestContext error codes
-//
-// TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
-// type, these codes will be the single source of truth for all context errors.
-// See plan: Phase 4 — Consolidate RequestContext to proto-only.
 type RequestContextErrorCode int32
 
 const (
@@ -2166,17 +2162,17 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x10AnnotationsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12*\n" +
 	"\x05value\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\x05value:\x028\x01:7\x92A4\n" +
-	"2*\bMetadata2&Standard metadata fields for resources\"\xe0\x01\n" +
+	"2*\bMetadata2&Standard metadata fields for resources\"\xe6\x01\n" +
 	"\aActorId\x12>\n" +
-	"\x04name\x18\x01 \x01(\tB*\xe0A\x02\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name\x12@\n" +
+	"\x04name\x18\x01 \x01(\tB*\xe0A\x02\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name\x12F\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB!\xe0A\x02\xbaH\x1br\x19\x10\x01\x18\x80\x012\x12^[a-z][a-z0-9_-]*$R\tactorType\x12+\n" +
+	"actor_type\x18\x02 \x01(\tB'\xe0A\x02\xbaH!r\x1f\x10\x01\x18\x80\x012\x18^[a-zA-Z][a-zA-Z0-9_-]*$R\tactorType\x12+\n" +
 	"\tnamespace\x18\x03 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\x80\x01R\tnamespace\x12&\n" +
-	"\anode_id\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x06nodeId\"\x91\x01\n" +
+	"\anode_id\x18\x04 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\x06nodeId\"\x97\x01\n" +
 	"\rActorIdentity\x12>\n" +
-	"\x04name\x18\x01 \x01(\tB*\xe0A\x02\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name\x12@\n" +
+	"\x04name\x18\x01 \x01(\tB*\xe0A\x02\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name\x12F\n" +
 	"\n" +
-	"actor_type\x18\x02 \x01(\tB!\xe0A\x02\xbaH\x1br\x19\x10\x01\x18\x80\x012\x12^[a-z][a-z0-9_-]*$R\tactorType\"\xf9\x01\n" +
+	"actor_type\x18\x02 \x01(\tB'\xe0A\x02\xbaH!r\x1f\x10\x01\x18\x80\x012\x18^[a-zA-Z][a-zA-Z0-9_-]*$R\tactorType\"\xf9\x01\n" +
 	"\vErrorDetail\x12(\n" +
 	"\x04code\x18\x01 \x01(\tB\x14\xbaH\x11r\x0f\x10\x01\x18@2\t^[A-Z_]+$R\x04code\x12$\n" +
 	"\amessage\x18\x02 \x01(\tB\n" +

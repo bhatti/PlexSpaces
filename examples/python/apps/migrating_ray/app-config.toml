@@ -1,10 +1,8 @@
 # Ray Parameter Server Application Configuration
 #
 # Deploys ParameterServer + DataWorker actors from one WASM module.
-# The framework passes child_spec.id as "actor_id" in init config,
-# and the SDK's ACTOR_ROLES mapping selects the correct class:
-#   "parameter-server" -> ParameterServer
-#   "data-worker-*"    -> DataWorker (prefix match)
+# actor_type matches the Python class name; the SDK selects the correct class
+# via select_actor_class (priority: actor_type exact match).
 
 [supervisor]
 strategy = "one_for_one"
@@ -14,8 +12,7 @@ max_restart_window_seconds = 60
 # Parameter server (centralized model weights)
 [[supervisor.children]]
 name = "parameter-server"
-actor_type = "migrating_ray_wasm"
-role = "parameter-server"
+actor_type = "ParameterServer"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 
@@ -28,14 +25,12 @@ hidden_dim = "64"
 # Data workers (gradient computation)
 [[supervisor.children]]
 name = "data-worker-0"
-actor_type = "migrating_ray_wasm"
-role = "data-worker-0"
+actor_type = "DataWorker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 
 [[supervisor.children]]
 name = "data-worker-1"
-actor_type = "migrating_ray_wasm"
-role = "data-worker-1"
+actor_type = "DataWorker"
 restart = "permanent"
 shutdown_timeout_seconds = 5

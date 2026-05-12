@@ -23,9 +23,7 @@
 //! thin shim so existing `use plexspaces_actor::journal_storage::*` imports
 //! keep working without any changes.
 
-pub use plexspaces_service_traits::{
-    JournalError, JournalResult, JournalStorage,
-};
+pub use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 
 // Re-export proto types that were previously re-exported from here.
 pub use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};

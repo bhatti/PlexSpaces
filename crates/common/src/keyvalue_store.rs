@@ -59,9 +59,15 @@ impl KeyValueStoreError {
         use plexspaces_proto::keyvalue::v1::KeyValueStoreErrorCode;
         match self {
             KeyValueStoreError::NotFound(_) => KeyValueStoreErrorCode::KeyValueStoreErrorNotFound,
-            KeyValueStoreError::StorageError(_) => KeyValueStoreErrorCode::KeyValueStoreErrorStorage,
-            KeyValueStoreError::SerializationError(_) => KeyValueStoreErrorCode::KeyValueStoreErrorSerialization,
-            KeyValueStoreError::CasConflict => KeyValueStoreErrorCode::KeyValueStoreErrorCasConflict,
+            KeyValueStoreError::StorageError(_) => {
+                KeyValueStoreErrorCode::KeyValueStoreErrorStorage
+            }
+            KeyValueStoreError::SerializationError(_) => {
+                KeyValueStoreErrorCode::KeyValueStoreErrorSerialization
+            }
+            KeyValueStoreError::CasConflict => {
+                KeyValueStoreErrorCode::KeyValueStoreErrorCasConflict
+            }
         }
     }
 }

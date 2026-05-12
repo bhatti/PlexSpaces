@@ -42,8 +42,8 @@
 //! - Uses `ApplicationManager` to register and start applications
 //! - Errors are logged but don't prevent node startup (best-effort deployment)
 
-use plexspaces_application::ApplicationSpec;
 use plexspaces_actor::ServiceLocator;
+use plexspaces_application::ApplicationSpec;
 use plexspaces_proto::supervision::v1::SupervisorSpec;
 use std::path::Path;
 use std::sync::Arc;
@@ -241,6 +241,24 @@ pub fn parse_app_config_toml(
         .unwrap_or(app_name)
         .to_string();
 
+    // tenant_id for embedded/file-copy deploys.
+    // For API deployments this is overridden by the JWT-extracted tenant from RequestContext.
+    // For file-copy deploys with no JWT, this TOML value is the only source of truth for
+    // tenant isolation — operators MUST set it in app-config.toml for multi-tenant nodes.
+    let tenant_id = parsed
+        .get("tenant_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if tenant_id.is_empty() {
+        tracing::warn!(
+            app_name = app_name,
+            "app-config.toml is missing 'tenant_id'; actors deployed from this file will have \
+             empty tenant_id which disables tenant isolation. Add `tenant_id = \"<tenant>\"` to \
+             the config file."
+        );
+    }
+
     let seed_nodes = parsed
         .get("seed_nodes")
         .and_then(|v| v.as_array())
@@ -263,6 +281,7 @@ pub fn parse_app_config_toml(
         name: app_name.to_string(),
         namespace,
         version,
+        tenant_id,
         seed_nodes,
         supervisor,
         ..Default::default()
@@ -365,8 +384,8 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 fn parse_child_spec(
     value: &toml::Value,
 ) -> Result<plexspaces_proto::supervision::v1::ChildSpec, WasmAppsLoaderError> {
-    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy};
     use plexspaces_proto::common::v1::{ActorIdentity, Facet};
+    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy};
     use std::collections::HashMap;
 
     let instance_name = value
@@ -644,7 +663,12 @@ async fn deploy_wasm_app(
         initial_state: vec![],
     };
 
-    // Deploy using ApplicationService
+    // Deploy using ApplicationService.
+    // File-copy deploys have no JWT — the ApplicationSpec.tenant_id (from app-config.toml)
+    // is carried through the DeployApplicationRequest.config field and preserved by
+    // application_service.rs when RequestContext.tenant_id is empty.
+    // We do NOT inject x-tenant-id metadata here: that header must only originate from a
+    // verified JWT so that auth-enabled nodes cannot be spoofed by TOML-controlled headers.
     let app_service = ApplicationServiceImpl::new(service_locator, node_connectivity);
     let grpc_request = tonic::Request::new(request);
 

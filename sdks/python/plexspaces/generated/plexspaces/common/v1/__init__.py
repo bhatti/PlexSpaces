@@ -54,13 +54,7 @@ class ResourceState(betterproto.Enum):
 
 
 class RequestContextErrorCode(betterproto.Enum):
-    """
-    RequestContext error codes
-
-     TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
-     type, these codes will be the single source of truth for all context errors.
-     See plan: Phase 4 — Consolidate RequestContext to proto-only.
-    """
+    """RequestContext error codes"""
 
     REQUEST_CONTEXT_ERROR_UNSPECIFIED = 0
     REQUEST_CONTEXT_ERROR_MISSING_TENANT_ID = 1

@@ -34,11 +34,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_actor::{
     actor_metrics_from_exposition_for_namespace, max_histogram_bucket_upper_bound_for_labels,
     sum_counter_for_labels, sum_sample_values_for_labels, ActorId, ActorRegistry,
-    ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator, RequestContextExt};
+    ProcessResourceSampler, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait, ServiceLocator,
+};
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_proto::application::v1::application_service_client::ApplicationServiceClient;
 use plexspaces_proto::application::v1::ApplicationInfo;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};

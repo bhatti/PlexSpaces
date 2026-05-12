@@ -30,19 +30,21 @@
 //!   - Slower, requires WASM runtime
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
-use plexspaces_actor::{ActorRegistry, RequestContext, ServiceLocator};
+use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_actor::{ActorRegistry, RequestContext, ServiceLocator};
+use plexspaces_behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
     DeployApplicationRequest, ShutdownStrategy,
 };
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use plexspaces_proto::v1::common::Facet;
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_services::application_service::ApplicationServiceImpl;

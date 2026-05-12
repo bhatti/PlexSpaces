@@ -1070,10 +1070,18 @@ impl TupleSpaceError {
             TupleSpaceError::NotFound => TupleSpaceErrorCode::TupleSpaceErrorNotFound,
             TupleSpaceError::PatternError(_) => TupleSpaceErrorCode::TupleSpaceErrorPatternError,
             TupleSpaceError::LeaseError(_) => TupleSpaceErrorCode::TupleSpaceErrorLeaseError,
-            TupleSpaceError::IoError(_) | TupleSpaceError::BackendError(_) | TupleSpaceError::ConnectionError(_) => TupleSpaceErrorCode::TupleSpaceErrorIoError,
-            TupleSpaceError::SerializationError(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
-            TupleSpaceError::NotSupported(_) | TupleSpaceError::NotImplemented(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
-            TupleSpaceError::InvalidConfiguration(_) => TupleSpaceErrorCode::TupleSpaceErrorUnspecified,
+            TupleSpaceError::IoError(_)
+            | TupleSpaceError::BackendError(_)
+            | TupleSpaceError::ConnectionError(_) => TupleSpaceErrorCode::TupleSpaceErrorIoError,
+            TupleSpaceError::SerializationError(_) => {
+                TupleSpaceErrorCode::TupleSpaceErrorUnspecified
+            }
+            TupleSpaceError::NotSupported(_) | TupleSpaceError::NotImplemented(_) => {
+                TupleSpaceErrorCode::TupleSpaceErrorUnspecified
+            }
+            TupleSpaceError::InvalidConfiguration(_) => {
+                TupleSpaceErrorCode::TupleSpaceErrorUnspecified
+            }
         }
     }
 }

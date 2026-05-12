@@ -166,6 +166,7 @@ async fn test_jwt_grpc_auth() {
             facets: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
+            ..Default::default()
         }),
         namespace: "default".to_string(),
         instances_count: 1,

@@ -35,16 +35,51 @@ async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Er
         "Choice to Parallel",
         "1.0",
         vec![
-            make_step("classify", "Classify Input", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"priority": "high"}}), None, None, None),
-            make_step("route", "Route by Priority", StepType::StepTypeChoice,
+            make_step(
+                "classify",
+                "Classify Input",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"priority": "high"}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "route",
+                "Route by Priority",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.priority", "operator": "equals", "value": "high", "next": "high-priority-tasks"}, {"variable": "$.priority", "operator": "equals", "value": "low", "next": "low-priority-task"}], "default": "normal-priority-task"}),
-                None, None, None),
-            make_step("high-priority-tasks", "High Priority Parallel Tasks", StepType::StepTypeParallel,
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-priority-tasks",
+                "High Priority Parallel Tasks",
+                StepType::StepTypeParallel,
                 json!({"branches": [{"id": "notify-urgent", "action": "succeed"}, {"id": "escalate", "action": "succeed"}, {"id": "log-high", "action": "succeed"}]}),
-                None, None, None),
-            make_step("low-priority-task", "Low Priority Task", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("normal-priority-task", "Normal Priority Task", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-priority-task",
+                "Low Priority Task",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "normal-priority-task",
+                "Normal Priority Task",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -53,7 +88,10 @@ async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Er
         WorkflowExecutor::start_execution(&storage, "choice-parallel", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -82,16 +120,51 @@ async fn test_map_to_choice_workflow() -> Result<(), Box<dyn std::error::Error>>
         "Map to Choice",
         "1.0",
         vec![
-            make_step("process-items", "Process Items", StepType::StepTypeMap,
+            make_step(
+                "process-items",
+                "Process Items",
+                StepType::StepTypeMap,
                 json!({"items": [1, 2, 3], "iterator": {"action": "multiply", "factor": 2}}),
-                None, None, None),
-            make_step("count-results", "Count Results", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"count": 3}}), None, None, None),
-            make_step("check-count", "Check Result Count", StepType::StepTypeChoice,
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "count-results",
+                "Count Results",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"count": 3}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-count",
+                "Check Result Count",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.count", "operator": "greater_than", "value": 2, "next": "many-results"}], "default": "few-results"}),
-                None, None, None),
-            make_step("many-results", "Handle Many Results", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("few-results", "Handle Few Results", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "many-results",
+                "Handle Many Results",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "few-results",
+                "Handle Few Results",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -100,7 +173,10 @@ async fn test_map_to_choice_workflow() -> Result<(), Box<dyn std::error::Error>>
         WorkflowExecutor::start_execution(&storage, "map-choice", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -124,17 +200,42 @@ async fn test_complex_multi_step_workflow() -> Result<(), Box<dyn std::error::Er
         "Complex Workflow",
         "1.0",
         vec![
-            make_step("init", "Initialize", StepType::StepTypeTask,
+            make_step(
+                "init",
+                "Initialize",
+                StepType::StepTypeTask,
                 json!({"action": "succeed", "output": {"mode": "fast"}}),
-                Some("decide-mode".to_string()), None, None),
-            make_step("decide-mode", "Decide Processing Mode", StepType::StepTypeChoice,
+                Some("decide-mode".to_string()),
+                None,
+                None,
+            ),
+            make_step(
+                "decide-mode",
+                "Decide Processing Mode",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.mode", "operator": "equals", "value": "fast", "next": "parallel-process"}], "default": "sequential-process"}),
-                None, None, None),
-            make_step("parallel-process", "Parallel Processing", StepType::StepTypeParallel,
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "parallel-process",
+                "Parallel Processing",
+                StepType::StepTypeParallel,
                 json!({"branches": [{"id": "task-a", "action": "succeed"}, {"id": "task-b", "action": "succeed"}]}),
-                None, None, None),
-            make_step("sequential-process", "Sequential Processing", StepType::StepTypeTask,
-                json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "sequential-process",
+                "Sequential Processing",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -143,7 +244,10 @@ async fn test_complex_multi_step_workflow() -> Result<(), Box<dyn std::error::Er
         WorkflowExecutor::start_execution(&storage, "complex", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();

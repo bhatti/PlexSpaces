@@ -32,8 +32,8 @@
 use crate::capacity_tracker::CapacityTracker;
 use crate::state_store::SchedulingStateStore;
 use futures::StreamExt;
-use plexspaces_channel::Channel;
 use plexspaces_actor::{RequestContext, RequestContextExt};
+use plexspaces_channel::Channel;
 use plexspaces_locks::{
     AcquireLockOptions, Lock, LockError, LockManager, ReleaseLockOptions, RenewLockOptions,
 };
@@ -589,8 +589,8 @@ impl BackgroundScheduler {
 mod tests {
     use super::*;
     use crate::state_store::sql::SqliteSchedulingStateStore;
-    use plexspaces_channel::InMemoryChannel;
     use plexspaces_actor::ObjectRegistry;
+    use plexspaces_channel::InMemoryChannel;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::channel::v1::ChannelConfig;

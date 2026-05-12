@@ -30,11 +30,13 @@ use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, DeployApplicationRequest,
 };
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
     GetNodeDashboardRequest, GetSummaryRequest,
+};
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
 };
 use plexspaces_proto::wasm::v1::WasmModule;
 use prost_types::Duration as ProstDuration;

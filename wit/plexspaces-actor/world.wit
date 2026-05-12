@@ -28,5 +28,6 @@ world plexspaces-actor {
 world actor-world {
     import host;
     import channels;
+    import registry;
     export actor;
 }

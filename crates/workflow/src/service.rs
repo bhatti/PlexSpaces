@@ -68,7 +68,6 @@ impl WorkflowServiceImpl {
             }
         }
     }
-
 }
 
 #[tonic::async_trait]
@@ -402,18 +401,14 @@ impl WorkflowService for WorkflowServiceImpl {
             .unwrap_or_else(|_| "UNSPECIFIED".to_string());
 
         let result = match req.query_name.as_str() {
-            "status" => {
-                prost_types::Value {
-                    kind: Some(prost_types::value::Kind::StringValue(status_str.clone())),
-                }
-            }
-            "current_step" => {
-                prost_types::Value {
-                    kind: Some(prost_types::value::Kind::StringValue(
-                        exec.current_step_id.clone(),
-                    )),
-                }
-            }
+            "status" => prost_types::Value {
+                kind: Some(prost_types::value::Kind::StringValue(status_str.clone())),
+            },
+            "current_step" => prost_types::Value {
+                kind: Some(prost_types::value::Kind::StringValue(
+                    exec.current_step_id.clone(),
+                )),
+            },
             "context" | "state" => {
                 let state_json = serde_json::json!({
                     "execution_id": exec.execution_id,

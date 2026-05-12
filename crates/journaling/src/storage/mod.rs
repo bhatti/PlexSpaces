@@ -35,8 +35,8 @@
 //! - [`DynamoDBJournalStorage`]: DynamoDB (AWS managed)
 
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
-use plexspaces_service_traits::{JournalError, JournalResult};
 use plexspaces_proto::storage::v1::SharedDbConfig;
+use plexspaces_service_traits::{JournalError, JournalResult};
 use std::sync::Arc;
 
 // Re-export reminder types from proto

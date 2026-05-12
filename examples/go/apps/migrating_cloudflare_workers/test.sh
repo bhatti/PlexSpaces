@@ -106,7 +106,7 @@ send_op() {
 echo "Step 3: Verify actors are responsive"
 echo "----------------------------------------------------------------"
 
-CHAT_RESP=$(send_op "chat-room" '{"op":"stats"}')
+CHAT_RESP=$(send_op "ChatRoom" '{"op":"stats"}')
 if echo "$CHAT_RESP" | grep -q '"status":"ok"'; then
     echo -e "  ${GREEN}ChatRoom actor OK${NC}"
 else
@@ -114,7 +114,7 @@ else
     exit 1
 fi
 
-RL_RESP=$(send_op "rate-limiter" '{"op":"stats"}')
+RL_RESP=$(send_op "RateLimiter" '{"op":"stats"}')
 if echo "$RL_RESP" | grep -q '"status":"ok"'; then
     echo -e "  ${GREEN}RateLimiter actor OK${NC}"
 else
@@ -131,7 +131,7 @@ echo ""
 # Join users
 echo "  Joining $NUM_USERS users..."
 for i in $(seq 1 $NUM_USERS); do
-    RESP=$(send_op "chat-room" "{\"op\":\"join\",\"user_id\":\"user-$i\"}" 5)
+    RESP=$(send_op "ChatRoom" "{\"op\":\"join\",\"user_id\":\"user-$i\"}" 5)
     if echo "$RESP" | grep -q '"action":"joined"'; then
         echo -e "    ${GREEN}user-$i joined${NC}"
     elif echo "$RESP" | grep -q '"already_joined"'; then
@@ -145,7 +145,7 @@ echo ""
 # Send messages
 echo "  Sending messages..."
 for i in $(seq 1 $NUM_USERS); do
-    RESP=$(send_op "chat-room" "{\"op\":\"send_message\",\"user_id\":\"user-$i\",\"content\":\"Hello from user-$i!\"}" 5)
+    RESP=$(send_op "ChatRoom" "{\"op\":\"send_message\",\"user_id\":\"user-$i\",\"content\":\"Hello from user-$i!\"}" 5)
     if echo "$RESP" | grep -q '"status":"ok"'; then
         FAN_OUT=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('fan_out',0))" 2>/dev/null || echo "?")
         echo -e "    ${GREEN}user-$i sent message (fan-out: $FAN_OUT)${NC}"
@@ -157,7 +157,7 @@ echo ""
 
 # Get members
 echo "  Getting member list..."
-MEMBERS_RESP=$(send_op "chat-room" '{"op":"get_members"}' 5)
+MEMBERS_RESP=$(send_op "ChatRoom" '{"op":"get_members"}' 5)
 if echo "$MEMBERS_RESP" | grep -q '"status":"ok"'; then
     MEMBER_COUNT=$(echo "$MEMBERS_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('count',0))" 2>/dev/null || echo "?")
     echo -e "    ${GREEN}Members: $MEMBER_COUNT${NC}"
@@ -168,7 +168,7 @@ echo ""
 
 # Get history
 echo "  Getting message history..."
-HIST_RESP=$(send_op "chat-room" '{"op":"get_history","limit":10}' 5)
+HIST_RESP=$(send_op "ChatRoom" '{"op":"get_history","limit":10}' 5)
 if echo "$HIST_RESP" | grep -q '"status":"ok"'; then
     HIST_COUNT=$(echo "$HIST_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('count',0))" 2>/dev/null || echo "?")
     echo -e "    ${GREEN}History: $HIST_COUNT messages${NC}"
@@ -179,7 +179,7 @@ echo ""
 
 # Leave one user
 echo "  User-1 leaving room..."
-LEAVE_RESP=$(send_op "chat-room" '{"op":"leave","user_id":"user-1"}' 5)
+LEAVE_RESP=$(send_op "ChatRoom" '{"op":"leave","user_id":"user-1"}' 5)
 if echo "$LEAVE_RESP" | grep -q '"action":"left"'; then
     echo -e "    ${GREEN}user-1 left${NC}"
 else
@@ -197,7 +197,7 @@ echo "  Checking rate limit (5 tokens, 1/sec refill)..."
 ALLOWED=0
 DENIED=0
 for i in $(seq 1 7); do
-    RESP=$(send_op "rate-limiter" '{"op":"check_rate","user_id":"test-user"}' 5)
+    RESP=$(send_op "RateLimiter" '{"op":"check_rate","user_id":"test-user"}' 5)
     if echo "$RESP" | grep -q '"allowed":true'; then
         ALLOWED=$((ALLOWED + 1))
     else
@@ -221,7 +221,7 @@ echo ""
 
 MSG_BENCH_START=$(date +%s%N)
 
-MSG_BATCH_RESP=$(send_op "chat-room" "{\"op\":\"send_message_batch\",\"count\":$BATCH_MSGS,\"user_id\":\"bench-user\",\"content\":\"Benchmark message with realistic payload sizing for chat\"}" 120)
+MSG_BATCH_RESP=$(send_op "ChatRoom" "{\"op\":\"send_message_batch\",\"count\":$BATCH_MSGS,\"user_id\":\"bench-user\",\"content\":\"Benchmark message with realistic payload sizing for chat\"}" 120)
 
 MSG_BENCH_END=$(date +%s%N)
 MSG_WALL_MS=$(( (MSG_BENCH_END - MSG_BENCH_START) / 1000000 ))
@@ -269,7 +269,7 @@ echo ""
 
 RL_BENCH_START=$(date +%s%N)
 
-BATCH_RL_RESP=$(send_op "rate-limiter" "{\"op\":\"check_rate_batch\",\"user_id\":\"bench\",\"count\":$BATCH_RATE_CHECKS}" 120)
+BATCH_RL_RESP=$(send_op "RateLimiter" "{\"op\":\"check_rate_batch\",\"user_id\":\"bench\",\"count\":$BATCH_RATE_CHECKS}" 120)
 
 RL_BENCH_END=$(date +%s%N)
 RL_WALL_MS=$(( (RL_BENCH_END - RL_BENCH_START) / 1000000 ))
@@ -317,8 +317,8 @@ echo "Step 8: Final Statistics"
 echo "================================================================"
 echo ""
 
-CHAT_STATS=$(send_op "chat-room" '{"op":"stats"}')
-RL_STATS=$(send_op "rate-limiter" '{"op":"stats"}')
+CHAT_STATS=$(send_op "ChatRoom" '{"op":"stats"}')
+RL_STATS=$(send_op "RateLimiter" '{"op":"stats"}')
 
 python3 -c "
 import sys, json

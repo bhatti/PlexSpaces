@@ -332,7 +332,9 @@ mod tests {
         let result = create_lock_manager_from_runtime(&runtime).await;
         #[cfg(not(feature = "redis-backend"))]
         {
-            assert!(matches!(result, Err(LockError::BackendError(message)) if message.contains("Redis backend not available")));
+            assert!(
+                matches!(result, Err(LockError::BackendError(message)) if message.contains("Redis backend not available"))
+            );
         }
         #[cfg(feature = "redis-backend")]
         {
@@ -360,6 +362,8 @@ mod tests {
         };
 
         let result = create_lock_manager_from_runtime(&runtime).await;
-        assert!(matches!(result, Err(LockError::ConfigError(message)) if message.contains("redis lock provider requires redis config")));
+        assert!(
+            matches!(result, Err(LockError::ConfigError(message)) if message.contains("redis lock provider requires redis config"))
+        );
     }
 }

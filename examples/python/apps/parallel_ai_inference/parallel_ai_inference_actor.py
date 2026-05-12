@@ -1236,10 +1236,3 @@ class OrchestratorWorkflow:
         }
 
 
-ACTOR_ROLES = {
-    "inference_worker": InferenceWorkerActor,
-    "benchmark": BenchmarkActor,
-    "orchestrator": OrchestratorWorkflow,
-    "metrics_event": MetricsEventActor,
-    "circuit_breaker": WorkerCircuitBreakerFSM,
-}

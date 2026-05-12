@@ -346,7 +346,9 @@ impl Default for ReplyWaiterRegistry {
 // Implement Service trait for ServiceLocator
 impl Service for ReplyWaiterRegistry {
     fn service_name(&self) -> String {
-        crate::ServiceName::ServiceNameReplyWaiterRegistry.as_str().to_string()
+        crate::ServiceName::ServiceNameReplyWaiterRegistry
+            .as_str()
+            .to_string()
     }
 }
 

@@ -26,7 +26,12 @@ use tonic::Request;
 #[tokio::test]
 async fn test_wasm_deployment_with_facets_from_toml() {
     // ARRANGE: Create node
-    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     node.initialize_services()
         .await
         .expect("Failed to initialize services");

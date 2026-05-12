@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use axum::{
-    Router,
     extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     response::Json,
     routing::{delete, post},
+    Router,
 };
 use plexspaces_actor::{NodeConnectivity, ServiceLocator};
 
@@ -56,7 +56,9 @@ async fn handle_deploy(
     headers: axum::http::HeaderMap,
     mut multipart: axum::extract::Multipart,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    use plexspaces_proto::application::v1::{DeployApplicationRequest, application_service_server::ApplicationService};
+    use plexspaces_proto::application::v1::{
+        application_service_server::ApplicationService, DeployApplicationRequest,
+    };
     use plexspaces_proto::wasm::v1::WasmModule;
     use plexspaces_services::application_service::ApplicationServiceImpl;
     use plexspaces_services::create_default_application_spec;
@@ -71,34 +73,52 @@ async fn handle_deploy(
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         tracing::error!(error = %e, "Multipart parsing error");
-        (StatusCode::BAD_REQUEST, format!("Failed to parse multipart form data: {}", e))
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Failed to parse multipart form data: {}", e),
+        )
     })? {
         let field_name = field.name().unwrap_or("").to_string();
         match field_name.as_str() {
             "application_id" => {
                 application_id = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read application_id: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read application_id: {}", e),
+                    )
                 })?);
             }
             "name" => {
                 name = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read name: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read name: {}", e),
+                    )
                 })?);
             }
             "version" => {
                 version = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read version: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read version: {}", e),
+                    )
                 })?);
             }
             "behavior_kind" => {
                 behavior_kind = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read behavior_kind: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read behavior_kind: {}", e),
+                    )
                 })?);
             }
             "wasm_file" => {
                 let bytes = field.bytes().await.map_err(|e| {
                     tracing::error!(error = %e, "WASM file read error");
-                    (StatusCode::BAD_REQUEST, format!("Failed to read wasm_file field: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read wasm_file field: {}", e),
+                    )
                 })?;
 
                 if bytes.len() > MAX_WASM_BODY_SIZE {
@@ -133,17 +153,23 @@ async fn handle_deploy(
             }
             "config" => {
                 config_data = Some(field.text().await.map_err(|e| {
-                    (StatusCode::BAD_REQUEST, format!("Failed to read config: {}", e))
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read config: {}", e),
+                    )
                 })?);
             }
             _ => {}
         }
     }
 
-    let application_id = application_id
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "application_id is required".to_string()))?;
-    let name = name
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "name is required".to_string()))?;
+    let application_id = application_id.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "application_id is required".to_string(),
+        )
+    })?;
+    let name = name.ok_or_else(|| (StatusCode::BAD_REQUEST, "name is required".to_string()))?;
     let version = version.unwrap_or_else(|| "1.0.0".to_string());
 
     let wasm_module = wasm_file_data.map(|bytes| WasmModule {
@@ -176,12 +202,11 @@ async fn handle_deploy(
         initial_state: vec![],
     };
 
-    let tenant_id = extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
+    let tenant_id =
+        extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
 
-    let app_service = ApplicationServiceImpl::new(
-        s.service_locator.clone(),
-        Some(s.node_connectivity.clone()),
-    );
+    let app_service =
+        ApplicationServiceImpl::new(s.service_locator.clone(), Some(s.node_connectivity.clone()));
     let mut grpc_request = tonic::Request::new(request);
     grpc_request.metadata_mut().insert(
         "x-tenant-id",
@@ -217,13 +242,13 @@ async fn handle_undeploy(
     Path(application_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     use plexspaces_proto::application::v1::{
-        UndeployApplicationRequest,
-        application_service_server::ApplicationService,
+        application_service_server::ApplicationService, UndeployApplicationRequest,
     };
     use plexspaces_services::application_service::ApplicationServiceImpl;
     use tonic::metadata::MetadataValue;
 
-    let tenant_id = extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
+    let tenant_id =
+        extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
 
     let app_service = ApplicationServiceImpl::new(s.service_locator.clone(), None);
     let mut grpc_request = tonic::Request::new(UndeployApplicationRequest {
@@ -276,5 +301,10 @@ fn extract_tenant_id_from_headers(
         .map(|s| s.to_string());
     crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref())
         .map(|claims| claims.tenant_id)
-        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Deploy requires valid JWT: {}", e)))
+        .map_err(|e| {
+            (
+                StatusCode::UNAUTHORIZED,
+                format!("Deploy requires valid JWT: {}", e),
+            )
+        })
 }

@@ -34,10 +34,11 @@
 //! Uses ServiceLocator for dependency injection instead of direct Node references.
 //! This enables clean separation and avoids circular dependencies.
 
-use plexspaces_application::ApplicationError as AppError;
 use plexspaces_actor::{
     wasm_worker_actor_type_from_application_name, ApplicationManager as ApplicationManagerTrait,
-    ServiceLocator, RequestContextExt};
+    RequestContextExt, ServiceLocator,
+};
+use plexspaces_application::ApplicationError as AppError;
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationRuntimeState, ApplicationSpec,
     ApplicationStatus, ApplicationType, DeployApplicationRequest, DeployApplicationResponse,
@@ -45,8 +46,10 @@ use plexspaces_proto::application::v1::{
     ListApplicationsResponse, ShutdownStrategy, UndeployApplicationRequest,
     UndeployApplicationResponse,
 };
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use plexspaces_proto::v1::application::ApplicationState as CoreApplicationState;
 use plexspaces_wasm_runtime::WasmDeploymentService;
 use std::sync::Arc;
@@ -158,7 +161,9 @@ impl ApplicationServiceImpl {
     }
 
     /// Get WASM runtime from ServiceLocator
-    async fn get_wasm_runtime(&self) -> Result<Arc<dyn plexspaces_actor::WasmRuntimeTrait>, Status> {
+    async fn get_wasm_runtime(
+        &self,
+    ) -> Result<Arc<dyn plexspaces_actor::WasmRuntimeTrait>, Status> {
         self.service_locator
             .get_wasm_runtime()
             .await
@@ -383,7 +388,11 @@ impl ApplicationService for ApplicationServiceImpl {
 
             // Store in ApplicationManager by application_id; use name (or application_id) as display name
             let app_name = req.application_id.clone();
-            let app_display_name = if req.name.is_empty() { req.application_id.clone() } else { req.name.clone() };
+            let app_display_name = if req.name.is_empty() {
+                req.application_id.clone()
+            } else {
+                req.name.clone()
+            };
             let app_version = req.version.clone();
 
             // Get or create ApplicationSpec with default supervisor tree
@@ -411,9 +420,28 @@ impl ApplicationService for ApplicationServiceImpl {
                 merged_config.supervisor = default_spec.supervisor;
             }
 
-            // Set tenant_id in ApplicationSpec from JWT (via RequestContext)
-            // This is the source of truth for tenant isolation
-            let final_tenant_id = tenant_id.clone();
+            // Resolve tenant_id for this deployment:
+            // - API deployments (auth enabled): JWT → RequestContext.tenant_id takes precedence.
+            // - Embedded/file-copy deploys (no JWT, no metadata): RequestContext.tenant_id is
+            //   empty; fall back to the value already in the ApplicationSpec (read from TOML by
+            //   parse_app_config_toml).  This preserves the operator-supplied tenant_id for
+            //   file-copy WASM apps without weakening the API/JWT path.
+            let final_tenant_id = if !tenant_id.is_empty() {
+                tenant_id.clone()
+            } else if !merged_config.tenant_id.is_empty() {
+                tracing::debug!(
+                    application_id = %req.application_id,
+                    toml_tenant_id = %merged_config.tenant_id,
+                    "Using tenant_id from ApplicationSpec (no JWT in request)"
+                );
+                merged_config.tenant_id.clone()
+            } else {
+                tracing::warn!(
+                    application_id = %req.application_id,
+                    "Deploying WASM application with empty tenant_id; set tenant_id in app-config.toml for multi-tenant isolation"
+                );
+                String::new()
+            };
             merged_config.tenant_id = final_tenant_id.clone();
             merged_config.name = app_display_name.clone();
             merged_config.namespace = app_display_name.clone();
@@ -600,7 +628,12 @@ impl ApplicationService for ApplicationServiceImpl {
         let mut merged_config = config.clone();
         merged_config.name = req.application_id.clone();
         merged_config.namespace = req.application_id.clone();
-        merged_config.tenant_id = tenant_id.clone();
+        // Prefer JWT tenant_id; fall back to TOML-supplied value for file-copy deploys.
+        merged_config.tenant_id = if !tenant_id.is_empty() {
+            tenant_id.clone()
+        } else {
+            merged_config.tenant_id.clone()
+        };
         if !merged_config.required_service_links.is_empty() {
             let rt = self
                 .service_locator
@@ -950,8 +983,8 @@ impl ApplicationService for ApplicationServiceImpl {
 mod tests {
     use super::*;
     use crate::ServiceLocatorImpl;
-    use plexspaces_application::ApplicationManagerImpl;
     use plexspaces_actor::NodeConnectivity;
+    use plexspaces_application::ApplicationManagerImpl;
     use plexspaces_proto::node::v1::NodeConfig;
     use std::collections::HashMap;
     use std::sync::Mutex;

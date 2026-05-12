@@ -3,6 +3,7 @@ import json
 
 host_module = importlib.import_module("plexspaces.host")
 host = host_module.host
+pg_first = host_module.pg_first
 ServiceHttpClient = host_module.ServiceHttpClient
 
 
@@ -180,6 +181,26 @@ def test_process_groups_first_or_raise_raises_when_empty():
             assert False, "expected RuntimeError"
         except RuntimeError as e:
             assert "svc:missing" in str(e)
+    finally:
+        _restore_stub(prev)
+
+
+def test_top_level_pg_first_returns_member():
+    stub = _StubPGHost({"svc:test": ["actor1@node", "actor2@node"]})
+    prev = _install_stub(stub)
+    try:
+        result = pg_first("svc:test")
+        assert result == "actor1@node"
+    finally:
+        _restore_stub(prev)
+
+
+def test_top_level_pg_first_returns_none_when_empty():
+    stub = _StubPGHost()
+    prev = _install_stub(stub)
+    try:
+        result = pg_first("svc:empty")
+        assert result is None
     finally:
         _restore_stub(prev)
 

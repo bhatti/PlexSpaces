@@ -73,10 +73,7 @@ macro_rules! skip_if_unavailable {
 
 /// Check if Docker is available
 pub fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("--version")
-        .output()
-        .is_ok()
+    Command::new("docker").arg("--version").output().is_ok()
 }
 
 /// Check if docker-compose is available (tries both `docker-compose` and `docker compose`)
@@ -112,11 +109,11 @@ static MINIO_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::n
 pub async fn dynamodb_local_available() -> bool {
     let cache = DDB_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Fast timeout for quick failure when service is not available
     let available = check_service_health("http://localhost:8000", Duration::from_millis(500)).await;
     *cached = Some(available);
@@ -129,13 +126,17 @@ pub async fn dynamodb_local_available() -> bool {
 pub async fn localstack_available() -> bool {
     let cache = SQS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Fast timeout for quick failure when service is not available
-    let available = check_service_health("http://localhost:4566/_localstack/health", Duration::from_millis(500)).await;
+    let available = check_service_health(
+        "http://localhost:4566/_localstack/health",
+        Duration::from_millis(500),
+    )
+    .await;
     *cached = Some(available);
     available
 }
@@ -152,11 +153,11 @@ pub async fn sqs_simulator_available() -> bool {
 pub async fn redis_available() -> bool {
     let cache = REDIS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Fast async Redis check using TCP connection
     let available = check_redis_port("localhost:6379", Duration::from_millis(500)).await;
     *cached = Some(available);
@@ -166,10 +167,7 @@ pub async fn redis_available() -> bool {
 /// Check if a service is available by making an HTTP request
 /// Fast timeout for quick failure when service is not available
 async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
-    let client = match reqwest::Client::builder()
-        .timeout(timeout_duration)
-        .build()
-    {
+    let client = match reqwest::Client::builder().timeout(timeout_duration).build() {
         Ok(c) => c,
         Err(_) => return false,
     };
@@ -184,7 +182,7 @@ async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
 /// Fast timeout for quick failure when service is not available
 async fn check_redis_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
-    
+
     match timeout(timeout_duration, TcpStream::connect(addr)).await {
         Ok(Ok(_)) => true,
         _ => false,
@@ -214,10 +212,19 @@ pub fn get_s3_endpoint() -> String {
 
 /// Setup AWS environment variables for local testing
 pub fn setup_aws_local_env() {
-    std::env::set_var("AWS_REGION", std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()));
-    std::env::set_var("AWS_ACCESS_KEY_ID", std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "test".to_string()));
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "test".to_string()));
-    
+    std::env::set_var(
+        "AWS_REGION",
+        std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+    );
+    std::env::set_var(
+        "AWS_ACCESS_KEY_ID",
+        std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "test".to_string()),
+    );
+    std::env::set_var(
+        "AWS_SECRET_ACCESS_KEY",
+        std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "test".to_string()),
+    );
+
     // Set endpoint URLs if not already set
     if std::env::var("DYNAMODB_ENDPOINT_URL").is_err() {
         std::env::set_var("DYNAMODB_ENDPOINT_URL", "http://localhost:8000");
@@ -243,11 +250,11 @@ pub fn setup_aws_local_env() {
 pub async fn nats_available() -> bool {
     let cache = NATS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Check NATS by attempting TCP connection to default port
     let nats_host = std::env::var("NATS_URL")
         .unwrap_or_else(|_| "localhost:4222".to_string())
@@ -277,14 +284,14 @@ pub fn get_nats_url() -> String {
 pub async fn kafka_available() -> bool {
     let cache = KAFKA_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Check Kafka by attempting TCP connection to default port
-    let kafka_host = std::env::var("KAFKA_BROKERS")
-        .unwrap_or_else(|_| "localhost:9092".to_string());
+    let kafka_host =
+        std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
     // Take only the first broker if multiple are specified
     let first_broker = kafka_host.split(',').next().unwrap_or("localhost:9092");
     let available = check_tcp_port(first_broker, Duration::from_millis(500)).await;
@@ -313,14 +320,16 @@ pub fn get_kafka_brokers() -> String {
 pub async fn postgres_available() -> bool {
     let cache = POSTGRES_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Check PostgreSQL by attempting TCP connection to default port
     // Parse host:port from connection string if available
-    let pg_addr = if let Ok(url) = std::env::var("TEST_POSTGRES_URL").or_else(|_| std::env::var("DATABASE_URL")) {
+    let pg_addr = if let Ok(url) =
+        std::env::var("TEST_POSTGRES_URL").or_else(|_| std::env::var("DATABASE_URL"))
+    {
         // Try to extract host:port from postgresql://user:pass@host:port/db
         if let Some(at_pos) = url.find('@') {
             let after_at = &url[at_pos + 1..];
@@ -335,7 +344,7 @@ pub async fn postgres_available() -> bool {
     } else {
         "localhost:5432".to_string()
     };
-    
+
     let available = check_tcp_port(&pg_addr, Duration::from_millis(500)).await;
     *cached = Some(available);
     available
@@ -346,7 +355,9 @@ pub fn get_postgres_url() -> String {
     std::env::var("TEST_POSTGRES_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
         .or_else(|_| std::env::var("PLEXSPACES_POSTGRES_URL"))
-        .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/plexspaces_test".to_string())
+        .unwrap_or_else(|_| {
+            "postgresql://postgres:postgres@localhost:5432/plexspaces_test".to_string()
+        })
 }
 
 // ============================================================================
@@ -362,11 +373,11 @@ pub fn get_postgres_url() -> String {
 pub async fn minio_available() -> bool {
     let cache = MINIO_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(available) = *cached {
         return available;
     }
-    
+
     // Check MinIO by attempting TCP connection to default port
     let minio_addr = std::env::var("MINIO_ENDPOINT")
         .unwrap_or_else(|_| "localhost:9000".to_string())
@@ -402,30 +413,30 @@ pub fn firecracker_available() -> bool {
             .arg("--version")
             .output()
             .is_ok();
-    
+
     if !has_binary {
         return false;
     }
-    
+
     // Check kernel image
     let has_kernel = Path::new("/var/lib/firecracker/vmlinux").exists();
     if !has_kernel {
         return false;
     }
-    
+
     // Check rootfs image
     let has_rootfs = Path::new("/var/lib/firecracker/rootfs.ext4").exists();
     if !has_rootfs {
         return false;
     }
-    
+
     true
 }
 
 /// Get detailed error message for missing Firecracker prerequisites
 pub fn firecracker_prerequisites_error() -> Option<String> {
     let mut errors = Vec::new();
-    
+
     let has_binary = Path::new("/usr/bin/firecracker").exists()
         || Command::new("firecracker")
             .arg("--version")
@@ -434,15 +445,15 @@ pub fn firecracker_prerequisites_error() -> Option<String> {
     if !has_binary {
         errors.push("Firecracker binary not found (install from: https://github.com/firecracker-microvm/firecracker/releases)");
     }
-    
+
     if !Path::new("/var/lib/firecracker/vmlinux").exists() {
         errors.push("Kernel image not found at /var/lib/firecracker/vmlinux");
     }
-    
+
     if !Path::new("/var/lib/firecracker/rootfs.ext4").exists() {
         errors.push("Rootfs image not found at /var/lib/firecracker/rootfs.ext4");
     }
-    
+
     if errors.is_empty() {
         None
     } else {
@@ -458,10 +469,9 @@ pub fn firecracker_prerequisites_error() -> Option<String> {
 /// Fast timeout for quick failure when service is not available
 async fn check_tcp_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
-    
+
     match timeout(timeout_duration, TcpStream::connect(addr)).await {
         Ok(Ok(_)) => true,
         _ => false,
     }
 }
-

@@ -410,6 +410,65 @@ class BankAccount:
         return {"balance": self.balance}
 ```
 
+## Tier 1 Ergonomics Helpers
+
+Convenience wrappers available on the `host` singleton and via `EventLog` from `plexspaces.host`.
+
+### Process Groups
+
+```python
+from plexspaces import host
+
+# First member of a group (None if empty)
+router = host.process_groups.first("svc:llm_router")
+
+# Raises RuntimeError if empty
+router = host.process_groups.first_or_raise("svc:llm_router")
+```
+
+### KV JSON Helpers
+
+```python
+# Write a JSON-serializable value
+host.kv_put_json("task:1", {"seq": 1, "kind": "summarize"})
+
+# Read (returns None if missing or corrupt JSON)
+task = host.kv_get_json("task:1")
+```
+
+### Metrics Helpers
+
+```python
+# Increment one counter by 1 (errors swallowed)
+host.incr_counter("my-app", "requests_processed")
+
+# Increment multiple counters
+host.incr_counters("my-app", {"cache_hits": 5, "cache_misses": 2})
+```
+
+### EventLog
+
+Monotonic append-only log backed by KV. Embed in actor state (JSON-serializable via `state()`). Multiple consumers track independent read cursors.
+
+```python
+from plexspaces.host import EventLog
+from plexspaces import actor, state, handler, host
+
+@actor
+class AuditActor:
+    log: EventLog = state(default_factory=EventLog)
+
+    @handler("record")
+    def record(self, event: dict) -> dict:
+        seq = self.log.append(host, "audit:", event)
+        return {"seq": seq}
+
+    @handler("poll")
+    def poll(self, consumer_id: str, limit: int = 50) -> dict:
+        events, cursor = self.log.poll(host, "audit:", consumer_id, limit=limit)
+        return {"events": events, "cursor": cursor}
+```
+
 ## Development
 
 ```bash

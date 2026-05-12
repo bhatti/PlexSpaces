@@ -143,13 +143,9 @@ impl InstancePool {
 
     /// Build an ActorId from a name and create a WasmInstance directly.
     async fn create_instance_by_name(&self, name: &str) -> WasmResult<WasmInstance> {
-        let actor_id = plexspaces_actor::ActorId::new(
-            name,
-            &self.actor_type,
-            &self.namespace,
-            &self.node_id,
-        )
-        .map_err(|e| WasmError::ActorFunctionError(e.to_string()))?;
+        let actor_id =
+            plexspaces_actor::ActorId::new(name, &self.actor_type, &self.namespace, &self.node_id)
+                .map_err(|e| WasmError::ActorFunctionError(e.to_string()))?;
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.config.limits.max_memory_bytes as usize)
             .build();
@@ -176,6 +172,8 @@ impl InstancePool {
             self.config.durability_enabled,
             None, // global_reinstantiation_semaphore - pool not tied to runtime
             None, // shared_timer_pool - pool instances don't track timers
+            String::new(), // tenant_id - pool instances are not tied to a specific tenant
+            String::new(), // default_namespace - pool instances are not tied to a specific namespace
         )
         .await
     }
@@ -355,7 +353,8 @@ mod tests {
             "test-pool",
             "test-namespace",
             "test-node",
-        ).await
+        )
+        .await
     }
 
     #[tokio::test]
@@ -475,9 +474,15 @@ mod tests {
             .unwrap();
 
         let result = InstancePool::new(
-            runtime.engine(), module, 0, WasmConfig::default(),
-            "test-pool", "test-namespace", "test-node",
-        ).await;
+            runtime.engine(),
+            module,
+            0,
+            WasmConfig::default(),
+            "test-pool",
+            "test-namespace",
+            "test-node",
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(matches!(result, Err(WasmError::ConfigurationError(_))));

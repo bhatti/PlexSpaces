@@ -27,16 +27,13 @@
 //! - Used only for creating ActorContext in tests and Actor::new()
 //! - Node will replace this with full ServiceLocatorImpl when spawning actors
 
-use async_trait::async_trait;
-use crate::core::facet_service_wrapper::{
-    FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
-};
+use crate::core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use crate::core::{
     ActorRegistry, BehaviorRegistry, ChannelService, GrpcConnectionManager,
-    MetricsPrometheusRenderer, ObjectRegistry,
-    ReplyWaiterRegistry, ServiceLocator,
+    MetricsPrometheusRenderer, ObjectRegistry, ReplyWaiterRegistry, ServiceLocator,
     TupleSpaceProvider, VirtualActorManager,
 };
+use async_trait::async_trait;
 use plexspaces_common::RequestContextExt;
 use std::sync::Arc;
 
@@ -184,7 +181,6 @@ impl ServiceLocator for TestServiceLocatorStub {
     async fn get_node_registry(&self) -> Option<Arc<dyn crate::core::NodeRegistryTrait>> {
         None
     }
-
 }
 
 #[async_trait]

@@ -4,5 +4,4 @@
 // Main integration test entry point for plexspaces-wasm-runtime
 // Compiles into a single test binary instead of 15 separate binaries
 
-
 mod suite;

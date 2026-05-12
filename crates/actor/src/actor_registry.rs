@@ -1908,14 +1908,9 @@ impl ActorRegistry {
                         .into(),
                 ));
             }
-            svc.monitor_actor(
-                ctx,
-                actor_id.as_str(),
-                supervisor_id.as_str(),
-                &callback,
-            )
-            .await
-            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+            svc.monitor_actor(ctx, actor_id.as_str(), supervisor_id.as_str(), &callback)
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
         }
     }
 
@@ -1930,17 +1925,13 @@ impl ActorRegistry {
         if actor_id.is_on_node(&self.local_node_id) {
             self.validate_link_monitor_operand_scope(ctx, &[actor_id, supervisor_id])
                 .await?;
-            self.local_demonitor(actor_id, supervisor_id, monitor_ref).await
+            self.local_demonitor(actor_id, supervisor_id, monitor_ref)
+                .await
         } else {
             let svc = self.actor_service.read().await.clone();
-            svc.demonitor_actor(
-                ctx,
-                actor_id.as_str(),
-                supervisor_id.as_str(),
-                monitor_ref,
-            )
-            .await
-            .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
+            svc.demonitor_actor(ctx, actor_id.as_str(), supervisor_id.as_str(), monitor_ref)
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
         }
     }
 
@@ -2108,8 +2099,12 @@ impl ActorRegistry {
             let monitoring_id = &monitor_link.monitoring_actor_id;
 
             let delivery_result = if monitoring_id.is_on_node(&self.local_node_id) {
-                self.dispatch_local_message(&monitor_link.monitoring_context, monitoring_id, down_msg)
-                    .await
+                self.dispatch_local_message(
+                    &monitor_link.monitoring_context,
+                    monitoring_id,
+                    down_msg,
+                )
+                .await
             } else {
                 let svc = self.actor_service.read().await.clone();
                 svc.send(
@@ -2386,7 +2381,9 @@ impl ActorRegistry {
 
         if let Some((actor_type, name)) = target.split_once(':') {
             if actor_type.is_empty() || name.is_empty() {
-                return Err(format!("Invalid actor target format '{target}': type and name must both be non-empty"));
+                return Err(format!(
+                    "Invalid actor target format '{target}': type and name must both be non-empty"
+                ));
             }
 
             // 2a. Live O(1) lookup: interpret left=actor_type, right=name.
@@ -2403,22 +2400,34 @@ impl ActorRegistry {
             // 2b. Virtual actor definition lookup via VirtualActorManager.
             if let Some(manager) = self.virtual_actor_manager.read().await.clone() {
                 // Resolve actor_type in case the left side is a definition name.
-                let resolved_type = manager.resolve_actor_type_for_name(&namespace, actor_type).await;
+                let resolved_type = manager
+                    .resolve_actor_type_for_name(&namespace, actor_type)
+                    .await;
                 // Try to get a virtual actor type registration so we can obtain the namespace.
                 if let Some(type_meta) = manager.get_virtual_actor_type(&resolved_type).await {
                     let canonical_ns = type_meta.namespace().to_string();
-                    let actor_id = ActorId::new(name, &resolved_type, &canonical_ns, &self.local_node_id)
-                        .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
-                    manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+                    let actor_id =
+                        ActorId::new(name, &resolved_type, &canonical_ns, &self.local_node_id)
+                            .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
+                    manager
+                        .prime_instance_from_definition(&actor_id, &type_meta)
+                        .await;
                     return Ok(actor_id);
                 }
                 // Definition-name lookup: left=definition_name, right=instance_name.
-                if let Some(def_meta) = manager.get_virtual_actor_definition(&namespace, actor_type).await {
+                if let Some(def_meta) = manager
+                    .get_virtual_actor_definition(&namespace, actor_type)
+                    .await
+                {
                     let def_ns = def_meta.namespace().to_string();
-                    let resolved = manager.resolve_actor_type_for_name(&def_ns, actor_type).await;
+                    let resolved = manager
+                        .resolve_actor_type_for_name(&def_ns, actor_type)
+                        .await;
                     let actor_id = ActorId::new(name, &resolved, &def_ns, &self.local_node_id)
                         .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
-                    manager.prime_instance_from_definition(&actor_id, &def_meta).await;
+                    manager
+                        .prime_instance_from_definition(&actor_id, &def_meta)
+                        .await;
                     return Ok(actor_id);
                 }
             }
@@ -2447,13 +2456,22 @@ impl ActorRegistry {
 
             // No live actor found; check VirtualActorManager for a registered type.
             if let Some(manager) = self.virtual_actor_manager.read().await.clone() {
-                let resolved_type = manager.resolve_actor_type_for_name(&namespace, target).await;
+                let resolved_type = manager
+                    .resolve_actor_type_for_name(&namespace, target)
+                    .await;
                 if let Some(type_meta) = manager.get_virtual_actor_type(&resolved_type).await {
                     let canonical_ns = type_meta.namespace().to_string();
                     // Use the resolved type as both the name and type for singleton-style actors.
-                    let actor_id = ActorId::new(&resolved_type, &resolved_type, &canonical_ns, &self.local_node_id)
-                        .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
-                    manager.prime_instance_from_definition(&actor_id, &type_meta).await;
+                    let actor_id = ActorId::new(
+                        &resolved_type,
+                        &resolved_type,
+                        &canonical_ns,
+                        &self.local_node_id,
+                    )
+                    .map_err(|e| format!("Cannot build actor ID for '{target}': {e}"))?;
+                    manager
+                        .prime_instance_from_definition(&actor_id, &type_meta)
+                        .await;
                     return Ok(actor_id);
                 }
             }
@@ -2469,7 +2487,9 @@ impl ActorRegistry {
 // Implement Service trait for ActorRegistry
 impl Service for ActorRegistry {
     fn service_name(&self) -> String {
-        crate::ServiceName::ServiceNameActorRegistry.as_str().to_string()
+        crate::ServiceName::ServiceNameActorRegistry
+            .as_str()
+            .to_string()
     }
 }
 

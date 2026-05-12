@@ -24,6 +24,17 @@ import {
   encodeScatterGatherRequest,
 } from './wire/shard-group-proto-wire.js';
 import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from './wit-payload.js';
+import {
+  encodeRegisterRequest,
+  encodeUnregisterRequest,
+  encodeLookupRequest,
+  encodeDiscoverRequest,
+  encodeHeartbeatRequest,
+  decodeLookupResponse,
+  decodeDiscoverResponse,
+  ObjectType as RegistryObjectType,
+} from './wire/registry-proto-wire.js';
+import { firstGroupMember, firstGroupMemberOrThrow } from './process_groups.js';
 
 // Virtual imports provided by jco componentize at runtime.
 // These map 1:1 to the WIT host interface functions.
@@ -78,6 +89,17 @@ import {
   httpFetch as hostHttpFetch,
   // @ts-expect-error Virtual import
 } from 'plexspaces:actor/host@0.1.0';
+
+// @ts-ignore
+import {
+  register as hostRegistryRegister,
+  unregister as hostRegistryUnregister,
+  lookup as hostRegistryLookup,
+  lookupByAlias as hostRegistryLookupByAlias,
+  discover as hostRegistryDiscover,
+  heartbeat as hostRegistryHeartbeat,
+  // @ts-expect-error Virtual import
+} from 'plexspaces:actor/registry@0.1.0';
 
 /**
  * Safe call helper — returns empty string if function is undefined.
@@ -198,12 +220,13 @@ export class ProcessGroups {
 
   /** Get members of a process group */
   members(group: string): string[] {
-    const result = safeCall(hostPgMembers, group) as string;
-    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+    const raw = safeCall(hostPgMembers, group);
+    const result = decodeWitPayloadUtf8(raw as (string | Uint8Array | ArrayBuffer | ArrayBufferView));
+    if (result.startsWith('ERROR:')) {
       throw new Error(result);
     }
     try {
-      return JSON.parse(result as string) as string[];
+      return JSON.parse(result) as string[];
     } catch {
       return [];
     }
@@ -211,8 +234,8 @@ export class ProcessGroups {
 
   /** Broadcast to all group members. msgType is used for routing so payload can be data-only. */
   broadcast(group: string, msgType: string, payload?: unknown): void {
-    const payloadJson = payload !== undefined ? JSON.stringify(payload) : '{}';
-    const result = safeCall(hostPgBroadcast, group, msgType, payloadJson) as string;
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '{}');
+    const result = safeCall(hostPgBroadcast, group, msgType, payloadBytes) as string;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
@@ -220,17 +243,12 @@ export class ProcessGroups {
 
   /** Return the first member of a process group, or null if empty. */
   first(group: string): string | null {
-    const members = this.members(group);
-    return members.length > 0 ? members[0] : null;
+    return firstGroupMember(this.members(group));
   }
 
   /** Return the first member of a process group, throwing if empty. */
   firstOrThrow(group: string): string {
-    const members = this.members(group);
-    if (members.length === 0) {
-      throw new Error(`no members in process group '${group}'`);
-    }
-    return members[0];
+    return firstGroupMemberOrThrow(group, this.members(group));
   }
 }
 
@@ -246,10 +264,138 @@ export class ProcessGroups {
  *   const response = host.ask('other-actor', 'get_balance', {}, 5000);
  *   const myId = host.selfId();
  */
+/** Object registration data from the registry. */
+export interface ObjectRegistration {
+  objectId: string;
+  objectType: string;
+  grpcAddress?: string;
+  objectCategory?: string;
+  tenantId?: string;
+  namespace?: string;
+  capabilities?: string[];
+  labels?: string[];
+  healthStatus?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  lastHeartbeat?: number;
+  alias?: string;
+}
+
+/**
+ * Object Registry host functions for registration and discovery.
+ *
+ * All calls encode request/response as proto wire bytes matching
+ * plexspaces.object_registry.v1 messages.
+ *
+ * @example
+ * ```typescript
+ * // Register this actor
+ * host.registry.register({ objectId: myId, objectType: 'actor', objectCategory: 'GenServer' });
+ *
+ * // Look up by alias (Orleans grain directory pattern)
+ * const reg = host.registry.lookupByAlias('Counter:my-counter:default:tenant1');
+ *
+ * // Discover all actors of a given category
+ * const actors = host.registry.discover({ objectType: RegistryObjectType.ACTOR, objectCategory: 'GenServer' });
+ * ```
+ */
+export class Registry {
+  /**
+   * Register an object in the registry.
+   */
+  register(reg: ObjectRegistration): void {
+    const reqBytes = encodeRegisterRequest(reg);
+    const result = safeCall(hostRegistryRegister, reqBytes) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /**
+   * Unregister an object from the registry.
+   */
+  unregister(objectId: string, objectType: number, tenantId?: string, namespace?: string): void {
+    const reqBytes = encodeUnregisterRequest(objectId, objectType, tenantId, namespace);
+    const result = safeCall(hostRegistryUnregister, reqBytes) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /**
+   * Look up an object by ID. Returns null if not found, throws on storage errors.
+   */
+  lookup(objectId: string, objectType: number = 0, tenantId?: string, namespace?: string): ObjectRegistration | null {
+    const reqBytes = encodeLookupRequest(objectId, objectType, tenantId, namespace);
+    const raw = safeCall(hostRegistryLookup, reqBytes);
+    if (typeof raw === 'string' && raw.startsWith('ERROR:')) {
+      throw new Error(raw);
+    }
+    if (!raw) return null;
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0) return null;
+    return decodeLookupResponse(bytes);
+  }
+
+  /**
+   * Look up an object by alias (Orleans grain directory pattern).
+   * Alias format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+   * Returns null if not found, throws on storage errors.
+   */
+  lookupByAlias(alias: string): ObjectRegistration | null {
+    const raw = safeCall(hostRegistryLookupByAlias, alias);
+    if (typeof raw === 'string' && raw.startsWith('ERROR:')) {
+      throw new Error(raw);
+    }
+    if (!raw) return null;
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0) return null;
+    return decodeLookupResponse(bytes);
+  }
+
+  /**
+   * Discover objects with optional filtering.
+   */
+  discover(options: {
+    objectType?: number;
+    objectCategory?: string;
+    tenantId?: string;
+    namespace?: string;
+    capabilities?: string[];
+    labels?: string[];
+    pageSize?: number;
+  } = {}): ObjectRegistration[] {
+    const reqBytes = encodeDiscoverRequest(options);
+    const raw = safeCall(hostRegistryDiscover, reqBytes);
+    if (!raw) return [];
+    if (typeof raw === 'string' && raw.startsWith('ERROR:')) {
+      throw new Error(raw);
+    }
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0) return [];
+    return decodeDiscoverResponse(bytes);
+  }
+
+  /**
+   * Update the heartbeat for a registered object.
+   */
+  heartbeat(objectId: string, objectType: number = 0, tenantId?: string, namespace?: string): void {
+    const reqBytes = encodeHeartbeatRequest(objectId, objectType, tenantId, namespace);
+    const result = safeCall(hostRegistryHeartbeat, reqBytes) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+}
+
+export { RegistryObjectType };
+
 export class Host {
   readonly processGroups = new ProcessGroups();
   /** Tuple space: list-in, list-out. Use null in patterns for wildcards. */
   readonly ts = new TupleSpace(this);
+  /** Object registry: register, discover, and look up actors and services. */
+  readonly registry = new Registry();
 
   // ========================================================================
   // Messaging
@@ -257,8 +403,8 @@ export class Host {
 
   /** Send message to another actor (fire-and-forget) */
   send(to: string, msgType: string, payload?: unknown): string {
-    const payloadJson = payload !== undefined ? JSON.stringify(payload) : '';
-    const raw = safeCall(hostSend, to, msgType, payloadJson);
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '');
+    const raw = safeCall(hostSend, to, msgType, payloadBytes);
     // WIT `result<_, actor-error>` ok is unit; jco may yield `undefined` on success.
     if (typeof raw !== 'string') {
       return '';
@@ -268,13 +414,15 @@ export class Host {
 
   /** Send request and wait for response (request-reply) */
   ask(to: string, msgType: string, payload?: unknown, timeoutMs: number = 5000): unknown {
-    const payloadJson = payload !== undefined ? JSON.stringify(payload) : '';
-    const result = safeCall(hostAsk, to, msgType, payloadJson, BigInt(timeoutMs)) as string;
-    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== undefined ? JSON.stringify(payload) : '');
+    const raw = safeCall(hostAsk, to, msgType, payloadBytes, BigInt(timeoutMs));
+    // jco returns result<list<u8>, actor-error>: OK value is Uint8Array, error is a string.
+    const result = decodeWitPayloadUtf8(raw as (string | Uint8Array | ArrayBuffer | ArrayBufferView));
+    if (result.startsWith('ERROR:')) {
       throw new Error(result);
     }
     try {
-      return JSON.parse(result as string);
+      return JSON.parse(result);
     } catch {
       return result;
     }
@@ -301,8 +449,8 @@ export class Host {
    * @returns Spawned actor ID string (may be auto-generated if actorId was empty)
    */
   spawn(moduleRef: string, actorId: string = '', initConfig?: unknown): string {
-    const configJson = initConfig !== undefined ? JSON.stringify(initConfig) : '{}';
-    const result = safeCall(hostSpawn, moduleRef, actorId, configJson) as string;
+    const configBytes = encodeWitPayloadUtf8(initConfig !== undefined ? JSON.stringify(initConfig) : '{}');
+    const result = safeCall(hostSpawn, moduleRef, actorId, configBytes) as string;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
@@ -816,3 +964,13 @@ export class ServiceHttpClient {
 
 /** Global host instance */
 export const host = new Host();
+
+/** Return the first member of a process group, or null if empty. */
+export function pgFirst(group: string): string | null {
+  return host.processGroups.first(group);
+}
+
+/** Return the first member of a process group, throwing if empty. */
+export function pgFirstOrThrow(group: string): string {
+  return host.processGroups.firstOrThrow(group);
+}

@@ -42,10 +42,10 @@
 use async_trait::async_trait;
 use metrics;
 use plexspaces_common::RequestContextExt;
-use plexspaces_service_traits::{ActorService, ServiceLocatorBase};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
+use plexspaces_service_traits::{ActorService, ServiceLocatorBase};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -300,8 +300,10 @@ impl TimerFacet {
             {
                 // Use actor_id as lock key since lock_key was removed from proto
                 // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
-                let ctx =
-                    plexspaces_common::RequestContext::new_without_auth(String::new(), String::new());
+                let ctx = plexspaces_common::RequestContext::new_without_auth(
+                    String::new(),
+                    String::new(),
+                );
                 // Calculate lease duration: for periodic timers, use 2x interval (min 1 second), for one-time use 60s
                 let lease_secs = if periodic {
                     let interval_secs = interval.as_secs() as u32;
@@ -421,8 +423,10 @@ impl TimerFacet {
                 current_lock.as_ref(),
             ) {
                 // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
-                let ctx =
-                    plexspaces_common::RequestContext::new_without_auth(String::new(), String::new());
+                let ctx = plexspaces_common::RequestContext::new_without_auth(
+                    String::new(),
+                    String::new(),
+                );
                 let _ = lock_mgr
                     .release_lock(
                         &ctx,
@@ -739,8 +743,8 @@ fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Dur
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_service_traits::{ActorRef, ActorService};
     use plexspaces_actor::ServiceLocator;
+    use plexspaces_service_traits::{ActorRef, ActorService};
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;
@@ -752,7 +756,8 @@ mod tests {
             &self,
             _ctx: &plexspaces_common::RequestContext,
             _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-        ) -> Result<plexspaces_service_traits::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<plexspaces_service_traits::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+        {
             Err("Not implemented".into())
         }
         async fn send(

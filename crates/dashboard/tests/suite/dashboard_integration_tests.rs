@@ -24,8 +24,8 @@
 //!   cargo test -p plexspaces-dashboard --test dashboard_integration_tests -- --test-threads=1
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_actor::{RequestContext, RequestContextExt};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::dashboard::v1::{
@@ -257,7 +257,8 @@ async fn register_application_with_metadata(
         .object_registry()
         .await
         .expect("ObjectRegistry should be registered for dashboard tests");
-    let registry_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+    let registry_ctx =
+        RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
     plexspaces_actor::object_registry_helpers::register_application(
         &object_registry,
         &registry_ctx,
@@ -379,8 +380,8 @@ async fn test_get_summary_with_applications() {
         node.clone(),
         &[("app-1", "1.0.0"), ("app-2", "2.0.0"), ("app-3", "1.5.0")],
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     let service = create_dashboard_service(node.clone()).await;
 
@@ -583,8 +584,8 @@ async fn test_get_applications_with_multiple_apps() {
             ("data-processor", "1.5.0"),
         ],
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     let service = create_dashboard_service(node.clone()).await;
 
@@ -630,8 +631,8 @@ async fn test_get_applications_with_name_pattern_filter() {
             ("calc-helper", "1.5.0"),
         ],
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     let service = create_dashboard_service(node.clone()).await;
 
@@ -1538,13 +1539,8 @@ async fn test_actors_by_type_on_home_page() {
                 }),
                 role: String::new(),
                 namespace: "system".to_string(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: String::new(),
-                args: HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: HashMap::new(),
+                ..Default::default()
             }
         };
         actor_factory
@@ -1572,13 +1568,8 @@ async fn test_actors_by_type_on_home_page() {
                 }),
                 role: String::new(),
                 namespace: "system".to_string(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: String::new(),
-                args: HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: HashMap::new(),
+                ..Default::default()
             }
         };
         actor_factory
@@ -1658,13 +1649,8 @@ async fn test_actors_by_type_on_node_page() {
                 }),
                 role: String::new(),
                 namespace: "system".to_string(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: String::new(),
-                args: HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: HashMap::new(),
+                ..Default::default()
             }
         };
         actor_factory

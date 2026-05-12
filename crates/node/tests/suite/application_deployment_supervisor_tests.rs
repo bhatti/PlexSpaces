@@ -30,8 +30,10 @@
 
 use plexspaces_node::Node;
 use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType};
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::node::v1::ReleaseSpec;
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 

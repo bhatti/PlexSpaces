@@ -49,9 +49,9 @@ use crate::{Channel, ChannelError, InMemoryChannel};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use plexspaces_service_traits::ChannelService;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, DeliveryGuarantee};
 use plexspaces_proto::common::v1::Message;
+use plexspaces_service_traits::ChannelService;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,8 +60,11 @@ use tokio::sync::RwLock;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Factory function type for creating Channel instances by name.
-pub type ChannelFactory =
-    Box<dyn Fn(&str) -> futures::future::BoxFuture<'static, Result<Arc<dyn Channel>, ChannelError>> + Send + Sync>;
+pub type ChannelFactory = Box<
+    dyn Fn(&str) -> futures::future::BoxFuture<'static, Result<Arc<dyn Channel>, ChannelError>>
+        + Send
+        + Sync,
+>;
 
 /// `ChannelServiceImpl` — multi-channel registry backed by pluggable transports.
 ///
@@ -102,9 +105,9 @@ impl ChannelServiceImpl {
                     delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
                     ..Default::default()
                 };
-                let ch = InMemoryChannel::new(config).await.map_err(|e| {
-                    ChannelError::BackendError(e.to_string())
-                })?;
+                let ch = InMemoryChannel::new(config)
+                    .await
+                    .map_err(|e| ChannelError::BackendError(e.to_string()))?;
                 Ok(Arc::new(ch) as Arc<dyn Channel>)
             })
         }))
@@ -144,7 +147,8 @@ impl ChannelServiceImpl {
         let new_ch = (self.factory)(name).await?;
         let mut map = self.channels.write().await;
         // Double-check (another task may have created it)
-        map.entry(name.to_string()).or_insert_with(|| new_ch.clone());
+        map.entry(name.to_string())
+            .or_insert_with(|| new_ch.clone());
         Ok(map[name].clone())
     }
 }
@@ -157,11 +161,7 @@ impl Default for ChannelServiceImpl {
 
 #[async_trait]
 impl ChannelService for ChannelServiceImpl {
-    async fn send_to_queue(
-        &self,
-        queue_name: &str,
-        message: Message,
-    ) -> Result<String, BoxError> {
+    async fn send_to_queue(&self, queue_name: &str, message: Message) -> Result<String, BoxError> {
         let ch = self
             .get_or_create(queue_name)
             .await
@@ -178,7 +178,10 @@ impl ChannelService for ChannelServiceImpl {
             .get_or_create(topic_name)
             .await
             .map_err(|e| Box::new(e) as BoxError)?;
-        let count = ch.publish(message).await.map_err(|e| Box::new(e) as BoxError)?;
+        let count = ch
+            .publish(message)
+            .await
+            .map_err(|e| Box::new(e) as BoxError)?;
         // Return subscriber count as the "message id" — callers that need an ID
         // should use message.id instead; we return a stable string here.
         Ok(count.to_string())
@@ -227,8 +230,8 @@ impl ChannelService for ChannelServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_service_traits::ChannelService;
     use plexspaces_proto::common::v1::Message;
+    use plexspaces_service_traits::ChannelService;
 
     fn make_msg(payload: &[u8]) -> Message {
         Message {
@@ -324,7 +327,9 @@ mod tests {
         svc.register_channel("pre-reg", ch).await;
 
         // Should use the pre-registered channel
-        svc.send_to_queue("pre-reg", make_msg(b"data")).await.unwrap();
+        svc.send_to_queue("pre-reg", make_msg(b"data"))
+            .await
+            .unwrap();
         let received = svc
             .receive_from_queue("pre-reg", Some(Duration::from_millis(200)))
             .await

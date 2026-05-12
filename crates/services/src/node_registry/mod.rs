@@ -41,7 +41,9 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn, Level};
 
-use plexspaces_actor::{NodeRegistryTrait, ObjectRegistry, RequestContext, ServiceLocator, RequestContextExt};
+use plexspaces_actor::{
+    NodeRegistryTrait, ObjectRegistry, RequestContext, RequestContextExt, ServiceLocator,
+};
 use plexspaces_proto::common::v1::Metadata as CommonMetadata;
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration, PingResponse};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
@@ -601,6 +603,47 @@ impl NodeRegistry {
         Ok(())
     }
 
+    /// Update `last_heartbeat`, `updated_at`, and `health_status` for a node in the
+    /// ObjectRegistry.  Called on every heartbeat regardless of `use_shared_db` because
+    /// `register_node` always writes the initial registration to the ObjectRegistry.
+    async fn refresh_node_heartbeat_in_registry(
+        object_registry: &Arc<dyn ObjectRegistry>,
+        ctx: &RequestContext,
+        node_id: &str,
+        heartbeat_timestamp: Timestamp,
+        capacity: Option<NodeCapacity>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let obj_reg = object_registry
+            .lookup_full(ctx, ObjectType::ObjectTypeNode, node_id)
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() })?;
+
+        if let Some(mut obj_reg) = obj_reg {
+            obj_reg.last_heartbeat = Some(heartbeat_timestamp.clone());
+            obj_reg.updated_at = Some(heartbeat_timestamp);
+            obj_reg.health_status = HealthStatus::HealthStatusHealthy as i32;
+
+            if let Some(ref cap) = capacity {
+                if let Some(ref total) = cap.total {
+                    obj_reg
+                        .metrics
+                        .insert("total_cpu_cores".to_string(), total.cpu_cores as f64);
+                    obj_reg
+                        .metrics
+                        .insert("total_memory_bytes".to_string(), total.memory_bytes as f64);
+                }
+            }
+
+            object_registry
+                .register(ctx, obj_reg)
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("{}", e).into()
+                })?;
+        }
+        Ok(())
+    }
+
     fn should_probe_member(member: &SwimMember) -> bool {
         member
             .last_probe_success
@@ -666,6 +709,29 @@ impl NodeRegistry {
         drop(cache_guard);
 
         let system_ctx = Self::system_registry_context_for(service_locator, cluster_name).await;
+
+        // Cascade: mark all objects on the dead node as DEAD.
+        match object_registry
+            .mark_objects_dead_by_node(&system_ctx, node_id)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                tracing::info!(
+                    node_id = %node_id,
+                    count = %count,
+                    "Cascaded node death to registered objects (probe reconciliation)"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    node_id = %node_id,
+                    error = %e,
+                    "Failed to cascade node death (probe reconciliation)"
+                );
+            }
+            _ => {}
+        }
+
         if let Err(e) = object_registry
             .unregister(&system_ctx, ObjectType::ObjectTypeNode, node_id)
             .await
@@ -1260,7 +1326,11 @@ impl NodeRegistry {
             .unwrap_or_default();
 
         let channel = conn_manager
-            .get_connection(ServiceType::ServiceNameNodeService, &target.node_id, &target.address)
+            .get_connection(
+                ServiceType::ServiceNameNodeService,
+                &target.node_id,
+                &target.address,
+            )
             .await
             .map_err(|e| format!("Failed to get channel: {}", e))?;
 
@@ -1558,7 +1628,33 @@ impl NodeRegistryTrait for NodeRegistry {
         // Remove from cache
         self.remove_from_cache(node_id).await;
 
+        // Admin context: empty tenant_id so the cascade reaches objects across all tenants
+        // (nodes host objects belonging to many tenants).
         let registry_ctx = self.system_registry_context(None).await;
+
+        // Cascade: mark all objects on the dead node as DEAD before removing the node itself.
+        match self
+            .object_registry
+            .mark_objects_dead_by_node(&registry_ctx, node_id)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                info!(
+                    node_id = %node_id,
+                    count = %count,
+                    "Cascaded node death to registered objects"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    node_id = %node_id,
+                    error = %e,
+                    "Failed to cascade node death to objects"
+                );
+            }
+            _ => {}
+        }
+
         if let Err(e) = self
             .object_registry
             .unregister(&registry_ctx, ObjectType::ObjectTypeNode, node_id)
@@ -1692,61 +1788,43 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
-        // Update DB if enabled
-        if self.config.use_shared_db {
-            let object_registry = self.object_registry.clone();
-            let node_id_owned = node_id.to_string();
-            let capacity_clone = capacity.clone();
-            let heartbeat_timestamp_clone = heartbeat_timestamp.clone();
-            let system_ctx = self.system_registry_context(None).await;
+        // Always refresh the ObjectRegistry heartbeat.
+        // register_node() always writes to ObjectRegistry regardless of use_shared_db, so
+        // the heartbeat must also always be refreshed there — otherwise scan_stale_object_heartbeats
+        // marks the local node Dead after 3× heartbeat_interval.
+        // For use_shared_db=true we apply DB-backoff retry; for in-memory we call directly.
+        let object_registry = self.object_registry.clone();
+        let node_id_owned = node_id.to_string();
+        let capacity_clone = capacity.clone();
+        let heartbeat_timestamp_clone = heartbeat_timestamp.clone();
+        let system_ctx = self.system_registry_context(None).await;
 
-            if let Err(e) = self
-                .with_db_backoff("heartbeat", || {
-                    let registry = object_registry.clone();
-                    let ctx = system_ctx.clone();
-                    let nid = node_id_owned.clone();
-                    let cap = capacity_clone.clone();
-                    let heartbeat_timestamp = heartbeat_timestamp_clone.clone();
-                    async move {
-                        let obj_reg = registry
-                            .lookup_full(&ctx, ObjectType::ObjectTypeNode, &nid)
-                            .await
-                            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                                format!("{}", e).into()
-                            })?;
-                        if let Some(mut obj_reg) = obj_reg {
-                            obj_reg.last_heartbeat = Some(heartbeat_timestamp.clone());
-                            obj_reg.updated_at = Some(heartbeat_timestamp);
-                            obj_reg.health_status = HealthStatus::HealthStatusHealthy as i32;
-
-                            if let Some(ref cap) = cap {
-                                if let Some(ref total) = cap.total {
-                                    // Store capacity info in metrics (which is a HashMap<String, f64>)
-                                    obj_reg.metrics.insert(
-                                        "total_cpu_cores".to_string(),
-                                        total.cpu_cores as f64,
-                                    );
-                                    obj_reg.metrics.insert(
-                                        "total_memory_bytes".to_string(),
-                                        total.memory_bytes as f64,
-                                    );
-                                }
-                            }
-
-                            registry.register(&ctx, obj_reg).await.map_err(
-                                |e| -> Box<dyn std::error::Error + Send + Sync> {
-                                    format!("{}", e).into()
-                                },
-                            )?;
-                        }
-                        Ok(())
-                    }
-                })
-                .await
-            {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("Heartbeat DB update failed (non-critical): {}", e);
+        let refresh_result = if self.config.use_shared_db {
+            self.with_db_backoff("heartbeat", || {
+                let registry = object_registry.clone();
+                let ctx = system_ctx.clone();
+                let nid = node_id_owned.clone();
+                let cap = capacity_clone.clone();
+                let ts = heartbeat_timestamp_clone.clone();
+                async move {
+                    Self::refresh_node_heartbeat_in_registry(&registry, &ctx, &nid, ts, cap).await
                 }
+            })
+            .await
+        } else {
+            Self::refresh_node_heartbeat_in_registry(
+                &object_registry,
+                &system_ctx,
+                &node_id_owned,
+                heartbeat_timestamp_clone,
+                capacity_clone,
+            )
+            .await
+        };
+
+        if let Err(e) = refresh_result {
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                debug!("Heartbeat ObjectRegistry update failed (non-critical): {}", e);
             }
         }
 

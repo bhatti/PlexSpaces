@@ -6,43 +6,29 @@
 # Generates the WIT interface wrapper for actor classes decorated with @actor.
 # This bridges the gap between the Pythonic SDK API and the componentize-py
 # WIT bindings.
-#
-# Supports multiple @actor classes in one module via Erlang-style ApplicationSpec:
-# The framework passes {"actor_id": "...", "actor_type": "...", "role": "..."}
-# in init config. The wrapper selects the correct class from role
-# or actor_id prefix matching.
 
 """
 Runtime support for PlexSpaces actors.
 
-This module provides:
-- Wrapper generation for WIT interface compatibility
-- State serialization/deserialization
-- Message dispatch
-- Multi-actor support (multiple @actor classes in one WASM module)
+## Multi-Actor Dispatch
 
-The generated wrapper implements the WIT actor interface:
-    interface actor {
-        init: func(config-json: string) -> string;
-        handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
-        get-state: func() -> string;
-        set-state: func(state-json: string) -> string;
-    }
+The framework always sets ``actor_type`` to the exact class name in the init
+config (e.g. ``"SessionActor"``).  The dispatch rule is therefore simple:
 
-## Multi-Actor Support
+1. ``config["actor_type"]`` — exact lookup in the class map.  This is the
+   normal case and covers every virtual-actor activation.
+2. ``config["role"]`` — exact lookup, used only when multiple children in
+   ``app-config.toml`` share the same ``actor_type`` but need different
+   behaviour (e.g. ``ephemeral`` / ``channel`` / ``controller`` all map to
+   ``AbstractionsActor``).
+3. ``default_class`` — first class in ``__all__`` / registration order.
 
-When a module contains multiple @actor classes, the wrapper selects the
-class from the init config in priority order:
-
-1. ``config["role"]`` — the child role from
-   ``app-config.toml`` / ``ActorSpawnSpec.role``.
-2. Prefix match on the normalized ``actor_id`` against role and class
-   aliases (e.g. ``data-worker-0`` matches ``data-worker``).
-3. ``ACTOR_ROLES`` aliases embedded at build time when provided.
+No aliases, no prefix matching, no normalization.  The framework is the
+source of truth; the SDK trusts what it receives.
 """
 
 import json
-from typing import Type, Any, List, Dict, Optional
+from typing import Type, List, Dict, Optional
 
 from .decorators import (
     get_state_dict,
@@ -55,63 +41,28 @@ from .decorators import (
 )
 
 
-def normalize_role_actor_id(actor_id: str) -> str:
-    """
-    Normalize runtime actor IDs to the logical child/base ID used by ACTOR_ROLES.
-
-    Supported inputs:
-    - child form: ``worker-0:my-app@node-1`` -> ``worker-0``
-    - canonical form: ``01ABC//worker-0::my-app@node-1`` -> ``worker-0``
-    - bare form: ``worker-0`` -> ``worker-0``
-    """
-    if not actor_id:
-        return ""
-    if "//" in actor_id:
-        return actor_id.split("//", 1)[0]
-    if ":" in actor_id:
-        return actor_id.split(":", 1)[0]
-    return actor_id
-
-
-def _class_name_aliases(class_name: str) -> List[str]:
-    """Return stable snake_case and kebab-case aliases for a class name."""
-    snake = ""
-    kebab = ""
-    for i, ch in enumerate(class_name):
-        if ch.isupper() and i > 0:
-            snake += "_"
-            kebab += "-"
-        snake += ch.lower()
-        kebab += ch.lower()
-
-    aliases = [snake]
-    if snake != kebab:
-        aliases.append(kebab)
-    if snake.endswith("_actor"):
-        trimmed = snake[: -len("_actor")]
-        if trimmed:
-            aliases.append(trimmed)
-            aliases.append(trimmed.replace("_", "-"))
-    return list(dict.fromkeys(alias for alias in aliases if alias))
-
-
-def build_class_alias_map(
-    actor_classes: List[Type], actor_roles: Optional[Dict[str, Type]] = None
+def build_class_map(
+    actor_classes: List[Type],
+    actor_roles: Optional[Dict[str, Type]] = None,
 ) -> Dict[str, Type]:
-    """Build the alias map used for multi-actor dispatch."""
+    """Build the dispatch map used by ``select_actor_class``.
+
+    Keys are exact strings the framework places in ``actor_type`` or ``role``:
+    - Each class is registered under its exact ``__name__``.
+    - Explicit ``actor_roles`` entries are registered under their exact key
+      (for same-class multi-instance cases like ``ephemeral``/``channel``).
+    """
     class_map: Dict[str, Type] = {}
 
+    # Class names first (lower priority — roles may override for same-class dispatch)
+    for cls in actor_classes:
+        class_map[cls.__name__] = cls
+
+    # Explicit role overrides (only valid when multiple children share actor_type)
     if actor_roles:
         for role, cls in actor_roles.items():
-            if cls not in actor_classes:
-                continue
-            normalized = role.replace("-", "_")
-            class_map[normalized] = cls
-            class_map[normalized.replace("_", "-")] = cls
-
-    for cls in actor_classes:
-        for alias in _class_name_aliases(cls.__name__):
-            class_map.setdefault(alias, cls)
+            if cls in actor_classes:
+                class_map[role] = cls
 
     return class_map
 
@@ -121,68 +72,41 @@ def select_actor_class(
     class_map: Dict[str, Type],
     default_class: Type,
 ) -> Type:
-    """Select the actor class to instantiate from the framework-supplied init config.
+    """Select the actor class from the framework-supplied init config.
 
-    Priority (mirrors Erlang supervisor child-spec dispatch):
-    1. ``config["role"]`` — ``ChildSpec.role`` / ``ActorSpawnSpec.role`` set at
-       registration time.  Exact match first; suffix match (``_<role>`` /
-       ``-<role>``) for compound aliases second.
-    2. Exact-then-prefix match on the normalised ``actor_id`` name component.
-       Longest prefix wins so ``counter-worker`` beats ``counter``.
-    3. ``config["actor_type"]`` — shared WASM behavior class, used when a
-       module exposes only one role per actor_type.
-    4. ``default_class`` — the first registered actor class.
+    Priority:
+    1. ``config["actor_type"]`` — exact match (the normal case).
+    2. ``config["role"]`` — exact match (same-class multi-instance only).
+    3. ``default_class`` — first registered class.
     """
     if not isinstance(config, dict) or not class_map:
         return default_class
 
-    def _norm(s: str) -> str:
-        return s.replace("-", "_")
-
-    # 1. role
-    role_key = _norm(config.get("role", ""))
-    if role_key:
-        if role_key in class_map:
-            return class_map[role_key]
-        for key, cls in class_map.items():
-            if key.endswith(f"_{role_key}") or key.endswith(f"-{role_key}"):
-                return cls
-
-    # 2. actor_id prefix
-    actor_id = normalize_role_actor_id(config.get("actor_id", ""))
-    if actor_id:
-        actor_id = _norm(actor_id)
-        if actor_id in class_map:
-            return class_map[actor_id]
-        for prefix, cls in sorted(class_map.items(), key=lambda x: -len(x[0])):
-            if actor_id.startswith(prefix):
-                return cls
-
-    # 3. actor_type
-    actor_type = _norm(config.get("actor_type", ""))
+    actor_type = config.get("actor_type", "")
     if actor_type and actor_type in class_map:
         return class_map[actor_type]
+
+    role = config.get("role", "")
+    if role and role in class_map:
+        return class_map[role]
 
     return default_class
 
 
 def generate_wrapper(
-    actor_classes: List[Type], module_name: str, actor_roles: Optional[Dict[str, Type]] = None
+    actor_classes: List[Type],
+    module_name: str,
+    actor_roles: Optional[Dict[str, Type]] = None,
 ) -> str:
-    """
-    Generate the WIT interface wrapper code for one or more actor classes.
-
-    When multiple classes are provided, the wrapper selects the class from the
-    init config in priority order: ``role`` exact match, prefix
-    match on normalized ``actor_id``, then ``actor_type`` exact match.
+    """Generate the WIT interface wrapper for one or more actor classes.
 
     Args:
-        actor_classes: List of @actor decorated classes (at least one)
-        module_name: Name of the module containing the actor classes
-        actor_roles: Optional role to actor-class mapping from ACTOR_ROLES
+        actor_classes: List of @actor decorated classes (at least one).
+        module_name: Name of the module containing the actor classes.
+        actor_roles: Optional role→class map for same-class multi-instance dispatch.
 
     Returns:
-        Python source code for the wrapper
+        Python source code for the generated wrapper.
     """
     if not actor_classes:
         raise ValueError("No @actor classes provided")
@@ -190,9 +114,8 @@ def generate_wrapper(
     class_names = [cls.__name__ for cls in actor_classes]
     imports = ", ".join(class_names)
     default_class = class_names[0]
-    class_map = build_class_alias_map(actor_classes, actor_roles)
+    class_map = build_class_map(actor_classes, actor_roles)
 
-    # Build lines for the generated wrapper (no indentation tricks)
     lines = [
         "# AUTO-GENERATED by PlexSpaces SDK",
         "# DO NOT EDIT - regenerate with: plexspaces-py build",
@@ -209,21 +132,16 @@ def generate_wrapper(
         "",
     ]
 
-    # Class map for multi-actor support.
-    # Selection priority in _select_class:
-    #   1. config["role"] — ChildSpec.role / ActorSpawnSpec.role
-    #   2. exact or prefix match on actor_id against role/class aliases
-    #   3. config["actor_type"] — shared behavior class when it uniquely maps
     if len(actor_classes) == 1:
         lines.append(f"_actor_class = {default_class}")
         lines.append("_CLASS_MAP = {}")
     else:
         lines.append(f"_actor_class = {default_class}  # default")
         lines.append("")
-        lines.append("# Auto-generated class map: role aliases and class aliases -> class")
+        lines.append("# Dispatch map: actor_type / role -> class (exact match only)")
         lines.append("_CLASS_MAP = {")
-        for alias, cls in class_map.items():
-            lines.append(f'    "{alias}": {cls.__name__},')
+        for key, cls in class_map.items():
+            lines.append(f'    "{key}": {cls.__name__},')
         lines.append("}")
 
     lines.extend([

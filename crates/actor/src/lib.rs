@@ -43,8 +43,9 @@ pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegist
 pub mod actor_context;
 pub use actor_context::LinkProvider;
 pub use actor_context::{
-    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistry, ObjectRegistration,
-    ProcessGroupService, TupleSpaceProvider,
+    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistration,
+    ObjectRegistryHealthStatus, ObjectRegistry, ProcessGroupService, RegisterResult,
+    TupleSpaceProvider,
 };
 
 pub mod actor_monitor;
@@ -183,25 +184,29 @@ pub use facet_factories::{
 
 /// Health module - consolidated health checking, reporting, and service functionality.
 pub mod health;
+pub use health::checker as health_checker;
 pub use health::checker::{
     run_health_check, HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
 };
-pub use health::reporter::HealthReporter;
-pub use health::service::PlexSpacesHealthReporter;
-pub use health::checker as health_checker;
 pub use health::reporter as health_reporter;
+pub use health::reporter::HealthReporter;
 pub use health::service as health_service;
+pub use health::service::PlexSpacesHealthReporter;
 
 pub mod test_helpers;
 
 // Re-export from external crates (same as plexspaces-core did)
 pub use plexspaces_common::{RequestContext, RequestContextError, RequestContextExt};
+pub use plexspaces_facet::FacetManager;
 pub use plexspaces_locks::{LockError, LockManager, LockResult};
 pub use plexspaces_proto::actor::v1::ActorSpawnSpec;
 pub use plexspaces_proto::common::v1::Message;
-pub use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};
-pub use plexspaces_facet::FacetManager;
-pub use plexspaces_service_traits::{ActorRef as ServiceTraitsActorRef, ActorStateChecker, ServiceLocatorBase};
+pub use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};
+pub use plexspaces_service_traits::{
+    ActorRef as ServiceTraitsActorRef, ActorStateChecker, ServiceLocatorBase,
+};
 
 // ---------------------------------------------------------------------------
 // Core module: compatibility re-export layer for crate::core::X paths
@@ -234,17 +239,8 @@ pub use actor_ref::{ActorRef, ActorRefError};
 // High-level typed actor references
 pub mod typed_refs;
 pub use typed_refs::{
-    EventError,
-    EventRef,
-    FsmError,
-    FsmRef,
-    GenServerError,
-    GenServerRef,
-    WorkflowRef,
-    WorkflowRefError,
-    DEFAULT_CALL_TIMEOUT,
-    DEFAULT_FSM_TIMEOUT,
-    DEFAULT_OPERATION_TIMEOUT,
+    EventError, EventRef, FsmError, FsmRef, GenServerError, GenServerRef, WorkflowRef,
+    WorkflowRefError, DEFAULT_CALL_TIMEOUT, DEFAULT_FSM_TIMEOUT, DEFAULT_OPERATION_TIMEOUT,
     DEFAULT_RUN_TIMEOUT,
 };
 

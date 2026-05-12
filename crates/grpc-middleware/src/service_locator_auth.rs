@@ -18,6 +18,12 @@ pub async fn http_jwt_auth_snapshot(
         .get_security_config()
         .await
         .and_then(|c| c.jwt)
-        .and_then(|j| if j.secret.is_empty() { None } else { Some(j.secret) });
+        .and_then(|j| {
+            if j.secret.is_empty() {
+                None
+            } else {
+                Some(j.secret)
+            }
+        });
     (auth_disabled, jwt_secret)
 }

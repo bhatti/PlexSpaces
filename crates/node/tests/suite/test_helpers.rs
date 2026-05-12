@@ -19,7 +19,9 @@
 //! Test helper functions to replace deprecated Node methods
 
 use plexspaces_actor::ActorRef;
-use plexspaces_actor::{ActorId, ActorRegistry, MessageSender, RequestContext, VirtualActorMetadata, RequestContextExt};
+use plexspaces_actor::{
+    ActorId, ActorRegistry, MessageSender, RequestContext, RequestContextExt, VirtualActorMetadata,
+};
 use plexspaces_node::Node;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -82,12 +84,16 @@ pub async fn virtual_actor_metadata_optional(
 }
 
 /// Registered actor ids from the node's actor registry.
-pub async fn registered_actor_ids_from_node(node: &Node) -> Result<HashSet<ActorId>, plexspaces_node::NodeError> {
+pub async fn registered_actor_ids_from_node(
+    node: &Node,
+) -> Result<HashSet<ActorId>, plexspaces_node::NodeError> {
     let registry = node
         .service_locator()
         .actor_registry()
         .await
-        .ok_or_else(|| plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string()))?;
+        .ok_or_else(|| {
+            plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
+        })?;
     Ok(registry.registered_actor_ids().await)
 }
 
@@ -151,10 +157,8 @@ pub async fn registry_tell(
         .ok_or_else(|| {
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
-    let ctx = RequestContext::new_without_auth(
-        "test-tenant".into(),
-        actor_id.namespace().to_string(),
-    );
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".into(), actor_id.namespace().to_string());
     actor_registry
         .tell(&ctx, actor_id, message)
         .await

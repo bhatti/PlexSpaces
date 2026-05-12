@@ -6,7 +6,8 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, Message,
-    ServiceLocator, RequestContextExt};
+    RequestContextExt, ServiceLocator,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};

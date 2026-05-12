@@ -571,118 +571,89 @@ func TestHostSendAfter(t *testing.T) {
 // ActorRouter Tests
 // ========================================================================
 
-func TestActorRouterInit(t *testing.T) {
+func TestActorRouterDispatchByActorType(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-	router.Route("echo", func() Actor { return newEchoActor() })
+	counterCreated := false
+	echoCreated := false
+	router.Route("Counter", func() Actor { counterCreated = true; return newCounterActor() })
+	router.Route("Echo", func() Actor { echoCreated = true; return newEchoActor() })
 
-	// Init with counter actor ID
-	result := router.Init(`{"actor_id":"counter:test@node","args":{}}`)
+	result := router.Init(`{"actor_id":"c1//Counter::ns@node","actor_type":"Counter","args":{}}`)
 	if result != "" {
 		t.Errorf("router Init should return empty on success, got %q", result)
 	}
-	if router.active == nil {
-		t.Fatal("router should have active actor after Init")
+	if !counterCreated {
+		t.Fatal("actor_type='Counter' should select Counter factory")
+	}
+	if echoCreated {
+		t.Fatal("Echo factory should not be called")
 	}
 }
 
-func TestActorRouterInitPrefersRoleOverActorType(t *testing.T) {
+func TestActorRouterActorTypeWinsOverRole(t *testing.T) {
 	router := NewActorRouter()
 	counterCreated := false
+	router.Route("Counter", func() Actor { counterCreated = true; return newCounterActor() })
+	router.Route("some_role", func() Actor { return newEchoActor() })
 
-	router.Route("counter", func() Actor {
-		counterCreated = true
-		return newCounterActor()
-	})
-
-	result := router.Init(`{"actor_id":"counter//shared_wasm::app@test-node","actor_type":"shared_wasm","role":"counter","args":{}}`)
+	// actor_type present and registered — role is not consulted
+	result := router.Init(`{"actor_type":"Counter","role":"some_role"}`)
 	if result != "" {
-		t.Fatalf("router Init should succeed with role dispatch, got %q", result)
+		t.Fatalf("expected success, got %q", result)
 	}
 	if !counterCreated {
-		t.Fatal("role should select the registered actor factory")
+		t.Fatal("actor_type should win over role")
 	}
 }
 
-func TestActorRouterInitWithNamespace(t *testing.T) {
+func TestActorRouterRoleFallbackForSameClassDispatch(t *testing.T) {
+	// Same actor type, multiple role names — canonical same-class multi-instance case
+	ephemeralCreated := false
 	router := NewActorRouter()
-	router.Route("rate-limiter", func() Actor { return newCounterActor() })
+	router.Route("AbstractionsActor", func() Actor { return newCounterActor() })
+	router.Route("ephemeral", func() Actor { ephemeralCreated = true; return newCounterActor() })
 
-	// Full actor ID format: name:namespace@node
-	result := router.Init(`{"actor_id":"rate-limiter:default@test-node"}`)
+	// actor_type matches directly
+	result := router.Init(`{"actor_type":"AbstractionsActor","role":"ephemeral"}`)
 	if result != "" {
-		t.Errorf("expected success, got %q", result)
+		t.Fatalf("expected success, got %q", result)
 	}
-}
-
-func TestActorRouterInitWithCanonicalActorID(t *testing.T) {
-	router := NewActorRouter()
-	router.Route("leader", func() Actor { return newEchoActor() })
-
-	result := router.Init(`{"actor_id":"01KM1SX3YM67ZK3PCRGTSNRAYZ//leader::parameter-server-go@test-node-8091"}`)
-	if result != "" {
-		t.Errorf("expected success for canonical actor id, got %q", result)
+	// role-only dispatch
+	router2 := NewActorRouter()
+	router2.Route("ephemeral", func() Actor { ephemeralCreated = true; return newCounterActor() })
+	result2 := router2.Init(`{"role":"ephemeral"}`)
+	if result2 != "" {
+		t.Fatalf("role-only dispatch should succeed, got %q", result2)
 	}
-}
-
-func TestActorRouterPrefixMatching(t *testing.T) {
-	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-
-	// "counter-1" should match "counter" prefix
-	result := router.Init(`{"actor_id":"counter-1:ns@node"}`)
-	if result != "" {
-		t.Errorf("prefix matching should work, got %q", result)
-	}
-}
-
-func TestActorRouterCanonicalPrefixMatching(t *testing.T) {
-	router := NewActorRouter()
-	router.Route("worker", func() Actor { return newCounterActor() })
-
-	result := router.Init(`{"actor_id":"01KM1SX3YM67ZK3PCRGTSNRAYZ//worker-3::parameter-server-go@test-node-8093"}`)
-	if result != "" {
-		t.Errorf("canonical prefix matching should work, got %q", result)
-	}
-}
-
-func TestActorRouterLongestPrefixWins(t *testing.T) {
-	router := NewActorRouter()
-	counterCreated := false
-	longCounterCreated := false
-
-	router.Route("count", func() Actor {
-		counterCreated = true
-		return newCounterActor()
-	})
-	router.Route("counter", func() Actor {
-		longCounterCreated = true
-		return newCounterActor()
-	})
-
-	router.Init(`{"actor_id":"counter:ns@node"}`)
-	if counterCreated {
-		t.Error("shorter prefix 'count' should not win over 'counter'")
-	}
-	if !longCounterCreated {
-		t.Error("longer prefix 'counter' should win")
+	if !ephemeralCreated {
+		t.Fatal("role 'ephemeral' should select its factory")
 	}
 }
 
 func TestActorRouterNoMatch(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
+	router.Route("Counter", func() Actor { return newCounterActor() })
 
-	result := router.Init(`{"actor_id":"unknown:ns@node"}`)
+	result := router.Init(`{"actor_type":"Unknown","role":"also_unknown"}`)
 	if !strings.HasPrefix(result, "ERROR:") {
-		t.Errorf("expected ERROR for unknown prefix, got %q", result)
+		t.Errorf("expected ERROR for unknown actor_type, got %q", result)
+	}
+}
+
+func TestActorRouterEmptyActorTypeAndRoleErrors(t *testing.T) {
+	router := NewActorRouter()
+	router.Route("Counter", func() Actor { return newCounterActor() })
+
+	result := router.Init(`{"actor_id":"c1//Counter::ns@node"}`)
+	if !strings.HasPrefix(result, "ERROR:") {
+		t.Errorf("expected ERROR when actor_type and role absent, got %q", result)
 	}
 }
 
 func TestActorRouterHandleDelegates(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-	router.Init(`{"actor_id":"counter:ns@node"}`)
+	router.Route("Counter", func() Actor { return newCounterActor() })
+	router.Init(`{"actor_type":"Counter","actor_id":"c1//Counter::ns@node"}`)
 
 	result := router.Handle("sender", "increment", "{}")
 	var parsed map[string]any
@@ -702,10 +673,9 @@ func TestActorRouterHandleWithoutInit(t *testing.T) {
 
 func TestActorRouterGetStateDelegates(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-	router.Init(`{"actor_id":"counter:ns@node"}`)
+	router.Route("Counter", func() Actor { return newCounterActor() })
+	router.Init(`{"actor_type":"Counter","actor_id":"c1//Counter::ns@node"}`)
 
-	// Increment to change state
 	router.Handle("sender", "increment", "{}")
 
 	state := router.GetState()
@@ -718,15 +688,14 @@ func TestActorRouterGetStateDelegates(t *testing.T) {
 
 func TestActorRouterSetStateDelegates(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-	router.Init(`{"actor_id":"counter:ns@node"}`)
+	router.Route("Counter", func() Actor { return newCounterActor() })
+	router.Init(`{"actor_type":"Counter","actor_id":"c1//Counter::ns@node"}`)
 
 	result := router.SetState(`{"value":99,"name":"restored"}`)
 	if result != "" {
 		t.Errorf("SetState should return empty on success, got %q", result)
 	}
 
-	// Verify state was restored
 	state := router.GetState()
 	if !strings.Contains(state, `"value":99`) {
 		t.Errorf("expected value=99 in state, got %q", state)
@@ -735,8 +704,8 @@ func TestActorRouterSetStateDelegates(t *testing.T) {
 
 func TestActorRouterWorkflowDelegates(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("workflow", func() Actor { return newWorkflowTestActor() })
-	result := router.Init(`{"actor_id":"workflow:ns@node"}`)
+	router.Route("WorkflowActor", func() Actor { return newWorkflowTestActor() })
+	result := router.Init(`{"actor_type":"WorkflowActor","actor_id":"w1//WorkflowActor::ns@node"}`)
 	if result != "" {
 		t.Fatalf("Init() = %q", result)
 	}
@@ -755,8 +724,8 @@ func TestActorRouterWorkflowDelegates(t *testing.T) {
 
 func TestActorRouterWorkflowWithoutWorkflowBehavior(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
-	result := router.Init(`{"actor_id":"counter:ns@node"}`)
+	router.Route("Counter", func() Actor { return newCounterActor() })
+	result := router.Init(`{"actor_type":"Counter","actor_id":"c1//Counter::ns@node"}`)
 	if result != "" {
 		t.Fatalf("Init() = %q", result)
 	}
@@ -1034,14 +1003,14 @@ func TestActorRouterSetStateWithoutInit(t *testing.T) {
 	}
 }
 
-func TestActorRouterInitWithEmptyActorID(t *testing.T) {
+func TestActorRouterInitWithEmptyActorTypeAndRole(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("counter", func() Actor { return newCounterActor() })
+	router.Route("Counter", func() Actor { return newCounterActor() })
 
-	// Empty actor_id should fail to find a match
-	result := router.Init(`{"actor_id":""}`)
+	// No actor_type, no role — must error
+	result := router.Init(`{"actor_id":"c1//Counter::ns@node"}`)
 	if !strings.HasPrefix(result, "ERROR:") {
-		t.Errorf("expected ERROR for empty actor_id, got %q", result)
+		t.Errorf("expected ERROR when actor_type and role absent, got %q", result)
 	}
 }
 
@@ -1336,15 +1305,13 @@ func TestServiceHTTPClientDelete(t *testing.T) {
 
 func TestActorRouterEchoActorInit(t *testing.T) {
 	router := NewActorRouter()
-	router.Route("echo", func() Actor { return newEchoActor() })
+	router.Route("EchoActor", func() Actor { return newEchoActor() })
 
-	// EchoActor has custom Init that sets LastMsg
-	result := router.Init(`{"actor_id":"echo:ns@node"}`)
+	result := router.Init(`{"actor_type":"EchoActor","actor_id":"e1//EchoActor::ns@node"}`)
 	if result != "" {
 		t.Errorf("expected success, got %q", result)
 	}
 
-	// Verify the echo actor was properly initialized
 	state := router.GetState()
 	if !strings.Contains(state, "initialized") {
 		t.Errorf("expected state to contain 'initialized', got %q", state)

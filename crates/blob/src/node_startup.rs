@@ -82,16 +82,13 @@ pub async fn create_and_register_blob_service(
         AnyPoolOptions::new()
     };
 
-    let any_pool = pool_options
-        .connect(db_url)
-        .await
-        .map_err(|e| BlobError::ConfigError(format!("Failed to connect to database '{db_url}': {e}")))?;
+    let any_pool = pool_options.connect(db_url).await.map_err(|e| {
+        BlobError::ConfigError(format!("Failed to connect to database '{db_url}': {e}"))
+    })?;
 
-    let repository = Arc::new(
-        SqlBlobRepository::new(any_pool)
-            .await
-            .map_err(|e| BlobError::RepositoryError(format!("Failed to create blob repository: {e}")))?,
-    );
+    let repository = Arc::new(SqlBlobRepository::new(any_pool).await.map_err(|e| {
+        BlobError::RepositoryError(format!("Failed to create blob repository: {e}"))
+    })?);
 
     let service = BlobService::new(blob_config, repository)
         .await

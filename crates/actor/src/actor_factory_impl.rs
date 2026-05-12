@@ -26,14 +26,14 @@
 //! ActorFactoryImpl depends only on ServiceLocator, not Node directly.
 //! It uses ActorRegistry, VirtualActorManager, and other services to spawn actors.
 
+use crate::core::{
+    ActorContext, ActorFactory, ActorId, ActorRegistry, ApplicationManager, ExitReason,
+    MessageSender, RequestContext, RequestContextExt, Service,
+    ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
+};
 use crate::{ActorInstance, ActorRef};
 use async_trait::async_trait;
 use plexspaces_common::ServiceNameExt;
-use crate::core::{
-    ActorContext, ActorFactory, ActorId, ActorRegistry, ApplicationManager, ExitReason,
-    MessageSender, RequestContext, RequestContextExt, Service, ServiceLocator as ServiceLocatorTrait,
-    VirtualActorManager,
-};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::actor::v1::ActorVisibility;
 use plexspaces_proto::ActorLifecycleEvent;
@@ -804,6 +804,7 @@ impl ActorFactory for ActorFactoryImpl {
                     facets: vec![],
                     config: config.clone(),
                     labels: labels.clone(),
+                    ..Default::default()
                 }
             };
             let actor_ref = match self
@@ -942,13 +943,9 @@ impl ActorFactory for ActorFactoryImpl {
         let local_node_id = registry.local_node_id();
 
         // Build ActorId directly from spec identity + local node_id
-        let actor_id = crate::core::ActorId::new(
-            actor_name.as_ref(),
-            actor_type,
-            &namespace,
-            local_node_id,
-        )
-        .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
+        let actor_id =
+            crate::core::ActorId::new(actor_name.as_ref(), actor_type, &namespace, local_node_id)
+                .map_err(|e| format!("Failed to build ActorId from spec: {}", e))?;
 
         // Derive init payload from spec (deterministic; no stale state)
         let initial_state = crate::core::wasm_init_payload(spawn_spec, &actor_id);
@@ -1008,10 +1005,9 @@ impl ActorFactory for ActorFactoryImpl {
 
         // Apply ActorConfig if present (wraps actor with a config-carrying context)
         if let Some(cfg) = spawn_spec.config.clone() {
-            use crate::TestServiceLocatorStub;
             use crate::core::ActorContext;
-            let sl: Arc<dyn crate::core::ServiceLocator> =
-                Arc::new(TestServiceLocatorStub::new());
+            use crate::TestServiceLocatorStub;
+            let sl: Arc<dyn crate::core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
             let ctx_with_cfg = Arc::new(ActorContext::new(
                 local_node_id.to_string(),
                 ctx.tenant_id().to_string(),
@@ -1021,6 +1017,13 @@ impl ActorFactory for ActorFactoryImpl {
             ));
             actor = actor.set_context(ctx_with_cfg);
         }
+
+        // Capture facet flags before facets are consumed by the attachment loop.
+        let has_virtual = facets.iter().any(|f| f.facet_type() == "virtual_actor");
+        let has_durability = facets.iter().any(|f| f.facet_type() == "durability");
+        let should_register =
+            spawn_spec.register_in_object_registry || (has_virtual && has_durability);
+        let enforce_unique = spawn_spec.enforce_unique_placement;
 
         // Attach runtime facets
         let num_facets = facets.len();
@@ -1044,6 +1047,18 @@ impl ActorFactory for ActorFactoryImpl {
                 labels,
             )
             .await?;
+
+        if should_register {
+            self.maybe_register_actor_in_object_registry(
+                ctx,
+                &actor_id,
+                actor_type,
+                &namespace,
+                enforce_unique,
+            )
+            .await?;
+        }
+
         Ok(Arc::new(actor_ref) as Arc<dyn MessageSender>)
     }
 
@@ -1415,6 +1430,7 @@ impl ActorFactoryImpl {
                     facets: effective_facets,
                     labels: labels.clone(),
                     config: actor_config.clone(),
+                    ..Default::default()
                 };
                 manager
                     .register(actor_id.clone(), facet_box, spec)
@@ -1453,6 +1469,7 @@ impl ActorFactoryImpl {
                     facets: Default::default(),   // merge picks up from existing instance/type spec
                     labels: labels.clone(),
                     config: actor_config.clone(),
+                    ..Default::default()
                 };
                 manager
                     .register(actor_id.clone(), facet_box_update, spec_update)
@@ -1754,6 +1771,16 @@ impl ActorFactoryImpl {
             .await
             .map_err(|e| format!("Failed to unregister actor: {}", e))?;
 
+        // Best-effort unregister from object registry (not all actors are registered there).
+        self.maybe_unregister_actor_from_object_registry(
+            &RequestContext::new_without_auth(
+                ctx.tenant_id().to_string(),
+                namespace.clone(),
+            ),
+            actor_id,
+        )
+        .await;
+
         if is_virtual {
             let manager = virtual_actor_manager
                 .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
@@ -1808,6 +1835,90 @@ impl ActorFactoryImpl {
         }
 
         Ok(())
+    }
+
+    // ========================================================================
+    // Object registry integration helpers
+    // ========================================================================
+
+    /// Register the actor in the object registry if the service is available.
+    ///
+    /// Silently skips when no object registry is configured.  Returns `Err` only
+    /// when `enforce_unique=true` and another live instance holds the same alias.
+    async fn maybe_register_actor_in_object_registry(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        actor_type: &str,
+        namespace: &str,
+        enforce_unique: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let Some(obj_registry) = self.service_locator.get_object_registry().await else {
+            return Ok(());
+        };
+
+        let grpc_address = self
+            .service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.grpc_address)
+            .unwrap_or_default();
+
+        let reg_ctx =
+            RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace.to_string());
+
+        use crate::actor_context::RegisterResult;
+        use crate::object_registry_helpers::register_actor;
+        match register_actor(
+            &obj_registry,
+            &reg_ctx,
+            &actor_id.to_string(),
+            actor_type,
+            actor_id.name(),
+            actor_id.node_id(),
+            &grpc_address,
+            enforce_unique,
+        )
+        .await?
+        {
+            RegisterResult::AlreadyExists {
+                object_id,
+                grpc_address: existing_addr,
+            } => Err(format!(
+                "Placement conflict: actor '{}' already active on '{}' (object_id={})",
+                actor_id, existing_addr, object_id
+            )
+            .into()),
+            RegisterResult::Registered => Ok(()),
+        }
+    }
+
+    /// Unregister the actor from the object registry if the service is available.
+    ///
+    /// Always best-effort — errors are logged and swallowed so they never
+    /// interrupt the stop sequence.
+    async fn maybe_unregister_actor_from_object_registry(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+    ) {
+        let Some(obj_registry) = self.service_locator.get_object_registry().await else {
+            return;
+        };
+
+        use crate::object_registry_helpers::unregister_actor;
+        if let Err(e) = unregister_actor(&obj_registry, ctx, &actor_id.to_string()).await {
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("not found") || msg.contains("does not exist") {
+                tracing::debug!(actor_id = %actor_id, "Actor not in object registry, skip unregister");
+            } else {
+                tracing::warn!(
+                    actor_id = %actor_id,
+                    error = %e,
+                    "Failed to unregister actor from object registry"
+                );
+            }
+        }
     }
 
     // ========================================================================
@@ -1997,6 +2108,8 @@ impl ActorFactoryImpl {
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
 impl Service for ActorFactoryImpl {
     fn service_name(&self) -> String {
-        crate::core::ServiceName::ServiceNameActorFactoryImpl.as_str().to_string()
+        crate::core::ServiceName::ServiceNameActorFactoryImpl
+            .as_str()
+            .to_string()
     }
 }

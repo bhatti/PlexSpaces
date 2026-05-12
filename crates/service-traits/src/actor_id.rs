@@ -33,7 +33,7 @@ use std::ops::Deref;
 use crate::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};
 
 const NAME_PATTERN: &str = "^[a-zA-Z0-9][a-zA-Z0-9_-]*$";
-const ACTOR_TYPE_PATTERN: &str = "^[a-z][a-z0-9_-]*$";
+const ACTOR_TYPE_PATTERN: &str = "^[a-zA-Z][a-zA-Z0-9_-]*$";
 const NAME_MAX_LEN: usize = 128;
 const ACTOR_TYPE_MAX_LEN: usize = 128;
 
@@ -267,10 +267,10 @@ fn validate_actor_type(actor_type: &str) -> Result<(), ActorIdError> {
     let Some(first) = chars.next() else {
         return Err(ActorIdError::InvalidActorType(actor_type.to_string()));
     };
-    if !first.is_ascii_lowercase() {
+    if !first.is_ascii_alphabetic() {
         return Err(ActorIdError::InvalidActorType(actor_type.to_string()));
     }
-    if !chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_') {
+    if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
         return Err(ActorIdError::InvalidActorType(actor_type.to_string()));
     }
     Ok(())

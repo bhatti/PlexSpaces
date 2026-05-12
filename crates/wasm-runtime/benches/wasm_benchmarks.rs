@@ -286,9 +286,13 @@ fn bench_actor_instantiation(c: &mut Criterion) {
         let mut counter = 0;
         b.to_async(&rt).iter(|| {
             let runtime = Arc::clone(&runtime);
-            let actor_id =
-                ActorId::new(format!("actor-{}", counter), "wasm", "default", "bench-node")
-                    .unwrap();
+            let actor_id = ActorId::new(
+                format!("actor-{}", counter),
+                "wasm",
+                "default",
+                "bench-node",
+            )
+            .unwrap();
             counter += 1;
 
             async move {
@@ -353,9 +357,13 @@ fn bench_actor_instantiation_with_state(c: &mut Criterion) {
             let mut counter = 0;
             b.to_async(&rt).iter(|| {
                 let runtime = Arc::clone(&runtime);
-                let actor_id =
-                    ActorId::new(format!("actor-{}", counter), "wasm", "default", "bench-node")
-                        .unwrap();
+                let actor_id = ActorId::new(
+                    format!("actor-{}", counter),
+                    "wasm",
+                    "default",
+                    "bench-node",
+                )
+                .unwrap();
                 let state = state.clone();
                 counter += 1;
 
@@ -531,9 +539,13 @@ fn bench_memory_limits(c: &mut Criterion) {
             let mut counter = 0;
             b.to_async(&rt).iter(|| {
                 let runtime = Arc::clone(&runtime);
-                let actor_id =
-                    ActorId::new(format!("actor-{}", counter), "wasm", "default", "bench-node")
-                        .unwrap();
+                let actor_id = ActorId::new(
+                    format!("actor-{}", counter),
+                    "wasm",
+                    "default",
+                    "bench-node",
+                )
+                .unwrap();
                 counter += 1;
 
                 async move {
@@ -602,9 +614,13 @@ fn bench_execution_timeouts(c: &mut Criterion) {
                 let mut counter = 0;
                 b.to_async(&rt).iter(|| {
                     let runtime = Arc::clone(&runtime);
-                    let actor_id =
-                        ActorId::new(format!("actor-{}", counter), "wasm", "default", "bench-node")
-                            .unwrap();
+                    let actor_id = ActorId::new(
+                        format!("actor-{}", counter),
+                        "wasm",
+                        "default",
+                        "bench-node",
+                    )
+                    .unwrap();
                     counter += 1;
 
                     async move {
@@ -661,9 +677,13 @@ fn bench_e2e_deployment(c: &mut Criterion) {
             let service = Arc::clone(&service);
             let runtime = Arc::clone(&runtime);
             let name = format!("module-{}", counter);
-            let actor_id =
-                ActorId::new(format!("actor-{}", counter), "wasm", "default", "bench-node")
-                    .unwrap();
+            let actor_id = ActorId::new(
+                format!("actor-{}", counter),
+                "wasm",
+                "default",
+                "bench-node",
+            )
+            .unwrap();
             counter += 1;
 
             async move {

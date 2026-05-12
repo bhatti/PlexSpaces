@@ -328,8 +328,8 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
             "Healthy" | "healthy" => {
                 plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
             }
-            "Unhealthy" | "unhealthy" => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy
+            "Unhealthy" | "unhealthy" | "Dead" | "dead" => {
+                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDead
             }
             "Unknown" | "unknown" => {
                 plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown
@@ -894,9 +894,7 @@ mod tests {
             None
         }
 
-        async fn get_keyvalue_store(
-            &self,
-        ) -> Option<Arc<dyn plexspaces_common::KeyValueStore>> {
+        async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_common::KeyValueStore>> {
             self.keyvalue_store.read().await.clone()
         }
 
@@ -1062,7 +1060,6 @@ mod tests {
         async fn get_node_registry(&self) -> Option<Arc<dyn NodeRegistryTrait>> {
             None
         }
-
     }
 
     #[async_trait]
@@ -1183,10 +1180,7 @@ mod tests {
             *self.keyvalue_store.write().await = Some(store);
         }
 
-        async fn register_outbound_http_client(
-            &self,
-            _client: Arc<dyn crate::OutboundHttpClient>,
-        ) {
+        async fn register_outbound_http_client(&self, _client: Arc<dyn crate::OutboundHttpClient>) {
         }
 
         async fn unregister_outbound_http_client(&self) {}

@@ -29,8 +29,8 @@
 
 // Re-export proto-generated types as the canonical types
 pub use plexspaces_proto::workflow::v1::{
-    ExecutionStatus, RetryConfig, Step, StepExecution, StepStatus, StepType,
-    WorkflowDefinition, WorkflowExecution,
+    ExecutionStatus, RetryConfig, Step, StepExecution, StepStatus, StepType, WorkflowDefinition,
+    WorkflowExecution,
 };
 
 // Re-export proto-generated error enum
@@ -44,7 +44,8 @@ pub trait WorkflowExecutionExt {
 
 impl WorkflowExecutionExt for WorkflowExecution {
     fn execution_status(&self) -> ExecutionStatus {
-        ExecutionStatus::try_from(self.status).unwrap_or(ExecutionStatus::ExecutionStatusUnspecified)
+        ExecutionStatus::try_from(self.status)
+            .unwrap_or(ExecutionStatus::ExecutionStatusUnspecified)
     }
 }
 
@@ -150,11 +151,9 @@ fn prost_value_to_json(v: &prost_types::Value) -> serde_json::Value {
         None => serde_json::Value::Null,
         Some(prost_types::value::Kind::NullValue(_)) => serde_json::Value::Null,
         Some(prost_types::value::Kind::BoolValue(b)) => serde_json::Value::Bool(*b),
-        Some(prost_types::value::Kind::NumberValue(n)) => {
-            serde_json::Number::from_f64(*n)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        Some(prost_types::value::Kind::NumberValue(n)) => serde_json::Number::from_f64(*n)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         Some(prost_types::value::Kind::StringValue(s)) => serde_json::Value::String(s.clone()),
         Some(prost_types::value::Kind::ListValue(list)) => {
             serde_json::Value::Array(list.values.iter().map(prost_value_to_json).collect())
@@ -203,7 +202,9 @@ impl WorkflowError {
             WorkflowError::Storage(_) => WorkflowErrorProto::WorkflowErrorStorage,
             WorkflowError::Serialization(_) => WorkflowErrorProto::WorkflowErrorSerialization,
             WorkflowError::NotFound(_) => WorkflowErrorProto::WorkflowErrorNotFound,
-            WorkflowError::InvalidDefinition(_) => WorkflowErrorProto::WorkflowErrorInvalidDefinition,
+            WorkflowError::InvalidDefinition(_) => {
+                WorkflowErrorProto::WorkflowErrorInvalidDefinition
+            }
             WorkflowError::Execution(_) => WorkflowErrorProto::WorkflowErrorExecution,
             WorkflowError::ConcurrentUpdate(_) => WorkflowErrorProto::WorkflowErrorConcurrentUpdate,
         }
@@ -273,7 +274,10 @@ impl ExecutionStatusExt for ExecutionStatus {
             "FAILED" => Ok(ExecutionStatus::ExecutionStatusFailed),
             "CANCELLED" => Ok(ExecutionStatus::ExecutionStatusCancelled),
             "TIMED_OUT" | "TIMEDOUT" => Ok(ExecutionStatus::ExecutionStatusTimedOut),
-            _ => Err(WorkflowError::InvalidDefinition(format!("Unknown status: {}", s))),
+            _ => Err(WorkflowError::InvalidDefinition(format!(
+                "Unknown status: {}",
+                s
+            ))),
         }
     }
 }
@@ -307,7 +311,10 @@ impl StepStatusExt for StepStatus {
             "FAILED" => Ok(StepStatus::StepStatusFailed),
             "RETRYING" => Ok(StepStatus::StepStatusRetrying),
             "CANCELLED" => Ok(StepStatus::StepStatusCancelled),
-            _ => Err(WorkflowError::InvalidDefinition(format!("Unknown step status: {}", s))),
+            _ => Err(WorkflowError::InvalidDefinition(format!(
+                "Unknown step status: {}",
+                s
+            ))),
         }
     }
 }
@@ -335,10 +342,22 @@ mod tests {
 
     #[test]
     fn test_execution_status_as_sql_str() {
-        assert_eq!(ExecutionStatus::ExecutionStatusPending.as_sql_str(), "PENDING");
-        assert_eq!(ExecutionStatus::ExecutionStatusRunning.as_sql_str(), "RUNNING");
-        assert_eq!(ExecutionStatus::ExecutionStatusCompleted.as_sql_str(), "COMPLETED");
-        assert_eq!(ExecutionStatus::ExecutionStatusFailed.as_sql_str(), "FAILED");
+        assert_eq!(
+            ExecutionStatus::ExecutionStatusPending.as_sql_str(),
+            "PENDING"
+        );
+        assert_eq!(
+            ExecutionStatus::ExecutionStatusRunning.as_sql_str(),
+            "RUNNING"
+        );
+        assert_eq!(
+            ExecutionStatus::ExecutionStatusCompleted.as_sql_str(),
+            "COMPLETED"
+        );
+        assert_eq!(
+            ExecutionStatus::ExecutionStatusFailed.as_sql_str(),
+            "FAILED"
+        );
     }
 
     #[test]

@@ -18,5 +18,5 @@
 
 //! Re-exports `ActorStateHandle` and `ActorStateChecker` from `plexspaces-service-traits`.
 
-pub use plexspaces_service_traits::ActorStateHandle;
 pub use plexspaces_service_traits::ActorStateChecker;
+pub use plexspaces_service_traits::ActorStateHandle;

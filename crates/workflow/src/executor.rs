@@ -26,7 +26,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 
-use crate::storage::sql::{execution_input_to_value, make_step, step_config_value, step_next, step_type};
+use crate::storage::sql::{
+    execution_input_to_value, make_step, step_config_value, step_next, step_type,
+};
 use crate::storage::WorkflowStorage;
 use crate::types::*;
 
@@ -257,7 +259,10 @@ impl WorkflowExecutor {
                 Err(_e) => {
                     // Step failed - mark workflow as failed
                     storage
-                        .update_execution_status(execution_id, ExecutionStatus::ExecutionStatusFailed)
+                        .update_execution_status(
+                            execution_id,
+                            ExecutionStatus::ExecutionStatusFailed,
+                        )
                         .await?;
                     return Ok(());
                 }
@@ -479,14 +484,12 @@ impl WorkflowExecutor {
             }
             Some("multiply") => {
                 // Multiply input by factor
-                let factor = config
-                    .get("factor")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0) as u64;
+                let factor = config.get("factor").and_then(|v| v.as_f64()).unwrap_or(1.0) as u64;
 
-                let n = input.as_f64().map(|f| f as u64).unwrap_or(
-                    input.as_u64().unwrap_or(0)
-                );
+                let n = input
+                    .as_f64()
+                    .map(|f| f as u64)
+                    .unwrap_or(input.as_u64().unwrap_or(0));
                 Ok(json!({
                     "result": n * factor
                 }))
@@ -612,7 +615,10 @@ impl WorkflowExecutor {
             // Spawn concurrent branch execution
             let task = tokio::spawn(async move {
                 // Simulate delay if specified
-                if let Some(delay_ms) = branch_config.get("delay_ms").and_then(|v| Self::json_as_u64(v)) {
+                if let Some(delay_ms) = branch_config
+                    .get("delay_ms")
+                    .and_then(|v| Self::json_as_u64(v))
+                {
                     sleep(Duration::from_millis(delay_ms)).await;
                 }
 
@@ -1073,14 +1079,13 @@ impl WorkflowExecutor {
 
         // Calculate wait duration from config
         let wait_cfg = step_config_value(step);
-        let wait_duration = if let Some(duration_ms) =
-            wait_cfg.get("duration_ms").and_then(|v| Self::json_as_u64(v))
+        let wait_duration = if let Some(duration_ms) = wait_cfg
+            .get("duration_ms")
+            .and_then(|v| Self::json_as_u64(v))
         {
             // Wait for milliseconds
             Duration::from_millis(duration_ms)
-        } else if let Some(duration_secs) =
-            wait_cfg.get("duration_secs").and_then(|v| v.as_f64())
-        {
+        } else if let Some(duration_secs) = wait_cfg.get("duration_secs").and_then(|v| v.as_f64()) {
             // Wait for seconds (supports fractional seconds)
             Duration::from_secs_f64(duration_secs)
         } else if let Some(until_str) = wait_cfg.get("until").and_then(|v| v.as_str()) {
@@ -1186,7 +1191,9 @@ impl WorkflowExecutor {
             })?;
 
         // Extract optional timeout
-        let timeout_ms = signal_cfg.get("timeout_ms").and_then(|v| Self::json_as_u64(v));
+        let timeout_ms = signal_cfg
+            .get("timeout_ms")
+            .and_then(|v| Self::json_as_u64(v));
 
         let poll_interval = Duration::from_millis(10); // Poll every 10ms
         let start_time = std::time::Instant::now();
@@ -1357,7 +1364,7 @@ impl WorkflowExecutor {
 mod tests {
     use super::*;
     use crate::storage::sql::make_workflow_definition;
-    use crate::types::{WorkflowExecutionExt};
+    use crate::types::WorkflowExecutionExt;
     use serde_json::json;
 
     #[tokio::test]
@@ -1365,8 +1372,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "test", "Test", "1.0",
-            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+            "test",
+            "Test",
+            "1.0",
+            vec![make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({}),
+                None,
+                None,
+                None,
+            )],
         );
 
         storage.save_definition(&def).await.unwrap();
@@ -1377,7 +1394,10 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusCompleted
+        );
     }
 
     #[tokio::test]
@@ -1396,8 +1416,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "parallel-invalid", "Parallel Invalid", "1.0",
-            vec![make_step("parallel-step", "Parallel Step", StepType::StepTypeParallel, json!({}), None, None, None)],
+            "parallel-invalid",
+            "Parallel Invalid",
+            "1.0",
+            vec![make_step(
+                "parallel-step",
+                "Parallel Step",
+                StepType::StepTypeParallel,
+                json!({}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&def).await.unwrap();
 
@@ -1407,7 +1437,10 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusFailed
+        );
     }
 
     #[tokio::test]
@@ -1415,8 +1448,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "map-invalid", "Map Invalid", "1.0",
-            vec![make_step("map-step", "Map Step", StepType::StepTypeMap, json!({}), None, None, None)],
+            "map-invalid",
+            "Map Invalid",
+            "1.0",
+            vec![make_step(
+                "map-step",
+                "Map Step",
+                StepType::StepTypeMap,
+                json!({}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&def).await.unwrap();
 
@@ -1426,7 +1469,10 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusFailed
+        );
     }
 
     #[tokio::test]
@@ -1434,8 +1480,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "map-no-iterator", "Map No Iterator", "1.0",
-            vec![make_step("map-step", "Map Step", StepType::StepTypeMap, json!({"items": [1, 2, 3]}), None, None, None)],
+            "map-no-iterator",
+            "Map No Iterator",
+            "1.0",
+            vec![make_step(
+                "map-step",
+                "Map Step",
+                StepType::StepTypeMap,
+                json!({"items": [1, 2, 3]}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&def).await.unwrap();
 
@@ -1445,7 +1501,10 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusFailed
+        );
     }
 
     #[tokio::test]
@@ -1493,29 +1552,69 @@ mod tests {
 
     #[tokio::test]
     async fn test_simulate_step_execution_actions() {
-        let step_succeed = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None);
+        let step_succeed = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "succeed"}),
+            None,
+            None,
+            None,
+        );
         let result = WorkflowExecutor::simulate_step_execution(&step_succeed, &json!({}), 1);
         assert!(result.is_ok());
 
-        let step_fail = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "fail", "error": "Test error"}), None, None, None);
+        let step_fail = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "fail", "error": "Test error"}),
+            None,
+            None,
+            None,
+        );
         let result = WorkflowExecutor::simulate_step_execution(&step_fail, &json!({}), 1);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Test error");
 
-        let step_generate = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "generate"}), None, None, None);
+        let step_generate = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "generate"}),
+            None,
+            None,
+            None,
+        );
         let result = WorkflowExecutor::simulate_step_execution(&step_generate, &json!({}), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.get("generated_data").is_some());
         assert!(output.get("timestamp").is_some());
 
-        let step_transform = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "transform", "operation": "uppercase"}), None, None, None);
+        let step_transform = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "transform", "operation": "uppercase"}),
+            None,
+            None,
+            None,
+        );
         let result = WorkflowExecutor::simulate_step_execution(&step_transform, &json!("hello"), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.get("result").and_then(|v| v.as_str()), Some("HELLO"));
 
-        let step_multiply = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "multiply", "factor": 3}), None, None, None);
+        let step_multiply = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "multiply", "factor": 3}),
+            None,
+            None,
+            None,
+        );
         let result = WorkflowExecutor::simulate_step_execution(&step_multiply, &json!(5), 1);
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -1524,7 +1623,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_simulate_step_execution_flaky() {
-        let step = make_step("test", "Test", StepType::StepTypeTask, json!({"action": "flaky", "fail_count": 2}), None, None, None);
+        let step = make_step(
+            "test",
+            "Test",
+            StepType::StepTypeTask,
+            json!({"action": "flaky", "fail_count": 2}),
+            None,
+            None,
+            None,
+        );
 
         // First attempt should fail
         let result = WorkflowExecutor::simulate_step_execution(&step, &json!({}), 1);
@@ -1549,8 +1656,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "invalid-next", "Invalid Next", "1.0",
-            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), Some("non-existent-step".to_string()), None, None)],
+            "invalid-next",
+            "Invalid Next",
+            "1.0",
+            vec![make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                Some("non-existent-step".to_string()),
+                None,
+                None,
+            )],
         );
         storage.save_definition(&def).await.unwrap();
 
@@ -1560,7 +1677,10 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusCompleted
+        );
     }
 
     #[tokio::test]
@@ -1568,9 +1688,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let def = make_workflow_definition(
-            "parallel-no-id", "Parallel No ID", "1.0",
-            vec![make_step("parallel-step", "Parallel Step", StepType::StepTypeParallel,
-                json!({"branches": [{"action": "succeed"}]}), None, None, None)],
+            "parallel-no-id",
+            "Parallel No ID",
+            "1.0",
+            vec![make_step(
+                "parallel-step",
+                "Parallel Step",
+                StepType::StepTypeParallel,
+                json!({"branches": [{"action": "succeed"}]}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&def).await.unwrap();
 
@@ -1580,6 +1709,9 @@ mod tests {
                 .unwrap();
 
         let execution = storage.get_execution(&execution_id).await.unwrap();
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusFailed
+        );
     }
 }

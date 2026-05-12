@@ -15,7 +15,9 @@ use super::test_helpers::{
 };
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_actor::{Actor as ActorTrait, ActorContext, InitializableServiceLocator, Message, ServiceLocator};
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, InitializableServiceLocator, Message, ServiceLocator,
+};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;

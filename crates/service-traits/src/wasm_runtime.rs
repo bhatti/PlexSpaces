@@ -28,10 +28,7 @@ pub trait WasmRuntimeTrait: Send + Sync {
         version: &str,
         bytes: &[u8],
     ) -> Result<Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>>;
-    async fn get_module(
-        &self,
-        hash: &str,
-    ) -> Option<Arc<dyn std::any::Any + Send + Sync>>;
+    async fn get_module(&self, hash: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>>;
     async fn resolve_module(
         &self,
         module_ref: &str,

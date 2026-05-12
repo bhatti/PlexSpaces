@@ -56,18 +56,15 @@
 
 mod security_config_toml;
 
+use crate::RequestContextExt;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
-use crate::RequestContextExt;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
     ApplicationServiceLinkRequirement, ApplicationSpec, ShutdownStrategy,
-};
-pub use plexspaces_proto::supervision::v1::{
-    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{
     GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, OutboundTransport, ReleaseSpec,
@@ -75,6 +72,9 @@ pub use plexspaces_proto::node::v1::{
 };
 pub use plexspaces_proto::prost_types;
 pub use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
+pub use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 
 use security_config_toml::SecurityConfigToml;
 

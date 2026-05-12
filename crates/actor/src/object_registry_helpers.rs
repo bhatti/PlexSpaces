@@ -22,7 +22,10 @@
 //! to simplify registration and discovery of different object types.
 //! Includes LRU caching for discovery operations to reduce registry load.
 
-use crate::{actor_context::ObjectRegistry as ObjectRegistryTrait, RequestContext, RequestContextExt};
+use crate::{
+    actor_context::{ObjectRegistry as ObjectRegistryTrait, RegisterResult},
+    RequestContext, RequestContextExt,
+};
 use plexspaces_proto::common::v1::Metadata;
 use plexspaces_proto::node::v1::{OutboundTransport, ServiceLinkConfig};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
@@ -618,4 +621,390 @@ pub async fn heartbeat_node(
     Ok(())
 }
 
-// Tests are in crates/core/tests/object_registry_helpers_integration_tests.rs
+/// Build the canonical alias key for an actor identity.
+///
+/// Format: `"{actor_type}:{name}:{namespace}:{tenant_id}"`
+///
+/// This key is used as the unique placement identifier in the object registry
+/// (Orleans grain directory pattern). Two actors with the same identity share
+/// this alias, so only one can be HEALTHY/DEGRADED at a time when
+/// `enforce_unique_placement=true`.
+pub fn build_actor_alias(
+    actor_type: &str,
+    name: &str,
+    namespace: &str,
+    tenant_id: &str,
+) -> String {
+    format!("{}:{}:{}:{}", actor_type, name, namespace, tenant_id)
+}
+
+/// Register an actor in the object registry.
+///
+/// ## Arguments
+/// * `object_registry` - ObjectRegistry instance
+/// * `ctx` - RequestContext for tenant isolation
+/// * `actor_id` - Actor identifier string (e.g. `"name@type@ns@node"`)
+/// * `actor_type` - Actor type slug (e.g. `"counter"`)
+/// * `actor_name` - Actor instance name
+/// * `node_id` - Node where the actor is running
+/// * `grpc_address` - Node's gRPC address
+/// * `enforce_unique` - If `true`, reject spawn when another active instance with
+///   the same identity alias already exists
+///
+/// ## Returns
+/// `RegisterResult::Registered` on success or
+/// `RegisterResult::AlreadyExists { grpc_address, object_id }` when another
+/// live instance holds the alias (only when `enforce_unique=true`).
+pub async fn register_actor<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
+    ctx: &RequestContext,
+    actor_id: &str,
+    actor_type: &str,
+    actor_name: &str,
+    node_id: &str,
+    grpc_address: &str,
+    enforce_unique: bool,
+) -> Result<RegisterResult, Box<dyn std::error::Error + Send + Sync>> {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let timestamp = Timestamp {
+        seconds: now.as_secs() as i64,
+        nanos: now.subsec_nanos() as i32,
+    };
+
+    let alias = build_actor_alias(actor_type, actor_name, ctx.namespace(), ctx.tenant_id());
+
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeActor as i32,
+        object_id: actor_id.to_string(),
+        object_name: format!("{}/{}", actor_type, actor_name),
+        object_category: actor_type.to_string(),
+        node_id: node_id.to_string(),
+        grpc_address: grpc_address.to_string(),
+        tenant_id: ctx.tenant_id().to_string(),
+        namespace: ctx.namespace().to_string(),
+        health_status: HealthStatus::HealthStatusHealthy as i32,
+        alias,
+        max_heartbeat_failures: 3,
+        created_at: Some(timestamp.clone()),
+        updated_at: Some(timestamp),
+        ..Default::default()
+    };
+
+    // Invalidate actor cache entries for this tenant/namespace.
+    let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
+    {
+        let mut cache = DISCOVERY_CACHE.write().await;
+        cache.remove_matching(|key| {
+            key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix)
+        });
+    }
+
+    object_registry
+        .register_with_unique_alias(ctx, registration, enforce_unique)
+        .await
+}
+
+/// Unregister an actor from the object registry.
+///
+/// ## Arguments
+/// * `object_registry` - ObjectRegistry instance
+/// * `ctx` - RequestContext for tenant isolation
+/// * `actor_id` - Actor identifier string
+pub async fn unregister_actor<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
+    ctx: &RequestContext,
+    actor_id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Invalidate actor cache entries for this tenant/namespace.
+    let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
+    {
+        let mut cache = DISCOVERY_CACHE.write().await;
+        cache.remove_matching(|key| {
+            key.starts_with("actor:") && key.ends_with(&tenant_ns_suffix)
+        });
+    }
+
+    object_registry
+        .unregister(ctx, ObjectType::ObjectTypeActor, actor_id)
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
+}
+
+/// Discover actors by type (object_category) within a tenant.
+///
+/// ## Arguments
+/// * `object_registry` - ObjectRegistry instance
+/// * `ctx` - RequestContext for tenant isolation
+/// * `actor_type` - Actor type slug to filter on (e.g. `"Counter"`)
+///
+/// ## Returns
+/// All HEALTHY + DEGRADED + STARTING actor registrations matching the type.
+///
+/// ## Caching
+/// Results are cached for 60 seconds under a key of the form
+/// `"actor:{actor_type}:{tenant_id}:{namespace}"`.
+/// Cache is invalidated by `register_actor` and `unregister_actor`.
+pub async fn discover_actors_by_type<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
+    ctx: &RequestContext,
+    actor_type: &str,
+) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    let cache_key = format!(
+        "actor:{}:{}:{}",
+        actor_type,
+        ctx.tenant_id(),
+        ctx.namespace()
+    );
+
+    {
+        let mut cache = DISCOVERY_CACHE.write().await;
+        if let Some(cached) = cache.get(&cache_key) {
+            return Ok(cached.clone());
+        }
+    }
+
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeActor),
+            Some(actor_type.to_string()),
+            None,
+            None,
+            None,
+            0,
+            10_000,
+        )
+        .await?;
+
+    {
+        let mut cache = DISCOVERY_CACHE.write().await;
+        cache.insert(cache_key, registrations.clone());
+    }
+
+    Ok(registrations)
+}
+
+/// Look up a single actor by its identity (actor_type + name), using the alias index.
+///
+/// ## Arguments
+/// * `object_registry` - ObjectRegistry instance
+/// * `ctx` - RequestContext for tenant isolation
+/// * `actor_type` - Actor type slug (e.g. `"Counter"`)
+/// * `actor_name` - Actor instance name (e.g. `"worker-1"`)
+///
+/// ## Returns
+/// `Ok(Some(registration))` if an active (HEALTHY/DEGRADED/STARTING) instance is found,
+/// `Ok(None)` if no registration holds this identity alias.
+///
+/// ## Note
+/// The alias cache inside `ObjectRegistryImpl` (30 s TTL) short-circuits repeated
+/// lookups for the same identity without going to the DB.
+pub async fn lookup_actor_by_identity<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
+    ctx: &RequestContext,
+    actor_type: &str,
+    actor_name: &str,
+) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    let alias = build_actor_alias(actor_type, actor_name, ctx.namespace(), ctx.tenant_id());
+    object_registry.lookup_by_alias(ctx, &alias).await
+}
+
+// Integration tests: crates/core/tests/object_registry_helpers_integration_tests.rs
+// Unit tests below cover the new Phase-8 helpers.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+
+    async fn make_registry() -> Arc<ObjectRegistryImpl> {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        Arc::new(ObjectRegistryImpl::new(repo))
+    }
+
+    fn ctx(tenant: &str, ns: &str) -> RequestContext {
+        RequestContext::new_without_auth(tenant.into(), ns.into())
+    }
+
+    #[tokio::test]
+    async fn test_discover_actors_by_type_returns_registered() {
+        clear_discovery_cache().await;
+        let reg = make_registry().await;
+        let ctx = ctx("t1", "ns1");
+
+        register_actor(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "actor-1@node1",
+            "Counter",
+            "worker-1",
+            "node1",
+            "http://node1:8000",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let actors = discover_actors_by_type(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actors.len(), 1);
+        assert_eq!(actors[0].object_id, "actor-1@node1");
+    }
+
+    #[tokio::test]
+    async fn test_discover_actors_by_type_cache_hit() {
+        clear_discovery_cache().await;
+        let reg = make_registry().await;
+        let ctx = ctx("t2", "ns2");
+
+        register_actor(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "actor-2@node1",
+            "Counter",
+            "worker-2",
+            "node1",
+            "http://node1:8000",
+            false,
+        )
+        .await
+        .unwrap();
+
+        // First call populates cache.
+        let first = discover_actors_by_type(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.len(), 1);
+
+        // Second call uses cache (same result, no DB).
+        let second = discover_actors_by_type(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+        )
+        .await
+        .unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(first[0].object_id, second[0].object_id);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_actor_by_identity_found() {
+        clear_discovery_cache().await;
+        let reg = make_registry().await;
+        let ctx = ctx("t3", "ns3");
+
+        register_actor(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "actor-3@node1",
+            "Counter",
+            "worker-3",
+            "node1",
+            "http://node1:8000",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let found = lookup_actor_by_identity(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+            "worker-3",
+        )
+        .await
+        .unwrap();
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().object_id, "actor-3@node1");
+    }
+
+    #[tokio::test]
+    async fn test_lookup_actor_by_identity_not_found() {
+        clear_discovery_cache().await;
+        let reg = make_registry().await;
+        let ctx = ctx("t4", "ns4");
+
+        let found = lookup_actor_by_identity(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+            "nonexistent",
+        )
+        .await
+        .unwrap();
+
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_discover_actors_cache_invalidated_on_unregister() {
+        clear_discovery_cache().await;
+        let reg = make_registry().await;
+        let ctx = ctx("t5", "ns5");
+
+        register_actor(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "actor-5@node1",
+            "Counter",
+            "worker-5",
+            "node1",
+            "http://node1:8000",
+            false,
+        )
+        .await
+        .unwrap();
+
+        // Populate cache.
+        let before = discover_actors_by_type(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+        )
+        .await
+        .unwrap();
+        assert_eq!(before.len(), 1);
+
+        // Unregister invalidates the actor discovery cache.
+        unregister_actor(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "actor-5@node1",
+        )
+        .await
+        .unwrap();
+
+        // Next discover fetches from DB → empty.
+        let after = discover_actors_by_type(
+            &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
+            &ctx,
+            "Counter",
+        )
+        .await
+        .unwrap();
+        assert!(after.is_empty());
+    }
+}

@@ -17,8 +17,8 @@
 //! IDs. The WASM host bridge passes IDs through unchanged.
 
 use async_trait::async_trait;
-use plexspaces_common::dialable_node_address;
 use plexspaces_actor::ActorService;
+use plexspaces_common::dialable_node_address;
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
     BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
@@ -376,8 +376,7 @@ impl MessageSender for ActorServiceMessageSender {
         let ctx = self
             .request_context_from_registered_sender_actor(from)
             .await?;
-        let labels_map: std::collections::HashMap<String, String> =
-            labels.into_iter().collect();
+        let labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
         // WASM host still supplies legacy JSON bytes for `initial_state`; map into spec fields.
         let (role_hint, args_map) =
             plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
@@ -397,6 +396,7 @@ impl MessageSender for ActorServiceMessageSender {
             facets: vec![],
             config: None,
             labels: labels_map,
+            ..Default::default()
         };
         let spawned_id = self
             .actor_service
@@ -824,9 +824,9 @@ impl MessageSender for ActorServiceMessageSender {
 mod tests {
     use super::ActorServiceMessageSender;
     use async_trait::async_trait;
-    use plexspaces_common::RequestContextExt;
     use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_actor::{ActorId, ActorRegistry, ActorService as ActorServiceTrait};
+    use plexspaces_common::RequestContextExt;
     use plexspaces_proto::common::v1::Message;
     use plexspaces_proto::node::v1::NodeRegistration;
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
@@ -906,7 +906,8 @@ mod tests {
             &self,
             _ctx: &plexspaces_actor::RequestContext,
             _spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
-        ) -> Result<plexspaces_actor::ServiceTraitsActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<plexspaces_actor::ServiceTraitsActorRef, Box<dyn std::error::Error + Send + Sync>>
+        {
             Err("not needed for this test".into())
         }
 
@@ -985,10 +986,9 @@ mod tests {
         });
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(NoopObjectRegistry);
-        let sender_id = ActorId::from_canonical(
-            "health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091",
-        )
-        .expect("sender actor id should be valid");
+        let sender_id =
+            ActorId::from_canonical("health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091")
+                .expect("sender actor id should be valid");
         let sender_ctx = plexspaces_actor::RequestContext::new_without_auth(
             "tenant-go".to_string(),
             sender_id.namespace().to_string(),

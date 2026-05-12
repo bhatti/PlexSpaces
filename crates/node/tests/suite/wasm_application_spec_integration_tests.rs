@@ -268,10 +268,7 @@ async fn test_empty_node_dashboard_shows_zero_applications() {
     // ARRANGE: Create empty node and start it
     let node = create_test_node("test-node-empty-apps", "127.0.0.1:9011").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -310,10 +307,7 @@ async fn test_wasm_deployment_creates_applicationspec() {
     // ARRANGE: Create node and start it
     let node = create_test_node("test-node-appspec", "127.0.0.1:9013").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -360,7 +354,6 @@ async fn test_wasm_deployment_creates_applicationspec() {
         .await
         .unwrap_or_else(|_| "No response body".to_string());
 
-
     // ASSERT: Deployment should succeed
     assert!(
         status.is_success(),
@@ -398,7 +391,6 @@ async fn test_wasm_deployment_creates_applicationspec() {
         "Application should be in Running state"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -409,10 +401,7 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
     // ARRANGE: Create empty node, check dashboard, deploy, check again
     let node = create_test_node("test-node-dashboard-flow", "127.0.0.1:9015").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -524,7 +513,6 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
         "Application name should match"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -535,10 +523,7 @@ async fn test_wasm_deployment_applicationspec_fields() {
     // ARRANGE: Deploy WASM and verify ApplicationSpec fields
     let node = create_test_node("test-node-spec-fields", "127.0.0.1:9017").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -602,7 +587,6 @@ async fn test_wasm_deployment_applicationspec_fields() {
         "Application should be running"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -613,10 +597,7 @@ async fn test_wasm_deployment_undeployment_flow() {
     // ARRANGE: Deploy, verify, undeploy, verify
     let node = create_test_node("test-node-undeploy", "127.0.0.1:9019").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -717,7 +698,6 @@ async fn test_wasm_deployment_undeployment_flow() {
         "Dashboard should show 0 applications after undeployment"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -728,10 +708,7 @@ async fn test_wasm_deployment_multiple_applications() {
     // ARRANGE: Deploy multiple applications and verify all are registered
     let node = create_test_node("test-node-multi-apps", "127.0.0.1:9021").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -835,7 +812,6 @@ async fn test_wasm_deployment_multiple_applications() {
         "Should have 3 applications in list"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -846,10 +822,7 @@ async fn test_wasm_deployment_component_error_handling() {
     // ARRANGE: Try to deploy a component (should fail gracefully)
     let node = create_test_node("test-node-component-error", "127.0.0.1:9023").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -927,10 +900,7 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
     // ARRANGE: Deploy without config field - ApplicationSpec should be auto-generated
     let node = create_test_node("test-node-auto-spec", "127.0.0.1:9025").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -988,7 +958,6 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
         "Application should be running (ApplicationSpec used correctly)"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -999,10 +968,7 @@ async fn test_wasm_deployment_name_vs_application_id() {
     // ARRANGE: Verify that ApplicationManager uses name, not application_id
     let node = create_test_node("test-node-name-id", "127.0.0.1:9027").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -1080,7 +1046,6 @@ async fn test_wasm_deployment_name_vs_application_id() {
         "Undeployment should succeed using application_id"
     );
 
-
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -1091,10 +1056,7 @@ async fn test_wasm_deployment_complete_workflow() {
     // ARRANGE: Complete workflow: empty node → deploy → dashboard → undeploy → dashboard
     let node = create_test_node("test-node-complete", "127.0.0.1:9029").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-        }
-    });
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -1213,7 +1175,6 @@ async fn test_wasm_deployment_complete_workflow() {
         final_summary.total_applications, 0,
         "Dashboard should show 0 applications after undeployment"
     );
-
 
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;

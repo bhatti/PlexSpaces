@@ -273,6 +273,8 @@ async fn test_handle_request_error() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");
@@ -339,6 +341,8 @@ async fn test_handle_event_error() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");
@@ -428,6 +432,8 @@ async fn test_channel_host_function_error_handling() {
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
         None,  // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");

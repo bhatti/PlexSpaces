@@ -6,10 +6,11 @@
 // Not scalability tests - just logic validation
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::{
     Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
-    ServiceLocator, RequestContextExt};
+    RequestContextExt, ServiceLocator,
+};
+use plexspaces_behavior::GenServer;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

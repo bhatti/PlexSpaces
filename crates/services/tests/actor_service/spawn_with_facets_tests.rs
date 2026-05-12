@@ -21,8 +21,8 @@ use tonic::Request;
 
 /// Helper to create a test service locator with required services
 async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
-    use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     use plexspaces_actor::{
         ActorRegistry, FacetManager, FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
         InitializableServiceLocator, VirtualActorManager,
@@ -277,6 +277,7 @@ async fn test_spawn_actor_with_virtual_actor_facet() {
             facets: vec![facet.clone()],
             config: None,
             labels: HashMap::new(),
+            ..Default::default()
         }),
         namespace: "test-namespace".to_string(),
         instances_count: 1,
@@ -377,6 +378,7 @@ async fn test_spawn_actor_with_multiple_facets() {
             facets: vec![virtual_facet, unknown_facet],
             config: None,
             labels: HashMap::new(),
+            ..Default::default()
         }),
         namespace: "test-namespace".to_string(),
         instances_count: 1,
@@ -438,6 +440,7 @@ async fn test_spawn_actor_without_facets() {
             facets: vec![], // No facets
             config: None,
             labels: HashMap::new(),
+            ..Default::default()
         }),
         namespace: "test-namespace".to_string(),
         instances_count: 1,

@@ -35,7 +35,6 @@
 //! ## Design Notes
 //! - All gRPC services consolidated here for easier management
 
-
 pub mod actor_factory_helpers;
 pub mod release_runtime_registration;
 pub mod service_locator;
@@ -74,6 +73,7 @@ pub mod service_link_service;
 pub mod system_service;
 pub mod tuple_service;
 pub mod wasm_file_saver;
+pub mod object_registry_service;
 pub mod workflow_service;
 
 // Re-export ProcessGroupServiceImpl for convenience

@@ -4,11 +4,12 @@
 // Integration tests for temporary sender pattern in ActorRef::ask()
 // Tests all scenarios: outside sender, local actor, remote actor, chained asks
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::{
     Actor, ActorContext, ActorId, ActorRegistry, ActorService, BehaviorError, BehaviorType,
-    Message, MessageSender, RequestContextExt};
+    Message, MessageSender, RequestContextExt,
+};
+use plexspaces_actor::{ActorBuilder, ActorRef};
+use plexspaces_behavior::GenServer;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::{actor_service_server::ActorServiceServer, ActorVisibility};
@@ -508,9 +509,7 @@ async fn test_outside_sender_calling_ask() {
     msg.receiver_id = counter_ref.id().to_string();
     // No sender set (outside caller) - temporary sender will be created
 
-    let reply = counter_ref
-        .ask(&ctx, msg, Duration::from_secs(5))
-        .await;
+    let reply = counter_ref.ask(&ctx, msg, Duration::from_secs(5)).await;
 
     assert!(
         reply.is_ok(),
@@ -557,9 +556,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     msg.receiver_id = counter2_ref.id().to_string();
     msg.sender_id = counter1_ref.id().to_string(); // Actor's own ID as sender
 
-    let reply = counter2_ref
-        .ask(&ctx, msg, Duration::from_secs(5))
-        .await;
+    let reply = counter2_ref.ask(&ctx, msg, Duration::from_secs(5)).await;
 
     assert!(reply.is_ok(), "ask() should succeed");
     let reply_msg = reply.unwrap();

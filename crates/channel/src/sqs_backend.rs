@@ -59,8 +59,8 @@ use aws_sdk_sqs::{
 };
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
-use plexspaces_proto::config::v1::{DlqConfig, SqsConfig};
 use plexspaces_proto::common::v1::Message as ChannelMessage;
+use plexspaces_proto::config::v1::{DlqConfig, SqsConfig};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -231,7 +231,11 @@ impl SQSChannel {
         // Create main queue with redrive policy if DLQ enabled
         let redrive_policy = if let Some(ref dlq_url) = dlq_url {
             let dlq_arn = Self::get_queue_arn(&client, dlq_url).await?;
-            let max_receive_count = sqs_config.dlq.as_ref().map(|d| d.max_receive_count).unwrap_or(3);
+            let max_receive_count = sqs_config
+                .dlq
+                .as_ref()
+                .map(|d| d.max_receive_count)
+                .unwrap_or(3);
             Some(format!(
                 r#"{{"deadLetterTargetArn":"{}","maxReceiveCount":{}}}"#,
                 dlq_arn, max_receive_count

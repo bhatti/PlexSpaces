@@ -325,7 +325,17 @@ pub struct WasmConfig {
     /// Shared pool of send_after timer handles for the entire application.
     /// When set, all timers spawned by any actor in this application register here.
     /// On undeploy, the application calls cancel_all() on this pool to abort all pending timers.
-    pub shared_timer_pool: Option<std::sync::Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
+    pub shared_timer_pool:
+        Option<std::sync::Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
+
+    /// Trusted tenant ID for this WASM application instance.
+    /// Comes from JWT at gRPC deploy time or from app-config.toml for file-copy deploys.
+    /// Injected into HostFunctions so WIT host calls never trust guest-supplied tenant_id.
+    pub tenant_id: String,
+
+    /// Default namespace for this WASM application instance.
+    /// Fallback when the guest WIT call does not supply a namespace.
+    pub default_namespace: String,
 }
 
 impl Default for WasmConfig {
@@ -347,6 +357,8 @@ impl Default for WasmConfig {
             use_instance_pool: true, // On by default; used when deploy-path integration is done
             max_concurrent_instantiations: Some(7), // Default: 7 permits (leaves headroom under Wasmtime's limit of 10)
             shared_timer_pool: None,
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 }
@@ -373,6 +385,8 @@ impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
                 default.max_concurrent_instantiations
             },
             shared_timer_pool: None,
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 }

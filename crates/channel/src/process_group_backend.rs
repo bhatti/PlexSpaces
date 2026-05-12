@@ -18,10 +18,10 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, info, trace, warn};
 
 use crate::{Channel, ChannelError, ChannelResult};
-use plexspaces_service_traits::{ProcessGroupService, ServiceLocatorBase as ServiceLocator};
 use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
+use plexspaces_service_traits::{ProcessGroupService, ServiceLocatorBase as ServiceLocator};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
 const DEFAULT_RECEIVE_TIMEOUT_MS: u64 = 5000;
@@ -461,9 +461,7 @@ mod tests {
             false
         }
 
-        async fn request_context_for_system_operations(
-            &self,
-        ) -> plexspaces_common::RequestContext {
+        async fn request_context_for_system_operations(&self) -> plexspaces_common::RequestContext {
             plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
         }
 

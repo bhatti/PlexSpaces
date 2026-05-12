@@ -18,6 +18,7 @@ Further reading: [Component / service design (internal)](../archived_docs/compon
 |---------|-------------|---------------------|--------|
 | `data_lake_rag` | Synthetic data-lake RAG-style benchmark: ingest, chunking, embedding, retrieval across leader/worker shard groups. | Go SDK `ActorRouter`, shard-group placement, application metrics | [README](go/apps/data_lake_rag/README.md) |
 | `abstractions` | Unified SDK authoring contract example. | GenServer + event-actor + workflow definitions, virtual actor facets, KV, tuple space, blob, process groups, timers, spawn/stop | [README](go/apps/abstractions/README.md) |
+| `chat_room` | Large-scale real-time chat: multi-actor dispatch by type, process groups, FSM, durable workflow. | `ActorRouter` (9 distinct actor types), virtual_actor, durability, timer, process groups, `WorkflowActor` (ModerationWorkflow), GenEvent (AuditEventActor), GenFSM (ConnectionFSM) | [README](go/apps/chat_room/README.md) |
 | `weather_actor` | **Service links + KV cache:** Outbound HTTP via named service link (`weather-api`), KV TTL caching, all 4 host operations. | `RuntimeConfig.service_links`, `ApplicationSpec.required_service_links`, `host.HTTPFetch` | [README](go/apps/weather_actor/README.md) |
 | `migrating_aws_durable_lambda` | **Migration:** AWS Lambda–style durable execution patterns (webhook-style actor). | Go SDK WASM actor, workflow/durability patterns; see `native/` | [README](go/apps/migrating_aws_durable_lambda/README.md) |
 | `migrating_cadence` | **Migration:** Cadence-style payment workflow with idempotency and retries. | `WorkflowActor`, Run/Signal/Query, virtual actor + durability | [README](go/apps/migrating_cadence/README.md) |
@@ -122,6 +123,7 @@ cd python/apps/<app>
 | `nbody` | **Workload / ML:** Gravitational N-body on one WASM GenServer (`step`, `run_steps`). | `#[gen_server_actor(wasm)]`, metrics | [README](rust/apps/nbody/README.md) |
 | `parameter_server` | **Workload / ML:** Parameter server benchmark (Rust WASM leader/worker). | Shard groups, scatter/gather, metrics | [README](rust/apps/parameter_server/README.md) |
 | `ring_allreduce` | **Parallel / ML:** Ring all-reduce–style gradient aggregation narrative. | Leader/worker WASM, collective-style rounds | [README](rust/apps/ring_allreduce/README.md) |
+| `chat_room` | Large-scale real-time chat: multi-actor dispatch by type, process groups, FSM, durable workflow. Object Registry for FanoutActor and AuditEventActor. | `#[gen_server_actor(wasm)]`, 9 actor types, virtual_actor, durability, timer, process groups, WorkflowActor (ModerationWorkflow), GenEvent (AuditEventActor), GenFSM (ConnectionFSM) | [README](rust/apps/chat_room/README.md) |
 | `session_manager` | Idle timeout and heartbeat using WASM timer host calls. | `#[gen_server_actor(wasm)]`, `send_after` / touch | [README](rust/apps/session_manager/README.md) |
 | `test-common.sh` | Shared helpers invoked by Rust WASM app `test.sh` scripts (not a standalone example). | Shell helpers for deploy/test | [test-common.sh](rust/apps/test-common.sh) |
 
@@ -172,6 +174,7 @@ cargo run
 | Example | Description | Abstractions / APIs | README |
 |---------|-------------|---------------------|--------|
 | `abstractions` | Unified SDK authoring contract example. | decorators, GenServer + event-actor + workflow definitions, virtual actor facets, KV / tuple space / blob / process groups / timer / spawn contract | [README](typescript/apps/abstractions/README.md) |
+| `chat_room` | Large-scale real-time chat: multi-actor dispatch by type, process groups, FSM, durable workflow. | `ActorRouter` (9 distinct actor types), `PlexSpacesActor`, `WorkflowActor`, virtual_actor, durability, timer, process groups, GenEvent (AuditEventActor), GenFSM (ConnectionFSM) | [README](typescript/apps/chat_room/README.md) |
 | `bank_account` | Durable bank account (same conceptual API as Python). | `PlexSpacesActor`, jco componentize, WIT world | [README](typescript/apps/bank_account/README.md) |
 | `weather_actor` | **Service links + KV cache:** Outbound HTTP via named service link, TTL caching, 7 contract tests. | `ServiceHttpClient`, `host.httpFetch`, `host.kvGet/kvPut`, `host.nowMs()` for TTL | [README](typescript/apps/weather_actor/README.md) |
 | `migrating_azure_durable_functions` | **Migration:** Azure Durable Functions–style document processing. | TS SDK workflow patterns; `native/` | [README](typescript/apps/migrating_azure_durable_functions/README.md) |

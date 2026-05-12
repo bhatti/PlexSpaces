@@ -23,7 +23,11 @@ pub async fn register_runtime_and_security_from_release(
             .register_runtime_config(runtime.clone())
             .await;
     }
-    if let Some(ref security) = release_spec.runtime.as_ref().and_then(|r| r.security.as_ref()) {
+    if let Some(ref security) = release_spec
+        .runtime
+        .as_ref()
+        .and_then(|r| r.security.as_ref())
+    {
         service_locator
             .register_security_config((*security).clone())
             .await;

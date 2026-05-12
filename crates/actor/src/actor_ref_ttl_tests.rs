@@ -23,9 +23,9 @@
 #[cfg(test)]
 mod tests {
     use crate::actor_ref::{ActorRef, ActorRefError};
-    use crate::core::{ActorId, Message, ServiceLocator, RequestContextExt};
-    use plexspaces_proto::actor::v1::ActorVisibility;
+    use crate::core::{ActorId, Message, RequestContextExt, ServiceLocator};
     use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
+    use plexspaces_proto::actor::v1::ActorVisibility;
     use std::sync::Arc;
     use std::time::Duration;
     use ulid::Ulid;

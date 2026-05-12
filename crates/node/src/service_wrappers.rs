@@ -35,8 +35,8 @@ use futures::stream::BoxStream;
 use plexspaces_actor::actor_context::{
     ActorService, ChannelService, FacetService, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_common::ServiceNameExt;
 use plexspaces_actor::Service;
+use plexspaces_common::ServiceNameExt;
 use plexspaces_facet::Facet;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
@@ -164,7 +164,9 @@ impl Default for ChannelServiceWrapper {
 
 impl Service for ChannelServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameChannelService.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameChannelService
+            .as_str()
+            .to_string()
     }
 }
 
@@ -302,7 +304,9 @@ impl ProcessGroupServiceWrapper {
 
 impl Service for ProcessGroupServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry
+            .as_str()
+            .to_string()
     }
 }
 
@@ -447,7 +451,9 @@ impl FacetServiceWrapper {
 
 impl Service for FacetServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameFacetService.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameFacetService
+            .as_str()
+            .to_string()
     }
 }
 
@@ -496,7 +502,9 @@ pub struct FirecrackerVmServiceWrapper {
 #[cfg(feature = "firecracker")]
 impl Service for FirecrackerVmServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameFirecrackerVmService.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameFirecrackerVmService
+            .as_str()
+            .to_string()
     }
 }
 

@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::get,
+    Router,
 };
 use serde_json::Value;
 
@@ -95,7 +95,16 @@ async fn handle_ask(
     } else {
         format!("/api/v1/actors/{}/{}/{}", namespace, actor_type, subpath)
     };
-    crate::http_gateway::actor_http_request(tenant_id, method, path, query, body, headers, s.actor_service).await
+    crate::http_gateway::actor_http_request(
+        tenant_id,
+        method,
+        path,
+        query,
+        body,
+        headers,
+        s.actor_service,
+    )
+    .await
 }
 
 /// Build the actor HTTP bridge router.
@@ -104,7 +113,11 @@ pub fn actor_router(
     auth_disabled: bool,
     jwt_secret: Option<String>,
 ) -> Router {
-    let state = ActorRouteState { actor_service, auth_disabled, jwt_secret };
+    let state = ActorRouteState {
+        actor_service,
+        auth_disabled,
+        jwt_secret,
+    };
 
     Router::new()
         // Base actor routes: GET=ask, POST/PUT=tell, DELETE=stop
@@ -119,7 +132,17 @@ pub fn actor_router(
                       headers: axum::http::HeaderMap| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::GET, "", None).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::GET,
+                            "",
+                            None,
+                        )
+                        .await
                     }
                 }
             })
@@ -133,7 +156,17 @@ pub fn actor_router(
                       body: Option<axum::body::Bytes>| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::POST, "", body).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::POST,
+                            "",
+                            body,
+                        )
+                        .await
                     }
                 }
             })
@@ -147,7 +180,17 @@ pub fn actor_router(
                       body: Option<axum::body::Bytes>| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::PUT, "", body).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::PUT,
+                            "",
+                            body,
+                        )
+                        .await
                     }
                 }
             })
@@ -159,13 +202,19 @@ pub fn actor_router(
                       headers: axum::http::HeaderMap| {
                     let s = s.clone();
                     async move {
-                        let tenant_id = effective_tenant_id(&jwt, s.auth_disabled, s.jwt_secret.as_deref(), &headers)?;
+                        let tenant_id = effective_tenant_id(
+                            &jwt,
+                            s.auth_disabled,
+                            s.jwt_secret.as_deref(),
+                            &headers,
+                        )?;
                         crate::http_gateway::stop_actor_http_request(
                             tenant_id,
                             ns,
                             at,
                             s.actor_service,
-                        ).await
+                        )
+                        .await
                     }
                 }
             }),
@@ -182,7 +231,17 @@ pub fn actor_router(
                       headers: axum::http::HeaderMap| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::GET, "ask", None).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::GET,
+                            "ask",
+                            None,
+                        )
+                        .await
                     }
                 }
             })
@@ -196,7 +255,17 @@ pub fn actor_router(
                       body: Option<axum::body::Bytes>| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::POST, "ask", body).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::POST,
+                            "ask",
+                            body,
+                        )
+                        .await
                     }
                 }
             })
@@ -210,7 +279,17 @@ pub fn actor_router(
                       body: Option<axum::body::Bytes>| {
                     let s = s.clone();
                     async move {
-                        handle_ask(State(s), jwt, Path((ns, at)), query, headers, axum::http::Method::PUT, "ask", body).await
+                        handle_ask(
+                            State(s),
+                            jwt,
+                            Path((ns, at)),
+                            query,
+                            headers,
+                            axum::http::Method::PUT,
+                            "ask",
+                            body,
+                        )
+                        .await
                     }
                 }
             }),

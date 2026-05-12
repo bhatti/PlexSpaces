@@ -25,8 +25,10 @@
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
     use plexspaces_actor::{RequestContext, RequestContextExt};
+    use plexspaces_workflow::types::{
+        ExecutionStatus, StepExecutionExt, StepStatus, WorkflowExecutionExt,
+    };
     use plexspaces_workflow::*;
-    use plexspaces_workflow::types::{ExecutionStatus, StepStatus, StepExecutionExt, WorkflowExecutionExt};
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -280,7 +282,10 @@ mod ddb_tests {
 
         assert_eq!(execution.execution_id, execution_id);
         assert_eq!(execution.definition_id, "test-workflow");
-        assert_eq!(execution.status, ExecutionStatus::ExecutionStatusPending as i32);
+        assert_eq!(
+            execution.status,
+            ExecutionStatus::ExecutionStatusPending as i32
+        );
     }
 
     #[tokio::test]
@@ -344,7 +349,10 @@ mod ddb_tests {
             .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        assert_eq!(execution.status, ExecutionStatus::ExecutionStatusRunning as i32);
+        assert_eq!(
+            execution.status,
+            ExecutionStatus::ExecutionStatusRunning as i32
+        );
     }
 
     #[tokio::test]
@@ -511,8 +519,7 @@ mod ddb_tests {
         // Retry getting execution in case of eventual consistency
         let mut execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         let mut retries = 0;
-        while execution.last_heartbeat.map(|h| h.seconds) == Some(initial_timestamp)
-            && retries < 5
+        while execution.last_heartbeat.map(|h| h.seconds) == Some(initial_timestamp) && retries < 5
         {
             tokio::time::sleep(Duration::from_millis(100)).await;
             execution = storage.get_execution(&ctx, &execution_id).await.unwrap();

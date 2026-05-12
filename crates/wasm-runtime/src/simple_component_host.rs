@@ -32,8 +32,10 @@
 
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
+use plexspaces_actor::{
+    ActorId, LockManager, RequestContext, RequestContextExt, TupleSpaceProvider,
+};
 use plexspaces_blob::BlobService;
-use plexspaces_actor::{ActorId, LockManager, RequestContext, RequestContextExt, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
 use plexspaces_proto::actor::v1::{
     AllReduceShardGroupRequest, BarrierShardGroupRequest, BroadcastShardGroupRequest,
@@ -1375,7 +1377,11 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             .await?;
         Ok(Self::encode_proto(&HttpFetchResponse {
             status: response.status,
-            headers: response.headers.into_iter().map(|h| (h.key, h.value)).collect(),
+            headers: response
+                .headers
+                .into_iter()
+                .map(|h| (h.key, h.value))
+                .collect(),
             body: response.body,
         }))
     }
@@ -1396,8 +1402,13 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         msg_type: String,
         payload: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
-        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone()).increment(1);
-        match self.host_functions.send_to_queue(&channel_name, &msg_type, payload).await {
+        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone())
+            .increment(1);
+        match self
+            .host_functions
+            .send_to_queue(&channel_name, &msg_type, payload)
+            .await
+        {
             Ok(message_id) => Ok(message_id),
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_channel_send_errors_total", "channel" => channel_name.clone()).increment(1);
@@ -1416,7 +1427,8 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         _ttl_ms: u64,
         _headers: String,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
-        self.channel_send(ctx, channel_name, msg_type, payload).await
+        self.channel_send(ctx, channel_name, msg_type, payload)
+            .await
     }
 
     async fn channel_receive(
@@ -1424,9 +1436,16 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         _ctx: String,
         channel_name: String,
         timeout_ms: u64,
-    ) -> Result<Option<plexspaces::actor::channels::ChannelMessage>, plexspaces::actor::types::ActorError> {
+    ) -> Result<
+        Option<plexspaces::actor::channels::ChannelMessage>,
+        plexspaces::actor::types::ActorError,
+    > {
         metrics::counter!("plexspaces_wasm_channel_receive_total", "channel" => channel_name.clone()).increment(1);
-        match self.host_functions.receive_from_queue(&channel_name, timeout_ms).await {
+        match self
+            .host_functions
+            .receive_from_queue(&channel_name, timeout_ms)
+            .await
+        {
             Ok(Some((msg_type, payload))) => {
                 let message_id = ulid::Ulid::new().to_string();
                 Ok(Some(plexspaces::actor::channels::ChannelMessage {
@@ -1455,7 +1474,8 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         channel_name: String,
         message_id: plexspaces::actor::types::MessageId,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone()).increment(1);
+        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone())
+            .increment(1);
         tracing::debug!(channel = %channel_name, message_id = %message_id, "channel_ack (actor-world)");
         Ok(())
     }
@@ -1470,7 +1490,8 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         metrics::counter!("plexspaces_wasm_channel_nack_total",
             "channel" => channel_name.clone(),
             "requeue" => requeue.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         tracing::debug!(channel = %channel_name, message_id = %message_id, requeue, "channel_nack (actor-world)");
         Ok(())
     }
@@ -1483,7 +1504,11 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         payload: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_channel_publish_total", "channel" => channel_name.clone()).increment(1);
-        match self.host_functions.publish_to_topic(&channel_name, &msg_type, payload).await {
+        match self
+            .host_functions
+            .publish_to_topic(&channel_name, &msg_type, payload)
+            .await
+        {
             Ok(message_id) => Ok(message_id),
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_channel_publish_errors_total", "channel" => channel_name.clone()).increment(1);
@@ -1499,9 +1524,10 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
         _filter: String,
     ) -> Result<String, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_channel_subscribe_total", "channel" => channel_name.clone()).increment(1);
-        let channel_service = self.host_functions.channel_service().ok_or_else(|| {
-            "internal: ChannelService not configured".to_string()
-        })?;
+        let channel_service = self
+            .host_functions
+            .channel_service()
+            .ok_or_else(|| "internal: ChannelService not configured".to_string())?;
         match channel_service.subscribe_to_topic(&channel_name).await {
             Ok(_stream) => {
                 let subscription_id = ulid::Ulid::new().to_string();
@@ -1864,9 +1890,7 @@ mod tests {
                     .map(|request| {
                         let spec = request.spec.as_ref();
                         let identity = spec.and_then(|s| s.identity.as_ref());
-                        let actor_type = identity
-                            .map(|i| i.actor_type.clone())
-                            .unwrap_or_default();
+                        let actor_type = identity.map(|i| i.actor_type.clone()).unwrap_or_default();
                         let actor_name = identity.map(|i| i.name.clone()).unwrap_or_default();
                         let effective_name = if actor_name.is_empty() {
                             actor_type.clone()
@@ -1965,8 +1989,14 @@ mod tests {
             Ok(OutboundHttpResponse {
                 status: 200,
                 headers: vec![
-                    HttpHeader { key: "x-link".to_string(), value: link_name.to_string() },
-                    HttpHeader { key: "x-method".to_string(), value: request.method },
+                    HttpHeader {
+                        key: "x-link".to_string(),
+                        value: link_name.to_string(),
+                    },
+                    HttpHeader {
+                        key: "x-method".to_string(),
+                        value: request.method,
+                    },
                 ],
                 body: request.body,
             })
@@ -1978,8 +2008,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<CreateShardGroupResponse>(
             host.create_shard_group(
                 CreateShardGroupRequest {
@@ -2013,8 +2046,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<ScatterGatherResponse>(
             host.scatter_gather(
                 ScatterGatherRequest {
@@ -2045,8 +2081,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<MapShardGroupResponse>(
             host.map_shard_group(
                 MapShardGroupRequest {
@@ -2077,8 +2116,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<ApplicationMetrics>(
             host.application_metrics_add(
                 "heat-diffusion-rust".to_string(),
@@ -2101,8 +2143,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<GetApplicationStatusResponse>(
             host.application_get_status(
                 "heat-diffusion-rust".to_string(),
@@ -2125,8 +2170,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<ApplicationMetrics>(
             host.application_get_metrics(
                 "heat-diffusion-rust".to_string(),
@@ -2143,8 +2191,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response =
             decode_proto_response::<plexspaces_proto::actor::v1::BroadcastShardGroupResponse>(
                 host.broadcast_shard_group(
@@ -2177,8 +2228,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<plexspaces_proto::actor::v1::ReduceShardGroupResponse>(
             host.reduce_shard_group(
                 ReduceShardGroupRequest {
@@ -2217,8 +2271,11 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
             MockMessageSender,
         )));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<SpawnActorsResponse>(
             host.spawn_actors(
                 SpawnActorsRequest {
@@ -2230,16 +2287,12 @@ mod tests {
                             }),
                             role: String::new(),
                             namespace: String::new(),
-                            tenant_id: String::new(),
-                            visibility: 0,
                             behavior_kind: String::new(),
                             args: std::collections::HashMap::from([(
                                 "rank".to_string(),
                                 "rank-0".to_string(),
                             )]),
-                            facets: vec![],
-                            config: None,
-                            labels: std::collections::HashMap::new(),
+                            ..Default::default()
                         }),
                         namespace: "mpi-app".to_string(),
                         instances_count: 1,
@@ -2276,8 +2329,11 @@ mod tests {
             Some(Arc::new(MockOutboundHttpClient)),
             None, // shared_timer_pool
         ));
-        let mut host =
-            SimpleHostImpl::new(ActorId::new("leader", "test", "default", "node-a").unwrap(), host_functions, None);
+        let mut host = SimpleHostImpl::new(
+            ActorId::new("leader", "test", "default", "node-a").unwrap(),
+            host_functions,
+            None,
+        );
         let response = decode_proto_response::<HttpFetchResponse>(
             host.http_fetch(
                 "weather-api".to_string(),

@@ -292,8 +292,10 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
 mod tests {
     use super::*;
     use plexspaces_proto::application::v1::ApplicationSpec;
-    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
     use plexspaces_proto::common::v1::ActorIdentity;
+    use plexspaces_proto::supervision::v1::{
+        ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+    };
     use tempfile::TempDir;
 
     fn create_test_spec() -> ApplicationSpec {

@@ -26,7 +26,8 @@ console.log("");
 // Initialize ChatRoom actor
 console.log("1. Initialize ChatRoom");
 const initResult = actor.init(JSON.stringify({
-  actor_id: "chat-room:test@node",
+  actor_id: "chat-room-1//ChatRoomActor::test@node",
+  actor_type: "ChatRoomActor",
   args: { max_history: "50" },
 }));
 check("init succeeds", !initResult.startsWith("ERROR"), initResult);
@@ -89,7 +90,8 @@ check("getState returns JSON", savedState.length > 10, savedState);
 
 // Re-init with different actor to test state restoration
 const initResult2 = actor.init(JSON.stringify({
-  actor_id: "rate-limiter:test@node",
+  actor_id: "rate-limiter-1//RateLimiterActor::test@node",
+  actor_type: "RateLimiterActor",
   args: { max_tokens: "3", refill_rate_ms: "500" },
 }));
 check("rate-limiter init", !initResult2.startsWith("ERROR"), initResult2);

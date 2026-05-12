@@ -7,8 +7,8 @@
 
 use crate::ApplicationError;
 use plexspaces_actor::ActorId;
-use plexspaces_proto::supervision::v1::ChildSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
+use plexspaces_proto::supervision::v1::ChildSpec;
 
 /// Returns `actor_identity` when present and valid (same rules as [`ActorId`] / proto `ActorIdentity`).
 pub fn require_child_identity(spec: &ChildSpec) -> Result<&ActorIdentity, ApplicationError> {

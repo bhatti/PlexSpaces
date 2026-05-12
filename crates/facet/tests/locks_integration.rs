@@ -10,7 +10,9 @@
 use plexspaces_actor::{create_facet_from_proto, ActorRef};
 use plexspaces_actor::{
     service_locator_trait::ServiceLocator, Actor as ActorTrait, ActorContext, ActorId,
-    InitializableServiceLocator, LockManager as CoreLockManager, RequestContextExt, ServiceLocatorBase};
+    InitializableServiceLocator, LockManager as CoreLockManager, RequestContextExt,
+    ServiceLocatorBase,
+};
 use plexspaces_facet::capabilities::locks::LockFacet;
 use plexspaces_mailbox::{new_message, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -511,7 +513,11 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .expect("Failed to acquire lock");
 
             let get_reply2 = actor_ref
-                .ask(&ctx, json_message(&json!(lock_key), "get_lock"), ASK_TIMEOUT)
+                .ask(
+                    &ctx,
+                    json_message(&json!(lock_key), "get_lock"),
+                    ASK_TIMEOUT,
+                )
                 .await
                 .expect("Failed to get lock");
 

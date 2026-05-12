@@ -683,7 +683,9 @@ type WorkflowExecution struct {
 	// Last update timestamp
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// User-defined labels
-	Labels        map[string]string `protobuf:"bytes,14,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,14,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Last heartbeat timestamp (set by update_heartbeat, tracks node liveness)
+	LastHeartbeat *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=last_heartbeat,json=lastHeartbeat,proto3,oneof" json:"last_heartbeat,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -812,6 +814,13 @@ func (x *WorkflowExecution) GetUpdatedAt() *timestamppb.Timestamp {
 func (x *WorkflowExecution) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *WorkflowExecution) GetLastHeartbeat() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastHeartbeat
 	}
 	return nil
 }
@@ -2076,7 +2085,7 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\x0fmax_interval_ms\x18\x04 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80\xdd\xdb\x01R\rmaxIntervalMs\x12:\n" +
 	"\x10retryable_errors\x18\x05 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fretryableErrors:f\x92Ac\n" +
-	"a*\x13Retry Configuration2JExponential backoff retry policy. Unset max_attempts means 1 (no retries).\"\xeb\a\n" +
+	"a*\x13Retry Configuration2JExponential backoff retry policy. Unset max_attempts means 1 (no retries).\"\xcb\b\n" +
 	"\x11WorkflowExecution\x12.\n" +
 	"\fexecution_id\x18\x01 \x01(\tB\v\xe0A\x03\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\x122\n" +
 	"\rdefinition_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\fdefinitionId\x12;\n" +
@@ -2095,11 +2104,13 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\fcompleted_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\vcompletedAt\x12>\n" +
 	"\n" +
 	"updated_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\tupdatedAt\x12M\n" +
-	"\x06labels\x18\x0e \x03(\v25.plexspaces.workflow.v1.WorkflowExecution.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x0e \x03(\v25.plexspaces.workflow.v1.WorkflowExecution.LabelsEntryR\x06labels\x12K\n" +
+	"\x0elast_heartbeat\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03H\x00R\rlastHeartbeat\x88\x01\x01\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01:~\x92A{\n" +
-	"y*\x12Workflow Execution2&Running or completed workflow instance\xd2\x01\fexecution_id\xd2\x01\rdefinition_id\xd2\x01\x12definition_version\xd2\x01\x06status\"\xa4\x04\n" +
+	"y*\x12Workflow Execution2&Running or completed workflow instance\xd2\x01\fexecution_id\xd2\x01\rdefinition_id\xd2\x01\x12definition_version\xd2\x01\x06statusB\x11\n" +
+	"\x0f_last_heartbeat\"\xa4\x04\n" +
 	"\rStepExecution\x124\n" +
 	"\x11step_execution_id\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\x0fstepExecutionId\x12+\n" +
 	"\fexecution_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\vexecutionId\x12!\n" +
@@ -2357,64 +2368,65 @@ var file_plexspaces_v1_workflow_workflow_proto_depIdxs = []int32{
 	36, // 15: plexspaces.workflow.v1.WorkflowExecution.completed_at:type_name -> google.protobuf.Timestamp
 	36, // 16: plexspaces.workflow.v1.WorkflowExecution.updated_at:type_name -> google.protobuf.Timestamp
 	31, // 17: plexspaces.workflow.v1.WorkflowExecution.labels:type_name -> plexspaces.workflow.v1.WorkflowExecution.LabelsEntry
-	2,  // 18: plexspaces.workflow.v1.StepExecution.status:type_name -> plexspaces.workflow.v1.StepStatus
-	37, // 19: plexspaces.workflow.v1.StepExecution.input:type_name -> google.protobuf.Struct
-	37, // 20: plexspaces.workflow.v1.StepExecution.output:type_name -> google.protobuf.Struct
-	36, // 21: plexspaces.workflow.v1.StepExecution.started_at:type_name -> google.protobuf.Timestamp
-	36, // 22: plexspaces.workflow.v1.StepExecution.completed_at:type_name -> google.protobuf.Timestamp
-	4,  // 23: plexspaces.workflow.v1.CreateDefinitionRequest.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	4,  // 24: plexspaces.workflow.v1.CreateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	4,  // 25: plexspaces.workflow.v1.GetDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	38, // 26: plexspaces.workflow.v1.ListDefinitionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
-	32, // 27: plexspaces.workflow.v1.ListDefinitionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
-	4,  // 28: plexspaces.workflow.v1.ListDefinitionsResponse.definitions:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	39, // 29: plexspaces.workflow.v1.ListDefinitionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
-	4,  // 30: plexspaces.workflow.v1.UpdateDefinitionRequest.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	4,  // 31: plexspaces.workflow.v1.UpdateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
-	37, // 32: plexspaces.workflow.v1.StartExecutionRequest.input:type_name -> google.protobuf.Struct
-	33, // 33: plexspaces.workflow.v1.StartExecutionRequest.labels:type_name -> plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
-	7,  // 34: plexspaces.workflow.v1.GetExecutionResponse.execution:type_name -> plexspaces.workflow.v1.WorkflowExecution
-	38, // 35: plexspaces.workflow.v1.ListExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
-	1,  // 36: plexspaces.workflow.v1.ListExecutionsRequest.status:type_name -> plexspaces.workflow.v1.ExecutionStatus
-	34, // 37: plexspaces.workflow.v1.ListExecutionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
-	36, // 38: plexspaces.workflow.v1.ListExecutionsRequest.started_after:type_name -> google.protobuf.Timestamp
-	36, // 39: plexspaces.workflow.v1.ListExecutionsRequest.started_before:type_name -> google.protobuf.Timestamp
-	7,  // 40: plexspaces.workflow.v1.ListExecutionsResponse.executions:type_name -> plexspaces.workflow.v1.WorkflowExecution
-	39, // 41: plexspaces.workflow.v1.ListExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
-	40, // 42: plexspaces.workflow.v1.SignalExecutionRequest.data:type_name -> google.protobuf.Value
-	40, // 43: plexspaces.workflow.v1.QueryExecutionResponse.result:type_name -> google.protobuf.Value
-	38, // 44: plexspaces.workflow.v1.GetStepExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
-	8,  // 45: plexspaces.workflow.v1.GetStepExecutionsResponse.step_executions:type_name -> plexspaces.workflow.v1.StepExecution
-	39, // 46: plexspaces.workflow.v1.GetStepExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
-	9,  // 47: plexspaces.workflow.v1.WorkflowService.CreateDefinition:input_type -> plexspaces.workflow.v1.CreateDefinitionRequest
-	11, // 48: plexspaces.workflow.v1.WorkflowService.GetDefinition:input_type -> plexspaces.workflow.v1.GetDefinitionRequest
-	13, // 49: plexspaces.workflow.v1.WorkflowService.ListDefinitions:input_type -> plexspaces.workflow.v1.ListDefinitionsRequest
-	15, // 50: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:input_type -> plexspaces.workflow.v1.UpdateDefinitionRequest
-	17, // 51: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:input_type -> plexspaces.workflow.v1.DeleteDefinitionRequest
-	18, // 52: plexspaces.workflow.v1.WorkflowService.StartExecution:input_type -> plexspaces.workflow.v1.StartExecutionRequest
-	20, // 53: plexspaces.workflow.v1.WorkflowService.GetExecution:input_type -> plexspaces.workflow.v1.GetExecutionRequest
-	22, // 54: plexspaces.workflow.v1.WorkflowService.ListExecutions:input_type -> plexspaces.workflow.v1.ListExecutionsRequest
-	24, // 55: plexspaces.workflow.v1.WorkflowService.CancelExecution:input_type -> plexspaces.workflow.v1.CancelExecutionRequest
-	25, // 56: plexspaces.workflow.v1.WorkflowService.SignalExecution:input_type -> plexspaces.workflow.v1.SignalExecutionRequest
-	26, // 57: plexspaces.workflow.v1.WorkflowService.QueryExecution:input_type -> plexspaces.workflow.v1.QueryExecutionRequest
-	28, // 58: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:input_type -> plexspaces.workflow.v1.GetStepExecutionsRequest
-	10, // 59: plexspaces.workflow.v1.WorkflowService.CreateDefinition:output_type -> plexspaces.workflow.v1.CreateDefinitionResponse
-	12, // 60: plexspaces.workflow.v1.WorkflowService.GetDefinition:output_type -> plexspaces.workflow.v1.GetDefinitionResponse
-	14, // 61: plexspaces.workflow.v1.WorkflowService.ListDefinitions:output_type -> plexspaces.workflow.v1.ListDefinitionsResponse
-	16, // 62: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:output_type -> plexspaces.workflow.v1.UpdateDefinitionResponse
-	41, // 63: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:output_type -> plexspaces.common.v1.Empty
-	19, // 64: plexspaces.workflow.v1.WorkflowService.StartExecution:output_type -> plexspaces.workflow.v1.StartExecutionResponse
-	21, // 65: plexspaces.workflow.v1.WorkflowService.GetExecution:output_type -> plexspaces.workflow.v1.GetExecutionResponse
-	23, // 66: plexspaces.workflow.v1.WorkflowService.ListExecutions:output_type -> plexspaces.workflow.v1.ListExecutionsResponse
-	41, // 67: plexspaces.workflow.v1.WorkflowService.CancelExecution:output_type -> plexspaces.common.v1.Empty
-	41, // 68: plexspaces.workflow.v1.WorkflowService.SignalExecution:output_type -> plexspaces.common.v1.Empty
-	27, // 69: plexspaces.workflow.v1.WorkflowService.QueryExecution:output_type -> plexspaces.workflow.v1.QueryExecutionResponse
-	29, // 70: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:output_type -> plexspaces.workflow.v1.GetStepExecutionsResponse
-	59, // [59:71] is the sub-list for method output_type
-	47, // [47:59] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	36, // 18: plexspaces.workflow.v1.WorkflowExecution.last_heartbeat:type_name -> google.protobuf.Timestamp
+	2,  // 19: plexspaces.workflow.v1.StepExecution.status:type_name -> plexspaces.workflow.v1.StepStatus
+	37, // 20: plexspaces.workflow.v1.StepExecution.input:type_name -> google.protobuf.Struct
+	37, // 21: plexspaces.workflow.v1.StepExecution.output:type_name -> google.protobuf.Struct
+	36, // 22: plexspaces.workflow.v1.StepExecution.started_at:type_name -> google.protobuf.Timestamp
+	36, // 23: plexspaces.workflow.v1.StepExecution.completed_at:type_name -> google.protobuf.Timestamp
+	4,  // 24: plexspaces.workflow.v1.CreateDefinitionRequest.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	4,  // 25: plexspaces.workflow.v1.CreateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	4,  // 26: plexspaces.workflow.v1.GetDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	38, // 27: plexspaces.workflow.v1.ListDefinitionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
+	32, // 28: plexspaces.workflow.v1.ListDefinitionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListDefinitionsRequest.LabelFilterEntry
+	4,  // 29: plexspaces.workflow.v1.ListDefinitionsResponse.definitions:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	39, // 30: plexspaces.workflow.v1.ListDefinitionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
+	4,  // 31: plexspaces.workflow.v1.UpdateDefinitionRequest.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	4,  // 32: plexspaces.workflow.v1.UpdateDefinitionResponse.definition:type_name -> plexspaces.workflow.v1.WorkflowDefinition
+	37, // 33: plexspaces.workflow.v1.StartExecutionRequest.input:type_name -> google.protobuf.Struct
+	33, // 34: plexspaces.workflow.v1.StartExecutionRequest.labels:type_name -> plexspaces.workflow.v1.StartExecutionRequest.LabelsEntry
+	7,  // 35: plexspaces.workflow.v1.GetExecutionResponse.execution:type_name -> plexspaces.workflow.v1.WorkflowExecution
+	38, // 36: plexspaces.workflow.v1.ListExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
+	1,  // 37: plexspaces.workflow.v1.ListExecutionsRequest.status:type_name -> plexspaces.workflow.v1.ExecutionStatus
+	34, // 38: plexspaces.workflow.v1.ListExecutionsRequest.label_filter:type_name -> plexspaces.workflow.v1.ListExecutionsRequest.LabelFilterEntry
+	36, // 39: plexspaces.workflow.v1.ListExecutionsRequest.started_after:type_name -> google.protobuf.Timestamp
+	36, // 40: plexspaces.workflow.v1.ListExecutionsRequest.started_before:type_name -> google.protobuf.Timestamp
+	7,  // 41: plexspaces.workflow.v1.ListExecutionsResponse.executions:type_name -> plexspaces.workflow.v1.WorkflowExecution
+	39, // 42: plexspaces.workflow.v1.ListExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
+	40, // 43: plexspaces.workflow.v1.SignalExecutionRequest.data:type_name -> google.protobuf.Value
+	40, // 44: plexspaces.workflow.v1.QueryExecutionResponse.result:type_name -> google.protobuf.Value
+	38, // 45: plexspaces.workflow.v1.GetStepExecutionsRequest.page:type_name -> plexspaces.common.v1.PageRequest
+	8,  // 46: plexspaces.workflow.v1.GetStepExecutionsResponse.step_executions:type_name -> plexspaces.workflow.v1.StepExecution
+	39, // 47: plexspaces.workflow.v1.GetStepExecutionsResponse.page:type_name -> plexspaces.common.v1.PageResponse
+	9,  // 48: plexspaces.workflow.v1.WorkflowService.CreateDefinition:input_type -> plexspaces.workflow.v1.CreateDefinitionRequest
+	11, // 49: plexspaces.workflow.v1.WorkflowService.GetDefinition:input_type -> plexspaces.workflow.v1.GetDefinitionRequest
+	13, // 50: plexspaces.workflow.v1.WorkflowService.ListDefinitions:input_type -> plexspaces.workflow.v1.ListDefinitionsRequest
+	15, // 51: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:input_type -> plexspaces.workflow.v1.UpdateDefinitionRequest
+	17, // 52: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:input_type -> plexspaces.workflow.v1.DeleteDefinitionRequest
+	18, // 53: plexspaces.workflow.v1.WorkflowService.StartExecution:input_type -> plexspaces.workflow.v1.StartExecutionRequest
+	20, // 54: plexspaces.workflow.v1.WorkflowService.GetExecution:input_type -> plexspaces.workflow.v1.GetExecutionRequest
+	22, // 55: plexspaces.workflow.v1.WorkflowService.ListExecutions:input_type -> plexspaces.workflow.v1.ListExecutionsRequest
+	24, // 56: plexspaces.workflow.v1.WorkflowService.CancelExecution:input_type -> plexspaces.workflow.v1.CancelExecutionRequest
+	25, // 57: plexspaces.workflow.v1.WorkflowService.SignalExecution:input_type -> plexspaces.workflow.v1.SignalExecutionRequest
+	26, // 58: plexspaces.workflow.v1.WorkflowService.QueryExecution:input_type -> plexspaces.workflow.v1.QueryExecutionRequest
+	28, // 59: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:input_type -> plexspaces.workflow.v1.GetStepExecutionsRequest
+	10, // 60: plexspaces.workflow.v1.WorkflowService.CreateDefinition:output_type -> plexspaces.workflow.v1.CreateDefinitionResponse
+	12, // 61: plexspaces.workflow.v1.WorkflowService.GetDefinition:output_type -> plexspaces.workflow.v1.GetDefinitionResponse
+	14, // 62: plexspaces.workflow.v1.WorkflowService.ListDefinitions:output_type -> plexspaces.workflow.v1.ListDefinitionsResponse
+	16, // 63: plexspaces.workflow.v1.WorkflowService.UpdateDefinition:output_type -> plexspaces.workflow.v1.UpdateDefinitionResponse
+	41, // 64: plexspaces.workflow.v1.WorkflowService.DeleteDefinition:output_type -> plexspaces.common.v1.Empty
+	19, // 65: plexspaces.workflow.v1.WorkflowService.StartExecution:output_type -> plexspaces.workflow.v1.StartExecutionResponse
+	21, // 66: plexspaces.workflow.v1.WorkflowService.GetExecution:output_type -> plexspaces.workflow.v1.GetExecutionResponse
+	23, // 67: plexspaces.workflow.v1.WorkflowService.ListExecutions:output_type -> plexspaces.workflow.v1.ListExecutionsResponse
+	41, // 68: plexspaces.workflow.v1.WorkflowService.CancelExecution:output_type -> plexspaces.common.v1.Empty
+	41, // 69: plexspaces.workflow.v1.WorkflowService.SignalExecution:output_type -> plexspaces.common.v1.Empty
+	27, // 70: plexspaces.workflow.v1.WorkflowService.QueryExecution:output_type -> plexspaces.workflow.v1.QueryExecutionResponse
+	29, // 71: plexspaces.workflow.v1.WorkflowService.GetStepExecutions:output_type -> plexspaces.workflow.v1.GetStepExecutionsResponse
+	60, // [60:72] is the sub-list for method output_type
+	48, // [48:60] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_plexspaces_v1_workflow_workflow_proto_init() }
@@ -2422,6 +2434,7 @@ func file_plexspaces_v1_workflow_workflow_proto_init() {
 	if File_plexspaces_v1_workflow_workflow_proto != nil {
 		return
 	}
+	file_plexspaces_v1_workflow_workflow_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

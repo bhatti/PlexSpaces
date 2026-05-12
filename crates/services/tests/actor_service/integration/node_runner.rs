@@ -15,8 +15,11 @@
 //!   node_runner node1 9001
 
 use async_trait::async_trait;
+use plexspaces_actor::{
+    ActorRegistry, InitializableServiceLocator, ObjectRegistration,
+    ObjectRegistry as CoreObjectRegistry, RequestContextExt,
+};
 use plexspaces_common::ServiceNameExt;
-use plexspaces_actor::{ActorRegistry, InitializableServiceLocator, ObjectRegistration, ObjectRegistry as CoreObjectRegistry, RequestContextExt};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::{
     ObjectRegistration as ProtoObjectRegistration, ObjectType,

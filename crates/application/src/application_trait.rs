@@ -316,14 +316,26 @@ impl ApplicationError {
     pub fn code(&self) -> plexspaces_proto::application::v1::ApplicationErrorCode {
         use plexspaces_proto::application::v1::ApplicationErrorCode;
         match self {
-            ApplicationError::StartupFailed(_) => ApplicationErrorCode::ApplicationErrorStartupFailed,
-            ApplicationError::ShutdownFailed(_) => ApplicationErrorCode::ApplicationErrorShutdownFailed,
+            ApplicationError::StartupFailed(_) => {
+                ApplicationErrorCode::ApplicationErrorStartupFailed
+            }
+            ApplicationError::ShutdownFailed(_) => {
+                ApplicationErrorCode::ApplicationErrorShutdownFailed
+            }
             ApplicationError::NotFound(_) => ApplicationErrorCode::ApplicationErrorNotFound,
-            ApplicationError::DependencyFailed(_) => ApplicationErrorCode::ApplicationErrorDependencyFailed,
+            ApplicationError::DependencyFailed(_) => {
+                ApplicationErrorCode::ApplicationErrorDependencyFailed
+            }
             ApplicationError::ConfigError(_) => ApplicationErrorCode::ApplicationErrorConfigError,
-            ApplicationError::ShutdownTimeout(_) => ApplicationErrorCode::ApplicationErrorShutdownTimeout,
-            ApplicationError::ActorSpawnFailed(_, _) => ApplicationErrorCode::ApplicationErrorActorSpawnFailed,
-            ApplicationError::ActorStopFailed(_, _) => ApplicationErrorCode::ApplicationErrorActorStopFailed,
+            ApplicationError::ShutdownTimeout(_) => {
+                ApplicationErrorCode::ApplicationErrorShutdownTimeout
+            }
+            ApplicationError::ActorSpawnFailed(_, _) => {
+                ApplicationErrorCode::ApplicationErrorActorSpawnFailed
+            }
+            ApplicationError::ActorStopFailed(_, _) => {
+                ApplicationErrorCode::ApplicationErrorActorStopFailed
+            }
             ApplicationError::Other(_) => ApplicationErrorCode::ApplicationErrorOther,
         }
     }

@@ -62,20 +62,62 @@ mod tests {
 
     #[test]
     fn test_service_name_as_str() {
-        assert_eq!(ServiceName::ServiceNameActorRegistry.as_str(), "ActorRegistry");
-        assert_eq!(ServiceName::ServiceNameObjectRegistry.as_str(), "ObjectRegistry");
-        assert_eq!(ServiceName::ServiceNameProcessGroupRegistry.as_str(), "ProcessGroupRegistry");
-        assert_eq!(ServiceName::ServiceNameProcessGroupService.as_str(), "ProcessGroupService");
-        assert_eq!(ServiceName::ServiceNameReplyWaiterRegistry.as_str(), "ReplyWaiterRegistry");
-        assert_eq!(ServiceName::ServiceNameVirtualActorManager.as_str(), "VirtualActorManager");
-        assert_eq!(ServiceName::ServiceNameFacetManager.as_str(), "FacetManager");
-        assert_eq!(ServiceName::ServiceNameFacetRegistry.as_str(), "FacetRegistry");
-        assert_eq!(ServiceName::ServiceNameActorFactoryImpl.as_str(), "ActorFactoryImpl");
-        assert_eq!(ServiceName::ServiceNameJournalStorage.as_str(), "JournalStorage");
-        assert_eq!(ServiceName::ServiceNameChannelService.as_str(), "ChannelService");
-        assert_eq!(ServiceName::ServiceNameFacetService.as_str(), "FacetService");
-        assert_eq!(ServiceName::ServiceNameFirecrackerVmService.as_str(), "FirecrackerVmService");
+        assert_eq!(
+            ServiceName::ServiceNameActorRegistry.as_str(),
+            "ActorRegistry"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameObjectRegistry.as_str(),
+            "ObjectRegistry"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameProcessGroupRegistry.as_str(),
+            "ProcessGroupRegistry"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameProcessGroupService.as_str(),
+            "ProcessGroupService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameReplyWaiterRegistry.as_str(),
+            "ReplyWaiterRegistry"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameVirtualActorManager.as_str(),
+            "VirtualActorManager"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameFacetManager.as_str(),
+            "FacetManager"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameFacetRegistry.as_str(),
+            "FacetRegistry"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameActorFactoryImpl.as_str(),
+            "ActorFactoryImpl"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameJournalStorage.as_str(),
+            "JournalStorage"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameChannelService.as_str(),
+            "ChannelService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameFacetService.as_str(),
+            "FacetService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameFirecrackerVmService.as_str(),
+            "FirecrackerVmService"
+        );
         assert_eq!(ServiceName::ServiceNameNode.as_str(), "Node");
-        assert_eq!(ServiceName::ServiceNameTuplespaceService.as_str(), "TupleSpaceService");
+        assert_eq!(
+            ServiceName::ServiceNameTuplespaceService.as_str(),
+            "TupleSpaceService"
+        );
     }
 }

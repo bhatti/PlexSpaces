@@ -75,7 +75,8 @@ pub async fn spawn_actor_on_node(
         .map_err(|e| anyhow::anyhow!("get_actor_service_client failed: {}", e))?;
     let mut client = ActorServiceClient::new(channel);
 
-    let (role_opt, args) = plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
+    let (role_opt, args) =
+        plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
     let spec = ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: actor_name,
@@ -90,6 +91,7 @@ pub async fn spawn_actor_on_node(
         facets: vec![],
         config,
         labels,
+        ..Default::default()
     };
 
     let req = SpawnActorRequest {

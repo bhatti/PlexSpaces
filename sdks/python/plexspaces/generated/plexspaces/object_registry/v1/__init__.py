@@ -102,7 +102,7 @@ class HealthStatus(betterproto.Enum):
     UNKNOWN = 0
     HEALTHY = 1
     DEGRADED = 2
-    UNHEALTHY = 3
+    DEAD = 3
     STARTING = 4
     STOPPING = 5
 
@@ -228,6 +228,24 @@ class ObjectRegistration(betterproto.Message):
     updated_at: datetime = betterproto.message_field(17)
     """Registration update timestamp"""
 
+    alias: str = betterproto.string_field(18)
+    """
+    Alias for identity-based lookup (Orleans grain directory key).
+     Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+     Enables unique actor placement - only one active registration per alias.
+    """
+
+    max_heartbeat_failures: int = betterproto.uint32_field(19)
+    """
+    Maximum consecutive heartbeat failures before marking DEAD (default: 3).
+     1 missed heartbeat -> DEGRADED, max_heartbeat_failures -> DEAD.
+    """
+
+    heartbeat_failure_count: int = betterproto.uint32_field(20)
+    """
+    Current consecutive heartbeat failure count (managed by registry, not client).
+    """
+
 
 @dataclass(eq=False, repr=False)
 class RegisterRequest(betterproto.Message):
@@ -242,6 +260,12 @@ class RegisterRequest(betterproto.Message):
      If specified, object auto-unregisters after TTL expires
     """
 
+    enforce_unique_alias: bool = betterproto.bool_field(3)
+    """
+    If true, enforce unique alias placement.
+     Returns existing grpc_address in response if another active registration holds the same alias.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class RegisterResponse(betterproto.Message):
@@ -250,6 +274,18 @@ class RegisterResponse(betterproto.Message):
 
     created: bool = betterproto.bool_field(2)
     """Whether this was a new registration (true) or update (false)"""
+
+    existing_grpc_address: str = betterproto.string_field(3)
+    """
+    If enforce_unique_alias was true and an active registration with the same alias exists,
+     this contains the existing registration's grpc_address for forwarding.
+    """
+
+    existing_object_id: str = betterproto.string_field(4)
+    """
+    If enforce_unique_alias was true and an active registration with the same alias exists,
+     this contains the existing object_id for diagnostics.
+    """
 
 
 @dataclass(eq=False, repr=False)
@@ -280,7 +316,7 @@ class LookupRequest(betterproto.Message):
     """Lookup single object request"""
 
     object_id: str = betterproto.string_field(1)
-    """Object ID to lookup"""
+    """Object ID to lookup (mutually exclusive with alias)"""
 
     object_type: "ObjectType" = betterproto.enum_field(2)
     """Object type (optional - if not specified, searches all types)"""
@@ -290,6 +326,12 @@ class LookupRequest(betterproto.Message):
 
     namespace: str = betterproto.string_field(4)
     """Namespace (for logical grouping)"""
+
+    alias: str = betterproto.string_field(5)
+    """
+    Lookup by alias (mutually exclusive with object_id).
+     Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+    """
 
 
 @dataclass(eq=False, repr=False)

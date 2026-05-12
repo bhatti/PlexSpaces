@@ -3298,6 +3298,7 @@ TypeScript, Go, and Rust WASM actors. Its ABI is proto-bytes-first:
 | **Blob Storage** | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
 | **Process Groups** | `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
 | **Elastic pool** | `pool-checkout`, `pool-checkin`, `pool-get-metrics` |
+| **Object Registry** | `register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, `heartbeat` (interface: `plexspaces:actor/registry@0.1.0`) |
 | **Shard groups & App metrics** | `create-shard-group`, `bulk-update-shard-group`, `map-shard-group`, `broadcast-shard-group`, `reduce-shard-group`, `all-reduce-shard-group`, `barrier-shard-group`, `scatter-gather`, `spawn-actors`, `application-metrics-add`, `application-get-status`, `http-fetch` |
 
 ### State Preservation
@@ -3317,12 +3318,14 @@ WASM components are re-instantiated after each `handle()` call (wasmtime Compone
 
 ### SDKs
 
-| Language | Location | Build Tool | Status |
-|----------|----------|------------|--------|
-| Python | `sdks/python/` | componentize-py | Available |
-| TypeScript | `sdks/typescript/` | jco componentize | Available |
-| Go | `sdks/go/` | TinyGo | Available |
-| Rust | `sdks/rust/plexspaces-sdk` | cargo (native) | Available |
+| Language | Location | Build Tool | Status | Registry API |
+|----------|----------|------------|--------|---|
+| Python | `sdks/python/` | componentize-py | Available | `host.registry.lookup_by_alias(ctx, alias)` |
+| TypeScript | `sdks/typescript/` | jco componentize | Available | `host.registry.lookupByAlias(ctx, alias)` |
+| Go | `sdks/go/` | TinyGo | Available | `host.Registry().LookupByAlias(ctx, alias)` |
+| Rust | `sdks/rust/plexspaces-sdk` | cargo (native) | Available | `plexspaces_sdk::object_registry::lookup_actor_by_identity(...)` |
+
+Each SDK exposes `register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, and `heartbeat` for the Object Registry. The `lookup-by-alias` function implements the Orleans grain directory pattern using alias keys of the form `"{actor_type}:{name}:{namespace}:{tenant_id}"`.
 
 See [SDK documentation](sdk.md) and [WASM deployment guide](wasm-deployment.md) for details.
 

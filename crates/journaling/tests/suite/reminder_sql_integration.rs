@@ -21,10 +21,10 @@
 //! Comprehensive integration tests for reminder persistence using SQLite.
 //! Tests cover all reminder operations: register, unregister, load, update, and query_due.
 
+use plexspaces_actor::ActorId;
 use plexspaces_journaling::{
     sql::SqliteJournalStorage, JournalStorage, ReminderRegistration, ReminderState,
 };
-use plexspaces_actor::ActorId;
 use plexspaces_proto::prost_types;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -97,10 +97,7 @@ async fn test_register_reminder() {
         loaded[0].registration.as_ref().unwrap().reminder_name,
         "reminder1"
     );
-    assert_eq!(
-        loaded[0].registration.as_ref().unwrap().actor_id,
-        actor_id
-    );
+    assert_eq!(loaded[0].registration.as_ref().unwrap().actor_id, actor_id);
 }
 
 #[tokio::test]
@@ -125,9 +122,7 @@ async fn test_unregister_reminder() {
     assert_eq!(loaded.len(), 1);
 
     // Unregister reminder
-    let result = storage
-        .unregister_reminder(&actor_id, "reminder1")
-        .await;
+    let result = storage.unregister_reminder(&actor_id, "reminder1").await;
     assert!(result.is_ok());
 
     // Verify it was removed
@@ -142,12 +137,8 @@ async fn test_load_reminders() {
 
     // Register multiple reminders for same actor
     for i in 1..=3 {
-        let registration = create_test_reminder_registration(
-            &actor_id,
-            &format!("reminder{}", i),
-            60,
-            1000 + i,
-        );
+        let registration =
+            create_test_reminder_registration(&actor_id, &format!("reminder{}", i), 60, 1000 + i);
         let reminder_state = ReminderState {
             registration: Some(registration.clone()),
             last_fired: None,

@@ -128,6 +128,7 @@ enum ActorErrorCode {
   ACTOR_ERROR_MAILBOX_ERROR = 7;
   ACTOR_ERROR_BEHAVIOR_ERROR = 8;
   ACTOR_ERROR_JOURNAL_ERROR = 9;
+  ACTOR_ERROR_PLACEMENT_CONFLICT = 10; // Unique placement violated - actor already active elsewhere
 }
 
 enum BehaviorErrorCode {

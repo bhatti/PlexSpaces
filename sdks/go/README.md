@@ -72,6 +72,41 @@ seq, err := state.Log.Append(host, "audit:", map[string]any{"action": "login"})
 events, cursor, err := state.Log.Poll(host, "audit:", "consumer-1", 20)
 ```
 
+### Object Registry
+
+Service registration and discovery via the host registry surface. All wire encoding is handled by the SDK (proto-first, no JSON); the proto schema is `proto/plexspaces/v1/registry/object_registry.proto`.
+
+```go
+// Register this actor as a named service
+err := host.Registry().Register(plexspaces.ObjectRegistration{
+    ObjectID:       cfg.ActorID,
+    ObjectType:     "actor",
+    ObjectCategory: "worker",
+    GRPCAddress:    "http://node:8080",
+    Capabilities:   []string{"persistent"},
+    Labels:         []string{"env=prod"},
+})
+
+// Look up by object ID
+reg, err := host.Registry().Lookup("some-actor-id", plexspaces.ObjectType.ACTOR, "", "")
+
+// Look up by alias
+reg, err := host.Registry().LookupByAlias("my-service-alias")
+
+// Discover all actors of a given type
+regs, err := host.Registry().Discover(plexspaces.DiscoverOptions{
+    ObjectType: plexspaces.ObjectType.ACTOR,
+})
+
+// Send heartbeat to refresh liveness
+err = host.Registry().Heartbeat(cfg.ActorID, plexspaces.ObjectType.ACTOR, "", "")
+```
+
+**Tenant isolation**: `tenant_id` is injected by the host from the deployment context (JWT for API
+deploys, or `tenant_id` in `app-config.toml` for file-copy deploys). Any `tenant_id` passed by the
+actor code is silently overridden. `namespace` may be supplied; empty string falls back to the
+application's default namespace.
+
 ## Documentation
 
 - [docs/sdk.md](../../docs/sdk.md) — Go SDK section and cross-language notes

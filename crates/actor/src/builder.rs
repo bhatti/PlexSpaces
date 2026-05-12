@@ -53,8 +53,8 @@
 //!     .await?;
 //! ```
 
-use crate::ActorInstance as ActorStruct;
 use crate::core::{Actor, ActorId, RequestContextExt};
+use crate::ActorInstance as ActorStruct;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
 use plexspaces_proto::v1::actor::ActorConfig;
@@ -102,6 +102,7 @@ impl ActorBuilder {
                 facets: vec![],
                 labels: HashMap::new(),
                 config: None,
+                ..Default::default()
             },
             facets: Vec::new(),
         }
@@ -366,7 +367,10 @@ impl ActorBuilder {
             max_memory_bytes: memory_bytes as u64,
             max_io_ops_per_sec: None,
             guaranteed_bandwidth_mbps: None,
-            max_execution_time: Some(prost_types::Duration { seconds: 300, nanos: 0 }),
+            max_execution_time: Some(prost_types::Duration {
+                seconds: 300,
+                nanos: 0,
+            }),
         };
 
         // Get or create ActorConfig
@@ -504,8 +508,8 @@ impl ActorBuilder {
         } else {
             spawn_spec.namespace.clone()
         };
-        let actor_id =
-            ActorId::new(actor_name, actor_type, namespace.clone(), "unassigned").map_err(|e| {
+        let actor_id = ActorId::new(actor_name, actor_type, namespace.clone(), "unassigned")
+            .map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("failed to construct actor id: {e}"),
@@ -513,16 +517,20 @@ impl ActorBuilder {
             })?;
         let tenant_id = spawn_spec.tenant_id.clone();
 
-        let mailbox_config = spawn_spec.config.as_ref().map(|config| {
-            let mut cfg = plexspaces_mailbox::mailbox_config_default();
-            if config.max_mailbox_size > 0 {
-                cfg.capacity = config.max_mailbox_size;
-            }
-            cfg
-        }).unwrap_or_else(|| {
-            use plexspaces_mailbox::mailbox_config_default;
-            mailbox_config_default()
-        });
+        let mailbox_config = spawn_spec
+            .config
+            .as_ref()
+            .map(|config| {
+                let mut cfg = plexspaces_mailbox::mailbox_config_default();
+                if config.max_mailbox_size > 0 {
+                    cfg.capacity = config.max_mailbox_size;
+                }
+                cfg
+            })
+            .unwrap_or_else(|| {
+                use plexspaces_mailbox::mailbox_config_default;
+                mailbox_config_default()
+            });
         let mailbox_id = format!("mailbox_{actor_id}");
         let mailbox = Mailbox::new(mailbox_config, mailbox_id)
             .await
@@ -688,9 +696,7 @@ impl ActorBuilder {
 
         // Register in ActorRegistry so discovery, routing, and lookup all work.
         // This mirrors what actor_factory_impl and supervisor do after start().
-        actor
-            .register_started(&registry, spawn_visibility)
-            .await;
+        actor.register_started(&registry, spawn_visibility).await;
 
         // Return ActorRef
         Ok(actor_ref)
@@ -700,8 +706,8 @@ impl ActorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::core::{Actor, BehaviorType};
+    use async_trait::async_trait;
     use std::sync::Arc;
 
     struct TestBehavior;
@@ -854,6 +860,5 @@ mod tests {
             error_msg
         );
     }
-
 }
 // Integration tests that need a real Node are in tests/suite/builder_node_integration_tests.rs

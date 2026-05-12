@@ -28,10 +28,10 @@ use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::child_spec::StartedChild;
 use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
-use plexspaces_actor::{ActorInstance as Actor, ChildSpec};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
+use plexspaces_actor::{ActorInstance as Actor, ChildSpec};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 
@@ -260,7 +260,9 @@ async fn test_supervisor_restart_preserves_facets() {
         .handle_failure(
             &actor_id_from_legacy(&actor_id),
             "simulated crash".to_string(),
-            Some(plexspaces_actor::ExitReason::Error("test error".to_string())),
+            Some(plexspaces_actor::ExitReason::Error(
+                "test error".to_string(),
+            )),
         )
         .await;
     assert!(result.is_ok(), "handle_failure should succeed");

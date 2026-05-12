@@ -9,9 +9,9 @@
 #[cfg(feature = "postgres-backend")]
 mod postgres_integration_tests {
     use async_trait::async_trait;
+    use plexspaces_actor::Message;
     use plexspaces_common::skip_if_unavailable;
     use plexspaces_common::test_helpers::postgres_available;
-    use plexspaces_actor::Message;
     use plexspaces_facet::Facet;
     use plexspaces_journaling::sql::PostgresJournalStorage;
     use plexspaces_journaling::*;
@@ -144,9 +144,15 @@ mod postgres_integration_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -162,9 +168,7 @@ mod postgres_integration_tests {
         };
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet
-            .set_replay_handler(Box::new(handler))
-            .await;
+        new_facet.set_replay_handler(Box::new(handler)).await;
         new_facet
             .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
             .await
@@ -195,9 +199,15 @@ mod postgres_integration_tests {
         for i in 1..=100 {
             let method = "increment";
             let payload = format!("{}", i).into_bytes();
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("count = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
 
             if i == 50 {
                 storage.flush().await.unwrap();

@@ -27,11 +27,11 @@
 //! All data fields (role, restart_policy, metadata, facets, shutdown_timeout) are
 //! accessed directly on the embedded proto message.
 
-use crate::ActorInstance;
 use crate::actor_ref::ActorRef;
 use crate::core::{ActorError, ActorId, ActorIdError};
-pub use plexspaces_proto::supervision::v1::RestartPolicy as ProtoRestartPolicy;
+use crate::ActorInstance;
 use plexspaces_proto::supervision::v1::ChildSpec as ProtoChildSpec;
+pub use plexspaces_proto::supervision::v1::RestartPolicy as ProtoRestartPolicy;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -69,9 +69,10 @@ impl ChildSpec {
 
     /// Shutdown timeout derived from proto duration field.
     pub fn shutdown_timeout(&self) -> Option<Duration> {
-        self.proto.shutdown_timeout.as_ref().map(|d| {
-            Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
-        })
+        self.proto
+            .shutdown_timeout
+            .as_ref()
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
     }
 }
 
@@ -87,9 +88,7 @@ pub enum StartedChild {
         actor_ref: ActorRef,
     },
     /// Supervisor child (nested supervisor)
-    Supervisor {
-        supervisor: crate::Supervisor,
-    },
+    Supervisor { supervisor: crate::Supervisor },
 }
 
 /// Shutdown specification - Erlang semantics
@@ -166,7 +165,10 @@ impl ChildSpec {
     /// Set shutdown timeout.
     pub fn with_shutdown(mut self, shutdown: ShutdownSpec) -> Self {
         self.proto.shutdown_timeout = match shutdown {
-            ShutdownSpec::BrutalKill => Some(prost_types::Duration { seconds: 0, nanos: 0 }),
+            ShutdownSpec::BrutalKill => Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 0,
+            }),
             ShutdownSpec::Timeout(d) => Some(prost_types::Duration {
                 seconds: d.as_secs() as i64,
                 nanos: d.subsec_nanos() as i32,
@@ -211,7 +213,11 @@ impl ChildSpec {
             .as_ref()
             .ok_or(ActorIdError::MissingField("actor_identity"))?;
         let actor_id = ActorId::from_actor_identity(identity, namespace, node_id)?;
-        Ok(Self { actor_id, proto, start_fn })
+        Ok(Self {
+            actor_id,
+            proto,
+            start_fn,
+        })
     }
 }
 
@@ -250,7 +256,10 @@ mod tests {
 
         assert_eq!(spec.actor_id.name(), "worker1");
         assert_eq!(spec.actor_id.actor_type(), "worker");
-        assert_eq!(spec.restart_policy(), ProtoRestartPolicy::RestartPolicyPermanent);
+        assert_eq!(
+            spec.restart_policy(),
+            ProtoRestartPolicy::RestartPolicyPermanent
+        );
         assert_eq!(spec.role(), "worker");
         assert!(spec.proto.shutdown_timeout.is_some());
     }
@@ -277,7 +286,10 @@ mod tests {
         let spec = ChildSpec::worker(test_worker_actor_id(), start_fn)
             .with_restart(ProtoRestartPolicy::RestartPolicyTemporary);
 
-        assert_eq!(spec.restart_policy(), ProtoRestartPolicy::RestartPolicyTemporary);
+        assert_eq!(
+            spec.restart_policy(),
+            ProtoRestartPolicy::RestartPolicyTemporary
+        );
     }
 
     #[tokio::test]
@@ -302,23 +314,31 @@ mod tests {
             Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
         let spec = ChildSpec::worker(test_worker_actor_id(), start_fn)
             .with_restart(ProtoRestartPolicy::RestartPolicyTransient);
-        assert_eq!(spec.restart_policy(), ProtoRestartPolicy::RestartPolicyTransient);
+        assert_eq!(
+            spec.restart_policy(),
+            ProtoRestartPolicy::RestartPolicyTransient
+        );
 
         let proto = spec.to_proto();
-        assert_eq!(proto.restart, ProtoRestartPolicy::RestartPolicyTransient as i32);
+        assert_eq!(
+            proto.restart,
+            ProtoRestartPolicy::RestartPolicyTransient as i32
+        );
     }
 
     #[tokio::test]
     async fn test_child_role_values() {
-        let spec_worker = ChildSpec::worker(test_worker_actor_id(), Arc::new(|| {
-            Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) })
-        }));
+        let spec_worker = ChildSpec::worker(
+            test_worker_actor_id(),
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) })),
+        );
         assert_eq!(spec_worker.role(), "worker");
 
         let sid = ActorId::new("sup", "supervisor", "default", "node1").expect("valid");
-        let spec_sup = ChildSpec::supervisor(sid, Arc::new(|| {
-            Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) })
-        }));
+        let spec_sup = ChildSpec::supervisor(
+            sid,
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) })),
+        );
         assert_eq!(spec_sup.role(), "supervisor");
     }
 
@@ -357,7 +377,10 @@ mod tests {
         let id = proto.actor_identity.as_ref().expect("identity set");
         assert_eq!(id.name, "worker1");
         assert_eq!(id.actor_type, "worker");
-        assert_eq!(proto.restart, ProtoRestartPolicy::RestartPolicyTransient as i32);
+        assert_eq!(
+            proto.restart,
+            ProtoRestartPolicy::RestartPolicyTransient as i32
+        );
         assert_eq!(proto.role, "worker");
         assert!(proto.shutdown_timeout.is_some());
         assert_eq!(proto.shutdown_timeout.as_ref().unwrap().seconds, 10);
@@ -398,7 +421,10 @@ mod tests {
 
         assert_eq!(spec.actor_id.name(), "worker1");
         assert_eq!(spec.actor_id.actor_type(), "worker");
-        assert_eq!(spec.restart_policy(), ProtoRestartPolicy::RestartPolicyTransient);
+        assert_eq!(
+            spec.restart_policy(),
+            ProtoRestartPolicy::RestartPolicyTransient
+        );
         assert_eq!(spec.role(), "worker");
         assert_eq!(spec.shutdown_timeout(), Some(Duration::from_secs(10)));
         assert_eq!(

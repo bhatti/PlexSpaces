@@ -1274,14 +1274,27 @@ The `ObjectRegistry` provides unified service discovery for actors, services, no
 
 **Storage Architecture**:
 - **Repository Pattern**: Dedicated `ObjectRegistryRepository` trait with multiple backend implementations
-- **Indexed Columns**: `object_type`, `node_id`, `health_status`, `last_heartbeat`, `object_category` for fast queries
+- **Indexed Columns**: `object_type`, `node_id`, `health_status`, `last_heartbeat`, `object_category`, `alias` for fast queries
 - **Blob Storage**: Full `ObjectRegistration` protobuf preserved in `registration_blob` column
 - **Multi-Backend**: SQLite with `:memory:` (tests), SQLite (embedded), PostgreSQL (production), DynamoDB (AWS)
 
+**Health Lifecycle** (proto-first, defined in `object_registry.proto`):
+- `HEALTHY` → `DEGRADED` on first heartbeat miss (count < `max_heartbeat_failures`, default 3)
+- `DEGRADED` → `DEAD` when failure count reaches `max_heartbeat_failures`
+- Successful heartbeat resets failure count and restores `HEALTHY`
+- NODE going `DEAD` cascades: all objects on that node are marked `DEAD`
+- `HealthStatus` enum values: `UNKNOWN=0, HEALTHY=1, DEGRADED=2, DEAD=3, STARTING=4, STOPPING=5`
+
+**Unique Actor Placement** (Orleans grain directory pattern):
+- `ObjectRegistration.alias` field (proto field 18): identity key `"{actor_type}:{name}:{namespace}:{tenant_id}"`
+- `register_with_unique_alias(enforce_unique=true)` checks for active registration before inserting
+- Returns `RegisterResult::AlreadyExists { grpc_address, object_id }` on conflict for forwarding
+- `DEAD`/`STOPPING` stale registrations are replaced automatically
+
 **Performance Characteristics**:
-- `heartbeat()` - O(1) single column UPDATE (no blob read/write)
+- `heartbeat()` - O(1) targeted column UPDATEs (no blob read/write), resets failure count
 - `discover()` - O(log n + k) using indexed columns
-- `lookup()` - O(1) primary key lookup
+- `lookup()` / `lookup_by_alias()` - O(1) primary key / unique index lookup
 - `find_stale()` - Fast query using `last_heartbeat` index
 
 **Environment Variables**:

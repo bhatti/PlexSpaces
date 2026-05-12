@@ -1617,7 +1617,9 @@ mod tests {
 
         // Call before_method
         let args = vec![1, 2, 3, 4];
-        let result = facet.before_method("test_method", &args, &std::collections::HashMap::new()).await;
+        let result = facet
+            .before_method("test_method", &args, &std::collections::HashMap::new())
+            .await;
         assert!(result.is_ok());
         assert!(matches!(result.unwrap(), InterceptResult::Continue));
 
@@ -1657,7 +1659,14 @@ mod tests {
 
         // Call after_method
         let result_data = vec![4, 5, 6];
-        let result = facet.after_method("test_method", &[], &result_data, &std::collections::HashMap::new()).await;
+        let result = facet
+            .after_method(
+                "test_method",
+                &[],
+                &result_data,
+                &std::collections::HashMap::new(),
+            )
+            .await;
         assert!(result.is_ok());
 
         // Verify journal entries
@@ -1690,8 +1699,14 @@ mod tests {
 
         // Process 3 messages
         for _ in 0..3 {
-            facet.before_method("test", &[], &std::collections::HashMap::new()).await.unwrap();
-            facet.after_method("test", &[], &[], &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method("test", &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet
+                .after_method("test", &[], &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Verify sequence numbers increase
@@ -1721,8 +1736,14 @@ mod tests {
 
         // Process 10 messages
         for _ in 0..10 {
-            facet.before_method("test", &[], &std::collections::HashMap::new()).await.unwrap();
-            facet.after_method("test", &[], &[], &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method("test", &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet
+                .after_method("test", &[], &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Verify journal entries were created (not truncated)
@@ -1748,11 +1769,20 @@ mod tests {
         // Process some messages
         for i in 0..3 {
             facet1
-                .before_method(&format!("method_{}", i), &[], &std::collections::HashMap::new())
+                .before_method(
+                    &format!("method_{}", i),
+                    &[],
+                    &std::collections::HashMap::new(),
+                )
                 .await
                 .unwrap();
             facet1
-                .after_method(&format!("method_{}", i), &[], &[], &std::collections::HashMap::new())
+                .after_method(
+                    &format!("method_{}", i),
+                    &[],
+                    &[],
+                    &std::collections::HashMap::new(),
+                )
                 .await
                 .unwrap();
         }
@@ -1799,7 +1829,9 @@ mod tests {
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
         // Calling before_method without attach should fail
-        let result = facet.before_method("test", &[], &std::collections::HashMap::new()).await;
+        let result = facet
+            .before_method("test", &[], &std::collections::HashMap::new())
+            .await;
         assert!(result.is_err());
     }
 
@@ -1825,8 +1857,14 @@ mod tests {
         ];
 
         for (method, payload) in &messages {
-            facet.before_method(method, payload, &std::collections::HashMap::new()).await.unwrap();
-            facet.after_method(method, &[], &[], &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet
+                .after_method(method, &[], &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Verify all entries
@@ -1887,8 +1925,14 @@ mod tests {
 
         // Process 6 messages (will create checkpoint at sequence 10)
         for _ in 0..6 {
-            facet1.before_method("test", &[], &std::collections::HashMap::new()).await.unwrap();
-            facet1.after_method("test", &[], &[], &std::collections::HashMap::new()).await.unwrap();
+            facet1
+                .before_method("test", &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet1
+                .after_method("test", &[], &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Manually create a checkpoint
@@ -1947,9 +1991,17 @@ mod tests {
         // Without batching: 10 messages = 10 MessageReceived + 10 MessageProcessed = 20 separate writes
         // With batching: 10 messages = 10 MessageReceived + 1 batch of 10 MessageProcessed = 11 writes (1.8x fewer)
         for i in 0..10 {
-            facet.before_method("test", &[i as u8], &std::collections::HashMap::new()).await.unwrap();
             facet
-                .after_method("test", &[], &[i as u8 + 100], &std::collections::HashMap::new())
+                .before_method("test", &[i as u8], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet
+                .after_method(
+                    "test",
+                    &[],
+                    &[i as u8 + 100],
+                    &std::collections::HashMap::new(),
+                )
                 .await
                 .unwrap();
         }
@@ -2017,7 +2069,12 @@ mod tests {
             .await
             .unwrap();
         facet
-            .after_method("test_method", &[], &[4, 5, 6], &std::collections::HashMap::new())
+            .after_method(
+                "test_method",
+                &[],
+                &[4, 5, 6],
+                &std::collections::HashMap::new(),
+            )
             .await
             .unwrap();
 

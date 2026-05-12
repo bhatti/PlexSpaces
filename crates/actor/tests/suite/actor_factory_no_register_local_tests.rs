@@ -24,13 +24,14 @@
 //! 3. Only MessageSender is registered
 
 use async_trait::async_trait;
+use plexspaces_actor::Message;
 use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
-use plexspaces_actor::Message;
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    RequestContext, ServiceLocator, RequestContextExt};
+    RequestContext, RequestContextExt, ServiceLocator,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use ulid::Ulid;
@@ -58,6 +59,7 @@ fn make_spawn_spec(
         facets: vec![],
         config: None,
         labels: HashMap::new(),
+        ..Default::default()
     }
 }
 

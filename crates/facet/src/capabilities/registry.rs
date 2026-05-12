@@ -284,8 +284,8 @@ impl RegistryFacet {
                     "Healthy" | "healthy" => {
                         plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
                     }
-                    "Unhealthy" | "unhealthy" => {
-                        plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy
+                    "Unhealthy" | "unhealthy" | "Dead" | "dead" => {
+                        plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDead
                     }
                     "Unknown" | "unknown" => {
                         plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown
@@ -305,12 +305,12 @@ impl RegistryFacet {
 
                 let registration = ObjectRegistration {
                     object_id: args.object_id.clone(),
-                    object_name: String::new(), // Optional, can be empty
+                    object_name: String::new(),
                     object_type: object_type_enum as i32,
-                    version: String::new(), // Optional, can be empty
+                    version: String::new(),
                     tenant_id: ctx.tenant_id().to_string(),
                     namespace: ctx.namespace().to_string(),
-                    node_id: String::new(), // Will be set by registry
+                    node_id: String::new(),
                     grpc_address: args.grpc_address.clone(),
                     object_category: args.object_category.unwrap_or_default(),
                     capabilities: args.capabilities.unwrap_or_default(),
@@ -321,6 +321,9 @@ impl RegistryFacet {
                     last_heartbeat: None,
                     created_at: None,
                     updated_at: None,
+                    alias: String::new(),
+                    max_heartbeat_failures: 3,
+                    heartbeat_failure_count: 0,
                 };
 
                 match self.object_registry.register(&ctx, registration).await {

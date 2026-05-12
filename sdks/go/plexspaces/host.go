@@ -34,8 +34,9 @@ const errorPrefix = "ERROR:"
 //	response, err := host.Ask("other-actor", "get_balance", nil, 5000)
 //	myID := host.SelfID()
 type Host struct {
-	ts *TupleSpace
-	ch *Channel
+	ts  *TupleSpace
+	ch  *Channel
+	reg *Registry
 }
 
 // NewHost creates a new Host instance.
@@ -43,8 +44,12 @@ func NewHost() *Host {
 	h := &Host{}
 	h.ts = &TupleSpace{host: h}
 	h.ch = &Channel{host: h}
+	h.reg = &Registry{}
 	return h
 }
+
+// Registry returns the Object Registry sub-API.
+func (h *Host) Registry() *Registry { return h.reg }
 
 // TupleSpace provides list-in, list-out tuple space API. Use nil in patterns for wildcards.
 // Consistent with Python host.ts and TypeScript host.ts.
@@ -468,6 +473,115 @@ func (pg *ProcessGroups) First(group string) (string, error) {
 		return "", fmt.Errorf("no members in process group %q", group)
 	}
 	return members[0], nil
+}
+
+// ========================================================================
+// Object Registry
+// ========================================================================
+
+// ObjectRegistration holds metadata for a registered object.
+type ObjectRegistration struct {
+	ObjectID       string   `json:"object_id"`
+	ObjectType     string   `json:"object_type"`
+	GRPCAddress    string   `json:"grpc_address"`
+	ObjectCategory string   `json:"object_category"`
+	TenantID       string   `json:"tenant_id,omitempty"`
+	Namespace      string   `json:"namespace,omitempty"`
+	Capabilities   []string `json:"capabilities"`
+	Labels         []string `json:"labels"`
+	HealthStatus   string   `json:"health_status"`
+	CreatedAt      uint64   `json:"created_at"`
+	UpdatedAt      uint64   `json:"updated_at"`
+	LastHeartbeat  *uint64  `json:"last_heartbeat,omitempty"`
+	Alias          *string  `json:"alias,omitempty"`
+}
+
+// Registry provides access to object registry operations.
+type Registry struct{}
+
+// Register registers an object in the registry.
+func (r *Registry) Register(reg ObjectRegistration) error {
+	reqBytes := encodeRegisterRequest(reg)
+	result := hostRegistryRegister(string(reqBytes))
+	return checkError(result)
+}
+
+// Unregister removes an object from the registry.
+func (r *Registry) Unregister(objectID string, objectType int32, tenantID, namespace string) error {
+	reqBytes := encodeUnregisterRequest(objectID, objectType, tenantID, namespace)
+	result := hostRegistryUnregister(string(reqBytes))
+	return checkError(result)
+}
+
+// Lookup finds an object by ID. Returns nil if not found.
+func (r *Registry) Lookup(objectID string, objectType int32, tenantID, namespace string) (*ObjectRegistration, error) {
+	reqBytes := encodeLookupRequest(objectID, objectType, tenantID, namespace, "")
+	result := hostRegistryLookup(string(reqBytes))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	if result == "" {
+		return nil, nil
+	}
+	reg, found := decodeLookupResponse([]byte(result))
+	if !found {
+		return nil, nil
+	}
+	return reg, nil
+}
+
+// LookupByAlias finds an object by alias. Returns nil if not found.
+// Alias format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+func (r *Registry) LookupByAlias(alias string) (*ObjectRegistration, error) {
+	result := hostRegistryLookupByAlias(alias)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	if result == "" {
+		return nil, nil
+	}
+	reg, found := decodeLookupResponse([]byte(result))
+	if !found {
+		return nil, nil
+	}
+	return reg, nil
+}
+
+// DiscoverOptions holds filter criteria for Discover.
+type DiscoverOptions struct {
+	ObjectType     int32
+	ObjectCategory string
+	TenantID       string
+	Namespace      string
+	Capabilities   []string
+	Labels         []string
+	PageSize       int32
+}
+
+// Discover finds objects matching the given criteria.
+func (r *Registry) Discover(opts DiscoverOptions) ([]ObjectRegistration, error) {
+	pageSize := opts.PageSize
+	if pageSize == 0 {
+		pageSize = 100
+	}
+	reqBytes := encodeDiscoverRequest(opts.ObjectType, opts.ObjectCategory,
+		opts.TenantID, opts.Namespace, opts.Capabilities, opts.Labels, pageSize)
+	result := hostRegistryDiscover(string(reqBytes))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	if result == "" {
+		return nil, nil
+	}
+	regs := decodeDiscoverResponse([]byte(result))
+	return regs, nil
+}
+
+// Heartbeat updates the heartbeat for a registered object.
+func (r *Registry) Heartbeat(objectID string, objectType int32, tenantID, namespace string) error {
+	reqBytes := encodeHeartbeatRequest(objectID, objectType, tenantID, namespace)
+	result := hostRegistryHeartbeat(string(reqBytes))
+	return checkError(result)
 }
 
 // ========================================================================
@@ -926,6 +1040,19 @@ func checkError(result string) error {
 //   - any other type: JSON-marshaled
 //
 // On marshal failure, returns the error as a JSON error object.
+// marshalStringSlice serializes a string slice to a JSON array for WIT boundary crossing.
+// TinyGo //go:wasmimport functions cannot accept Go slices directly.
+func marshalStringSlice(s []string) string {
+	if len(s) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
 func marshalPayload(payload any) string {
 	if payload == nil {
 		return "{}"

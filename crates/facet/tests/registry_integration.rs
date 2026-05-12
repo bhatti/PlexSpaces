@@ -8,7 +8,10 @@
 // the ObjectRegistry from ServiceLocator (based on node config).
 
 use plexspaces_actor::ActorRef;
-use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, InitializableServiceLocator, ServiceLocator, RequestContextExt};
+use plexspaces_actor::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, InitializableServiceLocator,
+    RequestContextExt, ServiceLocator,
+};
 use plexspaces_facet::capabilities::registry::RegistryFacet;
 use plexspaces_mailbox::{new_message, Mailbox, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -456,8 +459,8 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
             "Healthy" | "healthy" => {
                 plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
             }
-            "Unhealthy" | "unhealthy" => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy
+            "Unhealthy" | "unhealthy" | "Dead" | "dead" => {
+                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDead
             }
             "Unknown" | "unknown" => {
                 plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown

@@ -34,7 +34,15 @@ async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Er
         "step-test",
         "Step Test",
         "1.0",
-        vec![make_step("step-1", "First Step", StepType::StepTypeTask, json!({}), None, None, None)],
+        vec![make_step(
+            "step-1",
+            "First Step",
+            StepType::StepTypeTask,
+            json!({}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -69,7 +77,15 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
         "completion-test",
         "Completion Test",
         "1.0",
-        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+        vec![make_step(
+            "step-1",
+            "Step 1",
+            StepType::StepTypeTask,
+            json!({}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -112,7 +128,15 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
         "failure-test",
         "Failure Test",
         "1.0",
-        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+        vec![make_step(
+            "step-1",
+            "Step 1",
+            StepType::StepTypeTask,
+            json!({}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -154,7 +178,15 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
         "retry-test",
         "Retry Test",
         "1.0",
-        vec![make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None)],
+        vec![make_step(
+            "step-1",
+            "Step 1",
+            StepType::StepTypeTask,
+            json!({}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -201,8 +233,24 @@ async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Err
         "History Test",
         "1.0",
         vec![
-            make_step("step-1", "Step 1", StepType::StepTypeTask, json!({}), None, None, None),
-            make_step("step-2", "Step 2", StepType::StepTypeTask, json!({}), None, None, None),
+            make_step(
+                "step-1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "step-2",
+                "Step 2",
+                StepType::StepTypeTask,
+                json!({}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;

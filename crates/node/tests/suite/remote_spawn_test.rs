@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-use plexspaces_actor::{ActorId, ServiceLocator, ServiceLocatorBase, RequestContextExt};
+use plexspaces_actor::{ActorId, RequestContextExt, ServiceLocator, ServiceLocatorBase};
 use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_proto::{
     actor::v1::{
@@ -49,13 +49,8 @@ fn spawn_actor_grpc_request(
             }),
             role: role.to_string(),
             namespace: String::new(),
-            tenant_id: String::new(),
-            visibility: 0,
             behavior_kind: String::new(),
-            args: HashMap::new(),
-            facets: vec![],
-            config: None,
-            labels: HashMap::new(),
+            ..Default::default()
         }),
         namespace: namespace.to_string(),
         instances_count: 1,
@@ -92,7 +87,9 @@ async fn test_spawn_actor_basic() {
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
-            Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+            Box::pin(async move {
+                Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -115,7 +112,11 @@ async fn test_spawn_actor_basic() {
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
 
     // Should succeed
-    assert!(response.is_ok(), "spawn_actor should succeed: {:?}", response.as_ref().err());
+    assert!(
+        response.is_ok(),
+        "spawn_actor should succeed: {:?}",
+        response.as_ref().err()
+    );
 
     let resp = response.unwrap().into_inner();
 
@@ -192,7 +193,9 @@ async fn test_spawn_remote_actor_wrong_node() {
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
-            Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+            Box::pin(async move {
+                Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -217,7 +220,8 @@ async fn test_spawn_remote_actor_wrong_node() {
     // Should succeed - spawns on node1 (the node receiving the request)
     assert!(
         response.is_ok(),
-        "spawn_actor should succeed on receiving node: {:?}", response.as_ref().err()
+        "spawn_actor should succeed on receiving node: {:?}",
+        response.as_ref().err()
     );
 }
 
@@ -234,7 +238,9 @@ async fn test_spawn_multiple_remote_actors() {
         let type_name = format!("test_actor_{}", i);
         behavior_registry
             .register_simple(&type_name, || {
-                Box::pin(async move { Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>) })
+                Box::pin(async move {
+                    Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_actor::Actor>)
+                })
             })
             .await;
     }
@@ -250,7 +256,12 @@ async fn test_spawn_multiple_remote_actors() {
     // Spawn 3 actors
     for i in 0..3 {
         let request = grpc_request_with_ctx(
-            spawn_actor_grpc_request("default", &format!("test_actor_{}", i), &format!("test_actor_{}", i), ""),
+            spawn_actor_grpc_request(
+                "default",
+                &format!("test_actor_{}", i),
+                &format!("test_actor_{}", i),
+                "",
+            ),
             "default",
         );
 
@@ -315,7 +326,11 @@ async fn test_spawn_remote_actor_via_grpc() {
     let response = grpc_client
         .spawn_actor(grpc_request_with_ctx(spawn_req, "default"))
         .await;
-    assert!(response.is_ok(), "gRPC spawn should succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "gRPC spawn should succeed: {:?}",
+        response.err()
+    );
 
     let resp = response.unwrap().into_inner();
     assert!(!resp.actor_ref.is_empty(), "actor_ref should not be empty");
@@ -496,8 +511,7 @@ async fn test_node_route_remote_message() {
         node1.service_locator().get_object_registry().await.unwrap();
     // Use empty tenant/namespace so the system context lookup in get_actor_service_client
     // (which uses request_context_for_system_operations with empty tenant) can find it.
-    let reg_ctx =
-        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
+    let reg_ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = if node2_address.starts_with("http://") {
         node2_address.strip_prefix("http://").unwrap().to_string()
     } else {
@@ -535,7 +549,11 @@ async fn test_node_route_remote_message() {
     );
     let result = remote_actor_ref.tell(&tell_ctx, message).await;
 
-    assert!(result.is_ok(), "Remote routing should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Remote routing should succeed: {:?}",
+        result.err()
+    );
     let received_opt = mailbox2
         .dequeue_with_timeout(Some(tokio::time::Duration::from_secs(5)))
         .await;
@@ -635,8 +653,7 @@ async fn test_connection_pooling() {
         node1.service_locator().get_object_registry().await.unwrap();
     // Use empty tenant/namespace so the system context lookup in get_actor_service_client
     // (which uses request_context_for_system_operations with empty tenant) can find it.
-    let reg_ctx =
-        plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
+    let reg_ctx = plexspaces_actor::RequestContext::new_without_auth(String::new(), String::new());
     let grpc_address = if node2_address.starts_with("http://") {
         node2_address.strip_prefix("http://").unwrap().to_string()
     } else {
@@ -675,7 +692,12 @@ async fn test_connection_pooling() {
         let payload = format!("{{\"seq\":{}}}", i).into_bytes();
         let message = create_routing_test_message(payload);
         let result = remote_actor_ref.tell(&tell_ctx, message).await;
-        assert!(result.is_ok(), "Message {} should succeed: {:?}", i, result.err());
+        assert!(
+            result.is_ok(),
+            "Message {} should succeed: {:?}",
+            i,
+            result.err()
+        );
     }
 
     let mut count = 0;

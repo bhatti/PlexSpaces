@@ -14,23 +14,23 @@
 //! TDD: Tests written first, will fail until implementation is added.
 
 use async_trait::async_trait;
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
-use plexspaces_common::ServiceNameExt;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, behavior_factory::BehaviorFactory,
     Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType,
-    InitializableServiceLocator, NodeRegistryTrait, RequestContext, ServiceLocator,
-    RequestContextExt,
+    InitializableServiceLocator, NodeRegistryTrait, RequestContext, RequestContextExt,
+    ServiceLocator,
 };
+use plexspaces_behavior::GenServer;
+use plexspaces_common::ServiceNameExt;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, CreateShardGroupRequest,
     DataParallelConfig, DeleteShardGroupRequest, GetShardGroupRequest, ListShardGroupsRequest,
     MapShardGroupRequest, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
     SendToShardRequest, ShardGroupAggregationStrategy, ShardGroupState, SpawnActorRequest,
 };
-use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::{ActorIdentity, Message as ProtoMessage};
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
 use plexspaces_services::actor_service::{ActorServiceImpl, ActorServiceWrapper};
@@ -45,8 +45,10 @@ fn test_request<T>(inner: T) -> Request<T> {
 
 fn test_request_with_ns<T>(inner: T, namespace: &str) -> Request<T> {
     let mut req = Request::new(inner);
-    req.metadata_mut().insert("x-tenant-id", "test-tenant".parse().unwrap());
-    req.metadata_mut().insert("x-namespace", namespace.parse().unwrap());
+    req.metadata_mut()
+        .insert("x-tenant-id", "test-tenant".parse().unwrap());
+    req.metadata_mut()
+        .insert("x-namespace", namespace.parse().unwrap());
     req
 }
 
@@ -71,6 +73,7 @@ fn spawn_actor_request_for_test(
             facets: vec![],
             config: None,
             labels: HashMap::new(),
+            ..Default::default()
         }),
         namespace: namespace.to_string(),
         instances_count,
@@ -498,9 +501,9 @@ async fn create_test_actor_service(
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("counter", || {
-            Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
-            )
+            Box::pin(async move {
+                Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     service_locator
@@ -2116,7 +2119,9 @@ async fn test_spawn_actors_instances_count_replicas() {
 
     // Spawn 3 replicas of the same actor type with a single request
     let req = test_request(SpawnActorsRequest {
-        requests: vec![spawn_actor_request_for_test("default", "counter", "worker", 3)],
+        requests: vec![spawn_actor_request_for_test(
+            "default", "counter", "worker", 3,
+        )],
     });
 
     let result = service.spawn_actors(req).await;

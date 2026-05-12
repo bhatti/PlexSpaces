@@ -69,8 +69,12 @@ impl ChannelError {
             ChannelError::ChannelClosed(_) => ChannelErrorCode::ChannelErrorClosed,
             ChannelError::Timeout(_) => ChannelErrorCode::ChannelErrorTimeout,
             ChannelError::MessageNotFound(_) => ChannelErrorCode::ChannelErrorMessageNotFound,
-            ChannelError::InvalidConfiguration(_) => ChannelErrorCode::ChannelErrorInvalidConfiguration,
-            ChannelError::BackendError(_) | ChannelError::SerializationError(_) | ChannelError::InternalError(_) => ChannelErrorCode::ChannelErrorUnspecified,
+            ChannelError::InvalidConfiguration(_) => {
+                ChannelErrorCode::ChannelErrorInvalidConfiguration
+            }
+            ChannelError::BackendError(_)
+            | ChannelError::SerializationError(_)
+            | ChannelError::InternalError(_) => ChannelErrorCode::ChannelErrorUnspecified,
         }
     }
 }

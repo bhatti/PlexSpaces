@@ -262,6 +262,8 @@ async fn test_send_to_queue_host_function() {
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
         None,  // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");
@@ -322,6 +324,8 @@ async fn test_publish_to_topic_host_function() {
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
         None,  // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");
@@ -379,6 +383,8 @@ async fn test_send_to_queue_without_channel_service() {
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
         None,           // shared_timer_pool
+        String::new(), // tenant_id
+        String::new(), // default_namespace
     )
     .await
     .expect("Failed to create instance");

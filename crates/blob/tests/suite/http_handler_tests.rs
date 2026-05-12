@@ -25,8 +25,8 @@ mod tests {
     use hyper::body::Bytes;
     use hyper::{Method, Request, StatusCode, Uri};
     use object_store::local::LocalFileSystem;
-    use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService};
     use plexspaces_actor::{RequestContext, RequestContextExt};
+    use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService};
     use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
     use std::sync::Arc;
     use std::sync::Once;

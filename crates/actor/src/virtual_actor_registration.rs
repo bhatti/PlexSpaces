@@ -127,6 +127,7 @@ pub async fn register_virtual_actor_type_consistent(
         labels: HashMap::new(),
         config: actor_config,
         visibility: 0,
+        ..Default::default()
     };
     register_virtual_actor_definition(service_locator, spec).await
 }
@@ -138,13 +139,7 @@ pub async fn register_virtual_actor_type_consistent(
 ///   `{"k": "v"}` — flat top-level scalars (legacy test helpers)
 /// Meta fields (actor_id, actor_type, role, behavior_kind, args) are excluded.
 fn extract_args_from_template(template: Option<&[u8]>) -> HashMap<String, String> {
-    const META: &[&str] = &[
-        "actor_id",
-        "actor_type",
-        "role",
-        "behavior_kind",
-        "args",
-    ];
+    const META: &[&str] = &["actor_id", "actor_type", "role", "behavior_kind", "args"];
     template
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
         .and_then(|v| {

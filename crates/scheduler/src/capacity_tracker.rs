@@ -298,12 +298,13 @@ mod tests {
                 update_time: None,
                 updated_by: String::new(),
             }),
-            health_status: 1, // Healthy
-            labels: vec![],   // Labels are in metadata, not here
+            health_status: 1,
+            labels: vec![],
             metrics,
             created_at: None,
             updated_at: None,
             last_heartbeat: None,
+            ..Default::default()
         }
     }
 

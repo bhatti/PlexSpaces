@@ -367,7 +367,7 @@ mod tests {
 
         // Update health status
         registry
-            .update_health_status(&ctx, "actor1@node1", HealthStatus::HealthStatusUnhealthy)
+            .update_health_status(&ctx, "actor1@node1", HealthStatus::HealthStatusDead)
             .await
             .unwrap();
 
@@ -379,7 +379,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(HealthStatus::HealthStatusUnhealthy),
+                Some(HealthStatus::HealthStatusDead),
                 0,
                 100,
             )

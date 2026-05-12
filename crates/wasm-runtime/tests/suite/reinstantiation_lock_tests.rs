@@ -66,6 +66,8 @@ mod tests {
             use_instance_pool: false,
             max_concurrent_instantiations: None,
             shared_timer_pool: None,
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 
@@ -287,13 +289,9 @@ mod tests {
         let config = test_config();
         let instances: Vec<_> = (0..num_actors)
             .map(|i| {
-                let actor_id = ActorId::new(
-                    format!("test-actor-{}", i),
-                    "wasm",
-                    "default",
-                    "test-node",
-                )
-                .unwrap();
+                let actor_id =
+                    ActorId::new(format!("test-actor-{}", i), "wasm", "default", "test-node")
+                        .unwrap();
                 let module = module.clone();
                 runtime.instantiate(
                     module,

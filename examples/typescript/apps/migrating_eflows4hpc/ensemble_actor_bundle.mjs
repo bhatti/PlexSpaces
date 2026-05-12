@@ -1258,6 +1258,18 @@ function encodeApplicationMetrics(metrics) {
   return buf;
 }
 
+// ../../../../sdks/typescript/dist/process_groups.js
+function firstGroupMember(members) {
+  return members.length > 0 ? members[0] : null;
+}
+function firstGroupMemberOrThrow(group, members) {
+  const first = firstGroupMember(members);
+  if (first === null) {
+    throw new Error(`no members in process group '${group}'`);
+  }
+  return first;
+}
+
 // ../../../../sdks/typescript/dist/host.js
 import {
   send as hostSend,
@@ -1304,9 +1316,18 @@ import {
   barrierShardGroup as hostBarrierShardGroup,
   spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
+  applicationGetMetrics as hostApplicationGetMetrics,
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch
 } from "plexspaces:actor/host@0.1.0";
+import {
+  register as hostRegistryRegister,
+  unregister as hostRegistryUnregister,
+  lookup as hostRegistryLookup,
+  lookupByAlias as hostRegistryLookupByAlias,
+  discover as hostRegistryDiscover,
+  heartbeat as hostRegistryHeartbeat
+} from "plexspaces:actor/registry@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
     return fn(...args);
@@ -1429,11 +1450,103 @@ var ProcessGroups = class {
       throw new Error(result);
     }
   }
+  /** Return the first member of a process group, or null if empty. */
+  first(group) {
+    return firstGroupMember(this.members(group));
+  }
+  /** Return the first member of a process group, throwing if empty. */
+  firstOrThrow(group) {
+    return firstGroupMemberOrThrow(group, this.members(group));
+  }
+};
+var Registry = class {
+  /**
+   * Register an object in the registry.
+   */
+  register(ctx, objectId, objectType, grpcAddress, objectCategory, capabilities = [], labels = []) {
+    const result = safeCall(hostRegistryRegister, ctx, objectId, objectType, grpcAddress, objectCategory ?? null, capabilities, labels);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /**
+   * Unregister an object from the registry.
+   */
+  unregister(ctx, objectType, objectId) {
+    const result = safeCall(hostRegistryUnregister, ctx, objectType, objectId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /**
+   * Look up an object by ID. Returns null if not found, throws on storage errors.
+   */
+  lookup(ctx, objectType, objectId) {
+    const raw = safeCall(hostRegistryLookup, ctx, objectType, objectId);
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    if (!raw || raw === "null")
+      return null;
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return result ?? null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Look up an object by alias (Orleans grain directory pattern).
+   * Alias format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+   * Returns null if not found, throws on storage errors.
+   */
+  lookupByAlias(ctx, alias) {
+    const raw = safeCall(hostRegistryLookupByAlias, ctx, alias);
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    if (!raw || raw === "null")
+      return null;
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return result ?? null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Discover objects with optional filtering.
+   */
+  discover(ctx, options = {}) {
+    const { objectType, objectCategory, capabilities = [], labels = [], healthStatus, offset = 0, limit = 100 } = options;
+    const raw = safeCall(hostRegistryDiscover, ctx, objectType ?? null, objectCategory ?? null, capabilities, labels, healthStatus ?? null, offset, limit);
+    if (!raw)
+      return [];
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(result) ? result : [];
+    } catch {
+      return [];
+    }
+  }
+  /**
+   * Update the heartbeat for a registered object.
+   */
+  heartbeat(ctx, objectType, objectId) {
+    const result = safeCall(hostRegistryHeartbeat, ctx, objectType, objectId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
 };
 var Host = class {
   constructor() {
     this.processGroups = new ProcessGroups();
     this.ts = new TupleSpace(this);
+    this.registry = new Registry();
   }
   // ========================================================================
   // Messaging
@@ -1617,6 +1730,40 @@ var Host = class {
       return `ERROR:${e}`;
     }
   }
+  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
+  kvGetJson(key) {
+    const raw = this.kvGet(key);
+    if (!raw || raw.startsWith("ERROR:"))
+      return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  /** Serialize value to JSON and store under key. Throws on write failure. */
+  kvPutJson(key, value) {
+    const serialized = JSON.stringify(value);
+    const result = this.kvPut(key, serialized);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(`kvPutJson(${key}): ${result}`);
+    }
+  }
+  /** Increment a single named application metric counter by 1. Errors are swallowed. */
+  incrCounter(applicationId, name) {
+    this.incrCounters(applicationId, { [name]: 1 });
+  }
+  /** Increment one or more named application metric counters. Errors are swallowed. */
+  incrCounters(applicationId, counters) {
+    try {
+      this.applicationMetricsAdd(applicationId, {
+        message_count: Object.keys(counters).length,
+        counter_metrics: counters
+      });
+    } catch (e) {
+      this.warn(`incrCounters: metrics update failed: ${e}`);
+    }
+  }
   // ========================================================================
   // TupleSpace (protobuf WriteRequest / ReadRequest / ReadResponse wire bytes)
   // ========================================================================
@@ -1789,6 +1936,16 @@ var Host = class {
     } catch {
       return {};
     }
+  }
+  applicationGetMetrics(applicationId, nodeId) {
+    const result = safeCall(hostApplicationGetMetrics, applicationId, nodeId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0)
+      return {};
+    return decodeApplicationMetrics(bytes);
   }
   applicationGetStatus(applicationId, nodeId) {
     const result = safeCall(hostApplicationGetStatus, applicationId, nodeId);

@@ -141,6 +141,7 @@ The SDK automatically handles logging via `host.log()` for error reporting and o
 - **TupleSpace**: Prefer `host.ts` (list-in, list-out): `host.ts.write(tuple)`, `host.ts.take(pattern)` → tuple or null, `host.ts.readAll(pattern)` → tuple[]. Use `null` in patterns for wildcards. Low-level: `ts_write(tupleJson)`, `ts_take(patternJson)`, etc.
 - **Process groups**: `host.processGroups.broadcast(group, msgType, payload)` — `msgType` is used by the host for routing; payload can be data-only.
 - **Elastic pool**: `host.poolCheckout(poolName, timeoutMs)` → `{ actor_id, pool_name, checkout_id } | null`; `host.poolCheckin(poolName, actorId, checkoutId, healthy)`; `host.poolGetMetrics(poolName)` → metrics object or null. When the pool is not configured, checkout returns null; use process group broadcast as fallback. See [Parameter sweep (migrating_merlin)](../../examples/typescript/apps/migrating_merlin/README.md).
+- **Object Registry**: `host.registry.register(reg)`, `host.registry.lookup(id, type)`, `host.registry.lookupByAlias(alias)`, `host.registry.discover(opts)`, `host.registry.heartbeat(id, type)`. All wire encoding is proto-first (see below).
 - See `wit/plexspaces-actor/world.wit` for complete interface
 
 **Note**: The SDK uses `host.log()` internally for error logging. For custom logging in your actors, you can import and use host functions directly using the virtual import pattern (future enhancement: SDK may provide helper methods).
@@ -182,6 +183,38 @@ class MyActor extends PlexSpacesActor<{ auditLog: EventLog }> {
   }
 }
 ```
+
+### Object Registry
+
+Service registration and discovery via the host registry surface. The SDK handles protobuf wire encoding automatically; the proto schema is `proto/plexspaces/v1/registry/object_registry.proto`.
+
+```typescript
+import { host, RegistryObjectType } from "@plexspaces/sdk";
+
+// Register this actor as a service
+host.registry.register({
+  objectId: actorId,
+  objectType: "actor",
+  objectCategory: "worker",
+  grpcAddress: "http://node:8080",
+  capabilities: ["persistent"],
+  labels: ["env=prod"],
+});
+
+// Lookup by object ID
+const reg = host.registry.lookup(actorId, RegistryObjectType.ACTOR);
+
+// Lookup by alias
+const reg2 = host.registry.lookupByAlias("my-service-alias");
+
+// Discover all actors of a type
+const regs = host.registry.discover({ objectType: RegistryObjectType.ACTOR });
+
+// Send heartbeat to refresh liveness
+host.registry.heartbeat(actorId, RegistryObjectType.ACTOR);
+```
+
+**Tenant isolation**: `tenant_id` is injected by the host from the deployment context (JWT for API deploys, or `tenant_id` in `app-config.toml` for file-copy deploys). Any `tenant_id` in the SDK call is silently overridden. `namespace` may be supplied; empty string falls back to the application's default namespace.
 
 ### Type Generation
 

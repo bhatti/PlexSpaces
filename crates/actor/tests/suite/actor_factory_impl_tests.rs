@@ -26,13 +26,15 @@
 //! - normalize_actor_id: with @ format, without @ format, different node ID
 
 use async_trait::async_trait;
+use plexspaces_actor::Message;
 use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
-use plexspaces_actor::Message;
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    FacetManager, MessageSender, RequestContext, ServiceLocator, VirtualActorManager, RequestContextExt};
+    FacetManager, MessageSender, RequestContext, RequestContextExt, ServiceLocator,
+    VirtualActorManager,
+};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::collections::HashMap;
@@ -51,15 +53,10 @@ fn make_spawn_spec(
             name: actor_id.name().to_string(),
             actor_type: actor_type.to_string(),
         }),
-        role: String::new(),
         namespace: actor_id.namespace().to_string(),
-        tenant_id: String::new(),
-        visibility: 0,
-        behavior_kind: String::new(),
-        args: HashMap::new(),
-        facets: vec![],
         config,
         labels,
+        ..Default::default()
     }
 }
 
@@ -314,7 +311,11 @@ async fn test_activate_virtual_actor_success() {
 
     // Activate - this should rebuild the actor from virtual metadata.
     let result = factory.activate_virtual_actor(&actor_id).await;
-    assert!(result.is_ok(), "Activation should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Activation should succeed: {:?}",
+        result.err()
+    );
 
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
     assert!(
@@ -510,15 +511,8 @@ async fn test_spawn_actor_sets_self_ref_before_init() {
             name: "spawned-actor-init".to_string(),
             actor_type: "self_ref_init".to_string(),
         }),
-        role: String::new(),
         namespace: "system".to_string(),
-        tenant_id: String::new(),
-        visibility: 0,
-        behavior_kind: String::new(),
-        args: HashMap::new(),
-        facets: vec![],
-        config: None,
-        labels: HashMap::new(),
+        ..Default::default()
     };
     let expected_actor_id =
         ActorId::new("spawned-actor-init", "self_ref_init", "system", "test-node")

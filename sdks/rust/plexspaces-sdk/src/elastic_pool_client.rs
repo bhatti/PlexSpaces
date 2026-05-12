@@ -26,7 +26,9 @@ pub struct ElasticPoolClient {
 
 impl ElasticPoolClient {
     /// Create a client that uses the given ServiceLocator for pool operations.
-    pub fn from_service_locator(service_locator: Arc<dyn plexspaces_actor::ServiceLocator>) -> Self {
+    pub fn from_service_locator(
+        service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
+    ) -> Self {
         Self { service_locator }
     }
 

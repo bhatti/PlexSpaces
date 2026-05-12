@@ -37,11 +37,11 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout as tokio_timeout;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{ActorInstance, ActorRef as ActorActorRef};
-use plexspaces_proto::actor::v1::ActorVisibility;
 use crate::core::{
     ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait,
 };
+use crate::{ActorInstance, ActorRef as ActorActorRef};
+use plexspaces_proto::actor::v1::ActorVisibility;
 
 // Import proto types
 use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, SupervisorStats};
@@ -259,7 +259,6 @@ pub enum RestartPolicy {
     },
 }
 
-
 /// Supervisor events — canonical definition lives in proto.
 pub use plexspaces_proto::supervision::v1::SupervisorEvent;
 
@@ -357,7 +356,8 @@ impl Supervisor {
         // Record facets on span for observability (which facets are attached when creating actor)
         let facet_count = spec.proto.facets.len();
         let facet_list: String = spec
-            .proto.facets
+            .proto
+            .facets
             .iter()
             .map(|f| f.r#type.as_str())
             .collect::<Vec<_>>()
@@ -1181,7 +1181,8 @@ impl Supervisor {
             // Apply restart policy
             use crate::child_spec::ProtoRestartPolicy;
             match child.spec.restart_policy() {
-                ProtoRestartPolicy::RestartPolicyPermanent | ProtoRestartPolicy::RestartPolicyUnspecified => {
+                ProtoRestartPolicy::RestartPolicyPermanent
+                | ProtoRestartPolicy::RestartPolicyUnspecified => {
                     // Always restart (regardless of exit reason)
                     self.perform_restart(child, &mut stats).await?;
                 }
@@ -2647,8 +2648,8 @@ impl Supervisor {
     }
 }
 
-pub use plexspaces_proto::supervision::v1::ChildInfo;
 pub use plexspaces_proto::supervision::v1::ChildCount;
+pub use plexspaces_proto::supervision::v1::ChildInfo;
 pub use plexspaces_proto::supervision::v1::SupervisorEventType;
 
 /// Calculate exponential backoff delay
@@ -2910,7 +2911,9 @@ mod tests {
 
         ChildSpec::worker(child_actor_id, start_fn)
             .with_restart(restart)
-            .with_shutdown(crate::child_spec::ShutdownSpec::Timeout(Duration::from_secs(5)))
+            .with_shutdown(crate::child_spec::ShutdownSpec::Timeout(
+                Duration::from_secs(5),
+            ))
     }
 
     /// Helper function to create a test supervisor with ServiceLocator
@@ -2965,7 +2968,9 @@ mod tests {
 
         // Map supervisor RestartPolicy to proto RestartPolicy for ChildSpec
         let restart_policy = match restart {
-            RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => ProtoRestartPolicy::RestartPolicyPermanent,
+            RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => {
+                ProtoRestartPolicy::RestartPolicyPermanent
+            }
             RestartPolicy::Transient => ProtoRestartPolicy::RestartPolicyTransient,
             RestartPolicy::Temporary => ProtoRestartPolicy::RestartPolicyTemporary,
         };
@@ -2994,9 +2999,13 @@ mod tests {
         if let Some(event) = event_rx.recv().await {
             assert_eq!(
                 event.event_type,
-                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted as i32
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStarted
+                    as i32
             );
-            assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("test-child"));
+            assert_eq!(
+                ActorId::from(event.actor_id.clone()),
+                test_actor_id("test-child")
+            );
         }
     }
 
@@ -3052,9 +3061,13 @@ mod tests {
         if let Some(event) = event_rx.recv().await {
             assert_eq!(
                 event.event_type,
-                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped
+                    as i32
             );
-            assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("removable-child"));
+            assert_eq!(
+                ActorId::from(event.actor_id.clone()),
+                test_actor_id("removable-child")
+            );
         }
     }
 
@@ -3109,20 +3122,30 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
-            "Expected ChildFailed event, got event_type={}", event.event_type
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed
+                as i32,
+            "Expected ChildFailed event, got event_type={}",
+            event.event_type
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("failing-child"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("failing-child")
+        );
         assert_eq!(event.reason, "test error");
 
         // Check for ChildRestarted event
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
-            "Expected ChildRestarted event, got event_type={}", event.event_type
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted
+                as i32,
+            "Expected ChildRestarted event, got event_type={}",
+            event.event_type
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("failing-child"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("failing-child")
+        );
         assert_eq!(event.restart_count, 1); // First restart
     }
 
@@ -3157,7 +3180,8 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed
+                as i32,
             "Expected ChildFailed event"
         );
 
@@ -3211,7 +3235,10 @@ mod tests {
                     plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
                     "Expected MaxRestartsExceeded event"
                 );
-                assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("crash-child"));
+                assert_eq!(
+                    ActorId::from(event.actor_id.clone()),
+                    test_actor_id("crash-child")
+                );
             }
         }
     }
@@ -3281,7 +3308,8 @@ mod tests {
             let event = event_rx.recv().await.unwrap();
             assert_eq!(
                 event.event_type,
-                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped as i32,
+                plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildStopped
+                    as i32,
                 "Expected ChildStopped event"
             );
         }
@@ -3344,7 +3372,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_one_for_all_strategy() {
         let (supervisor, mut event_rx) = create_test_supervisor(
@@ -3374,10 +3401,14 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed
+                as i32,
             "Expected ChildFailed event"
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("child-1")
+        );
 
         // OneForAll should restart ALL children (0, 1, 2)
         // Collect all restart events
@@ -3428,20 +3459,28 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed
+                as i32,
             "Expected ChildFailed event"
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("child-1")
+        );
 
         // RestForOne should restart the failed child (for now, until we implement child ordering)
         // TODO: When child ordering (Vec) is implemented, this will restart child-1 and all after it
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted
+                as i32,
             "Expected ChildRestarted event"
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("child-1"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("child-1")
+        );
         assert_eq!(event.restart_count, 1);
     }
 
@@ -3479,7 +3518,8 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed
+                as i32,
             "Expected ChildFailed event"
         );
 
@@ -3487,10 +3527,14 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         assert_eq!(
             event.event_type,
-            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+            plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted
+                as i32,
             "Expected ChildRestarted event"
         );
-        assert_eq!(ActorId::from(event.actor_id.clone()), test_actor_id("adaptive-child"));
+        assert_eq!(
+            ActorId::from(event.actor_id.clone()),
+            test_actor_id("adaptive-child")
+        );
         assert_eq!(event.restart_count, 1);
     }
 

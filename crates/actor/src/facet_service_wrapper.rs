@@ -71,7 +71,9 @@ impl FacetManagerServiceWrapper {
 
 impl Service for FacetManagerServiceWrapper {
     fn service_name(&self) -> String {
-        crate::ServiceName::ServiceNameFacetManager.as_str().to_string()
+        crate::ServiceName::ServiceNameFacetManager
+            .as_str()
+            .to_string()
     }
 }
 
@@ -102,6 +104,8 @@ impl std::ops::Deref for FacetRegistryServiceWrapper {
 
 impl Service for FacetRegistryServiceWrapper {
     fn service_name(&self) -> String {
-        crate::ServiceName::ServiceNameFacetRegistry.as_str().to_string()
+        crate::ServiceName::ServiceNameFacetRegistry
+            .as_str()
+            .to_string()
     }
 }

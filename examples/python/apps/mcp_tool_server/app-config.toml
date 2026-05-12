@@ -9,13 +9,11 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-name = "tool_registry"
-actor_type = "mcp_tool_server_wasm"
-role = "tool_registry"
+name = "ToolRegistryActor"
+actor_type = "ToolRegistryActor"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
-args = { role = "tool_registry" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 5 } },
@@ -23,76 +21,65 @@ facets = [
 ]
 
 [[supervisor.children]]
-name = "calculator_tool"
-actor_type = "mcp_tool_server_wasm"
-role = "calculator_tool"
+name = "CalculatorToolActor"
+actor_type = "CalculatorToolActor"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
-args = { role = "calculator_tool" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
 ]
 
 [[supervisor.children]]
-name = "search_tool"
-actor_type = "mcp_tool_server_wasm"
-role = "search_tool"
+name = "SearchToolActor"
+actor_type = "SearchToolActor"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
-args = { role = "search_tool" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 20 } }
 ]
 
 [[supervisor.children]]
-name = "weather_tool"
-actor_type = "mcp_tool_server_wasm"
-role = "weather_tool"
+name = "WeatherToolActor"
+actor_type = "WeatherToolActor"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenServer"
-args = { role = "weather_tool" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "timer", priority = 70, config = { interval_ms = 60000 } }
 ]
 
 [[supervisor.children]]
-name = "mcp_gateway"
-actor_type = "mcp_tool_server_wasm"
-role = "mcp_gateway"
+name = "MCPGatewayWorkflow"
+actor_type = "MCPGatewayWorkflow"
 restart = "permanent"
 shutdown_timeout_seconds = 15
 behavior_kind = "Workflow"
-args = { role = "mcp_gateway" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
 ]
 
 [[supervisor.children]]
-name = "tool_audit"
-actor_type = "mcp_tool_server_wasm"
-role = "tool_audit"
+name = "ToolAuditEventActor"
+actor_type = "ToolAuditEventActor"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"
-args = { role = "tool_audit" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
 ]
 
 [[supervisor.children]]
-name = "circuit_breaker"
-actor_type = "mcp_tool_server_wasm"
-role = "circuit_breaker"
+name = "ToolCircuitBreakerFSM"
+actor_type = "ToolCircuitBreakerFSM"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenFSM"
-args = { role = "circuit_breaker", monitored_tool = "all", degraded_threshold = "2", open_threshold = "5" }
+args = { monitored_tool = "all", degraded_threshold = "2", open_threshold = "5" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 1 } },

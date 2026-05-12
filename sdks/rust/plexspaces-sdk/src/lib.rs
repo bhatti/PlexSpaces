@@ -64,6 +64,10 @@ pub use plexspaces_sdk_macros::signal_handler;
 pub use plexspaces_sdk_macros::query_handler;
 
 pub mod simple_actor;
+pub use simple_actor::pg_first;
+
+/// Object Registry helpers — registration, discovery, and alias-based lookup.
+pub mod object_registry;
 
 /// Ergonomic outbound HTTP client for actors using named service links.
 ///
@@ -117,12 +121,13 @@ pub trait DeclaredFacets {
 // ============================================================================
 
 #[cfg(feature = "native")]
+use plexspaces_actor::RequestContextExt as _;
+#[cfg(feature = "native")]
 pub use plexspaces_actor::{ActorBuilder, ActorRef};
 #[cfg(feature = "native")]
 pub use plexspaces_actor::{
     ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext, RequestContextExt,
 };
-use plexspaces_actor::RequestContextExt as _;
 #[cfg(feature = "native")]
 pub use plexspaces_node::NodeBuilder;
 
@@ -521,6 +526,7 @@ where
                 facets: plexspaces_actor::proto_facets_for_registration(Some(&facets), None),
                 labels: std::collections::HashMap::new(),
                 config: None,
+                ..Default::default()
             },
         )
         .await;
@@ -628,6 +634,7 @@ pub async fn spawn_with_behavior_type(
             facets: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
+            ..Default::default()
         }
     };
     let message_sender = actor_factory
@@ -1035,8 +1042,8 @@ mod tests {
     use async_trait::async_trait;
     use plexspaces_actor::{ActorRef, TestServiceLocatorStub};
     use plexspaces_actor::{Message, MessageSender, ServiceLocator};
-    use plexspaces_proto::actor::v1::ActorVisibility;
     use plexspaces_journaling::SqliteJournalStorage;
+    use plexspaces_proto::actor::v1::ActorVisibility;
     use std::sync::Arc;
 
     struct NonActorRefSender;

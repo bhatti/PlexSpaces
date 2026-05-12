@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Chat Room (Rust WASM)
+
+[workspace]
+
+[package]
+name = "chat-room-wasm"
+version = "1.0.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Large-scale chat room WASM actor (Rust port of Python/Go/TypeScript examples)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
+prost = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.51.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

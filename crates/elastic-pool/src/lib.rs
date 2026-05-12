@@ -266,7 +266,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-
 mod elastic_pool;
 mod pool_registry;
 

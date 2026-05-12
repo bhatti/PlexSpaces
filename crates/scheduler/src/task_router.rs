@@ -83,9 +83,7 @@ impl TaskRouterError {
                 TaskRouterErrorCode::TaskRouterErrorNoActorsInGroup
             }
             TaskRouterError::ChannelError(_) => TaskRouterErrorCode::TaskRouterErrorChannelError,
-            TaskRouterError::InvalidStrategy => {
-                TaskRouterErrorCode::TaskRouterErrorInvalidStrategy
-            }
+            TaskRouterError::InvalidStrategy => TaskRouterErrorCode::TaskRouterErrorInvalidStrategy,
         }
     }
 }

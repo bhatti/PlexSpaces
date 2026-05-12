@@ -101,7 +101,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-
 pub mod auth;
 pub mod cert_gen;
 pub mod chain;
@@ -117,10 +116,10 @@ pub mod service_locator_auth;
 pub mod tracing_interceptor;
 
 pub use auth::AuthInterceptor;
-pub use http_server::{GrpcHttpServerBuilder, ServerBuildError};
 pub use cert_gen::{CertGenError, CertificateGenerator, CertificatePaths};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;
+pub use http_server::{GrpcHttpServerBuilder, ServerBuildError};
 pub use jwt::{
     resolve_tenant_id, validate_bearer_token, validate_jwt_token, JwtClaims, AUTH_REQUIRED_HINT,
 };

@@ -266,13 +266,10 @@ impl SpecApplication {
                     }),
                     role: child.role.clone(),
                     namespace: effective_namespace.clone(),
-                    tenant_id: String::new(),
-                    visibility: 0,
                     behavior_kind: String::new(),
                     args: child.args.clone(),
                     facets: child.facets.clone(),
-                    config: None,
-                    labels: std::collections::HashMap::new(),
+                    ..Default::default()
                 }
             };
 

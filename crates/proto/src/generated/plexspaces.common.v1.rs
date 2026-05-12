@@ -747,10 +747,6 @@ impl ResourceState {
     }
 }
 /// RequestContext error codes
-///
-/// TODO(phase4): When RequestContext Rust struct is fully replaced by the proto-generated
-/// type, these codes will be the single source of truth for all context errors.
-/// See plan: Phase 4 — Consolidate RequestContext to proto-only.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum RequestContextErrorCode {

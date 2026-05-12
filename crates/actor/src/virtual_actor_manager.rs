@@ -43,7 +43,9 @@ use tokio::sync::RwLock;
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use crate::Service;
 use crate::{ActorId, ActorRegistry};
-use plexspaces_common::{from_config_str, ActivationStrategy, RequestContext, RequestContextExt, ServiceNameExt};
+use plexspaces_common::{
+    from_config_str, ActivationStrategy, RequestContext, RequestContextExt, ServiceNameExt,
+};
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Message;
@@ -322,7 +324,9 @@ impl VirtualActorError {
         use plexspaces_proto::actor::v1::VirtualActorErrorCode;
         match self {
             VirtualActorError::ActorNotFound(_) => VirtualActorErrorCode::VirtualActorErrorNotFound,
-            VirtualActorError::ActivationFailed(_) => VirtualActorErrorCode::VirtualActorErrorActivationFailed,
+            VirtualActorError::ActivationFailed(_) => {
+                VirtualActorErrorCode::VirtualActorErrorActivationFailed
+            }
         }
     }
 }
@@ -334,13 +338,7 @@ impl VirtualActorError {
 ///   `{"k": "v"}` — flat top-level scalars (legacy WASM callers)
 /// Meta fields (actor_id, actor_type, role, behavior_kind, args) are excluded.
 fn extract_args_from_template(template: Option<&[u8]>) -> HashMap<String, String> {
-    const META: &[&str] = &[
-        "actor_id",
-        "actor_type",
-        "role",
-        "behavior_kind",
-        "args",
-    ];
+    const META: &[&str] = &["actor_id", "actor_type", "role", "behavior_kind", "args"];
     template
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
         .and_then(|v| {
@@ -695,6 +693,7 @@ impl VirtualActorManager {
             labels: HashMap::new(),
             config,
             visibility: 0,
+            ..Default::default()
         };
         self.register_virtual_actor_definition(spec).await
     }
@@ -1168,7 +1167,9 @@ impl VirtualActorManager {
 // Implement Service trait for VirtualActorManager (required for ServiceLocator)
 impl crate::Service for VirtualActorManager {
     fn service_name(&self) -> String {
-        crate::ServiceName::ServiceNameVirtualActorManager.as_str().to_string()
+        crate::ServiceName::ServiceNameVirtualActorManager
+            .as_str()
+            .to_string()
     }
 }
 
@@ -1303,15 +1304,9 @@ mod tests {
                 name: actor_type.to_string(),
                 actor_type: actor_type.to_string(),
             }),
-            role: String::new(),
             namespace: namespace.to_string(),
             tenant_id: tenant_id.to_string(),
-            behavior_kind: String::new(),
-            args: HashMap::new(),
-            facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         }
     }
 
@@ -1336,7 +1331,10 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&payload).unwrap();
 
         assert_eq!(json["role"], "ephemeral", "payload must carry 'role' key");
-        assert!(json.get("declaration_name").is_none(), "legacy key must not appear");
+        assert!(
+            json.get("declaration_name").is_none(),
+            "legacy key must not appear"
+        );
         assert_eq!(json["actor_type"], "abstractions_wasm");
         assert_eq!(json["behavior_kind"], "GenServer");
         assert_eq!(json["args"]["workers"], "4");
@@ -1539,9 +1537,7 @@ mod tests {
                         metadata: None,
                     },
                 ],
-                labels: HashMap::new(),
-                config: None,
-                visibility: 0,
+                ..Default::default()
             })
             .await;
 
@@ -1582,9 +1578,7 @@ mod tests {
                     behavior_kind: String::new(),
                     args: HashMap::new(),
                     facets: vec![],
-                    labels: HashMap::new(),
-                    config: None,
-                    visibility: 0,
+                    ..Default::default()
                 },
             )
             .await
@@ -1611,9 +1605,7 @@ mod tests {
                     state: HashMap::new(),
                     metadata: None,
                 }],
-                labels: HashMap::new(),
-                config: None,
-                visibility: 0,
+                ..Default::default()
             })
             .await
             .expect("virtual actor type should register");
@@ -1737,7 +1729,7 @@ mod tests {
             facets: vec![],
             labels: HashMap::new(),
             config: config.clone(),
-            visibility: 0,
+            ..Default::default()
         };
 
         let result = manager.register(actor_id.clone(), facet, spec).await;
@@ -1776,8 +1768,7 @@ mod tests {
             args: HashMap::new(),
             facets: vec![],
             labels: labels.clone(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
 
         manager
@@ -1813,9 +1804,7 @@ mod tests {
                     behavior_kind: String::new(),
                     args: HashMap::new(),
                     facets: vec![],
-                    labels: HashMap::new(),
-                    config: None,
-                    visibility: 0,
+                    ..Default::default()
                 },
             )
             .await;
@@ -1959,9 +1948,7 @@ mod tests {
                         metadata: None,
                     },
                 ],
-                labels: HashMap::new(),
-                config: None,
-                visibility: 0,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -1982,9 +1969,7 @@ mod tests {
                     behavior_kind: String::new(), // empty — should inherit "GenServer"
                     args: HashMap::new(),
                     facets: vec![], // empty — should inherit from type
-                    labels: HashMap::new(),
-                    config: None,
-                    visibility: 0,
+                    ..Default::default()
                 },
             )
             .await
@@ -2253,9 +2238,7 @@ mod tests {
             behavior_kind: "GenServer".to_string(),
             args: HashMap::from([("initial_count".to_string(), "5".to_string())]),
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         manager
             .register_virtual_actor_definition(def_spec.clone())
@@ -2305,9 +2288,7 @@ mod tests {
             behavior_kind: String::new(), // intentionally empty — merge must fill from existing
             args: HashMap::new(),         // intentionally empty — merge must fill from existing
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         manager
             .register(actor_id.clone(), facet, update_spec)
@@ -2343,9 +2324,7 @@ mod tests {
             behavior_kind: "GenServer".to_string(),
             args: HashMap::from([("initial_count".to_string(), "7".to_string())]),
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         manager
             .register(actor_id.clone(), facet, spec)
@@ -2381,9 +2360,7 @@ mod tests {
             behavior_kind: "GenServer".to_string(),
             args: HashMap::from([("initial_count".to_string(), "5".to_string())]),
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         manager
             .register_virtual_actor_definition(spec)
@@ -2408,9 +2385,7 @@ mod tests {
             behavior_kind: "GenServer".to_string(),
             args: HashMap::from([("initial_count".to_string(), "7".to_string())]),
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         let facet = create_test_virtual_actor_facet();
         manager
@@ -2451,9 +2426,7 @@ mod tests {
             behavior_kind: "GenServer".to_string(),
             args: HashMap::new(),
             facets: vec![],
-            labels: HashMap::new(),
-            config: None,
-            visibility: 0,
+            ..Default::default()
         };
         manager
             .register_virtual_actor_definition(spec)

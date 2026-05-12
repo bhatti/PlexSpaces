@@ -9,12 +9,12 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
     FacetManager, InitializableServiceLocator, Message, MessageSender, ReplyWaiterRegistry,
-    RequestContext, VirtualActorManager, RequestContextExt,
+    RequestContext, RequestContextExt, VirtualActorManager,
 };
+use plexspaces_behavior::GenServer;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_proto::actor::v1::{

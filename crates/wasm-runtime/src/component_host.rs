@@ -1873,7 +1873,8 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         payload: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
-        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone()).increment(1);
+        metrics::counter!("plexspaces_wasm_channel_send_total", "channel" => channel_name.clone())
+            .increment(1);
 
         match self
             .host_functions
@@ -1913,7 +1914,8 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
     ) -> Result<plexspaces::actor::types::MessageId, plexspaces::actor::types::ActorError> {
         // delay_ms / ttl_ms / headers forwarded to ChannelService once it gains that support;
         // for now delegate to the basic send path.
-        self.channel_send(ctx, channel_name, msg_type, payload).await
+        self.channel_send(ctx, channel_name, msg_type, payload)
+            .await
     }
 
     async fn channel_receive(
@@ -1977,7 +1979,8 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         channel_name: String,
         message_id: plexspaces::actor::types::MessageId,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone()).increment(1);
+        metrics::counter!("plexspaces_wasm_channel_ack_total", "channel" => channel_name.clone())
+            .increment(1);
         tracing::debug!(channel = %channel_name, message_id = %message_id, "channel_ack");
         Ok(())
     }
@@ -1992,7 +1995,8 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
         metrics::counter!("plexspaces_wasm_channel_nack_total",
             "channel" => channel_name.clone(),
             "requeue" => requeue.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         tracing::debug!(channel = %channel_name, message_id = %message_id, requeue, "channel_nack");
         Ok(())
     }
@@ -2067,7 +2071,10 @@ impl plexspaces::actor::channels::Host for ChannelsImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_channel_subscribe_errors_total", "channel" => channel_name.clone()).increment(1);
-                Err(make_actor_error("internal", format!("channel_subscribe failed: {}", e)))
+                Err(make_actor_error(
+                    "internal",
+                    format!("channel_subscribe failed: {}", e),
+                ))
             }
         }
     }
@@ -5081,114 +5088,41 @@ pub struct RegistryImpl {
 
 #[cfg(feature = "component-model")]
 impl RegistryImpl {
-    /// Convert proto ObjectType to WIT ObjectType
-    fn proto_to_wit_object_type(proto_type: i32) -> plexspaces::actor::registry::ObjectType {
-        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
-        use prost::Enumeration;
-        // prost::Enumeration provides from_i32
-        match ProtoObjectType::from_i32(proto_type)
-            .unwrap_or(ProtoObjectType::ObjectTypeUnspecified)
-        {
-            ProtoObjectType::ObjectTypeUnspecified => {
-                plexspaces::actor::registry::ObjectType::Unspecified
+    /// Build a RequestContext using the trusted tenant_id from HostFunctions (injected from
+    /// ApplicationSpec at deploy time) and the namespace from the request (user-supplied is
+    /// accepted; falls back to the actor's namespace if empty).
+    fn request_ctx(host_functions: &HostFunctions, req_namespace: &str, actor_id: &ActorId) -> RequestContext {
+        let tenant_id = &host_functions.tenant_id;
+        let ns = if req_namespace.is_empty() {
+            if host_functions.default_namespace.is_empty() {
+                actor_id.namespace()
+            } else {
+                &host_functions.default_namespace
             }
-            ProtoObjectType::ObjectTypeActor => plexspaces::actor::registry::ObjectType::Actor,
-            ProtoObjectType::ObjectTypeTuplespace => {
-                plexspaces::actor::registry::ObjectType::Tuplespace
-            }
-            ProtoObjectType::ObjectTypeService => plexspaces::actor::registry::ObjectType::Service,
-            ProtoObjectType::ObjectTypeVm => plexspaces::actor::registry::ObjectType::Vm,
-            ProtoObjectType::ObjectTypeApplication => {
-                plexspaces::actor::registry::ObjectType::Application
-            }
-            ProtoObjectType::ObjectTypeWorkflow => {
-                plexspaces::actor::registry::ObjectType::Workflow
-            }
-            ProtoObjectType::ObjectTypeNode => plexspaces::actor::registry::ObjectType::Node,
-            ProtoObjectType::ObjectTypeProcessGroup => {
-                plexspaces::actor::registry::ObjectType::ProcessGroup
-            }
-        }
+        } else {
+            req_namespace
+        };
+        RequestContext::new_without_auth(tenant_id.clone(), ns.to_string())
     }
 
-    /// Convert proto HealthStatus to WIT HealthStatus
-    fn proto_to_wit_health_status(proto_status: i32) -> plexspaces::actor::registry::HealthStatus {
-        use plexspaces_proto::object_registry::v1::HealthStatus as ProtoHealthStatus;
-        use prost::Enumeration;
-        // prost::Enumeration provides from_i32
-        match ProtoHealthStatus::from_i32(proto_status)
-            .unwrap_or(ProtoHealthStatus::HealthStatusUnknown)
-        {
-            ProtoHealthStatus::HealthStatusUnknown => {
-                plexspaces::actor::registry::HealthStatus::Unknown
-            }
-            ProtoHealthStatus::HealthStatusHealthy => {
-                plexspaces::actor::registry::HealthStatus::Healthy
-            }
-            ProtoHealthStatus::HealthStatusDegraded => {
-                plexspaces::actor::registry::HealthStatus::Degraded
-            }
-            ProtoHealthStatus::HealthStatusUnhealthy => {
-                plexspaces::actor::registry::HealthStatus::Unhealthy
-            }
-            ProtoHealthStatus::HealthStatusStarting => {
-                plexspaces::actor::registry::HealthStatus::Starting
-            }
-            ProtoHealthStatus::HealthStatusStopping => {
-                plexspaces::actor::registry::HealthStatus::Stopping
-            }
-        }
+    /// Encode a proto ObjectRegistration as proto wire bytes for return to WASM guest.
+    fn encode_reg(proto: &plexspaces_proto::object_registry::v1::ObjectRegistration) -> Vec<u8> {
+        use prost::Message;
+        let resp = plexspaces_proto::object_registry::v1::LookupResponse {
+            registration: Some(proto.clone()),
+            found: true,
+        };
+        resp.encode_to_vec()
     }
 
-    /// Convert proto ObjectRegistration to WIT ObjectRegistration
-    fn proto_to_wit_registration(
-        proto: &plexspaces_proto::object_registry::v1::ObjectRegistration,
-    ) -> plexspaces::actor::registry::ObjectRegistration {
-        // Convert proto labels (Vec<String> with "key=value" format) to WIT labels (list<label>)
-        let wit_labels: Vec<plexspaces::actor::registry::Label> = proto
-            .labels
-            .iter()
-            .filter_map(|l| {
-                let parts: Vec<&str> = l.splitn(2, '=').collect();
-                if parts.len() == 2 {
-                    Some(plexspaces::actor::registry::Label {
-                        key: parts[0].to_string(),
-                        value: parts[1].to_string(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Convert timestamps
-        let created_at_ms = proto
-            .created_at
-            .as_ref()
-            .map(|ts| (ts.seconds as u64 * 1000) + (ts.nanos as u64 / 1_000_000))
-            .unwrap_or(0);
-        let updated_at_ms = proto
-            .updated_at
-            .as_ref()
-            .map(|ts| (ts.seconds as u64 * 1000) + (ts.nanos as u64 / 1_000_000))
-            .unwrap_or(0);
-        let last_heartbeat_ms = proto
-            .last_heartbeat
-            .as_ref()
-            .map(|ts| (ts.seconds as u64 * 1000) + (ts.nanos as u64 / 1_000_000));
-
-        plexspaces::actor::registry::ObjectRegistration {
-            object_id: proto.object_id.clone(),
-            object_type: Self::proto_to_wit_object_type(proto.object_type),
-            grpc_address: proto.grpc_address.clone(),
-            object_category: proto.object_category.clone(),
-            capabilities: proto.capabilities.clone(),
-            labels: wit_labels,
-            health_status: Self::proto_to_wit_health_status(proto.health_status),
-            created_at: created_at_ms,
-            updated_at: updated_at_ms,
-            last_heartbeat: last_heartbeat_ms,
-        }
+    fn encode_regs(protos: &[plexspaces_proto::object_registry::v1::ObjectRegistration]) -> Vec<u8> {
+        use prost::Message;
+        let resp = plexspaces_proto::object_registry::v1::DiscoverResponse {
+            registrations: protos.to_vec(),
+            total_count: protos.len() as i64,
+            ..Default::default()
+        };
+        resp.encode_to_vec()
     }
 }
 
@@ -5197,482 +5131,228 @@ impl RegistryImpl {
 impl plexspaces::actor::registry::Host for RegistryImpl {
     async fn register(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        object_id: String,
-        object_type: plexspaces::actor::registry::ObjectType,
-        grpc_address: String,
-        object_category: Option<String>,
-        capabilities: Vec<String>,
-        labels: Vec<plexspaces::actor::registry::Label>,
+        request: Vec<u8>,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
+        use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_register_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::DEBUG,
-            "wasm_registry_register",
-            actor_id = %self.actor_id,
-            object_id = %object_id,
-            object_type = ?object_type,
-            grpc_address = %grpc_address
+        let req = plexspaces_proto::object_registry::v1::RegisterRequest::decode(
+            request.as_slice(),
         )
-        .entered();
+        .map_err(|e| make_actor_error("invalid-input", format!("registry register: {}", e)))?;
+
+        let registration = req.registration.ok_or_else(|| {
+            make_actor_error("invalid-input", "registry register: missing registration".to_string())
+        })?;
+        let object_id = registration.object_id.clone();
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = context_to_request_context(&ctx);
+        let request_ctx = Self::request_ctx(&self.host_functions, &registration.namespace, &self.actor_id);
 
-        // Convert WIT ObjectType to proto ObjectType
-        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
-        let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => {
-                ProtoObjectType::ObjectTypeUnspecified
-            }
-            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => {
-                ProtoObjectType::ObjectTypeTuplespace
-            }
-            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => {
-                ProtoObjectType::ObjectTypeApplication
-            }
-            plexspaces::actor::registry::ObjectType::Workflow => {
-                ProtoObjectType::ObjectTypeWorkflow
-            }
-            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => {
-                ProtoObjectType::ObjectTypeProcessGroup
-            }
-        };
-
-        // Convert WIT labels to proto labels (Vec<String>)
-        let proto_labels: Vec<String> = labels
-            .into_iter()
-            .map(|l| format!("{}={}", l.key, l.value))
-            .collect();
-
-        let registration = plexspaces_proto::object_registry::v1::ObjectRegistration {
-            object_id: object_id.clone(),
-            object_type: proto_object_type as i32,
-            grpc_address: grpc_address.clone(),
-            object_category: object_category.unwrap_or_default(),
-            capabilities,
-            labels: proto_labels,
-            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
-                as i32,
-            ..Default::default()
-        };
-
-        // Drop span before await to ensure Send
-        drop(_span);
         match registry.register(&request_ctx, registration).await {
             Ok(()) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_register_duration_seconds")
-                    .record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_register_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_id = %object_id, object_type = ?object_type, "Registry register succeeded");
-                }
                 Ok(())
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_register_errors_total").increment(1);
-                let error_code = if e.to_string().contains("already registered") {
-                    "internal"
-                } else if e.to_string().contains("Invalid input") {
-                    "internal"
-                } else {
-                    "internal"
-                };
-                tracing::warn!(object_id = %object_id, object_type = ?object_type, error = %e, "Registry register failed");
-                Err(make_actor_error(
-                    error_code,
-                    format!("Registry register failed: {}", e),
-                ))
+                tracing::warn!(object_id = %object_id, error = %e, "Registry register failed");
+                Err(make_actor_error("internal", format!("Registry register failed: {}", e)))
             }
         }
     }
 
     async fn unregister(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        object_type: plexspaces::actor::registry::ObjectType,
-        object_id: String,
+        request: Vec<u8>,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
+        use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_unregister_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::DEBUG,
-            "wasm_registry_unregister",
-            actor_id = %self.actor_id,
-            object_type = ?object_type,
-            object_id = %object_id
+        let req = plexspaces_proto::object_registry::v1::UnregisterRequest::decode(
+            request.as_slice(),
         )
-        .entered();
+        .map_err(|e| make_actor_error("invalid-input", format!("registry unregister: {}", e)))?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = context_to_request_context(&ctx);
+        let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
+        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
-        // Convert WIT ObjectType to proto ObjectType
-        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
-        let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => {
-                ProtoObjectType::ObjectTypeUnspecified
-            }
-            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => {
-                ProtoObjectType::ObjectTypeTuplespace
-            }
-            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => {
-                ProtoObjectType::ObjectTypeApplication
-            }
-            plexspaces::actor::registry::ObjectType::Workflow => {
-                ProtoObjectType::ObjectTypeWorkflow
-            }
-            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => {
-                ProtoObjectType::ObjectTypeProcessGroup
-            }
-        };
-
-        // Drop span before await to ensure Send
-        drop(_span);
-        match registry
-            .unregister(&request_ctx, proto_object_type, &object_id)
-            .await
-        {
+        match registry.unregister(&request_ctx, object_type, &req.object_id).await {
             Ok(()) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_unregister_duration_seconds")
-                    .record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_unregister_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry unregister succeeded");
-                }
                 Ok(())
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_unregister_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    "actor-not-found"
-                } else {
-                    "internal"
-                };
-                tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry unregister failed");
-                Err(make_actor_error(
-                    error_code,
-                    format!("Registry unregister failed: {}", e),
-                ))
+                tracing::warn!(object_id = %req.object_id, error = %e, "Registry unregister failed");
+                let code = if e.to_string().contains("not found") { "actor-not-found" } else { "internal" };
+                Err(make_actor_error(code, format!("Registry unregister failed: {}", e)))
             }
         }
     }
 
     async fn lookup(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        object_type: plexspaces::actor::registry::ObjectType,
-        object_id: String,
-    ) -> Result<
-        Option<plexspaces::actor::registry::ObjectRegistration>,
-        plexspaces::actor::types::ActorError,
-    > {
-        let start_time = std::time::Instant::now();
+        request: Vec<u8>,
+    ) -> Result<Vec<u8>, plexspaces::actor::types::ActorError> {
+        use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_lookup_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::DEBUG,
-            "wasm_registry_lookup",
-            actor_id = %self.actor_id,
-            object_type = ?object_type,
-            object_id = %object_id
+        let req = plexspaces_proto::object_registry::v1::LookupRequest::decode(
+            request.as_slice(),
         )
-        .entered();
+        .map_err(|e| make_actor_error("invalid-input", format!("registry lookup: {}", e)))?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = context_to_request_context(&ctx);
+        let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
+        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
-        // Convert WIT ObjectType to proto ObjectType
-        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
-        let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => {
-                ProtoObjectType::ObjectTypeUnspecified
-            }
-            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => {
-                ProtoObjectType::ObjectTypeTuplespace
-            }
-            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => {
-                ProtoObjectType::ObjectTypeApplication
-            }
-            plexspaces::actor::registry::ObjectType::Workflow => {
-                ProtoObjectType::ObjectTypeWorkflow
-            }
-            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => {
-                ProtoObjectType::ObjectTypeProcessGroup
-            }
-        };
-
-        // Drop span before await to ensure Send
-        drop(_span);
-        match registry
-            .lookup_full(&request_ctx, proto_object_type, &object_id)
-            .await
-        {
-            Ok(Some(proto_reg)) => {
-                let wit_reg = Self::proto_to_wit_registration(&proto_reg);
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_lookup_duration_seconds")
-                    .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry lookup succeeded");
+        if !req.alias.is_empty() {
+            match registry.lookup_by_alias(&request_ctx, &req.alias).await {
+                Ok(Some(proto_reg)) => {
+                    metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
+                    return Ok(Self::encode_reg(&proto_reg));
                 }
-                Ok(Some(wit_reg))
+                Ok(None) => {
+                    metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
+                    return Ok(Vec::new());
+                }
+                Err(e) => {
+                    metrics::counter!("plexspaces_wasm_registry_lookup_errors_total").increment(1);
+                    return Err(make_actor_error("internal", format!("Registry lookup_by_alias failed: {}", e)));
+                }
+            }
+        }
+
+        match registry.lookup(&request_ctx, &req.object_id, Some(object_type)).await {
+            Ok(Some(proto_reg)) => {
+                metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
+                Ok(Self::encode_reg(&proto_reg))
             }
             Ok(None) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_lookup_duration_seconds")
-                    .record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_lookup_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry lookup returned None");
-                }
-                Ok(None)
+                Ok(Vec::new())
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_lookup_errors_total").increment(1);
-                tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry lookup failed");
-                Err(make_actor_error(
-                    "internal",
-                    format!("Registry lookup failed: {}", e),
-                ))
+                tracing::warn!(object_id = %req.object_id, error = %e, "Registry lookup failed");
+                Err(make_actor_error("internal", format!("Registry lookup failed: {}", e)))
             }
         }
     }
 
     async fn discover(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        object_type: Option<plexspaces::actor::registry::ObjectType>,
-        object_category: Option<String>,
-        capabilities: Vec<String>,
-        labels: Vec<String>,
-        health_status: Option<plexspaces::actor::registry::HealthStatus>,
-        offset: u32,
-        limit: u32,
-    ) -> Result<
-        Vec<plexspaces::actor::registry::ObjectRegistration>,
-        plexspaces::actor::types::ActorError,
-    > {
-        let start_time = std::time::Instant::now();
+        request: Vec<u8>,
+    ) -> Result<Vec<u8>, plexspaces::actor::types::ActorError> {
+        use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_discover_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::DEBUG,
-            "wasm_registry_discover",
-            actor_id = %self.actor_id,
-            object_type = ?object_type,
-            offset = offset,
-            limit = limit
+        let req = plexspaces_proto::object_registry::v1::DiscoverRequest::decode(
+            request.as_slice(),
         )
-        .entered();
+        .map_err(|e| make_actor_error("invalid-input", format!("registry discover: {}", e)))?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = context_to_request_context(&ctx);
+        let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
+        let object_type_opt = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+            .ok()
+            .filter(|t| *t != plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let page_size = if req.page_size > 0 { req.page_size as usize } else { 100usize };
+        let category_opt = if req.object_category.is_empty() { None } else { Some(req.object_category.clone()) };
+        let caps_opt = if req.capabilities.is_empty() { None } else { Some(req.capabilities.clone()) };
+        let labels_opt = if req.labels.is_empty() { None } else { Some(req.labels.clone()) };
 
-        // Convert WIT types to proto types
-        let proto_object_type = object_type.map(|ot| match ot {
-            plexspaces::actor::registry::ObjectType::Unspecified => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified
-            }
-            plexspaces::actor::registry::ObjectType::Actor => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor
-            }
-            plexspaces::actor::registry::ObjectType::Tuplespace => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace
-            }
-            plexspaces::actor::registry::ObjectType::Service => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService
-            }
-            plexspaces::actor::registry::ObjectType::Vm => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeVm
-            }
-            plexspaces::actor::registry::ObjectType::Application => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeApplication
-            }
-            plexspaces::actor::registry::ObjectType::Workflow => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeWorkflow
-            }
-            plexspaces::actor::registry::ObjectType::Node => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeNode
-            }
-            plexspaces::actor::registry::ObjectType::ProcessGroup => {
-                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeProcessGroup
-            }
-        });
-
-        let proto_health_status = health_status.map(|hs| match hs {
-            plexspaces::actor::registry::HealthStatus::Unknown => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown
-            }
-            plexspaces::actor::registry::HealthStatus::Healthy => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
-            }
-            plexspaces::actor::registry::HealthStatus::Degraded => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusDegraded
-            }
-            plexspaces::actor::registry::HealthStatus::Unhealthy => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy
-            }
-            plexspaces::actor::registry::HealthStatus::Starting => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStarting
-            }
-            plexspaces::actor::registry::HealthStatus::Stopping => {
-                plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusStopping
-            }
-        });
-
-        let capabilities_opt = if capabilities.is_empty() {
-            None
-        } else {
-            Some(capabilities)
-        };
-        let labels_opt = if labels.is_empty() {
-            None
-        } else {
-            Some(labels)
-        };
-
-        // Drop span before await to ensure Send
-        drop(_span);
-        match registry
-            .discover(
-                &request_ctx,
-                proto_object_type,
-                object_category,
-                capabilities_opt,
-                labels_opt,
-                proto_health_status,
-                offset as usize,
-                limit as usize,
-            )
-            .await
-        {
-            Ok(proto_regs) => {
-                let wit_regs: Vec<plexspaces::actor::registry::ObjectRegistration> = proto_regs
-                    .iter()
-                    .map(|r| Self::proto_to_wit_registration(r))
-                    .collect();
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_discover_duration_seconds")
-                    .record(duration.as_secs_f64());
+        match registry.discover(
+            &request_ctx,
+            object_type_opt,
+            category_opt,
+            caps_opt,
+            labels_opt,
+            None,
+            0,
+            page_size,
+        ).await {
+            Ok(registrations) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_type = ?object_type, count = wit_regs.len(), "Registry discover succeeded");
-                }
-                Ok(wit_regs)
+                Ok(Self::encode_regs(&registrations))
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_errors_total").increment(1);
-                tracing::warn!(object_type = ?object_type, error = %e, "Registry discover failed");
-                Err(make_actor_error(
-                    "internal",
-                    format!("Registry discover failed: {}", e),
-                ))
+                tracing::warn!(error = %e, "Registry discover failed");
+                Err(make_actor_error("internal", format!("Registry discover failed: {}", e)))
             }
         }
     }
 
     async fn heartbeat(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
-        object_type: plexspaces::actor::registry::ObjectType,
-        object_id: String,
+        request: Vec<u8>,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
-        let start_time = std::time::Instant::now();
+        use prost::Message;
         metrics::counter!("plexspaces_wasm_registry_heartbeat_total").increment(1);
-        let _span = tracing::span!(
-            tracing::Level::DEBUG,
-            "wasm_registry_heartbeat",
-            actor_id = %self.actor_id,
-            object_type = ?object_type,
-            object_id = %object_id
+        let req = plexspaces_proto::object_registry::v1::HeartbeatRequest::decode(
+            request.as_slice(),
         )
-        .entered();
+        .map_err(|e| make_actor_error("invalid-input", format!("registry heartbeat: {}", e)))?;
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())
         })?;
 
-        let request_ctx = context_to_request_context(&ctx);
+        let request_ctx = Self::request_ctx(&self.host_functions, &req.namespace, &self.actor_id);
+        let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(req.object_type)
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
 
-        // Convert WIT ObjectType to proto ObjectType
-        use plexspaces_proto::object_registry::v1::ObjectType as ProtoObjectType;
-        let proto_object_type = match object_type {
-            plexspaces::actor::registry::ObjectType::Unspecified => {
-                ProtoObjectType::ObjectTypeUnspecified
-            }
-            plexspaces::actor::registry::ObjectType::Actor => ProtoObjectType::ObjectTypeActor,
-            plexspaces::actor::registry::ObjectType::Tuplespace => {
-                ProtoObjectType::ObjectTypeTuplespace
-            }
-            plexspaces::actor::registry::ObjectType::Service => ProtoObjectType::ObjectTypeService,
-            plexspaces::actor::registry::ObjectType::Vm => ProtoObjectType::ObjectTypeVm,
-            plexspaces::actor::registry::ObjectType::Application => {
-                ProtoObjectType::ObjectTypeApplication
-            }
-            plexspaces::actor::registry::ObjectType::Workflow => {
-                ProtoObjectType::ObjectTypeWorkflow
-            }
-            plexspaces::actor::registry::ObjectType::Node => ProtoObjectType::ObjectTypeNode,
-            plexspaces::actor::registry::ObjectType::ProcessGroup => {
-                ProtoObjectType::ObjectTypeProcessGroup
-            }
-        };
-
-        // Drop span before await to ensure Send
-        drop(_span);
-        match registry
-            .heartbeat(&request_ctx, proto_object_type, &object_id)
-            .await
-        {
+        match registry.heartbeat(&request_ctx, object_type, &req.object_id).await {
             Ok(()) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_registry_heartbeat_duration_seconds")
-                    .record(duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_success_total").increment(1);
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(object_type = ?object_type, object_id = %object_id, "Registry heartbeat succeeded");
-                }
                 Ok(())
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_registry_heartbeat_errors_total").increment(1);
-                let error_code = if e.to_string().contains("not found") {
-                    "actor-not-found"
-                } else {
-                    "internal"
-                };
-                tracing::warn!(object_type = ?object_type, object_id = %object_id, error = %e, "Registry heartbeat failed");
-                Err(make_actor_error(
-                    error_code,
-                    format!("Registry heartbeat failed: {}", e),
-                ))
+                tracing::warn!(object_id = %req.object_id, error = %e, "Registry heartbeat failed");
+                Err(make_actor_error("internal", format!("Registry heartbeat failed: {}", e)))
+            }
+        }
+    }
+
+    async fn lookup_by_alias(
+        &mut self,
+        alias: String,
+    ) -> Result<Vec<u8>, plexspaces::actor::types::ActorError> {
+        metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_total").increment(1);
+
+        let registry = self.host_functions.object_registry().ok_or_else(|| {
+            make_actor_error("internal", "ObjectRegistry not configured".to_string())
+        })?;
+
+        let request_ctx = Self::request_ctx(&self.host_functions, "", &self.actor_id);
+
+        match registry.lookup_by_alias(&request_ctx, &alias).await {
+            Ok(Some(proto_reg)) => {
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total").increment(1);
+                Ok(Self::encode_reg(&proto_reg))
+            }
+            Ok(None) => {
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_success_total").increment(1);
+                Ok(Vec::new())
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_wasm_registry_lookup_by_alias_errors_total").increment(1);
+                tracing::warn!(alias = %alias, error = %e, "Registry lookup_by_alias failed");
+                Err(make_actor_error("internal", format!("Registry lookup_by_alias failed: {}", e)))
             }
         }
     }

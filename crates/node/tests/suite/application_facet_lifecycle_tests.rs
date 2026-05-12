@@ -26,14 +26,19 @@
 //! - Observability/metrics for application lifecycle
 
 use async_trait::async_trait;
+use plexspaces_actor::{
+    ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, RequestContextExt,
+    ServiceLocator,
+};
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_actor::{ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy};
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use prost_types::Duration as ProstDuration;
 use serde_json::Value;
 use std::collections::HashMap;

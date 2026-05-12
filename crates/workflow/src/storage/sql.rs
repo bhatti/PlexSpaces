@@ -81,8 +81,7 @@ fn encode_definition(def: &WorkflowDefinition) -> Result<Vec<u8>, WorkflowError>
 
 /// Decode a WorkflowDefinition from proto binary bytes
 fn decode_definition(bytes: &[u8]) -> Result<WorkflowDefinition, WorkflowError> {
-    WorkflowDefinition::decode(bytes)
-        .map_err(|e| WorkflowError::Serialization(e.to_string()))
+    WorkflowDefinition::decode(bytes).map_err(|e| WorkflowError::Serialization(e.to_string()))
 }
 
 /// Convert serde_json::Value to prost_types::Struct
@@ -147,11 +146,9 @@ fn prost_value_to_value(v: &prost_types::Value) -> Value {
         None => Value::Null,
         Some(prost_types::value::Kind::NullValue(_)) => Value::Null,
         Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(*b),
-        Some(prost_types::value::Kind::NumberValue(n)) => {
-            serde_json::Number::from_f64(*n)
-                .map(Value::Number)
-                .unwrap_or(Value::Null)
-        }
+        Some(prost_types::value::Kind::NumberValue(n)) => serde_json::Number::from_f64(*n)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         Some(prost_types::value::Kind::StringValue(s)) => Value::String(s.clone()),
         Some(prost_types::value::Kind::ListValue(list)) => {
             Value::Array(list.values.iter().map(prost_value_to_value).collect())
@@ -1811,7 +1808,9 @@ impl WorkflowStorage {
         statuses: Vec<ExecutionStatus>,
         node_id: Option<&str>,
     ) -> Result<Vec<WorkflowExecution>, WorkflowError> {
-        let rows = self.list_execution_rows_by_status(statuses, node_id).await?;
+        let rows = self
+            .list_execution_rows_by_status(statuses, node_id)
+            .await?;
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
@@ -1821,7 +1820,10 @@ impl WorkflowStorage {
         statuses: Vec<ExecutionStatus>,
         node_id: Option<&str>,
     ) -> Result<Vec<WorkflowExecutionRow>, WorkflowError> {
-        let status_strings: Vec<String> = statuses.iter().map(|s| s.as_sql_str().to_string()).collect();
+        let status_strings: Vec<String> = statuses
+            .iter()
+            .map(|s| s.as_sql_str().to_string())
+            .collect();
         let mut executions = Vec::new();
 
         match &self.pool {
@@ -1973,7 +1975,9 @@ impl WorkflowStorage {
         stale_threshold_seconds: u64,
         statuses: Vec<ExecutionStatus>,
     ) -> Result<Vec<WorkflowExecution>, WorkflowError> {
-        let rows = self.list_stale_execution_rows(stale_threshold_seconds, statuses).await?;
+        let rows = self
+            .list_stale_execution_rows(stale_threshold_seconds, statuses)
+            .await?;
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
@@ -1983,7 +1987,10 @@ impl WorkflowStorage {
         stale_threshold_seconds: u64,
         statuses: Vec<ExecutionStatus>,
     ) -> Result<Vec<WorkflowExecutionRow>, WorkflowError> {
-        let status_strings: Vec<String> = statuses.iter().map(|s| s.as_sql_str().to_string()).collect();
+        let status_strings: Vec<String> = statuses
+            .iter()
+            .map(|s| s.as_sql_str().to_string())
+            .collect();
         let mut executions = Vec::new();
 
         match &self.pool {
@@ -2114,4 +2121,3 @@ impl WorkflowStorage {
         Ok(executions)
     }
 }
-

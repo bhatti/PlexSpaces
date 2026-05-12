@@ -645,3 +645,51 @@ func hostChannelDepth(ctx, channelName string) string {
 	rawHostChannelDepth(ctx, channelName, unsafe.Pointer(&retArea))
 	return readResultString(unsafe.Pointer(&retArea))
 }
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 register
+func rawHostRegistryRegister(request string, retptr unsafe.Pointer)
+
+func hostRegistryRegister(request string) string {
+	rawHostRegistryRegister(request, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 unregister
+func rawHostRegistryUnregister(request string, retptr unsafe.Pointer)
+
+func hostRegistryUnregister(request string) string {
+	rawHostRegistryUnregister(request, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 lookup
+func rawHostRegistryLookup(request string, retptr unsafe.Pointer)
+
+func hostRegistryLookup(request string) string {
+	rawHostRegistryLookup(request, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 lookup-by-alias
+func rawHostRegistryLookupByAlias(alias string, retptr unsafe.Pointer)
+
+func hostRegistryLookupByAlias(alias string) string {
+	rawHostRegistryLookupByAlias(alias, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 discover
+func rawHostRegistryDiscover(request string, retptr unsafe.Pointer)
+
+func hostRegistryDiscover(request string) string {
+	rawHostRegistryDiscover(request, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/registry@0.1.0 heartbeat
+func rawHostRegistryHeartbeat(request string, retptr unsafe.Pointer)
+
+func hostRegistryHeartbeat(request string) string {
+	rawHostRegistryHeartbeat(request, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}

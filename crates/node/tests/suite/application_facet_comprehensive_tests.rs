@@ -33,16 +33,21 @@
 //! - Verify graceful shutdown with all facets
 
 use async_trait::async_trait;
+use plexspaces_actor::{
+    ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, RequestContextExt,
+    ServiceLocator,
+};
 use plexspaces_application::{
     Application, ApplicationError, ApplicationManagerImpl, ApplicationNode,
 };
-use plexspaces_actor::{ActorId, ApplicationManager, InitializableServiceLocator, RequestContext, ServiceLocator, RequestContextExt};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy};
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use prost_types::Duration as ProstDuration;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -172,7 +177,9 @@ impl FacetFactory for VirtualActorFacetFactory {
 }
 
 /// Helper: Register all facet factories in FacetRegistry
-async fn register_all_facet_factories(service_locator: Arc<dyn plexspaces_actor::InitializableServiceLocator>) {
+async fn register_all_facet_factories(
+    service_locator: Arc<dyn plexspaces_actor::InitializableServiceLocator>,
+) {
     use plexspaces_actor::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     // Create new registry with all factories

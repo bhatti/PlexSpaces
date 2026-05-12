@@ -19,6 +19,8 @@ This crate consolidates three separate registries (ActorRegistry, TupleSpaceRegi
 │              ObjectRegistryImpl                          │
 │  register() / unregister() / lookup() / discover()      │
 │  heartbeat() / find_stale() / update_health_status()    │
+│  record_heartbeat_failure() / lookup_by_alias()         │
+│  register_with_unique_alias()                           │
 └────────────────────┬────────────────────────────────────┘
                      │
                      ▼
@@ -51,7 +53,46 @@ Unlike a generic key-value store, this repository uses indexed columns:
 | `health_status` | Filter by health state |
 | `last_heartbeat` | Find stale registrations efficiently |
 | `object_category` | Sub-type filtering (e.g., "GenServer", "redis") |
+| `alias` | Unique identity key for placement (`"{type}:{name}:{ns}:{tenant}"`) |
+| `max_heartbeat_failures` | Threshold before transitioning to DEAD (default 3) |
+| `heartbeat_failure_count` | Consecutive missed heartbeats (reset on success) |
 | `registration_blob` | Full ObjectRegistration protobuf |
+
+### Health Lifecycle
+
+Health transitions are managed automatically:
+
+```
+HEALTHY  ──(1st miss)──▶  DEGRADED  ──(max misses)──▶  DEAD
+   ▲                                                      │
+   └─────────────(successful heartbeat)───────────────────┘
+
+NODE going DEAD ──cascades──▶ all objects on that node → DEAD
+```
+
+`max_heartbeat_failures` (proto field 19, default 3) and `heartbeat_failure_count` (proto field 20, OUTPUT_ONLY) are stored as indexed columns for efficient increments.
+
+### Unique Actor Placement (Orleans Grain Directory)
+
+The `alias` field (proto field 18) enables single-active-instance guarantees:
+
+```rust
+use plexspaces_object_registry::RegisterResult;
+
+let registration = ObjectRegistration {
+    object_id: "counter@node1".to_string(),
+    alias: "Counter:my-counter:production:tenant-1".to_string(),
+    // ...
+    ..Default::default()
+};
+
+match registry.register_with_unique_alias(&ctx, registration, true).await? {
+    RegisterResult::Registered => { /* spawn succeeded */ }
+    RegisterResult::AlreadyExists { grpc_address, object_id } => {
+        // Forward to existing instance at grpc_address
+    }
+}
+```
 
 ### Performance Characteristics
 
@@ -59,8 +100,11 @@ Unlike a generic key-value store, this repository uses indexed columns:
 |-----------|------------|-------|
 | `register()` | O(1) | Single repository write |
 | `lookup()` | O(1) | Primary key lookup |
+| `lookup_by_alias()` | O(1) | Unique index lookup |
+| `register_with_unique_alias()` | O(1) | Alias check + insert |
 | `discover()` | O(log n + k) | Indexed query + filter |
-| `heartbeat()` | O(1) | Single column UPDATE (no blob read/write) |
+| `heartbeat()` | O(1) | Column UPDATEs (timestamp + reset failures + health) |
+| `record_heartbeat_failure()` | O(1) | Atomic increment + health transition |
 | `find_stale()` | O(log n + k) | Uses `last_heartbeat` index |
 
 ### Multi-Backend Support
@@ -151,12 +195,18 @@ registry
     )
     .await?;
 
-// Update health status
+// Record a missed heartbeat (increments failure count, transitions health)
+let new_status = registry
+    .record_heartbeat_failure(&ctx, "counter//gen_server::production@node1")
+    .await?;
+// new_status == DEGRADED (count < max) or DEAD (count >= max)
+
+// Update health status directly
 registry
     .update_health_status(
         &ctx,
         "counter//gen_server::production@node1",
-        HealthStatus::HealthStatusUnhealthy,
+        HealthStatus::HealthStatusDead,
     )
     .await?;
 ```
@@ -180,6 +230,33 @@ Migrations run automatically when creating a SQL repository.
 The registry also supports distinct tenant discovery for a given object type. Dashboard tenant
 inventory uses application registrations as the source of truth, with repository-backed offset/limit
 pagination and total-count queries so tenant listing does not depend on higher-level response merges.
+
+## WIT Interface (WASM Actors)
+
+WASM actors access the Object Registry through the `plexspaces:actor/registry@0.1.0` WIT interface
+defined in `wit/plexspaces-actor/registry.wit`. The interface provides:
+
+| WIT Function | Description |
+|---|---|
+| `register` | Register an object with optional alias |
+| `unregister` | Remove a registration |
+| `lookup` | Fetch by object ID |
+| `lookup-by-alias` | Fetch by alias (grain directory lookup) |
+| `discover` | Paginated discovery with filters |
+| `heartbeat` | Update liveness timestamp |
+
+The `object-registration` record includes an `alias: option<string>` field for identity-based lookup.
+
+## SDK Access
+
+All SDK languages expose `host.registry` (or `host.Registry()` in Go):
+
+| Language | Access |
+|---|---|
+| Python | `host.registry.lookup_by_alias(ctx, alias)` |
+| TypeScript | `host.registry.lookupByAlias(ctx, alias)` |
+| Go | `host.Registry().LookupByAlias(ctx, alias)` |
+| Rust | `plexspaces_sdk::object_registry::lookup_actor_by_identity(...)` |
 
 ## Dependencies
 

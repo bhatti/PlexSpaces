@@ -34,11 +34,21 @@ impl OutboundHttpClientError {
     pub fn code(&self) -> plexspaces_proto::common::v1::OutboundHttpClientErrorCode {
         use plexspaces_proto::common::v1::OutboundHttpClientErrorCode;
         match self {
-            OutboundHttpClientError::UnknownLink(_) => OutboundHttpClientErrorCode::OutboundHttpErrorUnknownLink,
-            OutboundHttpClientError::CircuitOpen { .. } => OutboundHttpClientErrorCode::OutboundHttpErrorCircuitOpen,
-            OutboundHttpClientError::InvalidUrl(_) => OutboundHttpClientErrorCode::OutboundHttpErrorInvalidUrl,
-            OutboundHttpClientError::RequestFailed(_) => OutboundHttpClientErrorCode::OutboundHttpErrorRequestFailed,
-            OutboundHttpClientError::BodyTooLarge => OutboundHttpClientErrorCode::OutboundHttpErrorBodyTooLarge,
+            OutboundHttpClientError::UnknownLink(_) => {
+                OutboundHttpClientErrorCode::OutboundHttpErrorUnknownLink
+            }
+            OutboundHttpClientError::CircuitOpen { .. } => {
+                OutboundHttpClientErrorCode::OutboundHttpErrorCircuitOpen
+            }
+            OutboundHttpClientError::InvalidUrl(_) => {
+                OutboundHttpClientErrorCode::OutboundHttpErrorInvalidUrl
+            }
+            OutboundHttpClientError::RequestFailed(_) => {
+                OutboundHttpClientErrorCode::OutboundHttpErrorRequestFailed
+            }
+            OutboundHttpClientError::BodyTooLarge => {
+                OutboundHttpClientErrorCode::OutboundHttpErrorBodyTooLarge
+            }
         }
     }
 }

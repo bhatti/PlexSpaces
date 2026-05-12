@@ -1256,6 +1256,18 @@ function encodeApplicationMetrics(metrics) {
   return buf;
 }
 
+// ../../../../sdks/typescript/dist/process_groups.js
+function firstGroupMember(members) {
+  return members.length > 0 ? members[0] : null;
+}
+function firstGroupMemberOrThrow(group, members) {
+  const first = firstGroupMember(members);
+  if (first === null) {
+    throw new Error(`no members in process group '${group}'`);
+  }
+  return first;
+}
+
 // ../../../../sdks/typescript/dist/host.js
 import {
   send as hostSend,
@@ -1306,6 +1318,14 @@ import {
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch
 } from "plexspaces:actor/host@0.1.0";
+import {
+  register as hostRegistryRegister,
+  unregister as hostRegistryUnregister,
+  lookup as hostRegistryLookup,
+  lookupByAlias as hostRegistryLookupByAlias,
+  discover as hostRegistryDiscover,
+  heartbeat as hostRegistryHeartbeat
+} from "plexspaces:actor/registry@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
     return fn(...args);
@@ -1430,22 +1450,101 @@ var ProcessGroups = class {
   }
   /** Return the first member of a process group, or null if empty. */
   first(group) {
-    const members = this.members(group);
-    return members.length > 0 ? members[0] : null;
+    return firstGroupMember(this.members(group));
   }
   /** Return the first member of a process group, throwing if empty. */
   firstOrThrow(group) {
-    const members = this.members(group);
-    if (members.length === 0) {
-      throw new Error(`no members in process group '${group}'`);
+    return firstGroupMemberOrThrow(group, this.members(group));
+  }
+};
+var Registry = class {
+  /**
+   * Register an object in the registry.
+   */
+  register(ctx, objectId, objectType, grpcAddress, objectCategory, capabilities = [], labels = []) {
+    const result = safeCall(hostRegistryRegister, ctx, objectId, objectType, grpcAddress, objectCategory ?? null, capabilities, labels);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
     }
-    return members[0];
+  }
+  /**
+   * Unregister an object from the registry.
+   */
+  unregister(ctx, objectType, objectId) {
+    const result = safeCall(hostRegistryUnregister, ctx, objectType, objectId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
+  }
+  /**
+   * Look up an object by ID. Returns null if not found, throws on storage errors.
+   */
+  lookup(ctx, objectType, objectId) {
+    const raw = safeCall(hostRegistryLookup, ctx, objectType, objectId);
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    if (!raw || raw === "null")
+      return null;
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return result ?? null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Look up an object by alias (Orleans grain directory pattern).
+   * Alias format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+   * Returns null if not found, throws on storage errors.
+   */
+  lookupByAlias(ctx, alias) {
+    const raw = safeCall(hostRegistryLookupByAlias, ctx, alias);
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    if (!raw || raw === "null")
+      return null;
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return result ?? null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Discover objects with optional filtering.
+   */
+  discover(ctx, options = {}) {
+    const { objectType, objectCategory, capabilities = [], labels = [], healthStatus, offset = 0, limit = 100 } = options;
+    const raw = safeCall(hostRegistryDiscover, ctx, objectType ?? null, objectCategory ?? null, capabilities, labels, healthStatus ?? null, offset, limit);
+    if (!raw)
+      return [];
+    if (typeof raw === "string" && raw.startsWith("ERROR:")) {
+      throw new Error(raw);
+    }
+    try {
+      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(result) ? result : [];
+    } catch {
+      return [];
+    }
+  }
+  /**
+   * Update the heartbeat for a registered object.
+   */
+  heartbeat(ctx, objectType, objectId) {
+    const result = safeCall(hostRegistryHeartbeat, ctx, objectType, objectId);
+    if (typeof result === "string" && result.startsWith("ERROR:")) {
+      throw new Error(result);
+    }
   }
 };
 var Host = class {
   constructor() {
     this.processGroups = new ProcessGroups();
     this.ts = new TupleSpace(this);
+    this.registry = new Registry();
   }
   // ========================================================================
   // Messaging
@@ -1894,83 +1993,26 @@ var Host = class {
 var host = new Host();
 
 // ../../../../sdks/typescript/dist/router.js
-function normalizeActorRole(actorId) {
-  if (!actorId) {
-    return "";
-  }
-  const canonicalSep = actorId.indexOf("//");
-  if (canonicalSep >= 0 && canonicalSep + 2 < actorId.length) {
-    const rest = actorId.substring(canonicalSep + 2);
-    const behaviorSep = rest.indexOf("::");
-    if (behaviorSep >= 0) {
-      return rest.substring(0, behaviorSep);
-    }
-    const nodeSep2 = rest.indexOf("@");
-    return nodeSep2 >= 0 ? rest.substring(0, nodeSep2) : rest;
-  }
-  const childSep = actorId.indexOf(":");
-  if (childSep >= 0) {
-    return actorId.substring(0, childSep);
-  }
-  const nodeSep = actorId.indexOf("@");
-  if (nodeSep >= 0) {
-    return actorId.substring(0, nodeSep);
-  }
-  return actorId;
-}
 var ActorRouter = class {
-  /**
-   * Create an ActorRouter with prefix-to-factory mappings.
-   *
-   * @param routes - Map of actor_id prefix to factory function.
-   *   Prefix matching: "rate-limiter" matches "rate-limiter-0", "rate-limiter-1", etc.
-   *
-   * Example:
-   *   new ActorRouter({
-   *     "parameter-server": () => new ParameterServerActor(),
-   *     "data-worker": () => new DataWorkerActor(),
-   *   })
-   */
   constructor(routes) {
     this.active = null;
     this.factories = routes;
   }
   /** WIT `init(config: payload) -> result<_, actor-error>` */
   init(configJson) {
-    try {
-      const text = decodeWitPayloadUtf8(configJson);
-      const config = text.trim() ? JSON.parse(text) : {};
-      const actorId = config.actor_id || "";
-      const actorType = config.actor_type || normalizeActorRole(actorId);
-      const role = config.role || "";
-      const findFactory = (key) => {
-        let bestPrefix = "";
-        let bestFactory2 = null;
-        for (const prefix of Object.keys(this.factories)) {
-          if (key === prefix || key.startsWith(prefix)) {
-            if (prefix.length > bestPrefix.length) {
-              bestPrefix = prefix;
-              bestFactory2 = this.factories[prefix];
-            }
-          }
-        }
-        return [bestPrefix, bestFactory2];
-      };
-      let [, bestFactory] = role ? findFactory(role) : ["", null];
-      if (!bestFactory) {
-        [, bestFactory] = findFactory(actorType);
-      }
-      if (!bestFactory) {
-        throw new Error("ERROR: no actor registered for role='" + role + "' actor_type='" + actorType + "'");
-      }
-      this.active = bestFactory();
-      this.active.init(text);
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith("ERROR:")) {
-        throw e;
-      }
-      throw new Error("ERROR: router init failed");
+    const text = decodeWitPayloadUtf8(configJson);
+    const config = text.trim() ? JSON.parse(text) : {};
+    const actorType = config.actor_type || "";
+    const role = config.role || "";
+    let factory = actorType ? this.factories[actorType] : void 0;
+    if (!factory && role) {
+      factory = this.factories[role];
     }
+    if (!factory) {
+      throw new Error(`ERROR: no actor registered for actor_type='${actorType}' role='${role}'`);
+    }
+    this.active = factory();
+    this.active.init(text);
   }
   /** WIT `handle(...) -> result<payload, actor-error>` */
   handle(fromActor, msgType, payloadJson) {

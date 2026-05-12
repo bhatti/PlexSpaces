@@ -3,41 +3,36 @@
 //
 // PlexSpaces Go SDK - Multi-Actor Router
 //
-// Provides ActorRouter for routing messages to multiple actor types
-// within a single WASM module. This is the Go equivalent of the Python
-// SDK's ACTOR_ROLES mapping and TypeScript SDK's ActorRouter.
+// Dispatch rule (matches Python and TypeScript SDKs):
+//   1. config.actor_type — exact lookup (primary; always set by the framework).
+//   2. config.role       — exact lookup (same-actor_type multi-instance only,
+//                          e.g. "ephemeral"/"channel" both map to the same struct).
+//   3. Error — no silent fallback; a missing registration is always a bug.
 //
-// Example:
+// Example (normal case — distinct actor types):
 //
 //	func main() {
 //	    router := plexspaces.NewActorRouter()
-//	    router.Route("rate-limiter", func() plexspaces.Actor {
-//	        a := &RateLimiter{}
-//	        a.SetSelf(a)
-//	        return a
-//	    })
-//	    router.Route("counter", func() plexspaces.Actor {
-//	        a := &Counter{}
-//	        a.SetSelf(a)
-//	        return a
-//	    })
+//	    router.Route("ChatRoom",     func() plexspaces.Actor { return &ChatRoom{} })
+//	    router.Route("RateLimiter",  func() plexspaces.Actor { return &RateLimiter{} })
 //	    plexspaces.Register(router)
 //	}
+//
+// Example (same-type multi-instance — register role names too):
+//
+//	router.Route("AbstractionsActor", func() plexspaces.Actor { return &AbstractionsActor{} })
+//	router.Route("ephemeral",         func() plexspaces.Actor { return &AbstractionsActor{} })
 
 package plexspaces
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // ActorFactory is a function that creates a new Actor instance.
 type ActorFactory func() Actor
 
 // initConfig is the JSON structure passed by the framework to Init().
-// role is the primary dispatch key and is sourced from ActorSpawnSpec.role / ChildSpec.role.
-// actor_type is the shared behavior class/module name and is only a fallback.
-// actor_id is used as a final fallback when neither field is present.
 type initConfig struct {
 	ActorID   string          `json:"actor_id"`
 	ActorType string          `json:"actor_type"`
@@ -45,56 +40,45 @@ type initConfig struct {
 	Args      json.RawMessage `json:"args"`
 }
 
-// ActorRouter routes messages to multiple actor types within a single
-// WASM module. It implements the Actor interface and delegates to the
-// appropriate actor based on the actor_id prefix in the init config.
-//
-// This is the Go equivalent of Python SDK's ACTOR_ROLES dict and
-// TypeScript SDK's ActorRouter class.
+// ActorRouter routes messages to multiple actor types within a single WASM module.
 type ActorRouter struct {
 	BaseActor
-	factories map[string]ActorFactory
+	factories   map[string]ActorFactory
 	definitions map[string]ActorDefinition
-	active    Actor  // currently active actor for this instance
-	actorID   string // actor ID from init config
+	active      Actor
+	actorID     string
 }
 
 // NewActorRouter creates a new multi-actor router.
 func NewActorRouter() *ActorRouter {
 	r := &ActorRouter{
-		factories: make(map[string]ActorFactory),
+		factories:   make(map[string]ActorFactory),
 		definitions: make(map[string]ActorDefinition),
 	}
 	r.SetSelf(r)
 	return r
 }
 
-// Route registers an actor factory for a given prefix.
-// When the actor_id starts with this prefix, messages are routed to
-// an instance created by the factory.
-//
-// Example:
-//
-//	router.Route("rate-limiter", func() plexspaces.Actor { ... })
-//	// Matches: "rate-limiter", "rate-limiter-0", "rate-limiter-1", etc.
-func (r *ActorRouter) Route(prefix string, factory ActorFactory) {
-	r.RouteDefinition(prefix, DefineActor(factory))
+// Route registers an actor factory under an exact key.
+// Use the class name for normal dispatch (e.g. "ChatRoom").
+// Use a role name for same-class multi-instance dispatch (e.g. "ephemeral").
+func (r *ActorRouter) Route(key string, factory ActorFactory) {
+	r.RouteDefinition(key, DefineActor(factory))
 }
 
 // RouteDefinition registers an actor definition with explicit behavior/facet metadata.
-func (r *ActorRouter) RouteDefinition(prefix string, definition ActorDefinition) {
-	r.factories[prefix] = definition.Factory
-	r.definitions[prefix] = definition
+func (r *ActorRouter) RouteDefinition(key string, definition ActorDefinition) {
+	r.factories[key] = definition.Factory
+	r.definitions[key] = definition
 }
 
-// Definition returns the registered actor definition for a prefix.
-func (r *ActorRouter) Definition(prefix string) (ActorDefinition, bool) {
-	definition, ok := r.definitions[prefix]
+// Definition returns the registered actor definition for a key.
+func (r *ActorRouter) Definition(key string) (ActorDefinition, bool) {
+	definition, ok := r.definitions[key]
 	return definition, ok
 }
 
-// Init initializes the router by selecting the appropriate actor type
-// based on the actor_id field in the config JSON.
+// Init selects and initializes the correct actor from the framework-supplied config.
 func (r *ActorRouter) Init(configJSON string) string {
 	var config initConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
@@ -102,36 +86,23 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	// role sourced from ActorSpawnSpec.role / ChildSpec.role is the authoritative
-	// dispatch key for multi-actor WASM modules. Fall back to actor_type, then to the canonical
-	// actor_id-derived role for older/simpler configs.
-	dispatchKey := config.Role
-	if dispatchKey == "" {
-		dispatchKey = config.ActorType
-	}
-	if dispatchKey == "" {
-		dispatchKey = normalizeRoleActorID(config.ActorID)
-	}
-
-	// Find matching factory by prefix (longest match wins)
-	var bestPrefix string
-	var bestFactory ActorFactory
-	for prefix, factory := range r.factories {
-		if dispatchKey == prefix || strings.HasPrefix(dispatchKey, prefix) {
-			if len(prefix) > len(bestPrefix) {
-				bestPrefix = prefix
-				bestFactory = factory
-			}
+	// 1. actor_type — exact match (primary dispatch key, always set by framework)
+	if config.ActorType != "" {
+		if factory, ok := r.factories[config.ActorType]; ok {
+			r.active = factory()
+			return r.active.Init(configJSON)
 		}
 	}
 
-	if bestFactory == nil {
-		return "ERROR: no actor registered for prefix: " + dispatchKey
+	// 2. role — exact match (same-actor_type multi-instance only)
+	if config.Role != "" {
+		if factory, ok := r.factories[config.Role]; ok {
+			r.active = factory()
+			return r.active.Init(configJSON)
+		}
 	}
 
-	// Create and initialize the actor
-	r.active = bestFactory()
-	return r.active.Init(configJSON)
+	return "ERROR: no actor registered for actor_type='" + config.ActorType + "' role='" + config.Role + "'"
 }
 
 // Handle delegates to the active actor.

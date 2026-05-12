@@ -116,7 +116,9 @@ impl JournalError {
                 JournalErrorCode::JournalErrorStorage
             }
             JournalError::Replay(_) => JournalErrorCode::JournalErrorStorage,
-            JournalError::IncompatibleSchemaVersion { .. } => JournalErrorCode::JournalErrorConflict,
+            JournalError::IncompatibleSchemaVersion { .. } => {
+                JournalErrorCode::JournalErrorConflict
+            }
         }
     }
 }

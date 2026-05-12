@@ -73,11 +73,11 @@
 use async_trait::async_trait;
 use metrics;
 use plexspaces_common::RequestContextExt;
-use plexspaces_service_traits::{ActorId, ActorService, JournalStorage, ServiceLocatorBase};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};
+use plexspaces_service_traits::{ActorId, ActorService, JournalStorage, ServiceLocatorBase};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -744,8 +744,8 @@ fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemT
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_service_traits::{ActorId, ActorRef, ActorService};
     use plexspaces_actor::ServiceLocator;
+    use plexspaces_service_traits::{ActorId, ActorRef, ActorService};
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;

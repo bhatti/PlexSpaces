@@ -9,12 +9,13 @@
 
 use super::test_helpers::{registry_ask, spawn_actor_helper};
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::behavior_factory::BehaviorRegistry;
+use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
-    Message, ServiceLocator, RequestContextExt};
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
+    InitializableServiceLocator, Message, RequestContextExt, ServiceLocator,
+};
+use plexspaces_behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
@@ -173,10 +174,8 @@ fn named_def_spec(name: &str, actor_type: &str, initial_count: i64) -> ActorSpaw
             name: name.to_string(),
             actor_type: actor_type.to_string(),
         }),
-        role: String::new(),
         namespace: NAMESPACE.to_string(),
         tenant_id: TENANT.to_string(),
-        visibility: 0,
         behavior_kind: "GenServer".to_string(),
         args: HashMap::from([("initial_count".to_string(), initial_count.to_string())]),
         facets: vec![Facet {
@@ -186,8 +185,7 @@ fn named_def_spec(name: &str, actor_type: &str, initial_count: i64) -> ActorSpaw
             state: HashMap::new(),
             metadata: None,
         }],
-        labels: HashMap::new(),
-        config: None,
+        ..Default::default()
     }
 }
 
@@ -364,12 +362,9 @@ async fn test_named_definition_namespace_isolation() {
             name: "worker".to_string(),
             actor_type: actor_type.to_string(),
         }),
-        role: String::new(),
         namespace: "ns-a".to_string(),
         tenant_id: TENANT.to_string(),
-        visibility: 0,
         behavior_kind: "GenServer".to_string(),
-        args: HashMap::new(),
         facets: vec![Facet {
             r#type: "virtual_actor".to_string(),
             config: HashMap::new(),
@@ -377,8 +372,7 @@ async fn test_named_definition_namespace_isolation() {
             state: HashMap::new(),
             metadata: None,
         }],
-        labels: HashMap::new(),
-        config: None,
+        ..Default::default()
     };
     manager
         .register_virtual_actor_definition(def_spec)
@@ -422,10 +416,8 @@ async fn test_durable_actor_instance_retained_after_stop() {
             name: "cart".to_string(),
             actor_type: actor_type.to_string(),
         }),
-        role: String::new(),
         namespace: NAMESPACE.to_string(),
         tenant_id: TENANT.to_string(),
-        visibility: 0,
         behavior_kind: "GenServer".to_string(),
         args: HashMap::from([("initial_count".to_string(), "3".to_string())]),
         facets: vec![
@@ -444,8 +436,7 @@ async fn test_durable_actor_instance_retained_after_stop() {
                 metadata: None,
             },
         ],
-        labels: HashMap::new(),
-        config: None,
+        ..Default::default()
     };
     manager
         .register_virtual_actor_definition(def_spec)

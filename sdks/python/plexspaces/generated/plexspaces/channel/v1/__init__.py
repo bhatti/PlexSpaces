@@ -18,6 +18,7 @@ import grpclib
 from betterproto.grpc.grpclib_server import ServiceBase
 
 from ...common import v1 as __common_v1__
+from ...config import v1 as __config_v1__
 
 if TYPE_CHECKING:
     import grpclib.server
@@ -232,7 +233,9 @@ class ChannelConfig(betterproto.Message):
     sqlite: "SqliteConfig" = betterproto.message_field(13, group="backend_config")
     nats: "NatsConfig" = betterproto.message_field(14, group="backend_config")
     udp: "UdpConfig" = betterproto.message_field(15, group="backend_config")
-    sqs: "SqsConfig" = betterproto.message_field(16, group="backend_config")
+    sqs: "__config_v1__.SqsConfig" = betterproto.message_field(
+        16, group="backend_config"
+    )
     message_ttl: timedelta = betterproto.message_field(20)
     """Optional: TTL for messages"""
 
@@ -422,47 +425,6 @@ class UdpConfig(betterproto.Message):
 
     message_ttl_seconds: int = betterproto.uint32_field(4)
     """TTL for messages (default: 60 seconds)"""
-
-
-@dataclass(eq=False, repr=False)
-class SqsConfig(betterproto.Message):
-    """AWS SQS configuration"""
-
-    region: str = betterproto.string_field(1)
-    """AWS region (e.g., "us-east-1")"""
-
-    queue_prefix: str = betterproto.string_field(2)
-    """
-    Queue name prefix (default: "plexspaces-")
-     Actual queue names will be: {prefix}{channel_name}
-    """
-
-    endpoint_url: str = betterproto.string_field(3)
-    """
-    Endpoint URL (for local testing with SQS Local)
-     Leave empty for production (uses AWS service)
-    """
-
-    visibility_timeout_seconds: int = betterproto.uint32_field(4)
-    """
-    Visibility timeout in seconds (default: 30)
-     How long a message is invisible after being received
-    """
-
-    message_retention_period_seconds: int = betterproto.uint32_field(5)
-    """Message retention period in seconds (default: 345600 = 4 days)"""
-
-    dlq_enabled: bool = betterproto.bool_field(6)
-    """Dead Letter Queue configuration"""
-
-    dlq_max_receive_count: int = betterproto.uint32_field(7)
-    """Max receive count before sending to DLQ (default: 3)"""
-
-    receive_message_wait_time_seconds: int = betterproto.uint32_field(8)
-    """
-    Receive message wait time in seconds (long polling, default: 20)
-     0 = short polling, >0 = long polling
-    """
 
 
 @dataclass(eq=False, repr=False)

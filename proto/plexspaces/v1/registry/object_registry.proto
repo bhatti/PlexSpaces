@@ -247,7 +247,7 @@ enum HealthStatus {
   HEALTH_STATUS_UNKNOWN = 0;
   HEALTH_STATUS_HEALTHY = 1;
   HEALTH_STATUS_DEGRADED = 2;
-  HEALTH_STATUS_UNHEALTHY = 3;
+  HEALTH_STATUS_DEAD = 3;
   HEALTH_STATUS_STARTING = 4;
   HEALTH_STATUS_STOPPING = 5;
 }
@@ -361,8 +361,22 @@ message ObjectRegistration {
   // Registration update timestamp
   google.protobuf.Timestamp updated_at = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // NOTE: Lease-related fields intentionally omitted (per user requirement)
-  // Lease management is handled separately via TTL on KeyValueStore backend
+  // ==================== PLACEMENT & HEARTBEAT ====================
+
+  // Alias for identity-based lookup (Orleans grain directory key).
+  // Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+  // Enables unique actor placement - only one active registration per alias.
+  string alias = 18 [(buf.validate.field).string.max_len = 512];
+
+  // Maximum consecutive heartbeat failures before marking DEAD (default: 3).
+  // 1 missed heartbeat -> DEGRADED, max_heartbeat_failures -> DEAD.
+  uint32 max_heartbeat_failures = 19 [(buf.validate.field).uint32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // Current consecutive heartbeat failure count (managed by registry, not client).
+  uint32 heartbeat_failure_count = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // ============================================================================
@@ -395,12 +409,15 @@ service ObjectRegistry {
     };
   }
 
-  // Lookup single object by ID and type
+  // Lookup single object by ID or alias
   rpc Lookup(LookupRequest) returns (LookupResponse) {
-    option (google.api.http) = {get: "/api/v1/registry/objects/{object_id}"};
+    option (google.api.http) = {
+      get: "/api/v1/registry/objects/{object_id}"
+      additional_bindings: {get: "/api/v1/registry/objects:by-alias"}
+    };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Lookup Object"
-      description: "Get object registration by ID"
+      description: "Get object registration by ID or alias (identity-based unique key for actor placement)"
       tags: "Registry"
     };
   }
@@ -467,6 +484,10 @@ message RegisterRequest {
   // TTL for auto-expiry (optional, default: no expiry)
   // If specified, object auto-unregisters after TTL expires
   google.protobuf.Duration ttl = 2;
+
+  // If true, enforce unique alias placement.
+  // Returns existing grpc_address in response if another active registration holds the same alias.
+  bool enforce_unique_alias = 3;
 }
 
 message RegisterResponse {
@@ -475,6 +496,14 @@ message RegisterResponse {
 
   // Whether this was a new registration (true) or update (false)
   bool created = 2;
+
+  // If enforce_unique_alias was true and an active registration with the same alias exists,
+  // this contains the existing registration's grpc_address for forwarding.
+  string existing_grpc_address = 3;
+
+  // If enforce_unique_alias was true and an active registration with the same alias exists,
+  // this contains the existing object_id for diagnostics.
+  string existing_object_id = 4;
 }
 
 // Unregister object request
@@ -505,14 +534,8 @@ message UnregisterResponse {
 
 // Lookup single object request
 message LookupRequest {
-  // Object ID to lookup
-  string object_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
+  // Object ID to lookup (mutually exclusive with alias)
+  string object_id = 1 [(buf.validate.field).string.max_len = 255];
 
   // Object type (optional - if not specified, searches all types)
   ObjectType object_type = 2;
@@ -522,6 +545,10 @@ message LookupRequest {
 
   // Namespace (for logical grouping)
   string namespace = 4 [(buf.validate.field).string.max_len = 255];
+
+  // Lookup by alias (mutually exclusive with object_id).
+  // Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+  string alias = 5 [(buf.validate.field).string.max_len = 512];
 }
 
 message LookupResponse {

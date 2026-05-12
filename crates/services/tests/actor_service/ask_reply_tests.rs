@@ -14,13 +14,13 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::{
     behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorId, ActorRegistry,
     BehaviorError, BehaviorType, FacetManager, InitializableServiceLocator, Message,
-    ReplyWaiterRegistry, ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
-    RequestContextExt,
+    ReplyWaiterRegistry, RequestContextExt, ServiceLocator as ServiceLocatorTrait,
+    VirtualActorManager,
 };
+use plexspaces_behavior::GenServer;
 use plexspaces_mailbox::new_message;
 use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
@@ -348,6 +348,7 @@ async fn create_test_registry_with_actors(
                     facets: vec![],
                     config: None,
                     labels: std::collections::HashMap::new(),
+                    ..Default::default()
                 },
                 vec![],
             )
@@ -788,7 +789,9 @@ async fn test_ask_reply_not_found() {
         "default",
     )
     .await;
-    assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound || e.code() == tonic::Code::InvalidArgument));
+    assert!(
+        matches!(result, Err(e) if e.code() == tonic::Code::NotFound || e.code() == tonic::Code::InvalidArgument)
+    );
 }
 
 #[tokio::test]

@@ -779,7 +779,10 @@ mod tests {
         let get_req = Request::new(GetExecutionRequest { execution_id });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
         // ExecutionStatusCancelled = 5
-        assert_eq!(exec.execution.unwrap().status, ExecutionStatus::ExecutionStatusCancelled as i32);
+        assert_eq!(
+            exec.execution.unwrap().status,
+            ExecutionStatus::ExecutionStatusCancelled as i32
+        );
     }
 
     #[tokio::test]

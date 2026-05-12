@@ -170,14 +170,16 @@ mod tests {
             ActorRef::new(actor_id).expect("genserver test ActorContext self_ref should be valid");
 
         // Create context with ServiceLocator and spawned-actor self_ref.
-        let ctx = Arc::new(ActorContext::new(
-            node_id,
-            String::new(), // tenant_id (empty if auth disabled)
-            "test-ns".to_string(),
-            service_locator,
-            None,
-        )
-        .with_self_ref(self_ref));
+        let ctx = Arc::new(
+            ActorContext::new(
+                node_id,
+                String::new(), // tenant_id (empty if auth disabled)
+                "test-ns".to_string(),
+                service_locator,
+                None,
+            )
+            .with_self_ref(self_ref),
+        );
 
         // Set sender_id so envelope can send replies (required for GenServer handle_request)
         message.sender_id = "test-sender@test-node".to_string();

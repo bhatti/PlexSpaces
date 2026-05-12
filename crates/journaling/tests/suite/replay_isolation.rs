@@ -59,9 +59,15 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Flush to ensure entries are written
@@ -132,9 +138,15 @@ mod sqlite_tests {
         for i in 1..=100 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
 
             // Trigger checkpoint at message 50
             if i == 50 {
@@ -225,7 +237,10 @@ mod sqlite_tests {
         for i in 1..=3 {
             let method = "test";
             let payload = format!("payload-{}", i).into_bytes();
-            facet1.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet1
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("result-{}", i).into_bytes();
             facet1
                 .after_method(method, &payload, &result, &std::collections::HashMap::new())

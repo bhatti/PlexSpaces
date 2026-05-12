@@ -24,5 +24,5 @@
 // Re-export everything from plexspaces_actor::behavior
 pub use plexspaces_actor::behavior::*;
 // Also re-export the sub-modules
-pub use plexspaces_actor::behavior::workflow;
 pub use plexspaces_actor::behavior::simplified;
+pub use plexspaces_actor::behavior::workflow;

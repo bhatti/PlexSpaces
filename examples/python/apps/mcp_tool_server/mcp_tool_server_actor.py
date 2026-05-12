@@ -657,12 +657,3 @@ class ToolCircuitBreakerFSM:
         }
 
 
-ACTOR_ROLES = {
-    "tool_registry": ToolRegistryActor,
-    "calculator_tool": CalculatorToolActor,
-    "search_tool": SearchToolActor,
-    "weather_tool": WeatherToolActor,
-    "mcp_gateway": MCPGatewayWorkflow,
-    "tool_audit": ToolAuditEventActor,
-    "circuit_breaker": ToolCircuitBreakerFSM,
-}

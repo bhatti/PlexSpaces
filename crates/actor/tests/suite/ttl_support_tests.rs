@@ -21,9 +21,9 @@
 //! Tests for message TTL functionality to prevent stale messages
 //! from accumulating in mailboxes.
 
-use plexspaces_actor::ActorRef;
 use plexspaces_actor::ActorId;
-use plexspaces_actor::{Message, ServiceLocator, RequestContextExt};
+use plexspaces_actor::ActorRef;
+use plexspaces_actor::{Message, RequestContextExt, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 use std::time::Duration;

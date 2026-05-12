@@ -34,8 +34,8 @@
 //! LRU key list kept at `<key_prefix>__lru` for max_entries eviction.
 
 use async_trait::async_trait;
-use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_common::KeyValueStore;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
@@ -249,7 +249,8 @@ impl MemoizeFacet {
             *self.evictions.write().await += 1;
             metrics::counter!("plexspaces_memoize_evictions_total",
                 "actor_id" => actor_id.to_string()
-            ).increment(1);
+            )
+            .increment(1);
             tracing::debug!(actor_id = %actor_id, key = %oldest, "memoize: evicted cache entry");
         }
 
@@ -463,11 +464,7 @@ mod tests {
             Ok(())
         }
 
-        async fn delete(
-            &self,
-            _ctx: &RequestContext,
-            key: &str,
-        ) -> Result<(), KeyValueStoreError> {
+        async fn delete(&self, _ctx: &RequestContext, key: &str) -> Result<(), KeyValueStoreError> {
             self.data.lock().unwrap().remove(key);
             Ok(())
         }
@@ -563,20 +560,32 @@ mod tests {
     async fn test_cache_miss_then_hit() {
         let kv = MemKv::new();
         let mut facet = make_facet(kv, 0, 0, vec![]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let args = b"payload";
         let result = b"result-data";
 
         // First call: miss → Continue
-        let before = facet.before_method("compute", args, &std::collections::HashMap::new()).await.unwrap();
+        let before = facet
+            .before_method("compute", args, &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(before, InterceptResult::Continue));
 
         // Store result
-        facet.after_method("compute", args, result, &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method("compute", args, result, &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         // Second call: hit → ShortCircuit with cached result
-        let before2 = facet.before_method("compute", args, &std::collections::HashMap::new()).await.unwrap();
+        let before2 = facet
+            .before_method("compute", args, &std::collections::HashMap::new())
+            .await
+            .unwrap();
         match before2 {
             InterceptResult::ShortCircuit(cached) => {
                 assert_eq!(cached, result);
@@ -592,13 +601,38 @@ mod tests {
     async fn test_different_args_different_keys() {
         let kv = MemKv::new();
         let mut facet = make_facet(kv, 0, 0, vec![]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
-        facet.after_method("op", b"args-a", b"result-a", &std::collections::HashMap::new()).await.unwrap();
-        facet.after_method("op", b"args-b", b"result-b", &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method(
+                "op",
+                b"args-a",
+                b"result-a",
+                &std::collections::HashMap::new(),
+            )
+            .await
+            .unwrap();
+        facet
+            .after_method(
+                "op",
+                b"args-b",
+                b"result-b",
+                &std::collections::HashMap::new(),
+            )
+            .await
+            .unwrap();
 
-        let hit_a = facet.before_method("op", b"args-a", &std::collections::HashMap::new()).await.unwrap();
-        let hit_b = facet.before_method("op", b"args-b", &std::collections::HashMap::new()).await.unwrap();
+        let hit_a = facet
+            .before_method("op", b"args-a", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        let hit_b = facet
+            .before_method("op", b"args-b", &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         assert!(matches!(&hit_a, InterceptResult::ShortCircuit(r) if r == b"result-a"));
         assert!(matches!(&hit_b, InterceptResult::ShortCircuit(r) if r == b"result-b"));
@@ -608,13 +642,27 @@ mod tests {
     async fn test_handler_filter_skips_unlisted() {
         let kv = MemKv::new();
         let mut facet = make_facet(kv, 0, 0, vec!["allowed"]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Put something in cache for "blocked"
-        facet.after_method("blocked", b"a", b"cached", &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method(
+                "blocked",
+                b"a",
+                b"cached",
+                &std::collections::HashMap::new(),
+            )
+            .await
+            .unwrap();
 
         // "blocked" should not be intercepted → always Continue
-        let res = facet.before_method("blocked", b"a", &std::collections::HashMap::new()).await.unwrap();
+        let res = facet
+            .before_method("blocked", b"a", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res, InterceptResult::Continue));
     }
 
@@ -622,11 +670,20 @@ mod tests {
     async fn test_handler_filter_intercepts_listed() {
         let kv = MemKv::new();
         let mut facet = make_facet(kv, 0, 0, vec!["allowed"]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
-        facet.after_method("allowed", b"x", b"y", &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method("allowed", b"x", b"y", &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
-        let res = facet.before_method("allowed", b"x", &std::collections::HashMap::new()).await.unwrap();
+        let res = facet
+            .before_method("allowed", b"x", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res, InterceptResult::ShortCircuit(_)));
     }
 
@@ -635,23 +692,44 @@ mod tests {
         let kv = MemKv::new();
         let kv_ref = kv.clone();
         let mut facet = make_facet(kv, 0, 2, vec![]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Insert 3 entries with distinct args
-        facet.after_method("op", b"a", b"va", &std::collections::HashMap::new()).await.unwrap();
-        facet.after_method("op", b"b", b"vb", &std::collections::HashMap::new()).await.unwrap();
-        facet.after_method("op", b"c", b"vc", &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method("op", b"a", b"va", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        facet
+            .after_method("op", b"b", b"vb", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        facet
+            .after_method("op", b"c", b"vc", &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         // After 3rd insert, first entry should have been evicted
         assert_eq!(*facet.evictions.read().await, 1);
 
         // First entry should be a miss now
-        let res_a = facet.before_method("op", b"a", &std::collections::HashMap::new()).await.unwrap();
+        let res_a = facet
+            .before_method("op", b"a", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res_a, InterceptResult::Continue));
 
         // Last two should still be hits
-        let res_b = facet.before_method("op", b"b", &std::collections::HashMap::new()).await.unwrap();
-        let res_c = facet.before_method("op", b"c", &std::collections::HashMap::new()).await.unwrap();
+        let res_b = facet
+            .before_method("op", b"b", &std::collections::HashMap::new())
+            .await
+            .unwrap();
+        let res_c = facet
+            .before_method("op", b"c", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res_b, InterceptResult::ShortCircuit(_)));
         assert!(matches!(res_c, InterceptResult::ShortCircuit(_)));
 
@@ -666,7 +744,10 @@ mod tests {
 
         // Manually inject an already-expired envelope into cache
         let actor_id = "actor-ttl";
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         let key = facet.cache_key(actor_id, "op", b"args", &std::collections::HashMap::new());
         let expired_envelope = serde_json::json!({
@@ -675,10 +756,17 @@ mod tests {
         });
 
         let ctx = RequestContext::new_without_auth(actor_id.to_string(), "memoize".to_string());
-        facet.kv_store.put(&ctx, &key, serde_json::to_vec(&expired_envelope).unwrap()).await.unwrap();
+        facet
+            .kv_store
+            .put(&ctx, &key, serde_json::to_vec(&expired_envelope).unwrap())
+            .await
+            .unwrap();
 
         // Should be treated as miss
-        let res = facet.before_method("op", b"args", &std::collections::HashMap::new()).await.unwrap();
+        let res = facet
+            .before_method("op", b"args", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res, InterceptResult::Continue));
     }
 
@@ -687,7 +775,10 @@ mod tests {
         let kv = MemKv::new();
         let facet = make_facet(kv, 0, 0, vec![]);
         // No on_attach called
-        let res = facet.before_method("op", b"", &std::collections::HashMap::new()).await.unwrap();
+        let res = facet
+            .before_method("op", b"", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         assert!(matches!(res, InterceptResult::Continue));
     }
 
@@ -695,7 +786,10 @@ mod tests {
     async fn test_on_detach_clears_actor_id() {
         let kv = MemKv::new();
         let mut facet = make_facet(kv, 0, 0, vec![]);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.on_detach("actor-1").await.unwrap();
         assert!(facet.actor_id.read().await.is_none());
     }

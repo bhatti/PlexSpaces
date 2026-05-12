@@ -21,5 +21,4 @@
 //! The canonical trait definition lives in `plexspaces_common::keyvalue_store`
 //! to avoid circular dependencies between `core`, `facet`, and `keyvalue` crates.
 
-
 pub use plexspaces_common::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};

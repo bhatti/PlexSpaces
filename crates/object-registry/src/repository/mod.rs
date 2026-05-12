@@ -274,4 +274,70 @@ pub trait ObjectRegistryRepository: Send + Sync + Debug {
     /// ## Returns
     /// true if exists, false otherwise
     async fn exists(&self, ctx: &RequestContext, object_id: &str) -> RepositoryResult<bool>;
+
+    /// Lookup an object registration by alias (identity-based placement key).
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext with tenant_id and namespace
+    /// * `alias` - Alias string (e.g. "{actor_type}:{name}:{namespace}:{tenant_id}")
+    ///
+    /// ## Returns
+    /// - `Ok(Some(registration))` if alias is registered
+    /// - `Ok(None)` if not found
+    async fn get_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> RepositoryResult<Option<ObjectRegistration>>;
+
+    /// Increment heartbeat failure count and return the new count.
+    ///
+    /// Called when a scheduled heartbeat is missed. Returns the updated failure count
+    /// so callers can decide whether to transition to DEGRADED or DEAD.
+    async fn increment_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<u32>;
+
+    /// Reset heartbeat failure count to 0 (called on successful heartbeat).
+    async fn reset_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<()>;
+
+    /// Mark all objects hosted on a given node as DEAD (cascading health on node failure).
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext
+    /// * `node_id` - The node that went DEAD
+    ///
+    /// ## Returns
+    /// Number of objects that were updated.
+    async fn mark_dead_by_node_id(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> RepositoryResult<u64>;
+
+    /// Find registrations with stale heartbeats (last_heartbeat older than threshold).
+    ///
+    /// Only returns objects in HEALTHY or DEGRADED state (not already DEAD/STOPPING).
+    ///
+    /// ## Multi-tenancy contract
+    /// - `ctx.tenant_id().is_empty()` (admin context) → cross-tenant scan, returns stale
+    ///   entries across all tenants. Used by `HeartbeatMonitor`.
+    /// - Non-empty `tenant_id` → scoped to that tenant+namespace only.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext; empty `tenant_id` with `is_admin=true` for cross-tenant
+    /// * `threshold_seconds` - Heartbeat older than (now - threshold_seconds) is stale
+    /// * `limit` - Maximum objects to return per scan
+    async fn find_stale_heartbeats(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> RepositoryResult<Vec<ObjectRegistration>>;
 }

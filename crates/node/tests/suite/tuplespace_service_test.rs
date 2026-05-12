@@ -97,7 +97,12 @@ fn create_exact_pattern(values: Vec<tuple_field::Value>) -> ProtoTuple {
 #[tokio::test]
 async fn test_write_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-1").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-1")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
     // Create write request
@@ -134,7 +139,12 @@ async fn test_write_tuple_via_grpc() {
 #[tokio::test]
 async fn test_read_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-2").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-2")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     // Write tuple directly
     let tuple = InternalTuple::new(vec![
@@ -192,7 +202,12 @@ async fn test_read_tuple_via_grpc() {
 #[tokio::test]
 async fn test_take_tuple_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-3").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-3")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::Integer(20),
@@ -251,7 +266,12 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
     // Even when auth is disabled, we should use defaults from NodeConfig, not internal()
     // This ensures tenant isolation - operations must have valid tenant context
 
-    let node = Arc::new(NodeBuilder::new("test-node-context").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-context")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
     // Create request with valid tenant context (using defaults when auth disabled)
@@ -296,7 +316,12 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
 #[tokio::test]
 async fn test_count_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-4").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-4")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     // Write multiple tuples
     for i in 0..5 {
@@ -338,7 +363,12 @@ async fn test_count_tuples_via_grpc() {
 #[tokio::test]
 async fn test_exists_tuples_via_grpc() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-5").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-5")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let tuple = InternalTuple::new(vec![
         InternalTupleField::String("config".to_string()),
@@ -392,7 +422,12 @@ async fn test_exists_tuples_via_grpc() {
 #[tokio::test]
 async fn test_read_with_wildcard_pattern() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-6").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-6")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     // Write tuples
     let tuplespace = node
@@ -454,7 +489,12 @@ async fn test_read_with_wildcard_pattern() {
 #[tokio::test]
 async fn test_read_no_match() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-7").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-7")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -484,7 +524,12 @@ async fn test_read_no_match() {
 #[tokio::test]
 async fn test_write_multiple_tuples() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-8").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-8")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -515,7 +560,12 @@ async fn test_write_multiple_tuples() {
 #[tokio::test]
 async fn test_write_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-9").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-9")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -543,7 +593,12 @@ async fn test_write_with_missing_template() {
 #[tokio::test]
 async fn test_take_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10a").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-10a")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -571,7 +626,12 @@ async fn test_take_with_missing_template() {
 #[tokio::test]
 async fn test_count_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10b").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-10b")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -595,7 +655,12 @@ async fn test_count_with_missing_template() {
 #[tokio::test]
 async fn test_exists_with_missing_template() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10c").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-10c")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -618,7 +683,12 @@ async fn test_exists_with_missing_template() {
 #[tokio::test]
 async fn test_clear_tuplespace() {
     // Setup
-    let node = Arc::new(NodeBuilder::new("test-node-10").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-10")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
 
     // Write tuples
     let tuplespace = node

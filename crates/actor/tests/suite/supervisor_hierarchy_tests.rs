@@ -31,9 +31,11 @@ use plexspaces_actor::child_spec::{ProtoRestartPolicy, ShutdownSpec, StartedChil
 use plexspaces_actor::supervisor::{
     RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
-use plexspaces_actor::{ActorInstance, ActorInstance as Actor, ActorRef as ActorActorRef, ChildSpec};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message, ServiceLocator,
+};
+use plexspaces_actor::{
+    ActorInstance, ActorInstance as Actor, ActorRef as ActorActorRef, ChildSpec,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
@@ -68,7 +70,9 @@ fn create_child_spec_from_factory(
         CoreActorRef::new(actor_id_from_legacy(&id)).expect("Failed to create actor ref");
 
     let restart_policy_proto = match restart_policy {
-        RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => ProtoRestartPolicy::RestartPolicyPermanent,
+        RestartPolicy::Permanent | RestartPolicy::ExponentialBackoff { .. } => {
+            ProtoRestartPolicy::RestartPolicyPermanent
+        }
         RestartPolicy::Transient => ProtoRestartPolicy::RestartPolicyTransient,
         RestartPolicy::Temporary => ProtoRestartPolicy::RestartPolicyTemporary,
     };

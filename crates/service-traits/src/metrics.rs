@@ -25,8 +25,6 @@ pub trait MetricsServiceAccess: Send + Sync {
     ) -> Vec<Metric>;
 
     /// Metric definitions (metadata) optionally filtered by name glob.
-    async fn list_metric_definitions_filtered(
-        &self,
-        name_pattern: String,
-    ) -> Vec<MetricDefinition>;
+    async fn list_metric_definitions_filtered(&self, name_pattern: String)
+        -> Vec<MetricDefinition>;
 }

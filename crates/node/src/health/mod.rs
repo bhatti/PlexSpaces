@@ -3,7 +3,6 @@
 //
 // Health module - consolidated health checking and service functionality for nodes
 
-
 pub mod checker;
 pub mod circuit_breaker;
 pub mod helpers;

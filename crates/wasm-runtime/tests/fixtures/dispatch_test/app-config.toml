@@ -1,0 +1,20 @@
+name = "dispatch-test"
+version = "1.0.0"
+namespace = "dispatch-test"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "ping"
+actor_type = "PingActor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+name = "echo"
+actor_type = "EchoActor"
+restart = "permanent"
+shutdown_timeout_seconds = 5

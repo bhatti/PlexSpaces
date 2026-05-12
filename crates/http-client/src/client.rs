@@ -6,11 +6,11 @@ use crate::error::OutboundHttpClientError;
 use crate::policy::{circuit_breaker_for_link, effective_max_attempts, resolve_policy_for_link};
 use crate::retry::{backoff_duration_for_attempt, method_allows_retry, status_is_retriable};
 use async_trait::async_trait;
-use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_actor::{
     HttpHeader, OutboundHttpClient, OutboundHttpClientError as CoreOutboundError,
     OutboundHttpRequest, OutboundHttpResponse,
 };
+use plexspaces_circuit_breaker::CircuitBreaker;
 use plexspaces_proto::node::v1::{OutboundTransport, RuntimeConfig, ServiceLinkConfig};
 use rand::thread_rng;
 use reqwest::redirect::Policy;
@@ -113,14 +113,20 @@ impl ResilientOutboundHttpClient {
 fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<HttpHeader> {
     let mut h = Vec::new();
     for (k, v) in &link.default_headers {
-        h.push(HttpHeader { key: k.clone(), value: v.clone() });
+        h.push(HttpHeader {
+            key: k.clone(),
+            value: v.clone(),
+        });
     }
     if let (Some(name), Some(env_var)) = (
         link.api_key_header_name.as_deref(),
         link.api_key_env_var.as_deref(),
     ) {
         if let Ok(val) = std::env::var(env_var) {
-            h.push(HttpHeader { key: name.to_string(), value: val });
+            h.push(HttpHeader {
+                key: name.to_string(),
+                value: val,
+            });
         } else {
             tracing::warn!(
                 link = %link.name,
@@ -131,7 +137,10 @@ fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<HttpHeader> {
     }
     if let Some(env_var) = link.bearer_token_env_var.as_deref() {
         if let Ok(val) = std::env::var(env_var) {
-            h.push(HttpHeader { key: "Authorization".to_string(), value: format!("Bearer {val}") });
+            h.push(HttpHeader {
+                key: "Authorization".to_string(),
+                value: format!("Bearer {val}"),
+            });
         } else {
             tracing::warn!(
                 link = %link.name,
@@ -146,10 +155,14 @@ fn resolve_link_headers(link: &ServiceLinkConfig) -> Vec<HttpHeader> {
 fn build_reqwest_client(
     policy: &plexspaces_proto::node::v1::ClientTransportPolicy,
 ) -> Result<reqwest::Client, reqwest::Error> {
-    let mut b = reqwest::Client::builder().user_agent(concat!(
-        "plexspaces-http-client/",
-        env!("CARGO_PKG_VERSION")
-    ));
+    let mut b = reqwest::Client::builder()
+        .user_agent(concat!(
+            "plexspaces-http-client/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        // Keep test and embedded-node initialization deterministic on macOS and avoid
+        // reqwest/system-configuration proxy autodiscovery panics.
+        .no_proxy();
     if let Some(d) = policy.connect_timeout.as_ref() {
         b = b.connect_timeout(proto_duration_to_std(d));
     }

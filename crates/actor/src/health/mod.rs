@@ -3,7 +3,6 @@
 //
 // Health module - consolidated health checking, reporting, and service functionality
 
-
 pub mod checker;
 pub mod reporter;
 pub mod service;

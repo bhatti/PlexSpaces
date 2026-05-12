@@ -1111,6 +1111,59 @@ Deployable WASM apps can also use the framework shard-group APIs through the act
 
 Use this for WASM leader-worker applications that need framework-owned scatter/gather without dropping down to gRPC or hand-written host bindings. See [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for a Rust WASM example that deploys to multiple nodes and drives workers through the host shard-group surface.
 
+### Object Registry (WASM)
+
+WASM actors can register, discover, and look up services through the **object registry** host surface. All registry WIT functions use **protobuf wire-encoded payloads** (`list<u8>`) so the data model stays proto-first across the WASM boundary. Message definitions live in `proto/plexspaces/v1/registry/object_registry.proto`.
+
+| WIT function | Proto request type | Proto response type | Description |
+|---|---|---|---|
+| `register(request)` | `plexspaces.object_registry.v1.RegisterRequest` | _(unit)_ | Register this actor in the service registry. |
+| `unregister(request)` | `plexspaces.object_registry.v1.UnregisterRequest` | _(unit)_ | Remove a registration. |
+| `lookup(request)` | `plexspaces.object_registry.v1.LookupRequest` | `plexspaces.object_registry.v1.LookupResponse` | Look up a single object by id and type. |
+| `lookup-by-alias(alias)` | _(string)_ | `plexspaces.object_registry.v1.LookupResponse` | Resolve an alias string to a registered object. |
+| `discover(request)` | `plexspaces.object_registry.v1.DiscoverRequest` | `plexspaces.object_registry.v1.DiscoverResponse` | Filter-based discovery of multiple objects. |
+| `heartbeat(request)` | `plexspaces.object_registry.v1.HeartbeatRequest` | _(unit)_ | Refresh the liveness timestamp of a registration. |
+
+**Tenant isolation** is enforced at the host layer — the actor cannot forge a different tenant:
+
+- `tenant_id` in the host context is **always injected from the deployment** (from the JWT at gRPC deploy time, or from `tenant_id` in `app-config.toml` for file-copy deploys). The guest-supplied `tenant_id` field inside the proto payload is **always ignored**.
+- `namespace` may be supplied by the guest; if empty the host falls back to the application's default namespace.
+
+**SDK usage** (SDKs handle proto encoding/decoding):
+
+```python
+# Python
+host.registry_register({"object_id": actor_id, "object_type": "actor", "object_category": "worker"})
+result = host.registry_discover({"object_type": "actor", "object_category": "worker"})
+```
+
+```go
+// Go
+host.Registry().Register(plexspaces.ObjectRegistration{
+    ObjectID: cfg.ActorID, ObjectType: "actor", ObjectCategory: "worker",
+})
+regs, _ := host.Registry().Discover(plexspaces.DiscoverOptions{
+    ObjectType: plexspaces.ObjectType.ACTOR,
+})
+```
+
+```typescript
+// TypeScript
+host.registry.register({ objectId: actorId, objectType: "actor", objectCategory: "worker" });
+const regs = host.registry.discover({ objectType: RegistryObjectType.ACTOR });
+```
+
+**For file-copy / embedded deploys** — set `tenant_id` in `app-config.toml` to enable tenant isolation:
+
+```toml
+name    = "my-app"
+version = "1.0.0"
+tenant_id = "acme"        # required for multi-tenant nodes
+namespace = "production"
+```
+
+If `tenant_id` is omitted the node logs a warning and all registry calls use an empty tenant scope, which effectively disables isolation. See [Auto-Deploy and Persistence](#auto-deploy-and-persistence) for the full file-copy deploy workflow.
+
 ### Key-Value Storage (WASM)
 
 WASM actors using `actor-world` can persist data via the host **keyvalue** API. This avoids

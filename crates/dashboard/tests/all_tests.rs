@@ -4,5 +4,4 @@
 // Main integration test entry point for plexspaces-dashboard
 // Compiles into a single test binary instead of 2 separate binaries
 
-
 mod suite;

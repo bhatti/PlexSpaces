@@ -17,13 +17,14 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
-use plexspaces_common::ServiceNameExt;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
     ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
-    RequestContext, ServiceLocator, RequestContextExt};
+    RequestContext, RequestContextExt, ServiceLocator,
+};
+use plexspaces_behavior::GenServer;
+use plexspaces_common::ServiceNameExt;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, CreateShardGroupRequest,
@@ -130,9 +131,9 @@ async fn create_test_actor_service(
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("counter", || {
-            Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
-            )
+            Box::pin(async move {
+                Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     service_locator

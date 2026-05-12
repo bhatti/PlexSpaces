@@ -269,43 +269,46 @@ func (ExitAction) EnumDescriptor() ([]byte, []int) {
 type ActorErrorCode int32
 
 const (
-	ActorErrorCode_ACTOR_ERROR_UNSPECIFIED    ActorErrorCode = 0
-	ActorErrorCode_ACTOR_ERROR_NOT_FOUND      ActorErrorCode = 1
-	ActorErrorCode_ACTOR_ERROR_ALREADY_EXISTS ActorErrorCode = 2
-	ActorErrorCode_ACTOR_ERROR_INVALID_STATE  ActorErrorCode = 3
-	ActorErrorCode_ACTOR_ERROR_TIMEOUT        ActorErrorCode = 4
-	ActorErrorCode_ACTOR_ERROR_TERMINATED     ActorErrorCode = 5
-	ActorErrorCode_ACTOR_ERROR_FACET_ERROR    ActorErrorCode = 6
-	ActorErrorCode_ACTOR_ERROR_MAILBOX_ERROR  ActorErrorCode = 7
-	ActorErrorCode_ACTOR_ERROR_BEHAVIOR_ERROR ActorErrorCode = 8
-	ActorErrorCode_ACTOR_ERROR_JOURNAL_ERROR  ActorErrorCode = 9
+	ActorErrorCode_ACTOR_ERROR_UNSPECIFIED        ActorErrorCode = 0
+	ActorErrorCode_ACTOR_ERROR_NOT_FOUND          ActorErrorCode = 1
+	ActorErrorCode_ACTOR_ERROR_ALREADY_EXISTS     ActorErrorCode = 2
+	ActorErrorCode_ACTOR_ERROR_INVALID_STATE      ActorErrorCode = 3
+	ActorErrorCode_ACTOR_ERROR_TIMEOUT            ActorErrorCode = 4
+	ActorErrorCode_ACTOR_ERROR_TERMINATED         ActorErrorCode = 5
+	ActorErrorCode_ACTOR_ERROR_FACET_ERROR        ActorErrorCode = 6
+	ActorErrorCode_ACTOR_ERROR_MAILBOX_ERROR      ActorErrorCode = 7
+	ActorErrorCode_ACTOR_ERROR_BEHAVIOR_ERROR     ActorErrorCode = 8
+	ActorErrorCode_ACTOR_ERROR_JOURNAL_ERROR      ActorErrorCode = 9
+	ActorErrorCode_ACTOR_ERROR_PLACEMENT_CONFLICT ActorErrorCode = 10 // Unique placement violated - actor already active elsewhere
 )
 
 // Enum value maps for ActorErrorCode.
 var (
 	ActorErrorCode_name = map[int32]string{
-		0: "ACTOR_ERROR_UNSPECIFIED",
-		1: "ACTOR_ERROR_NOT_FOUND",
-		2: "ACTOR_ERROR_ALREADY_EXISTS",
-		3: "ACTOR_ERROR_INVALID_STATE",
-		4: "ACTOR_ERROR_TIMEOUT",
-		5: "ACTOR_ERROR_TERMINATED",
-		6: "ACTOR_ERROR_FACET_ERROR",
-		7: "ACTOR_ERROR_MAILBOX_ERROR",
-		8: "ACTOR_ERROR_BEHAVIOR_ERROR",
-		9: "ACTOR_ERROR_JOURNAL_ERROR",
+		0:  "ACTOR_ERROR_UNSPECIFIED",
+		1:  "ACTOR_ERROR_NOT_FOUND",
+		2:  "ACTOR_ERROR_ALREADY_EXISTS",
+		3:  "ACTOR_ERROR_INVALID_STATE",
+		4:  "ACTOR_ERROR_TIMEOUT",
+		5:  "ACTOR_ERROR_TERMINATED",
+		6:  "ACTOR_ERROR_FACET_ERROR",
+		7:  "ACTOR_ERROR_MAILBOX_ERROR",
+		8:  "ACTOR_ERROR_BEHAVIOR_ERROR",
+		9:  "ACTOR_ERROR_JOURNAL_ERROR",
+		10: "ACTOR_ERROR_PLACEMENT_CONFLICT",
 	}
 	ActorErrorCode_value = map[string]int32{
-		"ACTOR_ERROR_UNSPECIFIED":    0,
-		"ACTOR_ERROR_NOT_FOUND":      1,
-		"ACTOR_ERROR_ALREADY_EXISTS": 2,
-		"ACTOR_ERROR_INVALID_STATE":  3,
-		"ACTOR_ERROR_TIMEOUT":        4,
-		"ACTOR_ERROR_TERMINATED":     5,
-		"ACTOR_ERROR_FACET_ERROR":    6,
-		"ACTOR_ERROR_MAILBOX_ERROR":  7,
-		"ACTOR_ERROR_BEHAVIOR_ERROR": 8,
-		"ACTOR_ERROR_JOURNAL_ERROR":  9,
+		"ACTOR_ERROR_UNSPECIFIED":        0,
+		"ACTOR_ERROR_NOT_FOUND":          1,
+		"ACTOR_ERROR_ALREADY_EXISTS":     2,
+		"ACTOR_ERROR_INVALID_STATE":      3,
+		"ACTOR_ERROR_TIMEOUT":            4,
+		"ACTOR_ERROR_TERMINATED":         5,
+		"ACTOR_ERROR_FACET_ERROR":        6,
+		"ACTOR_ERROR_MAILBOX_ERROR":      7,
+		"ACTOR_ERROR_BEHAVIOR_ERROR":     8,
+		"ACTOR_ERROR_JOURNAL_ERROR":      9,
+		"ACTOR_ERROR_PLACEMENT_CONFLICT": 10,
 	}
 )
 
@@ -928,7 +931,7 @@ const file_plexspaces_v1_actors_types_proto_rawDesc = "" +
 	"ExitAction\x12\x1b\n" +
 	"\x17EXIT_ACTION_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15EXIT_ACTION_PROPAGATE\x10\x01\x12\x16\n" +
-	"\x12EXIT_ACTION_HANDLE\x10\x02*\xb7\x02\n" +
+	"\x12EXIT_ACTION_HANDLE\x10\x02*\xdb\x02\n" +
 	"\x0eActorErrorCode\x12\x1b\n" +
 	"\x17ACTOR_ERROR_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACTOR_ERROR_NOT_FOUND\x10\x01\x12\x1e\n" +
@@ -939,7 +942,9 @@ const file_plexspaces_v1_actors_types_proto_rawDesc = "" +
 	"\x17ACTOR_ERROR_FACET_ERROR\x10\x06\x12\x1d\n" +
 	"\x19ACTOR_ERROR_MAILBOX_ERROR\x10\a\x12\x1e\n" +
 	"\x1aACTOR_ERROR_BEHAVIOR_ERROR\x10\b\x12\x1d\n" +
-	"\x19ACTOR_ERROR_JOURNAL_ERROR\x10\t*\xcc\x01\n" +
+	"\x19ACTOR_ERROR_JOURNAL_ERROR\x10\t\x12\"\n" +
+	"\x1eACTOR_ERROR_PLACEMENT_CONFLICT\x10\n" +
+	"*\xcc\x01\n" +
 	"\x11BehaviorErrorCode\x12\x1e\n" +
 	"\x1aBEHAVIOR_ERROR_UNSPECIFIED\x10\x00\x12$\n" +
 	" BEHAVIOR_ERROR_HANDLER_NOT_FOUND\x10\x01\x12&\n" +

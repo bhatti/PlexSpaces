@@ -108,7 +108,9 @@ pub use node_builder::NodeBuilder;
 impl plexspaces_actor::Service for Node {
     fn service_name(&self) -> String {
         use plexspaces_common::ServiceNameExt;
-        plexspaces_actor::ServiceName::ServiceNameNode.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameNode
+            .as_str()
+            .to_string()
     }
 }
 

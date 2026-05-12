@@ -126,13 +126,14 @@ fn assert_facets(case: FacetHelpersCase, facets: &[Box<dyn plexspaces_facet::Fac
             assert!(types.contains(&"durability".to_string()), "{types:?}");
         }
         FacetHelpersCase::MultiFacetSkipsUnavailableProcessGroup => {
-            assert_eq!(facets.len(), 1, "multi_facet_skips_unavailable_process_group");
+            assert_eq!(
+                facets.len(),
+                1,
+                "multi_facet_skips_unavailable_process_group"
+            );
             let types: Vec<String> = facets.iter().map(|f| f.facet_type().to_string()).collect();
             assert!(types.contains(&"virtual_actor".to_string()), "{types:?}");
-            assert!(
-                !types.contains(&"process_group".to_string()),
-                "{types:?}"
-            );
+            assert!(!types.contains(&"process_group".to_string()), "{types:?}");
         }
         FacetHelpersCase::SingleVirtualActor => {
             assert_eq!(facets.len(), 1, "single virtual_actor");

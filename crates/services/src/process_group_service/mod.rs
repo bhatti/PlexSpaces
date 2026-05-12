@@ -61,7 +61,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
 use plexspaces_actor::actor_context::{ObjectRegistry, ProcessGroupService};
-use plexspaces_actor::{RequestContext, ServiceLocator as ServiceLocatorTrait, RequestContextExt};
+use plexspaces_actor::{RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 
@@ -226,6 +226,9 @@ impl ProcessGroupServiceImpl {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
             }),
+            alias: String::new(),
+            max_heartbeat_failures: 3,
+            heartbeat_failure_count: 0,
         }
     }
 
@@ -274,6 +277,9 @@ impl ProcessGroupServiceImpl {
                 seconds: chrono::Utc::now().timestamp(),
                 nanos: 0,
             }),
+            alias: String::new(),
+            max_heartbeat_failures: 3,
+            heartbeat_failure_count: 0,
         }
     }
 }

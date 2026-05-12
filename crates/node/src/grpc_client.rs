@@ -237,6 +237,7 @@ impl RemoteActorClient {
             facets: vec![],
             config,
             labels,
+            ..Default::default()
         };
         let request = Request::new(SpawnActorRequest {
             spec: Some(spec),

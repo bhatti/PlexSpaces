@@ -18,13 +18,13 @@ use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, ConnectNodesRequest, ConnectNodesResponse,
     GetMetricsRequest, ListConnectedNodesRequest, PingRequest,
 };
+use plexspaces_proto::prost_types::Duration;
 #[cfg(feature = "grpc")]
 use plexspaces_proto::system::v1::system_service_client::SystemServiceClient;
 #[cfg(feature = "grpc")]
 use plexspaces_proto::system::v1::{
     LivenessProbeRequest, LivenessProbeResponse, ReadinessProbeRequest, ReadinessProbeResponse,
 };
-use plexspaces_proto::prost_types::Duration;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;

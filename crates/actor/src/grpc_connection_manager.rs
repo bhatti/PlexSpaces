@@ -101,9 +101,9 @@ impl GrpcConnectionManager {
     ) -> Result<Channel, tonic::transport::Error> {
         let key = (service_type, node_id.to_string());
         let mut pools = self.pools.write().await;
-        let pool = pools
-            .entry(key)
-            .or_insert_with(|| ServiceConnectionPool::new(node_address.to_string(), self.pool_size));
+        let pool = pools.entry(key).or_insert_with(|| {
+            ServiceConnectionPool::new(node_address.to_string(), self.pool_size)
+        });
         if pool.node_address != node_address {
             *pool = ServiceConnectionPool::new(node_address.to_string(), self.pool_size);
         }
@@ -115,7 +115,8 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameActorService, node_id, node_address).await
+        self.get_connection(ServiceType::ServiceNameActorService, node_id, node_address)
+            .await
     }
 
     pub async fn get_application_service_connection(
@@ -123,7 +124,12 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameApplicationService, node_id, node_address).await
+        self.get_connection(
+            ServiceType::ServiceNameApplicationService,
+            node_id,
+            node_address,
+        )
+        .await
     }
 
     pub async fn get_tuplespace_service_connection(
@@ -131,7 +137,12 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameTuplespaceService, node_id, node_address).await
+        self.get_connection(
+            ServiceType::ServiceNameTuplespaceService,
+            node_id,
+            node_address,
+        )
+        .await
     }
 
     pub async fn get_process_group_service_connection(
@@ -139,7 +150,12 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameProcessGroupService, node_id, node_address).await
+        self.get_connection(
+            ServiceType::ServiceNameProcessGroupService,
+            node_id,
+            node_address,
+        )
+        .await
     }
 
     pub async fn get_node_service_connection(
@@ -147,7 +163,8 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ServiceNameNodeService, node_id, node_address).await
+        self.get_connection(ServiceType::ServiceNameNodeService, node_id, node_address)
+            .await
     }
 
     pub async fn shutdown(&self) {
@@ -172,7 +189,11 @@ mod tests {
         }
 
         let _ = manager
-            .get_connection(ServiceType::ServiceNameActorService, "node-a", "http://localhost:8093")
+            .get_connection(
+                ServiceType::ServiceNameActorService,
+                "node-a",
+                "http://localhost:8093",
+            )
             .await;
 
         let pools = manager.pools.read().await;
@@ -187,7 +208,11 @@ mod tests {
         let manager = GrpcConnectionManager::new(Some(2));
         for _ in 0..4 {
             let _ = manager
-                .get_connection(ServiceType::ServiceNameActorService, "node-b", "http://localhost:8093")
+                .get_connection(
+                    ServiceType::ServiceNameActorService,
+                    "node-b",
+                    "http://localhost:8093",
+                )
                 .await;
         }
         let pools = manager.pools.read().await;

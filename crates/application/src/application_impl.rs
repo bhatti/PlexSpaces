@@ -241,6 +241,7 @@ impl SpecApplication {
                     facets: child.facets.clone(),
                     config: None,
                     labels: std::collections::HashMap::new(),
+                    ..Default::default()
                 }
             };
 
@@ -248,13 +249,12 @@ impl SpecApplication {
                 // Spawn the supervisor actor first
                 match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
                     Ok(message_sender) => {
-                        let spawned_actor_id =
-                            message_sender.actor_id().ok_or_else(|| {
-                                ApplicationError::StartupFailed(format!(
-                                    "Spawned supervisor actor '{}' did not return canonical actor ID",
-                                    identity.name
-                                ))
-                            })?;
+                        let spawned_actor_id = message_sender.actor_id().ok_or_else(|| {
+                            ApplicationError::StartupFailed(format!(
+                                "Spawned supervisor actor '{}' did not return canonical actor ID",
+                                identity.name
+                            ))
+                        })?;
                         debug!(
                             application = %self.spec.name,
                             child_name = %identity.name,
@@ -301,13 +301,12 @@ impl SpecApplication {
                 // Regular worker - spawn normally
                 match actor_factory.spawn_actor(&ctx, &spawn_spec, facets).await {
                     Ok(message_sender) => {
-                        let spawned_actor_id =
-                            message_sender.actor_id().ok_or_else(|| {
-                                ApplicationError::StartupFailed(format!(
-                                    "Spawned actor '{}' did not return canonical actor ID",
-                                    identity.name
-                                ))
-                            })?;
+                        let spawned_actor_id = message_sender.actor_id().ok_or_else(|| {
+                            ApplicationError::StartupFailed(format!(
+                                "Spawned actor '{}' did not return canonical actor ID",
+                                identity.name
+                            ))
+                        })?;
                         debug!(
                             application = %self.spec.name,
                             child_name = %identity.name,
@@ -787,7 +786,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType};
-    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
+    use plexspaces_proto::supervision::v1::{
+        ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+    };
     use prost_types::Duration as ProtoDuration;
     use tokio::sync::RwLock;
 

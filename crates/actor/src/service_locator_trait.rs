@@ -29,17 +29,17 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::actor_context::{ActorService, ChannelService, ObjectRegistry, TupleSpaceProvider};
+use crate::behavior_factory::BehaviorRegistry;
+use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
+use crate::grpc_connection_manager::GrpcConnectionManager;
 use crate::metrics_renderer::MetricsPrometheusRenderer;
 use crate::metrics_service_access::MetricsServiceAccess;
 use crate::monitoring::NodeConnectionInfo;
+use crate::ActorFactory;
 use crate::JournalStorage;
 use crate::KeyValueStore;
 use crate::RequestContext;
 use crate::{ActorRegistry, ReplyWaiterRegistry, Service, VirtualActorManager};
-use crate::behavior_factory::BehaviorRegistry;
-use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
-use crate::grpc_connection_manager::GrpcConnectionManager;
-use crate::ActorFactory;
 
 /// Readonly service locator — runtime code depends only on this trait.
 ///

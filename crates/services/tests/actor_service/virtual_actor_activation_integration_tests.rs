@@ -12,13 +12,13 @@
 // - Error cases: missing metadata, invalid actor IDs, etc.
 
 use async_trait::async_trait;
-use plexspaces_behavior::GenServer;
-use plexspaces_common::ActivationStrategy;
 use plexspaces_actor::behavior_factory::{BehaviorFactoryError, BehaviorRegistry};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
-    InitializableServiceLocator, Message, RequestContext, ServiceLocator, RequestContextExt,
+    InitializableServiceLocator, Message, RequestContext, RequestContextExt, ServiceLocator,
 };
+use plexspaces_behavior::GenServer;
+use plexspaces_common::ActivationStrategy;
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeBuilder, ReleaseSpec};
 use plexspaces_proto::actor::v1::{
@@ -2115,6 +2115,7 @@ async fn test_abstractions_example_runtime_send_primes_channel_definition_metada
                 }],
                 labels: std::collections::HashMap::new(),
                 config: None,
+                ..Default::default()
             },
         )
         .await
@@ -2213,6 +2214,7 @@ async fn test_abstractions_example_ephemeral_named_actor_reactivates_from_init_t
                 }],
                 labels: std::collections::HashMap::new(),
                 config: None,
+                ..Default::default()
             },
         )
         .await

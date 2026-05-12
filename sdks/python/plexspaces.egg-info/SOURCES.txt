@@ -36,6 +36,8 @@ plexspaces/generated/plexspaces/circuitbreaker/__init__.py
 plexspaces/generated/plexspaces/circuitbreaker/prv/__init__.py
 plexspaces/generated/plexspaces/common/__init__.py
 plexspaces/generated/plexspaces/common/v1/__init__.py
+plexspaces/generated/plexspaces/config/__init__.py
+plexspaces/generated/plexspaces/config/v1/__init__.py
 plexspaces/generated/plexspaces/dashboard/__init__.py
 plexspaces/generated/plexspaces/dashboard/v1/__init__.py
 plexspaces/generated/plexspaces/facets/__init__.py
@@ -68,6 +70,8 @@ plexspaces/generated/plexspaces/scheduling/__init__.py
 plexspaces/generated/plexspaces/scheduling/v1/__init__.py
 plexspaces/generated/plexspaces/security/__init__.py
 plexspaces/generated/plexspaces/security/v1/__init__.py
+plexspaces/generated/plexspaces/services/__init__.py
+plexspaces/generated/plexspaces/services/prv/__init__.py
 plexspaces/generated/plexspaces/storage/__init__.py
 plexspaces/generated/plexspaces/storage/v1/__init__.py
 plexspaces/generated/plexspaces/supervision/__init__.py
@@ -86,10 +90,12 @@ plexspaces_cli/__init__.py
 plexspaces_cli/build.py
 tests/test_abstractions_contract.py
 tests/test_actor_id.py
+tests/test_application_metrics_host.py
 tests/test_decorators.py
 tests/test_host.py
 tests/test_host_collective.py
 tests/test_host_tuple_space.py
 tests/test_http_fetch_wire.py
+tests/test_lock_wire.py
 tests/test_runtime.py
 tests/test_workflow_retry.py

@@ -8,8 +8,10 @@
 // an in-memory ProcessGroupRegistry.
 
 use plexspaces_actor::ActorRef;
+use plexspaces_actor::{
+    service_locator_trait::ServiceLocator, ActorId, InitializableServiceLocator, RequestContextExt,
+};
 use plexspaces_common::RequestContext;
-use plexspaces_actor::{service_locator_trait::ServiceLocator, ActorId, InitializableServiceLocator, RequestContextExt};
 use plexspaces_facet::capabilities::process_groups::{ProcessGroupFacet, ProcessGroupRegistry};
 use plexspaces_mailbox::{new_message, Message};
 use plexspaces_node::{Node, NodeBuilder};

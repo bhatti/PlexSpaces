@@ -53,9 +53,7 @@ pub trait ServiceLocatorBase: Send + Sync {
     async fn get_journal_storage(&self) -> Option<Arc<dyn JournalStorage + Send + Sync>>;
 
     /// Get key-value store.
-    async fn get_keyvalue_store(
-        &self,
-    ) -> Option<Arc<dyn plexspaces_common::KeyValueStore>>;
+    async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_common::KeyValueStore>>;
 
     /// Get distributed lock manager.
     async fn get_lock_manager(
@@ -63,9 +61,7 @@ pub trait ServiceLocatorBase: Send + Sync {
     ) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>;
 
     /// Get process group service for Erlang pg/pg2-style pub/sub.
-    async fn get_process_group_service(
-        &self,
-    ) -> Option<Arc<dyn crate::ProcessGroupService>> {
+    async fn get_process_group_service(&self) -> Option<Arc<dyn crate::ProcessGroupService>> {
         None
     }
 

@@ -134,6 +134,7 @@ class ActorErrorCode(betterproto.Enum):
     ACTOR_ERROR_MAILBOX_ERROR = 7
     ACTOR_ERROR_BEHAVIOR_ERROR = 8
     ACTOR_ERROR_JOURNAL_ERROR = 9
+    ACTOR_ERROR_PLACEMENT_CONFLICT = 10
 
 
 class BehaviorErrorCode(betterproto.Enum):
@@ -2419,6 +2420,23 @@ class ActorSpawnSpec(betterproto.Message):
     """
     Actor runtime configuration (mailbox, restart policy, etc.).
      Optional — defaults apply when absent.
+    """
+
+    register_in_object_registry: bool = betterproto.bool_field(11)
+    """
+    If true, auto-register this actor in ObjectRegistry on spawn and unregister on stop.
+     Auto-enabled when facets include both "virtual_actor" and "durability".
+    """
+
+    enforce_unique_placement: bool = betterproto.bool_field(12)
+    """
+    If true, enforce unique placement via alias (requires register_in_object_registry=true or auto-enabled).
+     Spawn fails with ACTOR_ERROR_PLACEMENT_CONFLICT if another active instance with same identity exists.
+    """
+
+    placement_strategy: "PlacementStrategy" = betterproto.enum_field(13)
+    """
+    Placement strategy for distributed actor placement (default: PREFER_LOCAL).
     """
 
 

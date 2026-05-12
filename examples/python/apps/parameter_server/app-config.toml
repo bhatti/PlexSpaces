@@ -10,13 +10,11 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "leader"
-actor_type = "parameter_server_wasm"
-role = "leader"
+actor_type = "Leader"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 
 [supervisor.children.args]
-role = "leader"
 num_workers = "4"
 learning_rate = "0.01"
 input_dim = "100"
@@ -24,10 +22,6 @@ hidden_dim = "64"
 
 [[supervisor.children]]
 name = "worker"
-actor_type = "parameter_server_wasm"
-role = "worker"
+actor_type = "Worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
-
-[supervisor.children.args]
-role = "worker"

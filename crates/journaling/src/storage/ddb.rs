@@ -96,9 +96,9 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::Utc;
-use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::timer::v1::ReminderState;
+use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 use prost::Message;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};

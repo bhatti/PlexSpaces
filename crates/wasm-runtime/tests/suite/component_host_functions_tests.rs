@@ -425,11 +425,7 @@ mod tests {
         // ACT: Test send_to_queue
         let result = channels
             .host_functions
-            .send_to_queue(
-                "test-queue",
-                "test-msg",
-                vec![1, 2, 3],
-            )
+            .send_to_queue("test-queue", "test-msg", vec![1, 2, 3])
             .await;
 
         // ASSERT: Should fail without channel service configured
@@ -467,11 +463,7 @@ mod tests {
         // ACT: Test publish_to_topic
         let result = channels
             .host_functions
-            .publish_to_topic(
-                "test-topic",
-                "test-msg",
-                vec![1, 2, 3],
-            )
+            .publish_to_topic("test-topic", "test-msg", vec![1, 2, 3])
             .await;
 
         // ASSERT: Should fail without channel service configured

@@ -253,6 +253,11 @@ class WorkflowExecution(betterproto.Message):
     )
     """User-defined labels"""
 
+    last_heartbeat: Optional[datetime] = betterproto.message_field(15, optional=True)
+    """
+    Last heartbeat timestamp (set by update_heartbeat, tracks node liveness)
+    """
+
 
 @dataclass(eq=False, repr=False)
 class StepExecution(betterproto.Message):

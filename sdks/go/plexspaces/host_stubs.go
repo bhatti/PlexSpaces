@@ -31,10 +31,11 @@ var stubState = struct {
 	pgMembers         map[string][]string
 	channelQueues     map[string][]stubChannelMessage
 	channelTopics     map[string][]stubChannelMessage
-	channelAcked      map[string]bool   // msg ID → acked
-	channelNacked     map[string]bool   // msg ID → nacked
-	channelSubs       map[string]string // subscription ID → channel name
+	channelAcked      map[string]bool              // msg ID → acked
+	channelNacked     map[string]bool              // msg ID → nacked
+	channelSubs       map[string]string            // subscription ID → channel name
 	channelSubCounter int
+	registryStore     map[string]map[string]any    // object_id → registration
 	selfID            string
 	nowMs             uint64
 	useRealTime       bool
@@ -42,6 +43,7 @@ var stubState = struct {
 	kvStore:       make(map[string]string),
 	blobStore:     make(map[string]string),
 	pgMembers:     make(map[string][]string),
+	registryStore: make(map[string]map[string]any),
 	channelAcked:  make(map[string]bool),
 	channelNacked: make(map[string]bool),
 	channelSubs:   make(map[string]string),
@@ -82,6 +84,7 @@ func ResetStubs() {
 	stubState.channelNacked = make(map[string]bool)
 	stubState.channelSubs = make(map[string]string)
 	stubState.channelSubCounter = 0
+	stubState.registryStore = make(map[string]map[string]any)
 	stubState.selfID = "test-actor:test@test-node"
 	stubState.nowMs = 0
 	stubState.useRealTime = false
@@ -639,4 +642,283 @@ func hostChannelDepth(ctx, channelName string) string {
 		return "0"
 	}
 	return fmt.Sprintf("%d", len(stubState.channelQueues[channelName]))
+}
+
+// ========================================================================
+// Object Registry stubs
+// ========================================================================
+
+func hostRegistryRegister(request string) string {
+	// request is proto-encoded RegisterRequest: field 1 = ObjectRegistration (length-delimited)
+	b := []byte(request)
+	var reg ObjectRegistration
+	pos := 0
+	for pos < len(b) {
+		tag, n, err := readVarint(b, pos)
+		if err != nil {
+			break
+		}
+		pos += n
+		fn := tag >> 3
+		wt := tag & 7
+		if fn == 1 && wt == 2 {
+			ln, m, err := readVarint(b, pos)
+			if err != nil {
+				break
+			}
+			pos += m
+			end := pos + int(ln)
+			if end > len(b) {
+				break
+			}
+			reg = decodeObjectRegistration(b[pos:end])
+			pos = end
+		} else {
+			var err error
+			pos, err = skipField(b, pos, wt)
+			if err != nil {
+				break
+			}
+		}
+	}
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.registryStore == nil {
+		stubState.registryStore = make(map[string]map[string]any)
+	}
+	stubState.registryStore[reg.ObjectID] = map[string]any{
+		"object_id":       reg.ObjectID,
+		"object_type":     reg.ObjectType,
+		"grpc_address":    reg.GRPCAddress,
+		"object_category": reg.ObjectCategory,
+		"tenant_id":       reg.TenantID,
+		"namespace":       reg.Namespace,
+		"capabilities":    reg.Capabilities,
+		"labels":          reg.Labels,
+		"health_status":   "healthy",
+		"alias":           aliasFromPtr(reg.Alias),
+	}
+	return ""
+}
+
+func aliasFromPtr(a *string) string {
+	if a == nil {
+		return ""
+	}
+	return *a
+}
+
+
+func hostRegistryUnregister(request string) string {
+	b := []byte(request)
+	objectID := ""
+	pos := 0
+	for pos < len(b) {
+		tag, n, err := readVarint(b, pos)
+		if err != nil {
+			break
+		}
+		pos += n
+		fn := tag >> 3
+		wt := tag & 7
+		if fn == 1 && wt == 2 {
+			ln, m, err := readVarint(b, pos)
+			if err != nil {
+				break
+			}
+			pos += m
+			objectID = string(b[pos : pos+int(ln)])
+			pos += int(ln)
+		} else {
+			var err error
+			pos, err = skipField(b, pos, wt)
+			if err != nil {
+				break
+			}
+		}
+	}
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.registryStore != nil && objectID != "" {
+		delete(stubState.registryStore, objectID)
+	}
+	return ""
+}
+
+func hostRegistryLookup(request string) string {
+	b := []byte(request)
+	objectID := ""
+	pos := 0
+	for pos < len(b) {
+		tag, n, err := readVarint(b, pos)
+		if err != nil {
+			break
+		}
+		pos += n
+		fn := tag >> 3
+		wt := tag & 7
+		if fn == 1 && wt == 2 {
+			ln, m, err := readVarint(b, pos)
+			if err != nil {
+				break
+			}
+			pos += m
+			objectID = string(b[pos : pos+int(ln)])
+			pos += int(ln)
+		} else {
+			var err error
+			pos, err = skipField(b, pos, wt)
+			if err != nil {
+				break
+			}
+		}
+	}
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.registryStore == nil || objectID == "" {
+		return string(encodeLookupResponseNotFound())
+	}
+	raw, ok := stubState.registryStore[objectID]
+	if !ok {
+		return string(encodeLookupResponseNotFound())
+	}
+	reg := mapToObjectRegistration(raw)
+	return string(encodeLookupResponseFound(reg))
+}
+
+func encodeLookupResponseNotFound() []byte {
+	// LookupResponse: found=2 (bool false) — just empty bytes is fine since found=false is default
+	return []byte{}
+}
+
+func encodeLookupResponseFound(reg ObjectRegistration) []byte {
+	// LookupResponse: registration=1 (message), found=2 (bool true)
+	inner := encodeObjectRegistration(reg)
+	var b []byte
+	b = appendLengthDelimited(b, 1, inner)
+	b = appendVarintField(b, 2, 1) // found = true
+	return b
+}
+
+func mapToObjectRegistration(m map[string]any) ObjectRegistration {
+	reg := ObjectRegistration{}
+	if v, ok := m["object_id"].(string); ok {
+		reg.ObjectID = v
+	}
+	if v, ok := m["object_type"].(string); ok {
+		reg.ObjectType = v
+	}
+	if v, ok := m["grpc_address"].(string); ok {
+		reg.GRPCAddress = v
+	}
+	if v, ok := m["object_category"].(string); ok {
+		reg.ObjectCategory = v
+	}
+	if v, ok := m["tenant_id"].(string); ok {
+		reg.TenantID = v
+	}
+	if v, ok := m["namespace"].(string); ok {
+		reg.Namespace = v
+	}
+	if v, ok := m["capabilities"].([]string); ok {
+		reg.Capabilities = v
+	}
+	if v, ok := m["labels"].([]string); ok {
+		reg.Labels = v
+	}
+	if v, ok := m["alias"].(string); ok && v != "" {
+		reg.Alias = &v
+	}
+	return reg
+}
+
+func hostRegistryLookupByAlias(alias string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.registryStore == nil {
+		return string(encodeLookupResponseNotFound())
+	}
+	for _, raw := range stubState.registryStore {
+		if a, ok := raw["alias"].(string); ok && a == alias {
+			reg := mapToObjectRegistration(raw)
+			return string(encodeLookupResponseFound(reg))
+		}
+	}
+	return string(encodeLookupResponseNotFound())
+}
+
+func hostRegistryDiscover(request string) string {
+	b := []byte(request)
+	var filterObjectType int32
+	var filterObjectCategory string
+	pos := 0
+	for pos < len(b) {
+		tag, n, err := readVarint(b, pos)
+		if err != nil {
+			break
+		}
+		pos += n
+		fn := tag >> 3
+		wt := tag & 7
+		switch {
+		case fn == 1 && wt == 0: // object_type varint
+			v, m, err := readVarint(b, pos)
+			if err != nil {
+				break
+			}
+			pos += m
+			filterObjectType = int32(v)
+		case fn == 2 && wt == 2: // object_category string
+			ln, m, err := readVarint(b, pos)
+			if err != nil {
+				break
+			}
+			pos += m
+			filterObjectCategory = string(b[pos : pos+int(ln)])
+			pos += int(ln)
+		default:
+			var err error
+			pos, err = skipField(b, pos, wt)
+			if err != nil {
+				break
+			}
+		}
+	}
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	if stubState.registryStore == nil {
+		return string(encodeDiscoverResponseEmpty())
+	}
+	var regs []ObjectRegistration
+	for _, raw := range stubState.registryStore {
+		if filterObjectType != 0 {
+			if ot, ok := raw["object_type"].(string); !ok || ot != objectTypeToString(filterObjectType) {
+				continue
+			}
+		}
+		if filterObjectCategory != "" {
+			if oc, ok := raw["object_category"].(string); !ok || oc != filterObjectCategory {
+				continue
+			}
+		}
+		regs = append(regs, mapToObjectRegistration(raw))
+	}
+	return string(encodeDiscoverResponseRegs(regs))
+}
+
+func encodeDiscoverResponseEmpty() []byte {
+	return []byte{}
+}
+
+func encodeDiscoverResponseRegs(regs []ObjectRegistration) []byte {
+	var b []byte
+	for _, reg := range regs {
+		inner := encodeObjectRegistration(reg)
+		b = appendLengthDelimited(b, 1, inner)
+	}
+	return b
+}
+
+func hostRegistryHeartbeat(request string) string {
+	return ""
 }

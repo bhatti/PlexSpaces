@@ -62,8 +62,8 @@ use tokio::sync::RwLock;
 
 use crate::actor_context::ActorService;
 use crate::{ActorId, RequestContext};
-use plexspaces_service_traits::ActorRef;
 use plexspaces_proto::common::v1::Message;
+use plexspaces_service_traits::ActorRef;
 use ulid::Ulid;
 
 // ─── Control-message convention ──────────────────────────────────────────────
@@ -633,8 +633,14 @@ mod tests {
         assert_eq!(ping.message_type, "__PING__");
         assert_eq!(ping.sender_id, "sender@node1");
         assert_eq!(ping.receiver_id, "target@node2");
-        assert!(!ping.correlation_id.is_empty(), "correlation_id must be set");
-        assert_eq!(ping.headers.get("type").map(String::as_str), Some("__PING__"));
+        assert!(
+            !ping.correlation_id.is_empty(),
+            "correlation_id must be set"
+        );
+        assert_eq!(
+            ping.headers.get("type").map(String::as_str),
+            Some("__PING__")
+        );
     }
 
     #[test]
@@ -645,8 +651,14 @@ mod tests {
         assert_eq!(pong.message_type, "__PONG__");
         assert_eq!(pong.sender_id, ping.receiver_id);
         assert_eq!(pong.receiver_id, ping.sender_id);
-        assert_eq!(pong.correlation_id, ping.correlation_id, "correlation_id must be preserved");
-        assert_eq!(pong.headers.get("type").map(String::as_str), Some("__PONG__"));
+        assert_eq!(
+            pong.correlation_id, ping.correlation_id,
+            "correlation_id must be preserved"
+        );
+        assert_eq!(
+            pong.headers.get("type").map(String::as_str),
+            Some("__PONG__")
+        );
     }
 
     #[test]

@@ -42,11 +42,15 @@ impl PoolServiceError {
         use plexspaces_proto::actor::v1::PoolServiceErrorCode;
         match self {
             PoolServiceError::PoolNotFound(_) => PoolServiceErrorCode::PoolServiceErrorPoolNotFound,
-            PoolServiceError::CheckoutTimeout(_) => PoolServiceErrorCode::PoolServiceErrorCheckoutTimeout,
+            PoolServiceError::CheckoutTimeout(_) => {
+                PoolServiceErrorCode::PoolServiceErrorCheckoutTimeout
+            }
             PoolServiceError::PoolExhausted => PoolServiceErrorCode::PoolServiceErrorPoolExhausted,
             PoolServiceError::CircuitOpen => PoolServiceErrorCode::PoolServiceErrorCircuitOpen,
             PoolServiceError::PoolDraining => PoolServiceErrorCode::PoolServiceErrorPoolDraining,
-            PoolServiceError::InvalidConfig(_) => PoolServiceErrorCode::PoolServiceErrorInvalidConfig,
+            PoolServiceError::InvalidConfig(_) => {
+                PoolServiceErrorCode::PoolServiceErrorInvalidConfig
+            }
             PoolServiceError::ActorError(_) => PoolServiceErrorCode::PoolServiceErrorActorError,
         }
     }

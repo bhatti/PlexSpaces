@@ -204,12 +204,13 @@ use std::io::prelude::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
-use crate::resource::{ActorHealth, ActorHealthExt, ResourceContract, ResourceContractExt, ResourceProfile, ResourceUsage};
+use crate::resource::{
+    ActorHealth, ActorHealthExt, ResourceContract, ResourceContractExt, ResourceProfile,
+    ResourceUsage,
+};
 
 // Import from external crates
-use crate::core::{
-    Actor as ActorTrait, ActorContext, ActorError, ActorId, ExitAction, ExitReason,
-};
+use crate::core::{Actor as ActorTrait, ActorContext, ActorError, ActorId, ExitAction, ExitReason};
 
 /// Parse ExitReason from string representation (used for EXIT messages)
 fn parse_exit_reason_from_str(
@@ -534,9 +535,7 @@ async fn set_replay_handler_for_facet(
         .as_any_mut()
         .downcast_mut::<plexspaces_journaling::DurabilityFacet>()
     {
-        durability_facet
-            .set_replay_handler(Box::new(handler))
-            .await;
+        durability_facet.set_replay_handler(Box::new(handler)).await;
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("ReplayHandler set for DurabilityFacet");
         }
@@ -762,7 +761,6 @@ impl ActorInstance {
         Ok(())
     }
 
-
     /// Get the actor's ID
     pub fn id(&self) -> &ActorId {
         &self.id
@@ -793,8 +791,8 @@ impl ActorInstance {
         registry: &Arc<crate::core::ActorRegistry>,
         visibility: plexspaces_proto::actor::v1::ActorVisibility,
     ) {
-        use crate::ActorRef;
         use crate::core::{MessageSender, RequestContext, RequestContextExt};
+        use crate::ActorRef;
 
         let ctx = RequestContext::new_without_auth(
             self.context.tenant_id.clone(),
@@ -2572,11 +2570,11 @@ impl ActorInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::behavior::MockBehavior;
     use crate::core::{
         ActorContext, ActorStateHandle as CoreActorStateHandle, BehaviorError, ServiceLocator,
     };
+    use async_trait::async_trait;
     use plexspaces_journaling::{DurabilityFacet, JournalStorage, SqliteJournalStorage};
     use plexspaces_mailbox::MailboxConfig;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -3237,7 +3235,10 @@ mod tests {
         .with_resource_profile(profile);
 
         // Verify profile was set
-        assert_eq!(actor.resource_profile, ResourceProfile::ResourceProfileCpuIntensive);
+        assert_eq!(
+            actor.resource_profile,
+            ResourceProfile::ResourceProfileCpuIntensive
+        );
     }
 
     #[tokio::test]
@@ -3838,8 +3839,8 @@ mod tests {
     /// This covers error path in message loop (lines 439-442)
     #[tokio::test]
     async fn test_message_processing_error_handling() {
-        use async_trait::async_trait;
         use crate::core::{Actor as ActorTrait, BehaviorError, BehaviorType};
+        use async_trait::async_trait;
         use plexspaces_mailbox::mailbox_config_default;
 
         // Behavior that always fails

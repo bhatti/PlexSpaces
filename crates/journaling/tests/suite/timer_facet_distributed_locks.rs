@@ -133,8 +133,8 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id(actor_id, "node-1"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
 
         let mut facet_mut = facet;
@@ -154,8 +154,8 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
         let lock_manager: Arc<dyn LockManager + Send + Sync> =
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
@@ -189,14 +189,20 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
         let facet = create_timer_facet_without_locks(mailbox.clone()).await;
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
 
-        let registration =
-            timer_registration("test-actor", "node-1", "unlocked-timer", 0, 10_000_000, false);
+        let registration = timer_registration(
+            "test-actor",
+            "node-1",
+            "unlocked-timer",
+            0,
+            10_000_000,
+            false,
+        );
 
         let result = facet_mut.register_timer(registration).await;
         assert!(
@@ -225,8 +231,8 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-1"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
         let facet1 = create_timer_facet_with_locks(
             lock_manager.clone(),
@@ -242,8 +248,8 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor-1", "node-2"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
         let facet2 = create_timer_facet_with_locks(
             lock_manager.clone(),
@@ -254,26 +260,14 @@ mod distributed_lock_tests {
         let (mut facet2_mut, _mailbox2) = setup_facet(facet2, "test-actor-1").await; // Same actor_id!
 
         // Register timer on node 1 - should acquire lock
-        let registration1 = timer_registration(
-            "test-actor-1",
-            "node-1",
-            "node1-timer",
-            50_000_000,
-            0,
-            true,
-        );
+        let registration1 =
+            timer_registration("test-actor-1", "node-1", "node1-timer", 50_000_000, 0, true);
         let result1 = facet1_mut.register_timer(registration1).await;
         assert!(result1.is_ok(), "Node 1 timer registration should succeed");
 
         // Register timer on node 2 - should register but lock acquisition will fail
-        let registration2 = timer_registration(
-            "test-actor-1",
-            "node-2",
-            "node2-timer",
-            50_000_000,
-            0,
-            true,
-        );
+        let registration2 =
+            timer_registration("test-actor-1", "node-2", "node2-timer", 50_000_000, 0, true);
         // Registration succeeds (timer is registered), but lock acquisition will fail
         let result2 = facet2_mut.register_timer(registration2).await;
         assert!(
@@ -300,8 +294,8 @@ mod distributed_lock_tests {
                 MailboxConfig::default(),
                 timer_test_actor_id("test-actor", "node-1"),
             )
-                .await
-                .expect("Failed to create mailbox"),
+            .await
+            .expect("Failed to create mailbox"),
         );
         let lock_manager: Arc<dyn LockManager + Send + Sync> =
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());

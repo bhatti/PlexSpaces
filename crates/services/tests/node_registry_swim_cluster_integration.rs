@@ -71,7 +71,9 @@ async fn spawn_gossip_node(
         })
         .await;
     let grpc_mgr = Arc::new(GrpcConnectionManager::new(Some(2)));
-    service_locator.register_grpc_connection_manager(grpc_mgr).await;
+    service_locator
+        .register_grpc_connection_manager(grpc_mgr)
+        .await;
     service_locator
         .register_node_registry(node_registry.clone())
         .await;

@@ -21,8 +21,8 @@
 //! These tests require MinIO to be running. If MinIO is not available,
 //! tests will print a warning and skip.
 
-use plexspaces_blob::{repository::sql::SqlBlobRepository, repository::ListFilters, BlobService};
 use plexspaces_actor::{RequestContext, RequestContextExt};
+use plexspaces_blob::{repository::sql::SqlBlobRepository, repository::ListFilters, BlobService};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -128,7 +128,10 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     let service = match BlobService::new(config, repository).await {
         Ok(s) => Arc::new(s),
         Err(e) => {
-            eprintln!("⚠️  Failed to initialize BlobService against MinIO at {}: {}", endpoint, e);
+            eprintln!(
+                "⚠️  Failed to initialize BlobService against MinIO at {}: {}",
+                endpoint, e
+            );
             return None;
         }
     };
@@ -154,7 +157,10 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
             Some(service)
         }
         Err(e) => {
-            eprintln!("⚠️  MinIO at {} is reachable but S3 operations fail: {}. Skipping.", endpoint, e);
+            eprintln!(
+                "⚠️  MinIO at {} is reachable but S3 operations fail: {}. Skipping.",
+                endpoint, e
+            );
             None
         }
     }

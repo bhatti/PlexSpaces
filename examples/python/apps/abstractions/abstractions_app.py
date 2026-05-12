@@ -209,7 +209,6 @@ ControllerActor = AbstractionsActor
 ACTOR_ROLES = {
     "abstractions": AbstractionsActor,
     "ephemeral": EphemeralActor,
-    "workflow": AbstractionsWorkflow,
     "channel": AbstractionsChannel,
     "controller": ControllerActor,
 }

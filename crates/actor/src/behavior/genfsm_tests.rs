@@ -23,8 +23,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use async_trait::async_trait;
     use crate::core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
+    use async_trait::async_trait;
     use plexspaces_proto::common::v1::Message;
     use std::sync::{Arc, Mutex};
 

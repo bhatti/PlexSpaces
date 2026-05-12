@@ -4,128 +4,71 @@
 // PlexSpaces TypeScript SDK - Multi-Actor Router
 //
 // Routes messages to multiple actor types within a single WASM module.
-// Equivalent to Python SDK's ACTOR_ROLES dict and Go SDK's ActorRouter.
 //
-// Example:
-//   const router = new ActorRouter({
-//     "rate-limiter": () => new RateLimiterActor(),
-//     "counter": () => new CounterActor(),
-//   });
-//   export const actor = router;
+// Dispatch rule (matches Python and Go SDKs):
+//   1. config.actor_type — exact lookup (the normal case; always set by the framework).
+//   2. config.role       — exact lookup (same-actor_type multi-instance only,
+//                          e.g. "ephemeral"/"channel" both map to AbstractionsActor).
+//   3. Error — no silent fallback; a missing registration is always a bug.
 
 import { PlexSpacesActor } from "./actor.js";
 import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from "./wit-payload.js";
 
-/**
- * Factory function that creates an actor instance.
- */
+/** Factory function that creates an actor instance. */
 type ActorFactory = () => PlexSpacesActor;
-
-function normalizeActorRole(actorId: string): string {
-  if (!actorId) {
-    return "";
-  }
-  const canonicalSep = actorId.indexOf("//");
-  if (canonicalSep >= 0 && canonicalSep + 2 < actorId.length) {
-    const rest = actorId.substring(canonicalSep + 2);
-    const behaviorSep = rest.indexOf("::");
-    if (behaviorSep >= 0) {
-      return rest.substring(0, behaviorSep);
-    }
-    const nodeSep = rest.indexOf("@");
-    return nodeSep >= 0 ? rest.substring(0, nodeSep) : rest;
-  }
-  const childSep = actorId.indexOf(":");
-  if (childSep >= 0) {
-    return actorId.substring(0, childSep);
-  }
-  const nodeSep = actorId.indexOf("@");
-  if (nodeSep >= 0) {
-    return actorId.substring(0, nodeSep);
-  }
-  return actorId;
-}
 
 /**
  * Routes messages to multiple actor types within a single WASM module.
  *
- * When a WASM module serves multiple actor types (via ApplicationSpec),
- * the framework passes `{"actor_id": "rate-limiter:ns@node"}` in the init config.
- * The router uses prefix matching on the actor_id to select the correct factory.
+ * Register each actor type under its exact class name, which matches what
+ * the framework places in ``config.actor_type``:
  *
- * This is the TypeScript equivalent of:
- * - Python: `ACTOR_ROLES = {"rate-limiter": RateLimiter, "counter": Counter}`
- * - Go: `router.Route("rate-limiter", func() plexspaces.Actor { ... })`
+ *   const router = new ActorRouter({
+ *     "ChatRoomActor":  () => new ChatRoomActor(),
+ *     "RateLimiterActor": () => new RateLimiterActor(),
+ *   });
+ *   export const actor = router;
+ *
+ * For same-class multi-instance dispatch, register under the role name:
+ *
+ *   const router = new ActorRouter({
+ *     "AbstractionsActor": () => new AbstractionsActor(),
+ *     "ephemeral":         () => new AbstractionsActor(),
+ *     "channel":           () => new AbstractionsActor(),
+ *   });
  */
 export class ActorRouter {
-  private factories: Record<string, ActorFactory>;
+  private readonly factories: Record<string, ActorFactory>;
   private active: PlexSpacesActor | null = null;
 
-  /**
-   * Create an ActorRouter with prefix-to-factory mappings.
-   *
-   * @param routes - Map of actor_id prefix to factory function.
-   *   Prefix matching: "rate-limiter" matches "rate-limiter-0", "rate-limiter-1", etc.
-   *
-   * Example:
-   *   new ActorRouter({
-   *     "parameter-server": () => new ParameterServerActor(),
-   *     "data-worker": () => new DataWorkerActor(),
-   *   })
-   */
   constructor(routes: Record<string, ActorFactory>) {
     this.factories = routes;
   }
 
   /** WIT `init(config: payload) -> result<_, actor-error>` */
   init(configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): void {
-    try {
-      const text = decodeWitPayloadUtf8(configJson);
-      const config = text.trim()
-        ? JSON.parse(text) as Record<string, unknown>
-        : {};
+    const text = decodeWitPayloadUtf8(configJson);
+    const config = text.trim() ? JSON.parse(text) as Record<string, unknown> : {};
 
-      const actorId = (config.actor_id as string) || "";
-      // actor_type from init config is the authoritative dispatch key (set by ChildSpec.actor_type).
-      // Fall back to extracting the type component from the canonical actor_id.
-      const actorType = (config.actor_type as string) || normalizeActorRole(actorId);
-      // role is the child spec name (e.g. "router", "chain") sourced from ActorSpawnSpec.role —
-      // used when multiple children share the same actor_type.
-      const role = (config.role as string) || "";
+    const actorType = (config.actor_type as string) || "";
+    const role = (config.role as string) || "";
 
-      const findFactory = (key: string): [string, ActorFactory | null] => {
-        let bestPrefix = "";
-        let bestFactory: ActorFactory | null = null;
-        for (const prefix of Object.keys(this.factories)) {
-          if (key === prefix || key.startsWith(prefix)) {
-            if (prefix.length > bestPrefix.length) {
-              bestPrefix = prefix;
-              bestFactory = this.factories[prefix];
-            }
-          }
-        }
-        return [bestPrefix, bestFactory];
-      };
+    // 1. actor_type — exact match (primary dispatch key set by framework)
+    let factory = actorType ? this.factories[actorType] : undefined;
 
-      // Try role first (exact child name match wins when present).
-      // Fall back to actor_type prefix matching for single-actor-type modules.
-      let [, bestFactory] = role ? findFactory(role) : ["", null];
-      if (!bestFactory) {
-        [, bestFactory] = findFactory(actorType);
-      }
-
-      if (!bestFactory) {
-        throw new Error("ERROR: no actor registered for role='" + role + "' actor_type='" + actorType + "'");
-      }
-
-      this.active = bestFactory();
-      this.active.init(text);
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith("ERROR:")) {
-        throw e;
-      }
-      throw new Error("ERROR: router init failed");
+    // 2. role — exact match (same-actor_type multi-instance only)
+    if (!factory && role) {
+      factory = this.factories[role];
     }
+
+    if (!factory) {
+      throw new Error(
+        `ERROR: no actor registered for actor_type='${actorType}' role='${role}'`,
+      );
+    }
+
+    this.active = factory();
+    this.active.init(text);
   }
 
   /** WIT `handle(...) -> result<payload, actor-error>` */

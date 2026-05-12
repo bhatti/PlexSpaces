@@ -67,8 +67,7 @@ async fn test_link_basic() {
 
     // Link actor1 to actor2 (use test context for tenant isolation)
     use plexspaces_actor::{RequestContext, RequestContextExt};
-    let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
     node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
 
     // Verify bidirectional linking: unlink should work from either direction
@@ -88,8 +87,7 @@ async fn test_link_self_fails() {
 
     // Linking actor to itself should fail
     use plexspaces_actor::{RequestContext, RequestContextExt};
-    let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
     let result = node.link(&ctx, actor1.id(), actor1.id()).await;
     assert!(result.is_err());
 }
@@ -101,8 +99,7 @@ async fn test_unlink_nonexistent() {
     let actor1 = create_test_actor_ref(&node, "actor-1").await;
     let actor2 = create_test_actor_ref(&node, "actor-2").await;
     use plexspaces_actor::{RequestContext, RequestContextExt};
-    let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
     // Unlinking actors that aren't linked should succeed (idempotent)
     node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap();
@@ -188,10 +185,8 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "exit-test-2").await;
 
         use plexspaces_actor::{RequestContext, RequestContextExt};
-        let ctx = RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
 
@@ -225,10 +220,8 @@ async fn test_exit_condition_cascading() {
         let actor2 = create_test_actor_ref(&node, "normal-test-2").await;
 
         use plexspaces_actor::{RequestContext, RequestContextExt};
-        let ctx = RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         tokio::task::yield_now().await; // Give link time to register
 
@@ -261,10 +254,8 @@ async fn test_exit_condition_cascading() {
         let actor3 = create_test_actor_ref(&node, "chain-3").await;
 
         use plexspaces_actor::{RequestContext, RequestContextExt};
-        let ctx = RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         node.link(&ctx, actor2.id(), actor3.id()).await.unwrap();
 
@@ -314,10 +305,8 @@ async fn test_exit_condition_cascading() {
         let actor3 = create_test_actor_ref(&node, "multi-3").await;
 
         use plexspaces_actor::{RequestContext, RequestContextExt};
-        let ctx = RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "default".to_string(),
-        );
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         node.link(&ctx, actor1.id(), actor2.id()).await.unwrap();
         node.link(&ctx, actor1.id(), actor3.id()).await.unwrap();
         node.unlink(&ctx, actor1.id(), actor2.id()).await.unwrap(); // Unlink actor2

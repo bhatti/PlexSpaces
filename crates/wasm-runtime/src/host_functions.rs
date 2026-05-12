@@ -295,6 +295,13 @@ pub trait MessageSender: Send + Sync {
 
 /// Host functions for WASM actors
 pub struct HostFunctions {
+    /// Tenant ID injected from ApplicationSpec at deploy time.
+    /// Set from JWT (gRPC/REST deploy) or TOML `tenant_id` field (embedded/file deploy).
+    /// Never trust tenant_id from WASM guest requests — always use this field.
+    pub tenant_id: String,
+    /// Default namespace from ApplicationSpec. WASM guests may request a different namespace,
+    /// but tenant_id is always injected from this field.
+    pub default_namespace: String,
     /// Message sender for routing messages (optional)
     message_sender: Option<Arc<dyn MessageSender>>,
     /// Channel service for queue/topic patterns (optional)
@@ -322,9 +329,11 @@ pub struct HostFunctions {
 }
 
 impl HostFunctions {
-    /// Create new host functions context
+    /// Create new host functions context (no tenant isolation — for tests only)
     pub fn new() -> Self {
         Self {
+            tenant_id: String::new(),
+            default_namespace: String::new(),
             message_sender: None,
             channel_service: None,
             keyvalue_store: None,
@@ -337,6 +346,13 @@ impl HostFunctions {
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Set the tenant_id injected from ApplicationSpec (call after construction).
+    pub fn with_tenant(mut self, tenant_id: String, default_namespace: String) -> Self {
+        self.tenant_id = tenant_id;
+        self.default_namespace = default_namespace;
+        self
     }
 
     /// Abort all pending send_after timers registered by this actor.
@@ -363,6 +379,8 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 
@@ -380,6 +398,8 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 
@@ -400,6 +420,8 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 
@@ -417,9 +439,10 @@ impl HostFunctions {
         outbound_http_client: Option<Arc<dyn plexspaces_actor::OutboundHttpClient>>,
         shared_timer_pool: Option<Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
     ) -> Self {
-        let timer_handles = shared_timer_pool
-            .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
+        let timer_handles = shared_timer_pool.unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
         Self {
+            tenant_id: String::new(),
+            default_namespace: String::new(),
             message_sender: sender,
             channel_service,
             keyvalue_store,
@@ -502,7 +525,11 @@ impl HostFunctions {
         let outbound_request = OutboundHttpRequest {
             method: method.to_string(),
             path_and_query: path_and_query.to_string(),
-            headers: request.headers.into_iter().map(|(k, v)| HttpHeader { key: k, value: v }).collect(),
+            headers: request
+                .headers
+                .into_iter()
+                .map(|(k, v)| HttpHeader { key: k, value: v })
+                .collect(),
             body: request.body,
         };
 

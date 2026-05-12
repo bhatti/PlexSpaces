@@ -213,8 +213,12 @@ impl RequestContextExt for RequestContext {
         };
         let effective_namespace = namespace.unwrap_or_default();
 
-        let ctx = <RequestContext as RequestContextExt>::new(effective_tenant_id, effective_namespace, auth_enabled)?
-            .with_admin(admin);
+        let ctx = <RequestContext as RequestContextExt>::new(
+            effective_tenant_id,
+            effective_namespace,
+            auth_enabled,
+        )?
+        .with_admin(admin);
         let ctx = if let Some(uid) = user_id {
             ctx.with_user_id(uid)
         } else {

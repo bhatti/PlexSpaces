@@ -5,7 +5,9 @@
 
 use plexspaces_actor::{
     actor_context::ActorService as CoreActorSpawnService,
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext, RequestContextExt};
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext,
+    RequestContextExt,
+};
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
 use plexspaces_proto::common::v1::ActorIdentity;
@@ -34,6 +36,7 @@ fn spawn_spec_for_test(
         facets: vec![],
         config,
         labels,
+        ..Default::default()
     }
 }
 
@@ -264,13 +267,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     // Test 3: canonical actor ids should remain canonical after normalization
     let canonical_actor_id =
         canonical_actor_id("explicit-id", "test-type", "test-namespace", "local-node");
-    let spec = spawn_spec_for_test(
-        &ctx,
-        &canonical_actor_id,
-        "test-type",
-        None,
-        HashMap::new(),
-    );
+    let spec = spawn_spec_for_test(&ctx, &canonical_actor_id, "test-type", None, HashMap::new());
     let result = CoreActorSpawnService::spawn_actor(&actor_service, &ctx, &spec).await;
     if let Ok(actor_ref) = result {
         assert_eq!(actor_ref.id(), &canonical_actor_id);

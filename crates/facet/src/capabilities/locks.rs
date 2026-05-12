@@ -956,7 +956,10 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send non-lock message
-        let result = facet.before_method("other_message", b"{}", &std::collections::HashMap::new()).await.unwrap();
+        let result = facet
+            .before_method("other_message", b"{}", &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         // ASSERT: Should continue (not short-circuit)
         match result {
@@ -975,7 +978,13 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send invalid JSON
-        let result = facet.before_method("acquire_lock", b"invalid json", &std::collections::HashMap::new()).await;
+        let result = facet
+            .before_method(
+                "acquire_lock",
+                b"invalid json",
+                &std::collections::HashMap::new(),
+            )
+            .await;
 
         // ASSERT: Should return error
         assert!(result.is_err());

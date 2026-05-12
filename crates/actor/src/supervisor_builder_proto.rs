@@ -166,7 +166,11 @@ impl ProtoSupervisorBuilder {
     ) -> Result<(), SupervisorError> {
         // Convert proto restart policy to Rust enum
         let restart = Self::convert_restart_policy(child_spec)?;
-        let role = if child_spec.role.is_empty() { "worker" } else { child_spec.role.as_str() };
+        let role = if child_spec.role.is_empty() {
+            "worker"
+        } else {
+            child_spec.role.as_str()
+        };
 
         // Extract shutdown timeout
         let _shutdown_timeout = child_spec
@@ -221,7 +225,6 @@ impl ProtoSupervisorBuilder {
             ))),
         }
     }
-
 }
 
 // ============================================================================

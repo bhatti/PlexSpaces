@@ -111,6 +111,20 @@ pub struct ObjectRegistration {
     /// Registration update timestamp
     #[prost(message, optional, tag="17")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+    // ==================== PLACEMENT & HEARTBEAT ====================
+
+    /// Alias for identity-based lookup (Orleans grain directory key).
+    /// Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+    /// Enables unique actor placement - only one active registration per alias.
+    #[prost(string, tag="18")]
+    pub alias: ::prost::alloc::string::String,
+    /// Maximum consecutive heartbeat failures before marking DEAD (default: 3).
+    /// 1 missed heartbeat -> DEGRADED, max_heartbeat_failures -> DEAD.
+    #[prost(uint32, tag="19")]
+    pub max_heartbeat_failures: u32,
+    /// Current consecutive heartbeat failure count (managed by registry, not client).
+    #[prost(uint32, tag="20")]
+    pub heartbeat_failure_count: u32,
 }
 // ============================================================================
 // REQUEST/RESPONSE MESSAGES
@@ -127,6 +141,10 @@ pub struct RegisterRequest {
     /// If specified, object auto-unregisters after TTL expires
     #[prost(message, optional, tag="2")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
+    /// If true, enforce unique alias placement.
+    /// Returns existing grpc_address in response if another active registration holds the same alias.
+    #[prost(bool, tag="3")]
+    pub enforce_unique_alias: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -137,6 +155,14 @@ pub struct RegisterResponse {
     /// Whether this was a new registration (true) or update (false)
     #[prost(bool, tag="2")]
     pub created: bool,
+    /// If enforce_unique_alias was true and an active registration with the same alias exists,
+    /// this contains the existing registration's grpc_address for forwarding.
+    #[prost(string, tag="3")]
+    pub existing_grpc_address: ::prost::alloc::string::String,
+    /// If enforce_unique_alias was true and an active registration with the same alias exists,
+    /// this contains the existing object_id for diagnostics.
+    #[prost(string, tag="4")]
+    pub existing_object_id: ::prost::alloc::string::String,
 }
 /// Unregister object request
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -166,7 +192,7 @@ pub struct UnregisterResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LookupRequest {
-    /// Object ID to lookup
+    /// Object ID to lookup (mutually exclusive with alias)
     #[prost(string, tag="1")]
     pub object_id: ::prost::alloc::string::String,
     /// Object type (optional - if not specified, searches all types)
@@ -178,6 +204,10 @@ pub struct LookupRequest {
     /// Namespace (for logical grouping)
     #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
+    /// Lookup by alias (mutually exclusive with object_id).
+    /// Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
+    #[prost(string, tag="5")]
+    pub alias: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -447,7 +477,7 @@ pub enum HealthStatus {
     HealthStatusUnknown = 0,
     HealthStatusHealthy = 1,
     HealthStatusDegraded = 2,
-    HealthStatusUnhealthy = 3,
+    HealthStatusDead = 3,
     HealthStatusStarting = 4,
     HealthStatusStopping = 5,
 }
@@ -461,7 +491,7 @@ impl HealthStatus {
             HealthStatus::HealthStatusUnknown => "HEALTH_STATUS_UNKNOWN",
             HealthStatus::HealthStatusHealthy => "HEALTH_STATUS_HEALTHY",
             HealthStatus::HealthStatusDegraded => "HEALTH_STATUS_DEGRADED",
-            HealthStatus::HealthStatusUnhealthy => "HEALTH_STATUS_UNHEALTHY",
+            HealthStatus::HealthStatusDead => "HEALTH_STATUS_DEAD",
             HealthStatus::HealthStatusStarting => "HEALTH_STATUS_STARTING",
             HealthStatus::HealthStatusStopping => "HEALTH_STATUS_STOPPING",
         }
@@ -472,41 +502,13 @@ impl HealthStatus {
             "HEALTH_STATUS_UNKNOWN" => Some(Self::HealthStatusUnknown),
             "HEALTH_STATUS_HEALTHY" => Some(Self::HealthStatusHealthy),
             "HEALTH_STATUS_DEGRADED" => Some(Self::HealthStatusDegraded),
-            "HEALTH_STATUS_UNHEALTHY" => Some(Self::HealthStatusUnhealthy),
+            "HEALTH_STATUS_DEAD" => Some(Self::HealthStatusDead),
             "HEALTH_STATUS_STARTING" => Some(Self::HealthStatusStarting),
             "HEALTH_STATUS_STOPPING" => Some(Self::HealthStatusStopping),
             _ => None,
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

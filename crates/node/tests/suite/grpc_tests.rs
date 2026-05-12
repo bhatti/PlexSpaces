@@ -8,8 +8,8 @@
 // - grpc_service_test.rs (7 tests)
 // Total: 13 tests (1 duplicate removed)
 
-use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_actor::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message};
+use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{grpc_client::RemoteActorClient, Node, NodeBuilder};
 use plexspaces_proto::{
@@ -451,15 +451,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
                     name: String::new(),
                     actor_type: String::new(),
                 }),
-                role: String::new(),
-                namespace: String::new(),
-                tenant_id: String::new(),
-                visibility: 0,
-                behavior_kind: String::new(),
-                args: std::collections::HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: std::collections::HashMap::new(),
+                ..Default::default()
             }),
             namespace: "default".to_string(),
             instances_count: 1,
@@ -506,7 +498,8 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let err_code = result.unwrap_err().code();
     assert!(
         err_code == tonic::Code::Unimplemented || err_code == tonic::Code::InvalidArgument,
-        "expected Unimplemented or InvalidArgument, got {:?}", err_code
+        "expected Unimplemented or InvalidArgument, got {:?}",
+        err_code
     );
 }
 

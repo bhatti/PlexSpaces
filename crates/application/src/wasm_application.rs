@@ -35,15 +35,15 @@
 
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
+use plexspaces_actor::actor_types::Actor;
 use plexspaces_actor::{
     wasm_root_supervisor_actor_type_from_application_name,
-    wasm_worker_actor_type_from_application_name, ActorError, ActorId, BehaviorError,
-    BehaviorType, RequestContextExt,
+    wasm_worker_actor_type_from_application_name, ActorError, ActorId, BehaviorError, BehaviorType,
+    RequestContextExt,
 };
-use plexspaces_actor::actor_types::Actor;
 use plexspaces_proto::application::v1::ApplicationSpec;
-use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_wasm_runtime::{deployment_service::WasmDeploymentService, WasmInstance};
 use prost::Message as ProstMessage;
@@ -436,6 +436,8 @@ impl WasmApplication {
         actor_id: &str,
         init_payload: &[u8],
         shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
+        tenant_id: String,
+        default_namespace: String,
     ) -> Result<Arc<WasmInstance>, ApplicationError> {
         // Get ServiceLocator from node
         let service_locator = node
@@ -501,6 +503,8 @@ impl WasmApplication {
         let wasm_config = plexspaces_wasm_runtime::WasmConfig {
             durability_enabled: spec.facets.iter().any(|f| f.r#type == "durability"),
             shared_timer_pool,
+            tenant_id,
+            default_namespace,
             ..Default::default()
         };
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(wasm_config);
@@ -647,6 +651,7 @@ impl WasmApplication {
         let node_id = node.id().to_string();
         // Namespace is required so spawned actors get canonical ActorIds scoped to the app.
         let namespace = self.namespace.read().await.clone();
+        let tenant_id = self.tenant_id.read().await.clone();
 
         let shared_timer_pool = self.shared_timer_pool.clone();
 
@@ -677,6 +682,7 @@ impl WasmApplication {
                 facets: child_spec.facets.clone(),
                 labels: std::collections::HashMap::new(),
                 config: None,
+                ..Default::default()
             };
             spawn_specs_by_behavior_class
                 .entry(identity.actor_type.clone())
@@ -711,6 +717,7 @@ impl WasmApplication {
                 facets: child_spec.facets.clone(),
                 labels: std::collections::HashMap::new(),
                 config: None,
+                ..Default::default()
             };
             let _ =
                 plexspaces_actor::register_virtual_actor_definition(&service_locator, spawn_spec)
@@ -723,6 +730,8 @@ impl WasmApplication {
             let runtime_clone = runtime.clone();
             let behavior_spawn_specs_clone = behavior_spawn_specs.clone();
             let shared_timer_pool_clone = shared_timer_pool.clone();
+            let tenant_id_clone = tenant_id.clone();
+            let namespace_clone = namespace.clone();
 
             // Register async behavior constructor (factory key == behavior class == ActorId.actor_type segment).
             let behavior_class_for_error = behavior_class.clone();
@@ -735,6 +744,8 @@ impl WasmApplication {
                     let name_for_error = behavior_class_for_error.clone();
                     let initial_state = initial_state.to_vec();
                     let timer_pool = shared_timer_pool_clone.clone();
+                    let tenant_id_cap = tenant_id_clone.clone();
+                    let namespace_cap = namespace_clone.clone();
 
                     Box::pin(async move {
                         // Dispatch to the right spec by matching role from the payload.
@@ -805,6 +816,8 @@ impl WasmApplication {
                             &actor_id,
                             &initial_state,
                             Some(timer_pool),
+                            tenant_id_cap,
+                            namespace_cap,
                         )
                         .await
                         .map_err(|e| {
@@ -1376,7 +1389,8 @@ impl WasmApplication {
         tenant_id: String,
         namespace: String,
         shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
-    ) -> Result<(plexspaces_actor::ActorInstance, plexspaces_actor::ActorRef), ApplicationError> {
+    ) -> Result<(plexspaces_actor::ActorInstance, plexspaces_actor::ActorRef), ApplicationError>
+    {
         use plexspaces_actor::actor_types::Actor as CoreActor;
 
         let identity = crate::child_spec_util::require_child_identity(child_spec)?;
@@ -1403,6 +1417,7 @@ impl WasmApplication {
             facets: child_spec.facets.clone(),
             labels: std::collections::HashMap::new(),
             config: None,
+            ..Default::default()
         };
         // Derive the requested runtime actor ID from the spawn identity so the WASM host init
         // payload stays consistent with spawn-spec-driven activation.
@@ -1413,13 +1428,12 @@ impl WasmApplication {
             &namespace,
             node.id(),
         );
-        let canonical_actor_id =
-            ActorId::from_canonical(&requested_actor_id).map_err(|e| {
-                ApplicationError::Other(format!(
-                    "Invalid actor ID format '{}': {}",
-                    requested_actor_id, e
-                ))
-            })?;
+        let canonical_actor_id = ActorId::from_canonical(&requested_actor_id).map_err(|e| {
+            ApplicationError::Other(format!(
+                "Invalid actor ID format '{}': {}",
+                requested_actor_id, e
+            ))
+        })?;
 
         // Derive init payload from spec + actor_id — same derivation used by reactivation path.
         let init_payload = plexspaces_actor::wasm_init_payload(&build_spec, &canonical_actor_id);
@@ -1434,6 +1448,8 @@ impl WasmApplication {
             &requested_actor_id,
             &init_payload,
             shared_timer_pool,
+            tenant_id.clone(),
+            namespace.clone(),
         )
         .await?;
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
@@ -1565,6 +1581,7 @@ impl WasmApplication {
                 facets: child_spec.facets.clone(),
                 labels: std::collections::HashMap::new(),
                 config: config_for_type,
+                ..Default::default()
             },
         )
         .await;
@@ -1707,7 +1724,11 @@ impl WasmApplication {
         // Create instance using runtime's instantiate method (trait)
         // Build a valid canonical actor ID for the temporary supervisor-tree-loader instance.
         let namespace = self.namespace.read().await.clone();
-        let namespace = if namespace.is_empty() { "default".to_string() } else { namespace };
+        let namespace = if namespace.is_empty() {
+            "default".to_string()
+        } else {
+            namespace
+        };
         let node_id = self
             .node
             .read()
@@ -1715,14 +1736,12 @@ impl WasmApplication {
             .as_ref()
             .map(|n| n.id().to_string())
             .unwrap_or_else(|| "local".to_string());
-        let temp_actor_id = plexspaces_actor::ActorId::new(
-            "temp-loader",
-            "wasm-loader",
-            &namespace,
-            &node_id,
-        )
-        .map_err(|e| ApplicationError::Other(format!("Failed to build temp actor id: {}", e)))?
-        .to_string();
+        let temp_actor_id =
+            plexspaces_actor::ActorId::new("temp-loader", "wasm-loader", &namespace, &node_id)
+                .map_err(|e| {
+                    ApplicationError::Other(format!("Failed to build temp actor id: {}", e))
+                })?
+                .to_string();
         let module_any: Arc<dyn std::any::Any + Send + Sync> =
             module.clone() as Arc<dyn std::any::Any + Send + Sync>;
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(config);
@@ -2691,8 +2710,10 @@ mod tests {
 
         // Create ApplicationSpec with supervisor tree
         use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType};
-        use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
         use plexspaces_proto::common::v1::ActorIdentity;
+        use plexspaces_proto::supervision::v1::{
+            ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+        };
         use prost_types::Duration;
 
         let supervisor_spec = SupervisorSpec {

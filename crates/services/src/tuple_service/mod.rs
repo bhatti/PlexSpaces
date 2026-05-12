@@ -986,7 +986,11 @@ mod tests {
         })
     }
 
-    fn read_req(fields: Vec<ProtoTupleField>, max_results: i32, take: bool) -> Request<ReadRequest> {
+    fn read_req(
+        fields: Vec<ProtoTupleField>,
+        max_results: i32,
+        take: bool,
+    ) -> Request<ReadRequest> {
         Request::new(ReadRequest {
             template: Some(make_tuple(fields)),
             timeout: None,
@@ -1000,7 +1004,9 @@ mod tests {
 
     async fn make_test_service() -> TupleSpaceServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
-        use plexspaces_actor::{service_wrappers::TupleSpaceProviderWrapper, ServiceLocator, RequestContextExt};
+        use plexspaces_actor::{
+            service_wrappers::TupleSpaceProviderWrapper, RequestContextExt, ServiceLocator,
+        };
 
         let sl = Arc::new(ServiceLocatorImpl::new());
         sl.register_security_config(plexspaces_proto::node::v1::SecurityConfig {
@@ -1008,7 +1014,9 @@ mod tests {
             ..Default::default()
         })
         .await;
-        let ts = Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace("test", "default"));
+        let ts = Arc::new(plexspaces_tuplespace::TupleSpace::with_tenant_namespace(
+            "test", "default",
+        ));
         sl.register_tuplespace_provider(Arc::new(TupleSpaceProviderWrapper::new(ts)))
             .await;
         TupleSpaceServiceImpl::new(sl)
@@ -1019,107 +1027,264 @@ mod tests {
         let service = make_test_service().await;
 
         // --- write and read back ---
-        let resp = service.write(write_req(vec![vec![proto_int(42), proto_string("hello")]])).await.unwrap().into_inner();
+        let resp = service
+            .write(write_req(vec![vec![proto_int(42), proto_string("hello")]]))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.tuple_ids.len(), 1);
 
-        let resp = service.read(read_req(vec![proto_int(42), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        let resp = service
+            .read(read_req(vec![proto_int(42), proto_wildcard()], 1, false))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.tuples.len(), 1);
-        assert_eq!(resp.tuples[0].fields[0].value, Some(ProtoValue::Integer(42)));
-        assert_eq!(resp.tuples[0].fields[1].value, Some(ProtoValue::String("hello".to_string())));
+        assert_eq!(
+            resp.tuples[0].fields[0].value,
+            Some(ProtoValue::Integer(42))
+        );
+        assert_eq!(
+            resp.tuples[0].fields[1].value,
+            Some(ProtoValue::String("hello".to_string()))
+        );
 
         // --- write multiple, pattern-match ---
-        service.write(write_req(vec![
-            vec![proto_string("sensor"), proto_int(1), proto_float(23.5)],
-            vec![proto_string("sensor"), proto_int(2), proto_float(24.1)],
-            vec![proto_string("actuator"), proto_int(1), proto_bool(true)],
-        ])).await.unwrap();
+        service
+            .write(write_req(vec![
+                vec![proto_string("sensor"), proto_int(1), proto_float(23.5)],
+                vec![proto_string("sensor"), proto_int(2), proto_float(24.1)],
+                vec![proto_string("actuator"), proto_int(1), proto_bool(true)],
+            ]))
+            .await
+            .unwrap();
 
-        let resp = service.read(read_req(vec![proto_string("sensor"), proto_wildcard(), proto_wildcard()], 10, false)).await.unwrap().into_inner();
+        let resp = service
+            .read(read_req(
+                vec![proto_string("sensor"), proto_wildcard(), proto_wildcard()],
+                10,
+                false,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.tuples.len(), 2);
 
         // --- take removes tuple ---
-        service.write(write_req(vec![vec![proto_string("task"), proto_int(99)]])).await.unwrap();
-        let resp = service.take(read_req(vec![proto_string("task"), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        service
+            .write(write_req(vec![vec![proto_string("task"), proto_int(99)]]))
+            .await
+            .unwrap();
+        let resp = service
+            .take(read_req(
+                vec![proto_string("task"), proto_wildcard()],
+                1,
+                false,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.tuples.len(), 1);
-        let resp = service.read(read_req(vec![proto_string("task"), proto_wildcard()], 1, false)).await.unwrap().into_inner();
+        let resp = service
+            .read(read_req(
+                vec![proto_string("task"), proto_wildcard()],
+                1,
+                false,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.tuples.len(), 0);
 
         // --- count ---
-        service.write(write_req(vec![
-            vec![proto_string("ev"), proto_string("login")],
-            vec![proto_string("ev"), proto_string("logout")],
-            vec![proto_string("ev"), proto_string("login")],
-        ])).await.unwrap();
-        let resp = service.count(Request::new(CountRequest {
-            template: Some(make_tuple(vec![proto_string("ev"), proto_wildcard()])),
-            transaction_id: String::new(),
-            spatial_filter: None,
-        })).await.unwrap().into_inner();
+        service
+            .write(write_req(vec![
+                vec![proto_string("ev"), proto_string("login")],
+                vec![proto_string("ev"), proto_string("logout")],
+                vec![proto_string("ev"), proto_string("login")],
+            ]))
+            .await
+            .unwrap();
+        let resp = service
+            .count(Request::new(CountRequest {
+                template: Some(make_tuple(vec![proto_string("ev"), proto_wildcard()])),
+                transaction_id: String::new(),
+                spatial_filter: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.count, 3);
 
         // --- exists before and after write ---
         let exists_tmpl = make_tuple(vec![proto_string("cfg"), proto_string("timeout")]);
-        let resp = service.exists(Request::new(ExistsRequest {
-            template: Some(exists_tmpl.clone()),
-            transaction_id: String::new(),
-        })).await.unwrap().into_inner();
+        let resp = service
+            .exists(Request::new(ExistsRequest {
+                template: Some(exists_tmpl.clone()),
+                transaction_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(!resp.exists);
 
-        service.write(write_req(vec![vec![proto_string("cfg"), proto_string("timeout")]])).await.unwrap();
+        service
+            .write(write_req(vec![vec![
+                proto_string("cfg"),
+                proto_string("timeout"),
+            ]]))
+            .await
+            .unwrap();
 
-        let resp = service.exists(Request::new(ExistsRequest {
-            template: Some(make_tuple(vec![proto_string("cfg"), proto_wildcard()])),
-            transaction_id: String::new(),
-        })).await.unwrap().into_inner();
+        let resp = service
+            .exists(Request::new(ExistsRequest {
+                template: Some(make_tuple(vec![proto_string("cfg"), proto_wildcard()])),
+                transaction_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert!(resp.exists);
 
         // --- clear then count zero ---
-        service.write(write_req(vec![vec![proto_int(1)], vec![proto_int(2)]])).await.unwrap();
+        service
+            .write(write_req(vec![vec![proto_int(1)], vec![proto_int(2)]]))
+            .await
+            .unwrap();
         service.clear(Request::new(Empty {})).await.unwrap();
-        let resp = service.count(Request::new(CountRequest {
-            template: Some(make_tuple(vec![proto_wildcard()])),
-            transaction_id: String::new(),
-            spatial_filter: None,
-        })).await.unwrap().into_inner();
+        let resp = service
+            .count(Request::new(CountRequest {
+                template: Some(make_tuple(vec![proto_wildcard()])),
+                transaction_id: String::new(),
+                spatial_filter: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.count, 0);
 
         // --- stats tracking ---
-        service.write(write_req(vec![vec![proto_int(10)], vec![proto_int(20)]])).await.unwrap();
-        service.read(read_req(vec![proto_wildcard()], 1, false)).await.unwrap();
-        let stats = service.get_stats(Request::new(Empty {})).await.unwrap().into_inner().stats.unwrap();
+        service
+            .write(write_req(vec![vec![proto_int(10)], vec![proto_int(20)]]))
+            .await
+            .unwrap();
+        service
+            .read(read_req(vec![proto_wildcard()], 1, false))
+            .await
+            .unwrap();
+        let stats = service
+            .get_stats(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner()
+            .stats
+            .unwrap();
         assert!(stats.tuple_count >= 2);
         assert!(stats.write_operations >= 2);
         assert!(stats.read_operations >= 1);
 
         // --- validation: empty write ---
-        let err = service.write(Request::new(WriteRequest { tuples: vec![], transaction_id: String::new() })).await.unwrap_err();
+        let err = service
+            .write(Request::new(WriteRequest {
+                tuples: vec![],
+                transaction_id: String::new(),
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
 
         // --- validation: missing read template ---
-        let err = service.read(Request::new(ReadRequest {
-            template: None, timeout: None, blocking: false, take: false,
-            max_results: 1, transaction_id: String::new(), spatial_filter: None,
-        })).await.unwrap_err();
+        let err = service
+            .read(Request::new(ReadRequest {
+                template: None,
+                timeout: None,
+                blocking: false,
+                take: false,
+                max_results: 1,
+                transaction_id: String::new(),
+                spatial_filter: None,
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), Code::InvalidArgument);
 
         // --- unimplemented stubs ---
-        assert_eq!(service.subscribe(Request::new(plexspaces_proto::tuplespace::v1::SubscribeRequest {
-            template: None, qos: 0, actions: 0, callback_url: String::new(),
-        })).await.unwrap_err().code(), Code::Unimplemented);
-        assert_eq!(service.unsubscribe(Request::new(plexspaces_proto::tuplespace::v1::UnsubscribeRequest {
-            subscription_id: String::new(),
-        })).await.unwrap_err().code(), Code::Unimplemented);
-        assert_eq!(service.begin_transaction(Request::new(plexspaces_proto::tuplespace::v1::BeginTransactionRequest {
-            isolation_level: 0, timeout: None,
-        })).await.unwrap_err().code(), Code::Unimplemented);
-        assert_eq!(service.commit_transaction(Request::new(plexspaces_proto::tuplespace::v1::CommitTransactionRequest {
-            transaction_id: String::new(),
-        })).await.unwrap_err().code(), Code::Unimplemented);
-        assert_eq!(service.abort_transaction(Request::new(plexspaces_proto::tuplespace::v1::AbortTransactionRequest {
-            transaction_id: String::new(),
-        })).await.unwrap_err().code(), Code::Unimplemented);
-        assert_eq!(service.renew_lease(Request::new(plexspaces_proto::tuplespace::v1::RenewLeaseRequest {
-            tuple_id: String::new(), new_ttl: None,
-        })).await.unwrap_err().code(), Code::Unimplemented);
+        assert_eq!(
+            service
+                .subscribe(Request::new(
+                    plexspaces_proto::tuplespace::v1::SubscribeRequest {
+                        template: None,
+                        qos: 0,
+                        actions: 0,
+                        callback_url: String::new(),
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            service
+                .unsubscribe(Request::new(
+                    plexspaces_proto::tuplespace::v1::UnsubscribeRequest {
+                        subscription_id: String::new(),
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            service
+                .begin_transaction(Request::new(
+                    plexspaces_proto::tuplespace::v1::BeginTransactionRequest {
+                        isolation_level: 0,
+                        timeout: None,
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            service
+                .commit_transaction(Request::new(
+                    plexspaces_proto::tuplespace::v1::CommitTransactionRequest {
+                        transaction_id: String::new(),
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            service
+                .abort_transaction(Request::new(
+                    plexspaces_proto::tuplespace::v1::AbortTransactionRequest {
+                        transaction_id: String::new(),
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
+        assert_eq!(
+            service
+                .renew_lease(Request::new(
+                    plexspaces_proto::tuplespace::v1::RenewLeaseRequest {
+                        tuple_id: String::new(),
+                        new_ttl: None,
+                    }
+                ))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::Unimplemented
+        );
     }
 }

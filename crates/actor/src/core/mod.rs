@@ -28,8 +28,8 @@ pub use crate::actor_types::{Actor, ActorError, BehaviorContext, BehaviorError, 
 
 // Re-export all flat items from the merged core modules.
 pub use crate::actor_context::{
-    ActorContext, ActorService, ChannelService, FacetService, LinkProvider, ObjectRegistry,
-    ObjectRegistration, ProcessGroupService, TupleSpaceProvider,
+    ActorContext, ActorService, ChannelService, FacetService, LinkProvider, ObjectRegistration,
+    ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
 };
 pub use crate::actor_factory::ActorFactory;
 pub use crate::actor_id::{
@@ -105,21 +105,23 @@ pub use crate::actor_context;
 pub use crate::actor_types;
 pub use crate::actor_visibility;
 pub use crate::behavior_factory;
-pub use crate::facet_service_wrapper;
-pub use crate::monitoring;
-pub use crate::facet_helpers;
 pub use crate::facet_factories;
+pub use crate::facet_helpers;
+pub use crate::facet_service_wrapper;
 pub use crate::health_checker;
 pub use crate::health_reporter;
 pub use crate::health_service;
+pub use crate::monitoring;
 
 // Re-export from external crates (same as core did)
 pub use plexspaces_common::{RequestContext, RequestContextError, RequestContextExt};
+pub use plexspaces_facet::FacetManager;
 pub use plexspaces_locks::{LockError, LockManager, LockResult};
 pub use plexspaces_proto::actor::v1::ActorSpawnSpec;
 pub use plexspaces_proto::common::v1::Message;
-pub use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};
-pub use plexspaces_facet::FacetManager;
+pub use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};
 pub use plexspaces_service_traits::{ActorRef, ActorStateChecker, ServiceLocatorBase};
 
 // Health re-exports

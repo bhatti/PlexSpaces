@@ -29,7 +29,9 @@ mod tests {
         // Create an in-memory tuplespace for testing
         let tuplespace = TupleSpace::with_tenant_namespace("test-tenant", "test-namespace");
         Arc::new(
-            plexspaces_actor::service_wrappers::TupleSpaceProviderWrapper::new(Arc::new(tuplespace)),
+            plexspaces_actor::service_wrappers::TupleSpaceProviderWrapper::new(Arc::new(
+                tuplespace,
+            )),
         )
     }
 

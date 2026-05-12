@@ -41,8 +41,15 @@ async fn test_workflow_actor_basic_execution() -> Result<(), Box<dyn std::error:
         "simple-workflow",
         "Simple Workflow",
         "1.0",
-        vec![make_step("step1", "Step 1", StepType::StepTypeTask,
-            json!({"action": "succeed", "output": {"result": "done"}}), None, None, None)],
+        vec![make_step(
+            "step1",
+            "Step 1",
+            StepType::StepTypeTask,
+            json!({"action": "succeed", "output": {"result": "done"}}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -64,8 +71,15 @@ async fn test_workflow_actor_basic_execution() -> Result<(), Box<dyn std::error:
         };
         let status_response = actor.handle_message(query_msg).await?;
 
-        if let WorkflowResponse::Status { status_code, output } = status_response {
-            assert_eq!(ExecutionStatus::try_from(status_code).unwrap(), ExecutionStatus::ExecutionStatusCompleted);
+        if let WorkflowResponse::Status {
+            status_code,
+            output,
+        } = status_response
+        {
+            assert_eq!(
+                ExecutionStatus::try_from(status_code).unwrap(),
+                ExecutionStatus::ExecutionStatusCompleted
+            );
             assert!(output.is_some());
             let output_val = output.unwrap();
             assert_eq!(
@@ -92,12 +106,33 @@ async fn test_workflow_actor_multi_step() -> Result<(), Box<dyn std::error::Erro
         "Multi Step",
         "1.0",
         vec![
-            make_step("generate", "Generate", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"data": "test-data"}}), None, None, None),
-            make_step("process", "Process", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"processed": true}}), None, None, None),
-            make_step("complete", "Complete", StepType::StepTypeTask,
-                json!({"action": "succeed"}), None, None, None),
+            make_step(
+                "generate",
+                "Generate",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"data": "test-data"}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "process",
+                "Process",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"processed": true}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "complete",
+                "Complete",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -137,8 +172,24 @@ async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Er
         "Long Workflow",
         "1.0",
         vec![
-            make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("wait", "Wait", StepType::StepTypeWait, json!({"duration_ms": 10000}), None, None, None),
+            make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "wait",
+                "Wait",
+                StepType::StepTypeWait,
+                json!({"duration_ms": 10000}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -161,7 +212,10 @@ async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Er
 
         if let WorkflowResponse::Cancelled = cancel_response {
             let execution = storage.get_execution(&execution_id).await?;
-            assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCancelled);
+            assert_eq!(
+                execution.execution_status(),
+                ExecutionStatus::ExecutionStatusCancelled
+            );
         } else {
             panic!("Expected Cancelled response");
         }
@@ -182,10 +236,33 @@ async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Err
         "Signal Workflow",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("wait-approval", "Wait for Approval", StepType::StepTypeSignal,
-                json!({"signal_name": "approval", "timeout_ms": 5000}), None, None, None),
-            make_step("complete", "Complete", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "wait-approval",
+                "Wait for Approval",
+                StepType::StepTypeSignal,
+                json!({"signal_name": "approval", "timeout_ms": 5000}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "complete",
+                "Complete",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -216,7 +293,10 @@ async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Err
             actor.handle_message(resume_msg).await?;
 
             let execution = storage.get_execution(&execution_id).await?;
-            assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+            assert_eq!(
+                execution.execution_status(),
+                ExecutionStatus::ExecutionStatusCompleted
+            );
         } else {
             panic!("Expected SignalSent response");
         }
@@ -244,8 +324,15 @@ async fn test_workflow_actor_failure_retry() -> Result<(), Box<dyn std::error::E
         "flaky-workflow",
         "Flaky Workflow",
         "1.0",
-        vec![make_step("flaky-step", "Flaky Step", StepType::StepTypeTask,
-            json!({"action": "flaky", "fail_count": 2}), None, None, Some(retry_config))],
+        vec![make_step(
+            "flaky-step",
+            "Flaky Step",
+            StepType::StepTypeTask,
+            json!({"action": "flaky", "fail_count": 2}),
+            None,
+            None,
+            Some(retry_config),
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -261,7 +348,10 @@ async fn test_workflow_actor_failure_retry() -> Result<(), Box<dyn std::error::E
 
     if let WorkflowResponse::Started { execution_id } = response {
         let execution = storage.get_execution(&execution_id).await?;
-        assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+        assert_eq!(
+            execution.execution_status(),
+            ExecutionStatus::ExecutionStatusCompleted
+        );
 
         let history = storage.get_step_execution_history(&execution_id).await?;
         assert_eq!(history.len(), 3); // 3 attempts (2 failures + 1 success)

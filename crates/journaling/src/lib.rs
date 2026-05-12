@@ -316,10 +316,10 @@ pub use state_loader::{CheckpointStateAdapter, StateLoader};
 // Phase 8.5: Virtual Actor facet for Orleans-style lifecycle
 mod virtual_actor_facet;
 pub use plexspaces_common::{to_config_str, ActivationStrategy};
+pub use plexspaces_facet::VirtualActorLifecycleState;
 pub use virtual_actor_facet::{
     virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
 };
-pub use plexspaces_facet::VirtualActorLifecycleState;
 
 // Phase 8.5: Event Sourcing facet for Temporal-inspired event sourcing
 mod event_sourcing_facet;

@@ -217,6 +217,8 @@ pub enum ActorErrorCode {
     ActorErrorMailboxError = 7,
     ActorErrorBehaviorError = 8,
     ActorErrorJournalError = 9,
+    /// Unique placement violated - actor already active elsewhere
+    ActorErrorPlacementConflict = 10,
 }
 impl ActorErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -235,6 +237,7 @@ impl ActorErrorCode {
             ActorErrorCode::ActorErrorMailboxError => "ACTOR_ERROR_MAILBOX_ERROR",
             ActorErrorCode::ActorErrorBehaviorError => "ACTOR_ERROR_BEHAVIOR_ERROR",
             ActorErrorCode::ActorErrorJournalError => "ACTOR_ERROR_JOURNAL_ERROR",
+            ActorErrorCode::ActorErrorPlacementConflict => "ACTOR_ERROR_PLACEMENT_CONFLICT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -250,6 +253,7 @@ impl ActorErrorCode {
             "ACTOR_ERROR_MAILBOX_ERROR" => Some(Self::ActorErrorMailboxError),
             "ACTOR_ERROR_BEHAVIOR_ERROR" => Some(Self::ActorErrorBehaviorError),
             "ACTOR_ERROR_JOURNAL_ERROR" => Some(Self::ActorErrorJournalError),
+            "ACTOR_ERROR_PLACEMENT_CONFLICT" => Some(Self::ActorErrorPlacementConflict),
             _ => None,
         }
     }
@@ -2459,6 +2463,17 @@ pub struct ActorSpawnSpec {
     /// Optional — defaults apply when absent.
     #[prost(message, optional, tag="10")]
     pub config: ::core::option::Option<ActorConfig>,
+    /// If true, auto-register this actor in ObjectRegistry on spawn and unregister on stop.
+    /// Auto-enabled when facets include both "virtual_actor" and "durability".
+    #[prost(bool, tag="11")]
+    pub register_in_object_registry: bool,
+    /// If true, enforce unique placement via alias (requires register_in_object_registry=true or auto-enabled).
+    /// Spawn fails with ACTOR_ERROR_PLACEMENT_CONFLICT if another active instance with same identity exists.
+    #[prost(bool, tag="12")]
+    pub enforce_unique_placement: bool,
+    /// Placement strategy for distributed actor placement (default: PREFER_LOCAL).
+    #[prost(enumeration="PlacementStrategy", tag="13")]
+    pub placement_strategy: i32,
 }
 /// Placement strategy for actor activation (Orleans-inspired)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -3289,34 +3304,6 @@ impl ActorHealthStatus {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

@@ -23,9 +23,9 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
+    use plexspaces_actor::{RequestContext, RequestContextExt};
     use plexspaces_blob::{BlobRepository, DynamoDBBlobRepository, ListFilters};
     use plexspaces_common::test_helpers::dynamodb_local_available;
-    use plexspaces_actor::{RequestContext, RequestContextExt};
     use plexspaces_proto::storage::v1::BlobMetadata;
     use prost_types::Timestamp;
 

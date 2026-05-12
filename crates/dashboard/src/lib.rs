@@ -29,7 +29,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-
 pub mod dashboard_handlers;
 
 // Dashboard service moved to plexspaces-services crate

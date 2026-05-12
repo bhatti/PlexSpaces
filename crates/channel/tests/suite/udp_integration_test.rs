@@ -75,10 +75,7 @@ mod tests {
         create_channel(channel_config).await
     }
 
-    async fn create_udp_channel_or_skip(
-        name: &str,
-        port: u32,
-    ) -> Option<Box<dyn Channel>> {
+    async fn create_udp_channel_or_skip(name: &str, port: u32) -> Option<Box<dyn Channel>> {
         match create_udp_channel(name, port).await {
             Ok(channel) => Some(channel),
             Err(err) => {
@@ -259,7 +256,10 @@ mod tests {
                 ..Default::default()
             })
             .collect::<Vec<_>>();
-        if send_batch_or_skip(channel.as_ref(), messages).await.is_none() {
+        if send_batch_or_skip(channel.as_ref(), messages)
+            .await
+            .is_none()
+        {
             return;
         }
 

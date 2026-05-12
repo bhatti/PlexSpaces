@@ -167,7 +167,7 @@ impl VmRegistry {
             }
             crate::vm::VmState::Stopping => HealthStatus::HealthStatusStopping,
             crate::vm::VmState::Stopped | crate::vm::VmState::Failed => {
-                HealthStatus::HealthStatusUnhealthy
+                HealthStatus::HealthStatusDead
             }
             crate::vm::VmState::Created => HealthStatus::HealthStatusStarting,
         };

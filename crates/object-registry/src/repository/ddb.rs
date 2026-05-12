@@ -864,4 +864,264 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
 
         Ok(result.item().is_some())
     }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), alias = %alias))]
+    async fn get_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> RepositoryResult<Option<ObjectRegistration>> {
+        if alias.is_empty() {
+            return Ok(None);
+        }
+        // Query alias-index GSI, then verify tenant/namespace match to enforce isolation.
+        // The GSI has alias as partition key; tenant isolation is enforced in the filter.
+        let result = self
+            .client
+            .query()
+            .table_name(&self.table_name)
+            .index_name("alias-index")
+            .key_condition_expression("#alias_attr = :alias_val")
+            .filter_expression("tenant_id = :tid AND #ns = :ns")
+            .expression_attribute_names("#alias_attr", "alias")
+            .expression_attribute_names("#ns", "namespace")
+            .expression_attribute_values(":alias_val", AttributeValue::S(alias.to_string()))
+            .expression_attribute_values(":tid", AttributeValue::S(ctx.tenant_id().to_string()))
+            .expression_attribute_values(":ns", AttributeValue::S(ctx.namespace().to_string()))
+            .limit(1)
+            .send()
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        let items = result.items();
+        if !items.is_empty() {
+            if let Some(blob_attr) = items[0].get("registration_blob") {
+                if let Ok(blob) = blob_attr.as_b() {
+                    let mut registration =
+                        ObjectRegistration::decode(blob.as_ref()).map_err(|e| {
+                            RepositoryError::Serialization(e.to_string())
+                        })?;
+                    // Merge indexed columns from item attributes
+                    if let Some(hs) = items[0]
+                        .get("health_status")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<i32>().ok())
+                    {
+                        registration.health_status = hs;
+                    }
+                    if let Some(fc) = items[0]
+                        .get("heartbeat_failure_count")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<u32>().ok())
+                    {
+                        registration.heartbeat_failure_count = fc;
+                    }
+                    if let Some(mf) = items[0]
+                        .get("max_heartbeat_failures")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<u32>().ok())
+                    {
+                        if mf > 0 {
+                            registration.max_heartbeat_failures = mf;
+                        }
+                    }
+                    return Ok(Some(registration));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn increment_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<u32> {
+        let pk = Self::make_pk(ctx.tenant_id(), ctx.namespace(), object_id);
+        let result = self
+            .client
+            .update_item()
+            .table_name(&self.table_name)
+            .key("pk", AttributeValue::S(pk))
+            .key("sk", AttributeValue::S("REG".to_string()))
+            .update_expression("ADD heartbeat_failure_count :one")
+            .expression_attribute_values(":one", AttributeValue::N("1".to_string()))
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::UpdatedNew)
+            .send()
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        let count = result
+            .attributes()
+            .and_then(|attrs| attrs.get("heartbeat_failure_count"))
+            .and_then(|v| v.as_n().ok())
+            .and_then(|n| n.parse::<u32>().ok())
+            .unwrap_or(1);
+        Ok(count)
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn reset_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<()> {
+        let pk = Self::make_pk(ctx.tenant_id(), ctx.namespace(), object_id);
+        self.client
+            .update_item()
+            .table_name(&self.table_name)
+            .key("pk", AttributeValue::S(pk))
+            .key("sk", AttributeValue::S("REG".to_string()))
+            .update_expression("SET heartbeat_failure_count = :zero")
+            .expression_attribute_values(":zero", AttributeValue::N("0".to_string()))
+            .send()
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Mark all live objects on `node_id` as DEAD, scoped to tenant+namespace.
+    ///
+    /// Queries the `node-index` GSI (partition key: `node_id`) with a filter on
+    /// `tenant_id`/`namespace` and `health_status IN (1, 2, 4)`.  Each matching item
+    /// is updated individually since DynamoDB has no bulk-update primitive.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), node_id = %node_id))]
+    async fn mark_dead_by_node_id(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> RepositoryResult<u64> {
+        // Query node-index GSI for this node; filter to tenant+namespace and live statuses.
+        let result = self
+            .client
+            .query()
+            .table_name(&self.table_name)
+            .index_name("node-index")
+            .key_condition_expression("node_id = :nid")
+            .filter_expression(
+                "tenant_id = :tid AND #ns = :ns AND health_status IN (:h1, :h2, :h4)",
+            )
+            .expression_attribute_names("#ns", "namespace")
+            .expression_attribute_values(":nid", AttributeValue::S(node_id.to_string()))
+            .expression_attribute_values(":tid", AttributeValue::S(ctx.tenant_id().to_string()))
+            .expression_attribute_values(":ns", AttributeValue::S(ctx.namespace().to_string()))
+            .expression_attribute_values(":h1", AttributeValue::N("1".to_string()))
+            .expression_attribute_values(":h2", AttributeValue::N("2".to_string()))
+            .expression_attribute_values(":h4", AttributeValue::N("4".to_string()))
+            .send()
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        let mut updated = 0u64;
+        for item in result.items() {
+            let pk = item
+                .get("pk")
+                .and_then(|v| v.as_s().ok())
+                .map(|s| s.to_string());
+            let sk = item
+                .get("sk")
+                .and_then(|v| v.as_s().ok())
+                .map(|s| s.to_string());
+            if let (Some(pk), Some(sk)) = (pk, sk) {
+                self.client
+                    .update_item()
+                    .table_name(&self.table_name)
+                    .key("pk", AttributeValue::S(pk))
+                    .key("sk", AttributeValue::S(sk))
+                    .update_expression("SET health_status = :dead")
+                    .expression_attribute_values(":dead", AttributeValue::N("3".to_string()))
+                    .send()
+                    .await
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+                updated += 1;
+            }
+        }
+        Ok(updated)
+    }
+
+    /// Find registrations with stale heartbeats.
+    ///
+    /// Scoped to tenant+namespace when ctx has a non-empty tenant_id.  Pass an admin
+    /// context with empty tenant_id to scan all tenants (system heartbeat monitor).
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), threshold_seconds = %threshold_seconds, limit = %limit))]
+    async fn find_stale_heartbeats(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> RepositoryResult<Vec<ObjectRegistration>> {
+        let cutoff = chrono::Utc::now().timestamp() - threshold_seconds;
+
+        // Build scan with conditional tenant filter
+        let mut scan = self
+            .client
+            .scan()
+            .table_name(&self.table_name)
+            .limit(limit as i32);
+
+        if !ctx.tenant_id().is_empty() {
+            scan = scan
+                .filter_expression(
+                    "tenant_id = :tid AND #ns = :ns AND health_status IN (:h1, :h2) AND (attribute_not_exists(last_heartbeat) OR last_heartbeat < :cutoff)"
+                )
+                .expression_attribute_names("#ns", "namespace")
+                .expression_attribute_values(":tid", AttributeValue::S(ctx.tenant_id().to_string()))
+                .expression_attribute_values(":ns", AttributeValue::S(ctx.namespace().to_string()))
+                .expression_attribute_values(":h1", AttributeValue::N("1".to_string()))
+                .expression_attribute_values(":h2", AttributeValue::N("2".to_string()))
+                .expression_attribute_values(":cutoff", AttributeValue::N(cutoff.to_string()));
+        } else {
+            scan = scan
+                .filter_expression(
+                    "health_status IN (:h1, :h2) AND (attribute_not_exists(last_heartbeat) OR last_heartbeat < :cutoff)"
+                )
+                .expression_attribute_values(":h1", AttributeValue::N("1".to_string()))
+                .expression_attribute_values(":h2", AttributeValue::N("2".to_string()))
+                .expression_attribute_values(":cutoff", AttributeValue::N(cutoff.to_string()));
+        }
+
+        let result = scan
+            .send()
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        let mut registrations = Vec::new();
+        for item in result.items() {
+            if let Some(blob_attr) = item.get("registration_blob") {
+                if let Ok(blob) = blob_attr.as_b() {
+                    let mut registration =
+                        ObjectRegistration::decode(blob.as_ref()).map_err(|e| {
+                            RepositoryError::Serialization(e.to_string())
+                        })?;
+                    // Merge indexed columns from item
+                    if let Some(hs) = item
+                        .get("health_status")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<i32>().ok())
+                    {
+                        registration.health_status = hs;
+                    }
+                    if let Some(fc) = item
+                        .get("heartbeat_failure_count")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<u32>().ok())
+                    {
+                        registration.heartbeat_failure_count = fc;
+                    }
+                    if let Some(mf) = item
+                        .get("max_heartbeat_failures")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<u32>().ok())
+                    {
+                        if mf > 0 {
+                            registration.max_heartbeat_failures = mf;
+                        }
+                    }
+                    registrations.push(registration);
+                }
+            }
+        }
+        Ok(registrations)
+    }
 }

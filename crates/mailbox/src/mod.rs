@@ -1268,8 +1268,7 @@ impl Mailbox {
     /// Get current size
     /// Returns the total number of pending messages across both queues.
     pub async fn size(&self) -> usize {
-        self.stats.read().await.current_size
-            + self.ctrl_size.load(AtomicOrdering::Relaxed)
+        self.stats.read().await.current_size + self.ctrl_size.load(AtomicOrdering::Relaxed)
     }
 
     /// Returns the number of pending control messages.
@@ -3118,15 +3117,15 @@ mod tests {
         mailbox.enqueue(ctrl.clone()).await.unwrap();
 
         // The ctrl message must be returned first, regardless of insertion order
-        let first = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            mailbox.dequeue(),
-        )
-        .await
-        .expect("timed out")
-        .expect("no message");
+        let first = tokio::time::timeout(std::time::Duration::from_millis(500), mailbox.dequeue())
+            .await
+            .expect("timed out")
+            .expect("no message");
 
-        assert_eq!(first.message_type, "__DOWN__", "ctrl message must arrive before data messages");
+        assert_eq!(
+            first.message_type, "__DOWN__",
+            "ctrl message must arrive before data messages"
+        );
     }
 
     #[tokio::test]
@@ -3135,18 +3134,26 @@ mod tests {
 
         assert_eq!(mailbox.ctrl_size(), 0);
 
-        mailbox.enqueue(with_message_type(new_message(vec![]), "__EXIT__")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![]), "__DOWN__")).await.unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "__EXIT__"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "__DOWN__"))
+            .await
+            .unwrap();
         assert_eq!(mailbox.ctrl_size(), 2);
 
         // Dequeue one ctrl message
         tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(mailbox.ctrl_size(), 1);
 
         // Dequeue the second
         tokio::time::timeout(std::time::Duration::from_millis(200), mailbox.dequeue())
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(mailbox.ctrl_size(), 0);
     }
 
@@ -3154,15 +3161,27 @@ mod tests {
     async fn test_get_stats_includes_ctrl_queue_size() {
         let mailbox = create_default_mailbox().await;
 
-        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![]), "__DOWN__")).await.unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "call"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "__DOWN__"))
+            .await
+            .unwrap();
 
         // Give the internal processor a moment to move the data message to the channel
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let stats = mailbox.get_stats().await;
-        assert_eq!(stats.ctrl_queue_size, 1, "ctrl_queue_size must count pending ctrl messages");
-        assert_eq!(stats.total_size(), stats.data_queue_size + stats.ctrl_queue_size);
+        assert_eq!(
+            stats.ctrl_queue_size, 1,
+            "ctrl_queue_size must count pending ctrl messages"
+        );
+        assert_eq!(
+            stats.total_size(),
+            stats.data_queue_size + stats.ctrl_queue_size
+        );
     }
 
     #[tokio::test]
@@ -3170,18 +3189,30 @@ mod tests {
         // Use a tiny capacity so the data queue fills up
         let config = MailboxConfig {
             capacity: 2,
-            backpressure_strategy: plexspaces_proto::mailbox::v1::BackpressureStrategy::Error.into(),
+            backpressure_strategy: plexspaces_proto::mailbox::v1::BackpressureStrategy::Error
+                .into(),
             ..mailbox_config_default()
         };
         let mailbox = create_test_mailbox(config).await;
 
         // Fill the data queue to capacity
-        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![]), "call")).await.unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "call"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![]), "call"))
+            .await
+            .unwrap();
 
         // Ctrl messages must still be accepted even when data queue is full
-        let result = mailbox.enqueue(with_message_type(new_message(vec![]), "__PING__")).await;
-        assert!(result.is_ok(), "ctrl messages must not be blocked by data-queue backpressure");
+        let result = mailbox
+            .enqueue(with_message_type(new_message(vec![]), "__PING__"))
+            .await;
+        assert!(
+            result.is_ok(),
+            "ctrl messages must not be blocked by data-queue backpressure"
+        );
     }
 
     #[tokio::test]
@@ -3189,17 +3220,36 @@ mod tests {
         let mailbox = create_default_mailbox().await;
 
         // Interleave ctrl and data messages
-        mailbox.enqueue(with_message_type(new_message(vec![1]), "call")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![2]), "__DOWN__")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![3]), "call")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![4]), "__EXIT__")).await.unwrap();
-        mailbox.enqueue(with_message_type(new_message(vec![5]), "call")).await.unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![1]), "call"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![2]), "__DOWN__"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![3]), "call"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![4]), "__EXIT__"))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(with_message_type(new_message(vec![5]), "call"))
+            .await
+            .unwrap();
 
         // First two dequeues must be ctrl messages
         let m1 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
-            .await.unwrap().unwrap();
+            .await
+            .unwrap()
+            .unwrap();
         let m2 = tokio::time::timeout(std::time::Duration::from_millis(300), mailbox.dequeue())
-            .await.unwrap().unwrap();
+            .await
+            .unwrap()
+            .unwrap();
 
         assert!(
             is_ctrl_message(&m1.message_type),

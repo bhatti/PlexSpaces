@@ -213,13 +213,16 @@ pub mod workflow_actor;
 // Re-exports for convenience
 pub use executor::WorkflowExecutor;
 pub use service::WorkflowServiceImpl;
+pub use storage::sql::{
+    execution_input_to_value, make_step, make_workflow_definition, step_config_value, step_next,
+    step_type,
+};
 pub use storage::WorkflowStorage;
 pub use types::{
     ExecutionStatus, ExecutionStatusExt, RetryConfig, Step, StepExecution, StepExecutionExt,
-    StepStatus, StepStatusExt, StepType, WorkflowDefinition, WorkflowError,
-    WorkflowErrorProto, WorkflowExecution, WorkflowExecutionExt, WorkflowExecutionOutputExt,
+    StepStatus, StepStatusExt, StepType, WorkflowDefinition, WorkflowError, WorkflowErrorProto,
+    WorkflowExecution, WorkflowExecutionExt, WorkflowExecutionOutputExt,
 };
-pub use storage::sql::{make_step, make_workflow_definition, step_config_value, step_type, step_next, execution_input_to_value};
 pub use workflow_actor::{WorkflowActor, WorkflowMessage, WorkflowResponse};
 
 // Re-export WorkflowRef from actor crate (canonical location for all typed refs)

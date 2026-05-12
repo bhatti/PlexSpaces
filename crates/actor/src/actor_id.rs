@@ -25,7 +25,5 @@
 
 pub use plexspaces_service_traits::{
     wasm_root_supervisor_actor_type_from_application_name,
-    wasm_worker_actor_type_from_application_name,
-    ActorId,
-    ActorIdError,
+    wasm_worker_actor_type_from_application_name, ActorId, ActorIdError,
 };

@@ -36,7 +36,10 @@ async fn test_create_and_get_execution() {
 
     assert_eq!(execution.execution_id, execution_id);
     assert_eq!(execution.definition_id, "test-workflow");
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusPending);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusPending
+    );
 }
 
 #[tokio::test]
@@ -80,7 +83,10 @@ async fn test_update_execution_status() {
         .unwrap();
 
     let execution = storage.get_execution(&execution_id).await.unwrap();
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusRunning);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusRunning
+    );
 }
 
 #[tokio::test]
@@ -173,9 +179,7 @@ async fn test_transfer_ownership_optimistic_locking() {
         .unwrap();
 
     // Transfer with stale version=1 (should fail, current version is now 2)
-    let result = storage
-        .transfer_ownership(&execution_id, "node-3", 1)
-        .await;
+    let result = storage.transfer_ownership(&execution_id, "node-3", 1).await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
 }
@@ -298,7 +302,10 @@ async fn test_list_executions_by_node() {
         .unwrap();
 
     let node1_execs = storage
-        .list_executions_by_status(vec![ExecutionStatus::ExecutionStatusPending], Some("node-1"))
+        .list_executions_by_status(
+            vec![ExecutionStatus::ExecutionStatusPending],
+            Some("node-1"),
+        )
         .await
         .unwrap();
 
@@ -494,7 +501,9 @@ async fn test_update_execution_output() {
         .unwrap();
 
     let execution = storage.get_execution(&execution_id).await.unwrap();
-    let output = execution.output_value().expect("Execution should have output");
+    let output = execution
+        .output_value()
+        .expect("Execution should have output");
     assert_eq!(output["result"], "success");
 }
 
@@ -546,25 +555,19 @@ async fn test_update_execution_output_with_version() {
 
     // Update output with correct version (should succeed)
     storage
-        .update_execution_output_with_version(
-            &execution_id,
-            json!({"result": "success"}),
-            Some(1),
-        )
+        .update_execution_output_with_version(&execution_id, json!({"result": "success"}), Some(1))
         .await
         .unwrap();
 
     let execution = storage.get_execution(&execution_id).await.unwrap();
-    let output = execution.output_value().expect("Execution should have output");
+    let output = execution
+        .output_value()
+        .expect("Execution should have output");
     assert_eq!(output["result"], "success");
 
     // Update with wrong version (should fail)
     let result = storage
-        .update_execution_output_with_version(
-            &execution_id,
-            json!({"result": "fail"}),
-            Some(1),
-        )
+        .update_execution_output_with_version(&execution_id, json!({"result": "fail"}), Some(1))
         .await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
@@ -595,7 +598,10 @@ async fn test_recovery_scenario_node_crash() {
 
     // Find RUNNING executions on node-1
     let running = storage
-        .list_executions_by_status(vec![ExecutionStatus::ExecutionStatusRunning], Some("node-1"))
+        .list_executions_by_status(
+            vec![ExecutionStatus::ExecutionStatusRunning],
+            Some("node-1"),
+        )
         .await
         .unwrap();
 
@@ -637,9 +643,7 @@ async fn test_recovery_scenario_concurrent_ownership_transfer() {
         .unwrap();
 
     // Node-3 tries to transfer with stale version=1 (should fail)
-    let result = storage
-        .transfer_ownership(&execution_id, "node-3", 1)
-        .await;
+    let result = storage.transfer_ownership(&execution_id, "node-3", 1).await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
 }
@@ -677,7 +681,10 @@ async fn test_heartbeat_updates_health_monitoring() {
 
     // Verify execution is still running
     let execution = storage.get_execution(&execution_id).await.unwrap();
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusRunning);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusRunning
+    );
 }
 
 #[tokio::test]

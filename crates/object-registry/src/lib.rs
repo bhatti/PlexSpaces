@@ -145,7 +145,11 @@ pub mod repository;
 use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use repository::{DiscoverFilter, ObjectRegistryRepository, RepositoryError};
+use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::sync::RwLock;
 use tracing::instrument;
 
 // Re-export commonly used types
@@ -156,6 +160,9 @@ pub use repository::{PostgresObjectRegistryRepository, SqliteObjectRegistryRepos
 
 #[cfg(feature = "ddb-backend")]
 pub use repository::DynamoDBObjectRegistryRepository;
+
+// Re-export RegisterResult from service-traits via actor crate so callers don't need extra deps.
+pub use plexspaces_actor::actor_context::RegisterResult;
 
 /// Error types for ObjectRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -194,6 +201,78 @@ impl From<RepositoryError> for ObjectRegistryError {
     }
 }
 
+// ── In-process alias LRU cache (Phase 12) ──────────────────────────────────
+//
+// Short-circuits `lookup_by_alias` for the hot path (actor placement checks,
+// duplicate-spawn guard).  TTL is 30 s — shorter than the discovery cache
+// (60 s) because actor placement decisions require fresher data.
+//
+// Capacity: 10_000 entries (≈ actors per node in a typical large deployment).
+
+/// Minimal LRU cache with per-entry TTL, used for alias → ObjectRegistration.
+struct AliasLruCache {
+    capacity: usize,
+    ttl: Duration,
+    map: HashMap<String, (Option<ObjectRegistration>, SystemTime)>,
+    queue: VecDeque<String>,
+}
+
+impl AliasLruCache {
+    fn new(capacity: usize, ttl: Duration) -> Self {
+        Self {
+            capacity,
+            ttl,
+            map: HashMap::with_capacity(capacity),
+            queue: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<Option<ObjectRegistration>> {
+        let expired = self
+            .map
+            .get(key)
+            .map(|(_, ts)| {
+                SystemTime::now()
+                    .duration_since(*ts)
+                    .unwrap_or_default()
+                    >= self.ttl
+            })
+            .unwrap_or(true);
+
+        if expired {
+            if self.map.remove(key).is_some() {
+                self.queue.retain(|k| k != key);
+            }
+            return None;
+        }
+
+        self.map.get(key).map(|(v, _)| v.clone())
+    }
+
+    fn insert(&mut self, key: String, value: Option<ObjectRegistration>) {
+        let now = SystemTime::now();
+        if let Some(entry) = self.map.get_mut(&key) {
+            entry.0 = value;
+            entry.1 = now;
+            return;
+        }
+        // Evict LRU (insertion-order front) when at capacity.
+        if self.map.len() >= self.capacity {
+            if let Some(evict) = self.queue.pop_front() {
+                self.map.remove(&evict);
+            }
+        }
+        self.queue.push_back(key.clone());
+        self.map.insert(key, (value, now));
+    }
+
+    fn remove(&mut self, key: &str) {
+        if self.map.remove(key).is_some() {
+            self.queue.retain(|k| k != key);
+        }
+    }
+}
+
 /// Unified ObjectRegistry implementation for actors, tuplespaces, and services
 ///
 /// ## Purpose
@@ -205,6 +284,8 @@ impl From<RepositoryError> for ObjectRegistryError {
 /// - Indexed columns enable fast queries by object_type, node_id, health_status, last_heartbeat
 /// - Full ObjectRegistration blob preserved for complete data
 /// - No external dependencies beyond repository
+/// - In-process alias LRU cache (30 s TTL, 10 k cap) short-circuits hot-path
+///   alias lookups for unique-placement checks
 ///
 /// ## Examples
 /// ```rust,no_run
@@ -218,6 +299,8 @@ impl From<RepositoryError> for ObjectRegistryError {
 /// ```
 pub struct ObjectRegistryImpl {
     repository: Arc<dyn ObjectRegistryRepository>,
+    /// In-process alias LRU cache (30 s TTL, 10_000 cap).
+    alias_cache: RwLock<AliasLruCache>,
 }
 
 impl ObjectRegistryImpl {
@@ -240,7 +323,13 @@ impl ObjectRegistryImpl {
     /// # }
     /// ```
     pub fn new(repository: Arc<dyn ObjectRegistryRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            alias_cache: RwLock::new(AliasLruCache::new(
+                10_000,
+                Duration::from_secs(30),
+            )),
+        }
     }
 
     /// Register object (actor, tuplespace, or service)
@@ -355,6 +444,11 @@ impl ObjectRegistryImpl {
         // Store via repository (upsert semantics)
         self.repository.put(ctx, &registration).await?;
 
+        // Invalidate alias cache so next lookup fetches fresh data.
+        if !registration.alias.is_empty() {
+            self.alias_cache.write().await.remove(&registration.alias);
+        }
+
         Ok(())
     }
 
@@ -378,8 +472,9 @@ impl ObjectRegistryImpl {
         _object_type: ObjectType,
         object_id: &str,
     ) -> Result<(), ObjectRegistryError> {
-        // Check if exists first
-        if !self.repository.exists(ctx, object_id).await? {
+        // Fetch before delete so we can evict the alias cache entry.
+        let existing = self.repository.get(ctx, object_id).await?;
+        if existing.is_none() {
             return Err(ObjectRegistryError::ObjectNotFound(format!(
                 "Object '{}' not found in tenant '{}', namespace '{}'",
                 object_id,
@@ -389,6 +484,13 @@ impl ObjectRegistryImpl {
         }
 
         self.repository.delete(ctx, object_id).await?;
+
+        if let Some(reg) = existing {
+            if !reg.alias.is_empty() {
+                self.alias_cache.write().await.remove(&reg.alias);
+            }
+        }
+
         Ok(())
     }
 
@@ -528,7 +630,7 @@ impl ObjectRegistryImpl {
         }
     }
 
-    /// Update heartbeat for object
+    /// Update heartbeat for object, reset failure count, restore HEALTHY status.
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant isolation
@@ -543,7 +645,7 @@ impl ObjectRegistryImpl {
     /// - [`ObjectRegistryError::StorageError`]: Repository failure
     ///
     /// ## Performance
-    /// O(1) - single column UPDATE, no blob read/write required
+    /// O(1) - targeted column UPDATEs, no blob read/write required
     #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
     pub async fn heartbeat(
         &self,
@@ -555,7 +657,156 @@ impl ObjectRegistryImpl {
         self.repository
             .update_heartbeat(ctx, object_id, now)
             .await?;
+        self.repository
+            .reset_heartbeat_failures(ctx, object_id)
+            .await?;
+        self.repository
+            .update_health_status(ctx, object_id, HealthStatus::HealthStatusHealthy)
+            .await?;
         Ok(())
+    }
+
+    /// Record a missed heartbeat, increment failure count, and transition health state.
+    ///
+    /// ## Transitions
+    /// - 1st failure (< max): DEGRADED
+    /// - Failures >= max_heartbeat_failures (default 3): DEAD
+    /// - NODE going DEAD cascades to all objects on that node
+    ///
+    /// ## Returns
+    /// New HealthStatus after the failure is recorded.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    pub async fn record_heartbeat_failure(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> Result<HealthStatus, ObjectRegistryError> {
+        let new_count = self
+            .repository
+            .increment_heartbeat_failures(ctx, object_id)
+            .await?;
+
+        let reg = self
+            .repository
+            .get(ctx, object_id)
+            .await?
+            .ok_or_else(|| ObjectRegistryError::ObjectNotFound(object_id.to_string()))?;
+
+        let max = if reg.max_heartbeat_failures == 0 {
+            3
+        } else {
+            reg.max_heartbeat_failures
+        };
+
+        let is_dead = new_count >= max;
+        let new_status = if is_dead {
+            HealthStatus::HealthStatusDead
+        } else {
+            HealthStatus::HealthStatusDegraded
+        };
+
+        self.repository
+            .update_health_status(ctx, object_id, new_status.clone())
+            .await?;
+
+        // Invalidate alias cache: health_status changed, so a cached entry would
+        // return stale HEALTHY/DEGRADED data and could incorrectly block a new spawn.
+        if !reg.alias.is_empty() {
+            self.alias_cache.write().await.remove(&reg.alias);
+        }
+
+        // Cascade: if a NODE goes DEAD, mark all objects on that node DEAD
+        if is_dead && ObjectType::try_from(reg.object_type) == Ok(ObjectType::ObjectTypeNode) {
+            self.repository
+                .mark_dead_by_node_id(ctx, &reg.object_id)
+                .await?;
+        }
+
+        Ok(new_status)
+    }
+
+    /// Lookup an object by alias (identity-based placement key).
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `alias` - Alias string (e.g. `"{actor_type}:{name}:{namespace}:{tenant_id}"`)
+    ///
+    /// ## Returns
+    /// `Ok(Some(registration))` if found, `Ok(None)` if not found.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), alias = %alias))]
+    pub async fn lookup_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> Result<Option<ObjectRegistration>, ObjectRegistryError> {
+        // Fast path: check in-process alias LRU cache (30 s TTL).
+        if let Some(cached) = self.alias_cache.write().await.get(alias) {
+            return Ok(cached);
+        }
+
+        // Cache miss — query repository.
+        let result = self
+            .repository
+            .get_by_alias(ctx, alias)
+            .await
+            .map_err(ObjectRegistryError::from)?;
+
+        // Populate cache (store None too, to short-circuit repeated misses).
+        self.alias_cache
+            .write()
+            .await
+            .insert(alias.to_string(), result.clone());
+
+        Ok(result)
+    }
+
+    /// Register with unique alias enforcement (Orleans grain directory pattern).
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext for tenant isolation
+    /// * `registration` - ObjectRegistration to store; `alias` field is used as placement key
+    /// * `enforce_unique` - If true, fail (return AlreadyExists) when an active instance holds the alias
+    ///
+    /// ## Returns
+    /// - [`RegisterResult::Registered`] on success
+    /// - [`RegisterResult::AlreadyExists`] when alias conflict with an active instance is found
+    ///
+    /// ## Semantics
+    /// - DEAD/STOPPING/UNKNOWN existing registrations are removed and replaced.
+    /// - HEALTHY/DEGRADED/STARTING existing registrations block the new registration.
+    #[instrument(skip(self, ctx, registration), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %registration.object_id))]
+    pub async fn register_with_unique_alias(
+        &self,
+        ctx: &RequestContext,
+        registration: ObjectRegistration,
+        enforce_unique: bool,
+    ) -> Result<RegisterResult, ObjectRegistryError> {
+        if enforce_unique && !registration.alias.is_empty() {
+            let alias = registration.alias.as_str();
+            if let Some(existing) = self.repository.get_by_alias(ctx, alias).await? {
+                let status = HealthStatus::try_from(existing.health_status)
+                    .unwrap_or(HealthStatus::HealthStatusUnknown);
+                match status {
+                    HealthStatus::HealthStatusHealthy
+                    | HealthStatus::HealthStatusDegraded
+                    | HealthStatus::HealthStatusStarting => {
+                        // Active instance holds the alias — refuse
+                        return Ok(RegisterResult::AlreadyExists {
+                            grpc_address: existing.grpc_address,
+                            object_id: existing.object_id,
+                        });
+                    }
+                    _ => {
+                        // DEAD / STOPPING / UNKNOWN — stale, remove it
+                        self.repository.delete(ctx, &existing.object_id).await?;
+                        self.alias_cache.write().await.remove(alias);
+                    }
+                }
+            }
+        }
+
+        self.register(ctx, registration).await?;
+        Ok(RegisterResult::Registered)
     }
 
     /// Find stale registrations (last heartbeat older than threshold)
@@ -663,6 +914,54 @@ impl ObjectRegistryImpl {
     ) -> Result<usize, ObjectRegistryError> {
         self.repository
             .count_tenant_ids_by_object_type(ctx, object_type)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Mark all HEALTHY/DEGRADED/STARTING objects on `node_id` as DEAD.
+    ///
+    /// ## Purpose
+    /// Called by SWIM when a node permanently leaves the cluster.  All actors,
+    /// services, and workflows registered on that node are immediately marked DEAD.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext; admin context with empty tenant_id performs a
+    ///   cross-tenant cascade (the correct call site is the SWIM handler)
+    /// * `node_id` - The dead node's identifier
+    ///
+    /// ## Returns
+    /// The number of registrations updated
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), node_id = %node_id))]
+    pub async fn mark_objects_dead_by_node(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> Result<u64, ObjectRegistryError> {
+        self.repository
+            .mark_dead_by_node_id(ctx, node_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Return registrations whose last heartbeat is older than `threshold_seconds`.
+    ///
+    /// ## Purpose
+    /// Used exclusively by `HeartbeatMonitor` to find stale registrations across
+    /// all tenants (admin context with empty `tenant_id`) or within a single tenant.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext; empty `tenant_id` performs a cross-tenant scan
+    /// * `threshold_seconds` - Objects not seen in this many seconds are stale
+    /// * `limit` - Maximum objects to return per cycle
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), threshold_seconds = %threshold_seconds, limit = %limit))]
+    pub async fn find_stale_heartbeats_raw(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
+        self.repository
+            .find_stale_heartbeats(ctx, threshold_seconds, limit)
             .await
             .map_err(Into::into)
     }
@@ -813,6 +1112,82 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.heartbeat(ctx, object_type, object_id)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn lookup_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> Result<Option<plexspaces_actor::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
+    {
+        self.lookup_by_alias(ctx, alias).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
+    }
+
+    async fn register_with_unique_alias(
+        &self,
+        ctx: &RequestContext,
+        registration: plexspaces_actor::actor_context::ObjectRegistration,
+        enforce_unique: bool,
+    ) -> Result<RegisterResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.register_with_unique_alias(ctx, registration, enforce_unique)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn record_heartbeat_failure(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> Result<HealthStatus, Box<dyn std::error::Error + Send + Sync>> {
+        self.record_heartbeat_failure(ctx, object_id)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn mark_objects_dead_by_node(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.mark_objects_dead_by_node(ctx, node_id)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn find_stale_heartbeats(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        self.find_stale_heartbeats_raw(ctx, threshold_seconds, limit)
             .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -1099,7 +1474,7 @@ mod tests {
         registry.register(&ctx, reg).await.unwrap();
 
         registry
-            .update_health_status(&ctx, "actor-1", HealthStatus::HealthStatusUnhealthy)
+            .update_health_status(&ctx, "actor-1", HealthStatus::HealthStatusDead)
             .await
             .unwrap();
 
@@ -1111,7 +1486,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(HealthStatus::HealthStatusUnhealthy),
+                Some(HealthStatus::HealthStatusDead),
                 0,
                 100,
             )
@@ -1223,6 +1598,547 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    // ----- Health lifecycle tests -----
+
+    #[tokio::test]
+    async fn test_record_heartbeat_failure_degraded_then_dead() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let mut reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        reg.max_heartbeat_failures = 3;
+        registry.register(&ctx, reg).await.unwrap();
+
+        // First failure → DEGRADED
+        let status = registry
+            .record_heartbeat_failure(&ctx, "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(status, HealthStatus::HealthStatusDegraded);
+
+        // Second failure → still DEGRADED (count=2 < max=3)
+        let status = registry
+            .record_heartbeat_failure(&ctx, "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(status, HealthStatus::HealthStatusDegraded);
+
+        // Third failure → DEAD (count=3 >= max=3)
+        let status = registry
+            .record_heartbeat_failure(&ctx, "actor-1")
+            .await
+            .unwrap();
+        assert_eq!(status, HealthStatus::HealthStatusDead);
+
+        // Verify stored health status
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.health_status, HealthStatus::HealthStatusDead as i32);
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_resets_failure_count_and_restores_healthy() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let mut reg = create_test_registration("actor-2", ObjectType::ObjectTypeActor);
+        reg.max_heartbeat_failures = 3;
+        registry.register(&ctx, reg).await.unwrap();
+
+        // Two failures → DEGRADED
+        registry
+            .record_heartbeat_failure(&ctx, "actor-2")
+            .await
+            .unwrap();
+        registry
+            .record_heartbeat_failure(&ctx, "actor-2")
+            .await
+            .unwrap();
+
+        // Successful heartbeat restores HEALTHY
+        registry
+            .heartbeat(&ctx, ObjectType::ObjectTypeActor, "actor-2")
+            .await
+            .unwrap();
+
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            found.health_status,
+            HealthStatus::HealthStatusHealthy as i32
+        );
+        assert_eq!(found.heartbeat_failure_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_custom_max_heartbeat_failures() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let mut reg = create_test_registration("actor-3", ObjectType::ObjectTypeActor);
+        reg.max_heartbeat_failures = 2;
+        registry.register(&ctx, reg).await.unwrap();
+
+        // First failure → DEGRADED
+        let status = registry
+            .record_heartbeat_failure(&ctx, "actor-3")
+            .await
+            .unwrap();
+        assert_eq!(status, HealthStatus::HealthStatusDegraded);
+
+        // Second failure → DEAD (max=2)
+        let status = registry
+            .record_heartbeat_failure(&ctx, "actor-3")
+            .await
+            .unwrap();
+        assert_eq!(status, HealthStatus::HealthStatusDead);
+    }
+
+    #[tokio::test]
+    async fn test_node_dead_cascades_to_objects() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        // Register node
+        let mut node_reg = create_test_registration("node-1", ObjectType::ObjectTypeNode);
+        node_reg.node_id = "node-1".to_string();
+        node_reg.max_heartbeat_failures = 1;
+        registry.register(&ctx, node_reg).await.unwrap();
+
+        // Register actors on that node
+        let mut actor1 = create_test_registration("actor-a", ObjectType::ObjectTypeActor);
+        actor1.node_id = "node-1".to_string();
+        registry.register(&ctx, actor1).await.unwrap();
+
+        let mut actor2 = create_test_registration("actor-b", ObjectType::ObjectTypeActor);
+        actor2.node_id = "node-1".to_string();
+        registry.register(&ctx, actor2).await.unwrap();
+
+        // Node fails enough → DEAD, cascades to actors
+        registry
+            .record_heartbeat_failure(&ctx, "node-1")
+            .await
+            .unwrap();
+
+        // Actors on node should be DEAD
+        let actor_a = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(actor_a.health_status, HealthStatus::HealthStatusDead as i32);
+
+        let actor_b = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-b")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(actor_b.health_status, HealthStatus::HealthStatusDead as i32);
+    }
+
+    // ----- Alias placement tests -----
+
+    #[tokio::test]
+    async fn test_register_with_unique_alias_succeeds_on_first_registration() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let mut reg = create_test_registration("actor-x", ObjectType::ObjectTypeActor);
+        reg.alias = "Counter:worker:ns:t1".to_string();
+
+        let result = registry
+            .register_with_unique_alias(&ctx, reg, true)
+            .await
+            .unwrap();
+
+        assert!(matches!(result, RegisterResult::Registered));
+
+        // Lookup by alias should find it
+        let found = registry
+            .lookup_by_alias(&ctx, "Counter:worker:ns:t1")
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().object_id, "actor-x");
+    }
+
+    #[tokio::test]
+    async fn test_register_with_unique_alias_conflicts_with_healthy_instance() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let alias = "Counter:worker:ns:t1";
+        let mut reg1 = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        reg1.alias = alias.to_string();
+        reg1.grpc_address = "http://node1:8000".to_string();
+        registry
+            .register_with_unique_alias(&ctx, reg1, true)
+            .await
+            .unwrap();
+
+        // Second registration with same alias while first is HEALTHY → conflict
+        let mut reg2 = create_test_registration("actor-2", ObjectType::ObjectTypeActor);
+        reg2.alias = alias.to_string();
+        let result = registry
+            .register_with_unique_alias(&ctx, reg2, true)
+            .await
+            .unwrap();
+
+        match result {
+            RegisterResult::AlreadyExists {
+                grpc_address,
+                object_id,
+            } => {
+                assert_eq!(object_id, "actor-1");
+                assert_eq!(grpc_address, "http://node1:8000");
+            }
+            RegisterResult::Registered => panic!("expected AlreadyExists"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_register_with_unique_alias_replaces_dead_instance() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let alias = "Counter:worker:ns:t1";
+        let mut reg1 = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        reg1.alias = alias.to_string();
+        reg1.max_heartbeat_failures = 1;
+        registry
+            .register_with_unique_alias(&ctx, reg1, true)
+            .await
+            .unwrap();
+
+        // Kill the instance
+        registry
+            .record_heartbeat_failure(&ctx, "actor-1")
+            .await
+            .unwrap();
+
+        // New registration with same alias should succeed (stale instance removed)
+        let mut reg2 = create_test_registration("actor-2", ObjectType::ObjectTypeActor);
+        reg2.alias = alias.to_string();
+        let result = registry
+            .register_with_unique_alias(&ctx, reg2, true)
+            .await
+            .unwrap();
+
+        assert!(matches!(result, RegisterResult::Registered));
+
+        // Lookup should find new instance
+        let found = registry.lookup_by_alias(&ctx, alias).await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().object_id, "actor-2");
+    }
+
+    #[tokio::test]
+    async fn test_register_without_enforce_unique_skips_app_level_check() {
+        // enforce_unique=false skips the app-level conflict check.
+        // Two registrations with NO alias, or with distinct aliases, both succeed.
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let mut reg1 = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        reg1.alias = "Counter:worker-1:ns:t1".to_string();
+        let result1 = registry
+            .register_with_unique_alias(&ctx, reg1, false)
+            .await
+            .unwrap();
+        assert!(matches!(result1, RegisterResult::Registered));
+
+        let mut reg2 = create_test_registration("actor-2", ObjectType::ObjectTypeActor);
+        reg2.alias = "Counter:worker-2:ns:t1".to_string();
+        let result2 = registry
+            .register_with_unique_alias(&ctx, reg2, false)
+            .await
+            .unwrap();
+        assert!(matches!(result2, RegisterResult::Registered));
+    }
+
+    // ── Stale-heartbeat scan tests (formerly heartbeat_monitor tests) ─────────
+
+    async fn make_registry_for_stale_tests() -> Arc<ObjectRegistryImpl> {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        Arc::new(ObjectRegistryImpl::new(repo))
+    }
+
+    fn healthy_actor_reg(id: &str) -> ObjectRegistration {
+        ObjectRegistration {
+            object_id: id.to_string(),
+            object_type: ObjectType::ObjectTypeActor as i32,
+            grpc_address: "http://test:8000".to_string(),
+            health_status: HealthStatus::HealthStatusHealthy as i32,
+            max_heartbeat_failures: 3,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stale_scan_transitions_to_degraded() {
+        let registry = make_registry_for_stale_tests().await;
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        registry
+            .register(&ctx, healthy_actor_reg("actor-stale-1"))
+            .await
+            .unwrap();
+
+        // threshold=0 → all objects with any heartbeat record are stale
+        let stale = registry
+            .find_stale_heartbeats_raw(&admin_ctx, 0, 100)
+            .await
+            .unwrap();
+        for reg in &stale {
+            let tenant_ctx = RequestContext::new_without_auth(
+                reg.tenant_id.clone(),
+                reg.namespace.clone(),
+            );
+            registry
+                .record_heartbeat_failure(&tenant_ctx, &reg.object_id)
+                .await
+                .unwrap();
+        }
+
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-stale-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            found.health_status,
+            HealthStatus::HealthStatusDegraded as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stale_scan_max_failures_transitions_to_dead() {
+        let registry = make_registry_for_stale_tests().await;
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        let mut reg = healthy_actor_reg("actor-stale-2");
+        reg.max_heartbeat_failures = 2;
+        registry.register(&ctx, reg).await.unwrap();
+
+        let scan = |registry: Arc<ObjectRegistryImpl>, admin_ctx: RequestContext| async move {
+            let stale = registry
+                .find_stale_heartbeats_raw(&admin_ctx, 0, 100)
+                .await
+                .unwrap();
+            for r in &stale {
+                let tenant_ctx =
+                    RequestContext::new_without_auth(r.tenant_id.clone(), r.namespace.clone());
+                let _ = registry
+                    .record_heartbeat_failure(&tenant_ctx, &r.object_id)
+                    .await;
+            }
+        };
+
+        scan(registry.clone(), admin_ctx.clone()).await; // count=1 → DEGRADED
+        scan(registry.clone(), admin_ctx.clone()).await; // count=2 >= max=2 → DEAD
+
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-stale-2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.health_status, HealthStatus::HealthStatusDead as i32);
+    }
+
+    #[tokio::test]
+    async fn test_fresh_heartbeat_not_returned_by_stale_scan() {
+        let registry = make_registry_for_stale_tests().await;
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        registry
+            .register(&ctx, healthy_actor_reg("actor-stale-3"))
+            .await
+            .unwrap();
+
+        // Record a fresh heartbeat for this object.
+        registry
+            .heartbeat(&ctx, ObjectType::ObjectTypeActor, "actor-stale-3")
+            .await
+            .unwrap();
+
+        // Use a 1-hour threshold → object is not stale.
+        let stale = registry
+            .find_stale_heartbeats_raw(&admin_ctx, 3600, 100)
+            .await
+            .unwrap();
+        assert!(
+            stale.iter().all(|r| r.object_id != "actor-stale-3"),
+            "freshly heartbeated actor must not appear in stale scan"
+        );
+
+        let found = registry
+            .lookup(&ctx, ObjectType::ObjectTypeActor, "actor-stale-3")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            found.health_status,
+            HealthStatus::HealthStatusHealthy as i32
+        );
+    }
+
+    // ── Alias LRU cache tests (Phase 12) ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_alias_cache_hit_on_second_lookup() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".into(), "ns1".into());
+
+        let mut reg = create_test_registration("actor-cached", ObjectType::ObjectTypeActor);
+        reg.alias = "Counter:worker:ns1:t1".to_string();
+        registry.register(&ctx, reg).await.unwrap();
+
+        // First call: cache miss, goes to DB.
+        let r1 = registry
+            .lookup_by_alias(&ctx, "Counter:worker:ns1:t1")
+            .await
+            .unwrap();
+        assert!(r1.is_some());
+
+        // Second call: cache hit (no DB read, same result).
+        let r2 = registry
+            .lookup_by_alias(&ctx, "Counter:worker:ns1:t1")
+            .await
+            .unwrap();
+        assert_eq!(r1.unwrap().object_id, r2.unwrap().object_id);
+    }
+
+    #[tokio::test]
+    async fn test_alias_cache_invalidated_on_unregister() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".into(), "ns1".into());
+
+        let mut reg = create_test_registration("actor-evict", ObjectType::ObjectTypeActor);
+        reg.alias = "Counter:evict:ns1:t1".to_string();
+        registry.register(&ctx, reg).await.unwrap();
+
+        // Populate cache.
+        let r = registry
+            .lookup_by_alias(&ctx, "Counter:evict:ns1:t1")
+            .await
+            .unwrap();
+        assert!(r.is_some());
+
+        // Unregister removes from DB and evicts from cache.
+        registry
+            .unregister(&ctx, ObjectType::ObjectTypeActor, "actor-evict")
+            .await
+            .unwrap();
+
+        // Next lookup must miss — returns None from DB (not stale cache).
+        let after = registry
+            .lookup_by_alias(&ctx, "Counter:evict:ns1:t1")
+            .await
+            .unwrap();
+        assert!(after.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_alias_cache_invalidated_on_register_update() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+        let ctx = RequestContext::new_without_auth("t1".into(), "ns1".into());
+
+        let mut reg = create_test_registration("actor-update", ObjectType::ObjectTypeActor);
+        reg.alias = "Counter:update:ns1:t1".to_string();
+        registry.register(&ctx, reg).await.unwrap();
+
+        // Populate cache.
+        registry
+            .lookup_by_alias(&ctx, "Counter:update:ns1:t1")
+            .await
+            .unwrap();
+
+        // Re-register with updated grpc_address (upsert).
+        let mut reg2 = create_test_registration("actor-update", ObjectType::ObjectTypeActor);
+        reg2.alias = "Counter:update:ns1:t1".to_string();
+        reg2.grpc_address = "http://new-node:9000".to_string();
+        registry.register(&ctx, reg2).await.unwrap();
+
+        // Cache was evicted on register; next lookup fetches fresh data.
+        let updated = registry
+            .lookup_by_alias(&ctx, "Counter:update:ns1:t1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.grpc_address, "http://new-node:9000");
     }
 }
 

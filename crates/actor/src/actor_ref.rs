@@ -263,8 +263,10 @@
 //! - Sending is lock-free (tokio::mpsc channel)
 //! - No shared mutable state (immutable after creation)
 
+use crate::core::{
+    ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext, RequestContextExt,
+};
 use async_trait::async_trait;
-use crate::core::{ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext, RequestContextExt};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
@@ -1062,7 +1064,10 @@ impl ActorRef {
                         reply_to: proto_message.reply_to,
                         message_id: proto_message.id,
                     });
-                    crate::core::apply_request_context_to_grpc_metadata(ctx, request.metadata_mut());
+                    crate::core::apply_request_context_to_grpc_metadata(
+                        ctx,
+                        request.metadata_mut(),
+                    );
 
                     // Send via gRPC
                     client_ref.send_message(request).await.map_err(|e| {
@@ -1582,7 +1587,6 @@ mod tests {
     /// TEST 2: Can create a remote ActorRef
     #[tokio::test]
     async fn test_create_remote_actor_ref() {
-        
         let service_locator =
             Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         let actor_ref = ActorRef::remote(
@@ -2121,7 +2125,7 @@ mod tests {
         }
 
         // Create remote ActorRef with ServiceLocator
-        
+
         let service_locator =
             Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         // Use actor crate's ActorRef for remote actors
@@ -2217,10 +2221,7 @@ mod tests {
         // Send via ActorRef - ReplyWaiterRegistry routes it if there's a pending ask
         // For this test, we just verify the message can be sent
         let ctx = tell_test_ctx();
-        target_ref
-            .tell(&ctx, reply_message.clone())
-            .await
-            .unwrap();
+        target_ref.tell(&ctx, reply_message.clone()).await.unwrap();
 
         // Verify message was received
         let received = target_mailbox_arc.dequeue().await.unwrap();
@@ -2334,7 +2335,7 @@ mod tests {
         }
 
         // Create remote ActorRef using actor crate's ActorRef
-        
+
         let service_locator =
             Arc::new(crate::TestServiceLocatorStub::new()) as Arc<dyn ServiceLocatorTrait>;
         let actor_ref = ActorRef::remote(
@@ -2350,9 +2351,7 @@ mod tests {
         let request = create_test_message(b"remote request".to_vec());
         // Remote ask will fail (no server), but that's expected in unit test
         let ctx = tell_test_ctx();
-        let result = actor_ref
-            .ask(&ctx, request, Duration::from_secs(1))
-            .await;
+        let result = actor_ref.ask(&ctx, request, Duration::from_secs(1)).await;
         // Should fail with connection error (no server running)
         // The remote ActorRef tries to connect via gRPC, which fails without a server
         assert!(result.is_err());

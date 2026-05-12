@@ -193,14 +193,10 @@ mod tests {
         let host_functions = create_test_host_functions_with_channel_service();
 
         // Test send_to_queue via HostFunctions
-        let _ = host_functions
-            .send_to_queue("queue", "msg", vec![])
-            .await;
+        let _ = host_functions.send_to_queue("queue", "msg", vec![]).await;
 
         // Test receive_from_queue via HostFunctions
-        let _ = host_functions
-            .receive_from_queue("queue", 0)
-            .await;
+        let _ = host_functions.receive_from_queue("queue", 0).await;
 
         // Test publish_to_topic via HostFunctions
         let _ = host_functions

@@ -4,7 +4,9 @@
 // Tests for behavior registration patterns (embedded and WASM)
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, BehaviorFactory, BehaviorRegistry, Message, ServiceLocator, InitializableServiceLocator};
+use plexspaces_actor::{
+    Actor, BehaviorFactory, BehaviorRegistry, InitializableServiceLocator, Message, ServiceLocator,
+};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
 

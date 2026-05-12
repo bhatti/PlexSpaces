@@ -2,12 +2,13 @@
 // Tests for virtual actor suspension/passivation and reactivation
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
+use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
-    ServiceLocator, ServiceLocatorBase, RequestContextExt};
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
+    InitializableServiceLocator, RequestContextExt, ServiceLocator, ServiceLocatorBase,
+};
+use plexspaces_behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalError, JournalResult, JournalStorage, SqliteJournalStorage,
     StateLoader, VirtualActorFacet,
@@ -35,7 +36,10 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+fn create_test_message_with_type(
+    payload: Vec<u8>,
+    message_type: &str,
+) -> plexspaces_actor::Message {
     plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
@@ -274,9 +278,9 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
-            )
+            Box::pin(async move {
+                Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -317,7 +321,8 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     assert!(exists, "Actor should exist");
     assert!(is_virtual, "Actor should be virtual");
     assert!(is_active, "Eager actor should be active immediately");
@@ -413,7 +418,8 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     assert!(matches!(reply, TestMessage::Count(0)), "State preservation not yet implemented - new actor instance starts with count=0. See docs/state-preservation-design.md");
 
     // Verify actor is active again
-    let (_, is_active_final, _) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
+    let (_, is_active_final, _) =
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     assert!(is_active_final, "Actor should be active again after ask()");
 }
 
@@ -428,9 +434,9 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("gen_server", || {
-            Box::pin(
-                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>) },
-            )
+            Box::pin(async move {
+                Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_actor::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -458,7 +464,8 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor is active immediately (spawn_built_actor is synchronous)
-    let (exists, is_active, is_virtual) = check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
+    let (exists, is_active, is_virtual) =
+        check_virtual_actor_exists_triplet(node.as_ref(), &actor_id).await;
     eprintln!(
         "🔵 [TEST] After registration: exists={}, is_active={}, is_virtual={}, actor_id={}",
         exists, is_active, is_virtual, actor_id

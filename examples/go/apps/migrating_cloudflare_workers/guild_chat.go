@@ -794,8 +794,8 @@ func toInt(v any) int {
 // registered before the host calls any exported functions like init/handle.
 func init() {
 	router := plexspaces.NewActorRouter()
-	router.Route("chat-room", NewChatRoom)
-	router.Route("rate-limiter", NewRateLimiter)
+	router.Route("ChatRoom", NewChatRoom)
+	router.Route("RateLimiter", NewRateLimiter)
 	plexspaces.Register(router)
 }
 

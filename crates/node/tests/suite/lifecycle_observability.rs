@@ -34,10 +34,10 @@
 
 use super::test_helpers::{spawn_actor_helper, test_runtime_actor_id};
 
-use plexspaces_actor::ActorInstance as Actor;
-use plexspaces_behavior::MockBehavior;
 use plexspaces_actor::ActorId;
+use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_actor::{RequestContextExt, ServiceLocator, ServiceLocatorBase};
+use plexspaces_behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_persistence::MemoryJournal;

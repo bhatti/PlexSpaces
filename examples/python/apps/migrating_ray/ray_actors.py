@@ -349,7 +349,3 @@ class DataWorker:
 # Multi-actor role mapping: actor_id prefix -> actor class
 # Framework passes full IDs like {"actor_id": "parameter-server:ray-ps@node"}
 # or {"actor_id": "data-worker-0:ray-ps@node"}; prefix matching selects the class.
-ACTOR_ROLES = {
-    "parameter-server": ParameterServer,
-    "data-worker": DataWorker,
-}

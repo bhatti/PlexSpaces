@@ -609,8 +609,8 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
 // ========================================================================
 
 const router = new ActorRouter({
-  "chat-room": () => new ChatRoomActor(),
-  "rate-limiter": () => new RateLimiterActor(),
+  "ChatRoomActor": () => new ChatRoomActor(),
+  "RateLimiterActor": () => new RateLimiterActor(),
 });
 
 export const actor = {

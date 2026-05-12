@@ -62,6 +62,8 @@ mod tests {
             use_instance_pool: false,
             max_concurrent_instantiations: None,
             shared_timer_pool: None,
+            tenant_id: String::new(),
+            default_namespace: String::new(),
         }
     }
 

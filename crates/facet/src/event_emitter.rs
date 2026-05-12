@@ -336,7 +336,12 @@ mod tests {
 
         // Trigger after_method which should emit event
         let result = facet
-            .after_method("event_test", b"args", b"result", &std::collections::HashMap::new())
+            .after_method(
+                "event_test",
+                b"args",
+                b"result",
+                &std::collections::HashMap::new(),
+            )
             .await
             .unwrap();
 

@@ -369,7 +369,12 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     use plexspaces_services::actor_service::ActorServiceImpl;
 
-    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     node.initialize_services().await.unwrap();
     let service_locator = node.service_locator();
 
@@ -392,13 +397,8 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
                 }),
                 role: "TestActor".to_string(),
                 namespace: String::new(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: String::new(),
-                args: std::collections::HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: std::collections::HashMap::new(),
+                ..Default::default()
             }),
             namespace: "default".to_string(),
             instances_count: 1,
@@ -419,7 +419,12 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     use plexspaces_proto::actor::v1::actor_service_server::ActorService;
     use plexspaces_services::actor_service::ActorServiceImpl;
 
-    let node = Arc::new(NodeBuilder::new("test-node").with_auth_disabled().build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     node.initialize_services().await.unwrap();
     let _service_locator = node.service_locator();
 
@@ -439,13 +444,8 @@ async fn test_grpc_service_accepts_requests_when_serving() {
                 }),
                 role: "TestActor".to_string(),
                 namespace: String::new(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: String::new(),
-                args: std::collections::HashMap::new(),
-                facets: vec![],
-                config: None,
-                labels: std::collections::HashMap::new(),
+                ..Default::default()
             }),
             namespace: "default".to_string(),
             instances_count: 1,

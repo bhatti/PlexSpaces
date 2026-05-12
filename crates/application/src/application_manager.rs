@@ -35,10 +35,10 @@
 use crate::application_trait::ApplicationNode;
 use crate::{Application, ApplicationError, SpecApplication, WasmApplication};
 use async_trait::async_trait;
-use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_actor::{
     object_registry_helpers, ApplicationManager as ApplicationManagerTrait, Service,
 };
+use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::application::v1::ApplicationSpec;
 use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
@@ -91,6 +91,14 @@ impl Service for ApplicationManagerImpl {
 }
 
 impl ApplicationManagerImpl {
+    /// Mark the application manager as shutting down.
+    ///
+    /// This is used by node-level shutdown orchestration paths that stop applications
+    /// individually instead of going through `stop_all()`.
+    pub async fn request_shutdown(&self) {
+        *self.shutdown_requested.write().await = true;
+    }
+
     fn count_supervisors_in_tree(supervisor_spec: &SupervisorSpec) -> u32 {
         supervisor_spec
             .children
@@ -1365,7 +1373,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use plexspaces_proto::application::v1::{ApplicationSpec, ApplicationType, ShutdownStrategy};
-    use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
+    use plexspaces_proto::supervision::v1::{
+        ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+    };
     use std::collections::HashMap;
 
     fn app_ctx(name: &str) -> RequestContext {

@@ -89,6 +89,9 @@ impl HealthChecker for MinIOHealthChecker {
         // Create HTTP client
         let client = reqwest::Client::builder()
             .timeout(timeout_duration)
+            // Keep health checks deterministic in tests and avoid platform-specific
+            // proxy autodiscovery panics from system configuration lookups.
+            .no_proxy()
             .build()
             .map_err(|e| {
                 HealthCheckError::CheckFailed(format!("Failed to create HTTP client: {}", e))

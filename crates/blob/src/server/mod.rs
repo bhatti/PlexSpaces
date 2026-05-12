@@ -20,7 +20,6 @@
 //!
 //! This module contains both gRPC and HTTP server implementations for blob storage.
 
-
 pub mod grpc;
 pub mod http;
 

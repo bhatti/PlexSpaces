@@ -5,12 +5,13 @@ use super::test_helpers::{
     lookup_actor_ref, registry_ask, spawn_actor_helper, test_runtime_actor_id,
 };
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorBuilder};
-use plexspaces_behavior::GenServer;
 use plexspaces_actor::Message;
+use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, InitializableServiceLocator,
-    ServiceLocator, RequestContextExt};
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
+    InitializableServiceLocator, RequestContextExt, ServiceLocator,
+};
+use plexspaces_behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,10 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_actor::Message {
 }
 
 /// Helper to create a test message with message type
-fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> plexspaces_actor::Message {
+fn create_test_message_with_type(
+    payload: Vec<u8>,
+    message_type: &str,
+) -> plexspaces_actor::Message {
     plexspaces_actor::Message {
         id: ulid::Ulid::new().to_string(),
         payload,
@@ -156,9 +160,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
         "default".to_string(),
         "default".to_string(),
     );
-    let result = actor_ref
-        .ask(&ctx, msg, Duration::from_secs(5))
-        .await;
+    let result = actor_ref.ask(&ctx, msg, Duration::from_secs(5)).await;
 
     assert!(
         result.is_ok(),

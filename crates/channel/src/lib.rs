@@ -188,7 +188,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-
 mod channel;
 mod in_memory;
 mod observability;

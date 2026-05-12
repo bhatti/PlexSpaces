@@ -290,9 +290,15 @@ mod sqlite_tests {
         // Process one message
         let method = "test_method";
         let payload = b"test payload".to_vec();
-        facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .before_method(method, &payload, &std::collections::HashMap::new())
+            .await
+            .unwrap();
         let result = b"result".to_vec();
-        facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+        facet
+            .after_method(method, &payload, &result, &std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         // Flush
         storage.flush().await.unwrap();
@@ -337,7 +343,10 @@ mod sqlite_tests {
         for i in 1..=2 {
             let method = "test_method";
             let payload = format!("payload-{}", i).into_bytes();
-            facet1.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet1
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("result-{}", i).into_bytes();
             facet1
                 .after_method(method, &payload, &result, &std::collections::HashMap::new())
@@ -378,7 +387,10 @@ mod sqlite_tests {
 
         // Verify sequence number was restored by writing a new entry
         // If sequence was restored correctly, new entry should have sequence 5
-        facet2.before_method("test_method", b"new", &std::collections::HashMap::new()).await.unwrap();
+        facet2
+            .before_method("test_method", b"new", &std::collections::HashMap::new())
+            .await
+            .unwrap();
         storage.flush().await.unwrap();
         let entries_after_new = storage.replay_from(actor_id, 0).await.unwrap();
         assert_eq!(

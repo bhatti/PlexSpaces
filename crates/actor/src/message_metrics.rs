@@ -9,5 +9,4 @@
 //! [`crate::prometheus_text::actor_metrics_from_exposition_for_namespace`].
 
 /// Re-export proto-generated `ActorMetrics` for dashboards and gRPC.
-
 pub use plexspaces_proto::metrics::v1::ActorMetrics;

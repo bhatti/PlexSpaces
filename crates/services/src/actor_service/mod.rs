@@ -127,7 +127,6 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 use crate::ServiceLocatorImpl;
-use plexspaces_service_traits::ServiceLocatorBase;
 use plexspaces_actor::parallel::{
     build_collective_message, reduce_values, resolve_timeout, scatter_stats_from_results,
     select_collective_value, shard_group_config, shard_query_responses_from_results,
@@ -139,9 +138,11 @@ use plexspaces_actor::{
         record_node_shard_messages_sent, record_node_shard_operation,
         record_node_shard_operation_failed,
     },
-    ActorId, ActorRegistry, RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait,
+    ActorId, ActorRegistry, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_proto::common::v1::Message;
+use plexspaces_service_traits::ServiceLocatorBase;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 use ulid::Ulid;
@@ -746,12 +747,11 @@ impl ActorServiceImpl {
         use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
 
-        let identity = input_spec
-            .identity
-            .as_ref()
-            .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+        let identity = input_spec.identity.as_ref().ok_or_else(
+            || -> Box<dyn std::error::Error + Send + Sync> {
                 "spawn_actor_local_from_spec: spec.identity is required".into()
-            })?;
+            },
+        )?;
         if identity.actor_type.is_empty() {
             return Err("spawn_actor_local_from_spec: spec.identity.actor_type is required".into());
         }
@@ -812,9 +812,11 @@ impl ActorServiceImpl {
                     },
                     &self.local_node_id,
                 )
-                .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> {
-                    e.to_string().into()
-                })?
+                .map_err(
+                    |e: Status| -> Box<dyn std::error::Error + Send + Sync> {
+                        e.to_string().into()
+                    },
+                )?
             } else {
                 self.build_canonical_actor_id(
                     name_for_id,
@@ -822,9 +824,11 @@ impl ActorServiceImpl {
                     &effective_namespace,
                     &self.local_node_id,
                 )
-                .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> {
-                    e.to_string().into()
-                })?
+                .map_err(
+                    |e: Status| -> Box<dyn std::error::Error + Send + Sync> {
+                        e.to_string().into()
+                    },
+                )?
             }
         } else {
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -838,7 +842,9 @@ impl ActorServiceImpl {
                 &effective_namespace,
                 &self.local_node_id,
             )
-            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?
+            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> {
+                e.to_string().into()
+            })?
         };
 
         let actor_factory: Arc<dyn ActorFactory> = self.service_locator.get_actor_factory().await
@@ -856,7 +862,8 @@ impl ActorServiceImpl {
             if let Some(facet_registry_wrapper) = self.service_locator.get_facet_registry().await {
                 let facet_registry = facet_registry_wrapper.inner();
                 for proto_facet in &facets_proto {
-                    match plexspaces_actor::create_facet_from_proto(proto_facet, facet_registry).await
+                    match plexspaces_actor::create_facet_from_proto(proto_facet, facet_registry)
+                        .await
                     {
                         Ok(facet_box) => facet_boxes.push(facet_box),
                         Err(e) => {
@@ -892,6 +899,9 @@ impl ActorServiceImpl {
             facets: facets_proto,
             config: input_spec.config.clone(),
             labels: input_spec.labels.clone(),
+            register_in_object_registry: input_spec.register_in_object_registry,
+            enforce_unique_placement: input_spec.enforce_unique_placement,
+            placement_strategy: input_spec.placement_strategy,
         };
 
         actor_factory
@@ -903,16 +913,14 @@ impl ActorServiceImpl {
             ctx.tenant_id().to_string(),
             effective_namespace,
         );
-        Ok(
-            Self::create_actor_ref_for_local_actor(
-                &routing_ctx,
-                &registry,
-                &local_actor_id,
-                &self.local_node_id,
-                self.service_locator.clone(),
-            )
-            .await,
+        Ok(Self::create_actor_ref_for_local_actor(
+            &routing_ctx,
+            &registry,
+            &local_actor_id,
+            &self.local_node_id,
+            self.service_locator.clone(),
         )
+        .await)
     }
 
     /// Send a message to an actor (local or remote) - Public API for ActorContext
@@ -1447,9 +1455,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             };
 
             let (actor_type, name_prefix) = match base_spec.identity.as_ref() {
-                Some(id) if !id.actor_type.is_empty() => {
-                    (id.actor_type.clone(), id.name.clone())
-                }
+                Some(id) if !id.actor_type.is_empty() => (id.actor_type.clone(), id.name.clone()),
                 _ => {
                     results.push(plexspaces_proto::actor::v1::SpawnActorResult {
                         success: false,
@@ -1531,9 +1537,9 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
         supervisor_id: &str,
         supervisor_callback: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let target = self
-            .parse_canonical_actor_id(actor_id)
-            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let target = self.parse_canonical_actor_id(actor_id).map_err(
+            |e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+        )?;
         let node_id = target.node_id();
         let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
@@ -1547,12 +1553,11 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             supervisor_callback: supervisor_callback.to_string(),
         });
         plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
-        let resp = client
-            .monitor_actor(req)
-            .await
-            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+        let resp = client.monitor_actor(req).await.map_err(
+            |e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("monitor_actor failed: {}", e.message()).into()
-            })?;
+            },
+        )?;
         Ok(resp.into_inner().monitor_ref)
     }
 
@@ -1563,9 +1568,9 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
         supervisor_id: &str,
         monitor_ref: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let target = self
-            .parse_canonical_actor_id(actor_id)
-            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let target = self.parse_canonical_actor_id(actor_id).map_err(
+            |e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+        )?;
         let node_id = target.node_id();
         let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
@@ -1579,12 +1584,11 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             monitor_ref: monitor_ref.to_string(),
         });
         plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
-        client
-            .demonitor_actor(req)
-            .await
-            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+        client.demonitor_actor(req).await.map_err(
+            |e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("demonitor_actor failed: {}", e.message()).into()
-            })?;
+            },
+        )?;
         Ok(())
     }
 
@@ -1594,9 +1598,9 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let target = self
-            .parse_canonical_actor_id(actor_id)
-            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let target = self.parse_canonical_actor_id(actor_id).map_err(
+            |e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+        )?;
         let node_id = target.node_id();
         let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
@@ -1609,12 +1613,11 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             linked_actor_id: linked_actor_id.to_string(),
         });
         plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
-        client
-            .link_actor(req)
-            .await
-            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+        client.link_actor(req).await.map_err(
+            |e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("link_actor failed: {}", e.message()).into()
-            })?;
+            },
+        )?;
         Ok(())
     }
 
@@ -1624,9 +1627,9 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
         actor_id: &str,
         linked_actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let target = self
-            .parse_canonical_actor_id(actor_id)
-            .map_err(|e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        let target = self.parse_canonical_actor_id(actor_id).map_err(
+            |e: Status| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+        )?;
         let node_id = target.node_id();
         let sl: Arc<dyn plexspaces_actor::ServiceLocator> = self.service_locator.clone();
         let channel = sl
@@ -1639,12 +1642,11 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             linked_actor_id: linked_actor_id.to_string(),
         });
         plexspaces_actor::apply_request_context_to_grpc_metadata(ctx, req.metadata_mut());
-        client
-            .unlink_actor(req)
-            .await
-            .map_err(|e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
+        client.unlink_actor(req).await.map_err(
+            |e: tonic::Status| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("unlink_actor failed: {}", e.message()).into()
-            })?;
+            },
+        )?;
         Ok(())
     }
 }
@@ -1970,6 +1972,9 @@ impl ActorServiceTrait for ActorServiceImpl {
             facets: facets.clone(),
             config: config.clone(),
             labels: labels.clone(),
+            register_in_object_registry: spec.register_in_object_registry,
+            enforce_unique_placement: spec.enforce_unique_placement,
+            placement_strategy: spec.placement_strategy,
         };
 
         let actor_factory_opt: Option<Arc<dyn ActorFactory>> =
@@ -3118,6 +3123,7 @@ impl ActorServiceImpl {
                         facets: vec![],
                         config: Some(shard_config),
                         labels: std::collections::HashMap::new(),
+                        ..Default::default()
                     }
                 };
                 match actor_factory
@@ -3176,6 +3182,7 @@ impl ActorServiceImpl {
                         facets: vec![],
                         config: Some(shard_config.clone()),
                         labels: std::collections::HashMap::new(),
+                        ..Default::default()
                     }
                 };
                 let channel = self
@@ -4701,7 +4708,9 @@ pub mod partition;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_actor::{InitializableServiceLocator, MessageSender, ObjectRegistry as ObjectRegistryTrait};
+    use plexspaces_actor::{
+        InitializableServiceLocator, MessageSender, ObjectRegistry as ObjectRegistryTrait,
+    };
     use plexspaces_mailbox::{mailbox_config_default, Mailbox};
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
@@ -5406,15 +5415,9 @@ mod tests {
                     name: "weather".to_string(),
                     actor_type: "weather_actor_wasm".to_string(),
                 }),
-                role: String::new(),
                 namespace: "app-ns".to_string(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: "GenServer".to_string(),
-                args: Default::default(),
-                facets: vec![],
-                labels: Default::default(),
-                config: None,
+                ..Default::default()
             };
             manager
                 .register_virtual_actor_definition(spec)
@@ -5449,13 +5452,8 @@ mod tests {
                 }),
                 role: "worker".to_string(),
                 namespace: "audit-log-test".to_string(),
-                tenant_id: String::new(),
-                visibility: 0,
                 behavior_kind: "GenEvent".to_string(),
-                args: Default::default(),
-                facets: vec![],
-                labels: Default::default(),
-                config: None,
+                ..Default::default()
             };
             manager
                 .register_virtual_actor_definition(spec)

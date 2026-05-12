@@ -446,7 +446,7 @@ message Actor {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 128
-      pattern: "^[a-z][a-z0-9_-]*$"
+      pattern: "^[a-zA-Z][a-zA-Z0-9_-]*$"
     }
   ];
   ActorState state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -3638,4 +3638,15 @@ message ActorSpawnSpec {
   // Actor runtime configuration (mailbox, restart policy, etc.).
   // Optional — defaults apply when absent.
   ActorConfig config = 10;
+
+  // If true, auto-register this actor in ObjectRegistry on spawn and unregister on stop.
+  // Auto-enabled when facets include both "virtual_actor" and "durability".
+  bool register_in_object_registry = 11;
+
+  // If true, enforce unique placement via alias (requires register_in_object_registry=true or auto-enabled).
+  // Spawn fails with ACTOR_ERROR_PLACEMENT_CONFLICT if another active instance with same identity exists.
+  bool enforce_unique_placement = 12;
+
+  // Placement strategy for distributed actor placement (default: PREFER_LOCAL).
+  PlacementStrategy placement_strategy = 13;
 }

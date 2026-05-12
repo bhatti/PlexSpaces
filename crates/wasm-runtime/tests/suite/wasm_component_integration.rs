@@ -145,6 +145,8 @@ async fn test_wasm_component_instantiation() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
     let actor_id = ActorId::new("test-calculator-actor", "wasm", "default", "test-node").unwrap();
@@ -249,6 +251,8 @@ async fn test_component_init_function() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
     let actor_id = ActorId::new("test-calculator-init", "wasm", "default", "test-node").unwrap();
@@ -319,10 +323,11 @@ async fn test_component_handle_message() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
-    let actor_id =
-        ActorId::new("test-calculator-handle", "wasm", "default", "test-node").unwrap();
+    let actor_id = ActorId::new("test-calculator-handle", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
@@ -454,11 +459,12 @@ async fn test_component_empty_initial_state() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
     // ACT: Instantiate with empty initial state (with timeout)
-    let actor_id_empty =
-        ActorId::new("test-empty-state", "wasm", "default", "test-node").unwrap();
+    let actor_id_empty = ActorId::new("test-empty-state", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
@@ -521,11 +527,12 @@ async fn test_component_observability() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
     // ACT: Instantiate and call handle_message (with timeout)
-    let actor_id_obs =
-        ActorId::new("test-observability", "wasm", "default", "test-node").unwrap();
+    let actor_id_obs = ActorId::new("test-observability", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),
@@ -597,10 +604,11 @@ async fn test_component_different_message_types() {
         use_instance_pool: false,
         max_concurrent_instantiations: None,
         shared_timer_pool: None,
+        tenant_id: String::new(),
+        default_namespace: String::new(),
     };
 
-    let actor_id_msg =
-        ActorId::new("test-message-types", "wasm", "default", "test-node").unwrap();
+    let actor_id_msg = ActorId::new("test-message-types", "wasm", "default", "test-node").unwrap();
     let runtime_guard = runtime.lock().await;
     let inst_result = timeout(
         Duration::from_secs(10),

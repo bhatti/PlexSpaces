@@ -83,14 +83,20 @@ mod sqlite_tests {
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
             // Before method (journals MessageReceived)
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
 
             // Simulate actor state change (counter += i)
             // In real implementation, this would be actor.handle_message()
             let result = format!("counter = {}", i).into_bytes();
 
             // After method (journals MessageProcessed + StateChanged)
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Flush to ensure entries are written to SQLite
@@ -163,9 +169,15 @@ mod sqlite_tests {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
 
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
 
             // Trigger checkpoint at message 50
             if i == 50 {
@@ -367,7 +379,9 @@ mod sqlite_tests {
 
         // Should succeed and create new execution context
         // Verify by checking that we can process a message
-        let result = facet.before_method("test", &[], &std::collections::HashMap::new()).await;
+        let result = facet
+            .before_method("test", &[], &std::collections::HashMap::new())
+            .await;
         assert!(result.is_ok(), "Should be able to process messages");
     }
 
@@ -401,9 +415,15 @@ mod sqlite_tests {
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            facet.before_method(method, &payload, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .before_method(method, &payload, &std::collections::HashMap::new())
+                .await
+                .unwrap();
             let result = format!("counter = {}", i).into_bytes();
-            facet.after_method(method, &payload, &result, &std::collections::HashMap::new()).await.unwrap();
+            facet
+                .after_method(method, &payload, &result, &std::collections::HashMap::new())
+                .await
+                .unwrap();
         }
 
         // Flush to ensure entries are written to SQLite

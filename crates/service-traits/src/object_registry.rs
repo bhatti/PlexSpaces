@@ -9,6 +9,21 @@ use async_trait::async_trait;
 use plexspaces_common::RequestContext;
 
 pub type ObjectRegistration = plexspaces_proto::object_registry::v1::ObjectRegistration;
+pub type HealthStatus = plexspaces_proto::object_registry::v1::HealthStatus;
+
+/// Result of a `register_with_unique_alias` call.
+#[derive(Debug, Clone)]
+pub enum RegisterResult {
+    /// Registration succeeded.
+    Registered,
+    /// Alias conflict with an active instance; contains routing info for forwarding.
+    AlreadyExists {
+        /// gRPC address of the existing active instance.
+        grpc_address: String,
+        /// object_id of the existing active instance.
+        object_id: String,
+    },
+}
 
 /// Trait for object registry (service discovery).
 #[async_trait]
@@ -114,4 +129,71 @@ pub trait ObjectRegistry: Send + Sync {
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Lookup an object by alias (identity-based placement key).
+    ///
+    /// Returns `Ok(None)` if no registration holds the alias.
+    /// Default implementation returns `Ok(None)` for adapters that do not support alias lookup.
+    async fn lookup_by_alias(
+        &self,
+        _ctx: &RequestContext,
+        _alias: &str,
+    ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(None)
+    }
+
+    /// Register with unique alias enforcement (Orleans grain directory pattern).
+    ///
+    /// If `enforce_unique` is true, an active registration with the same alias blocks
+    /// the call and returns `RegisterResult::AlreadyExists` with routing info.
+    /// Default implementation ignores alias and delegates to `register()`.
+    async fn register_with_unique_alias(
+        &self,
+        ctx: &RequestContext,
+        registration: ObjectRegistration,
+        _enforce_unique: bool,
+    ) -> Result<RegisterResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.register(ctx, registration).await?;
+        Ok(RegisterResult::Registered)
+    }
+
+    /// Record a missed heartbeat for an object.
+    ///
+    /// Increments the failure count and transitions health:
+    /// - count < max → DEGRADED
+    /// - count >= max → DEAD (cascades to node objects when the object is a NODE)
+    /// Default implementation returns DEGRADED without persisting (for adapters that lack this).
+    async fn record_heartbeat_failure(
+        &self,
+        _ctx: &RequestContext,
+        _object_id: &str,
+    ) -> Result<HealthStatus, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(HealthStatus::HealthStatusDegraded)
+    }
+
+    /// Mark all HEALTHY/DEGRADED/STARTING objects on `node_id` as DEAD.
+    ///
+    /// Called when SWIM detects that a node has permanently left the cluster.
+    /// Default implementation is a no-op for adapters that do not support this.
+    async fn mark_objects_dead_by_node(
+        &self,
+        _ctx: &RequestContext,
+        _node_id: &str,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(0)
+    }
+
+    /// Find registrations whose `last_heartbeat` is older than `threshold_seconds` ago.
+    ///
+    /// Only returns objects in HEALTHY or DEGRADED state (not already DEAD/STOPPING).
+    /// An empty `ctx.tenant_id()` with `is_admin=true` performs a cross-tenant scan.
+    /// Default implementation returns an empty list for adapters that do not persist heartbeats.
+    async fn find_stale_heartbeats(
+        &self,
+        _ctx: &RequestContext,
+        _threshold_seconds: i64,
+        _limit: usize,
+    ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![])
+    }
 }

@@ -538,7 +538,9 @@ impl WasmRuntime {
             std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>,
         >,
         lock_manager: Option<std::sync::Arc<dyn plexspaces_actor::LockManager + Send + Sync>>,
-        object_registry: Option<std::sync::Arc<dyn plexspaces_actor::actor_context::ObjectRegistry>>,
+        object_registry: Option<
+            std::sync::Arc<dyn plexspaces_actor::actor_context::ObjectRegistry>,
+        >,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
         elastic_pool_service: Option<std::sync::Arc<dyn plexspaces_actor::ElasticPoolService>>,
@@ -588,6 +590,8 @@ impl WasmRuntime {
             #[cfg(not(feature = "component-model"))]
             None,
             config.shared_timer_pool,
+            config.tenant_id,
+            config.default_namespace,
         )
         .await
     }
@@ -813,8 +817,8 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
                 .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
 
         // Parse actor_id string to ActorId at the boundary
-        let parsed_actor_id = plexspaces_actor::ActorId::from_canonical(&actor_id)
-            .map_err(|err| {
+        let parsed_actor_id =
+            plexspaces_actor::ActorId::from_canonical(&actor_id).map_err(|err| {
                 Box::new(WasmError::ActorFunctionError(format!(
                     "invalid canonical actor id '{}': {err}",
                     actor_id
@@ -847,6 +851,8 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
             #[cfg(not(feature = "component-model"))]
             None,
             wasm_config.shared_timer_pool,
+            wasm_config.tenant_id,
+            wasm_config.default_namespace,
         )
         .await?;
 

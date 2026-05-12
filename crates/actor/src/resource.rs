@@ -56,10 +56,18 @@ pub enum ResourceViolation {
 impl ResourceViolation {
     pub fn code(&self) -> ResourceViolationCode {
         match self {
-            ResourceViolation::CpuExceeded { .. } => ResourceViolationCode::ResourceViolationCodeCpuExceeded,
-            ResourceViolation::MemoryExceeded { .. } => ResourceViolationCode::ResourceViolationCodeMemoryExceeded,
-            ResourceViolation::IoExceeded { .. } => ResourceViolationCode::ResourceViolationCodeIoExceeded,
-            ResourceViolation::NetworkExceeded { .. } => ResourceViolationCode::ResourceViolationCodeNetworkExceeded,
+            ResourceViolation::CpuExceeded { .. } => {
+                ResourceViolationCode::ResourceViolationCodeCpuExceeded
+            }
+            ResourceViolation::MemoryExceeded { .. } => {
+                ResourceViolationCode::ResourceViolationCodeMemoryExceeded
+            }
+            ResourceViolation::IoExceeded { .. } => {
+                ResourceViolationCode::ResourceViolationCodeIoExceeded
+            }
+            ResourceViolation::NetworkExceeded { .. } => {
+                ResourceViolationCode::ResourceViolationCodeNetworkExceeded
+            }
         }
     }
 }
@@ -82,7 +90,10 @@ impl ResourceContractExt for ResourceContract {
             max_memory_bytes: 1024 * 1024 * 1024, // 1GB
             max_io_ops_per_sec: Some(100),
             guaranteed_bandwidth_mbps: None,
-            max_execution_time: Some(prost_types::Duration { seconds: 300, nanos: 0 }),
+            max_execution_time: Some(prost_types::Duration {
+                seconds: 300,
+                nanos: 0,
+            }),
         }
     }
 
@@ -92,7 +103,10 @@ impl ResourceContractExt for ResourceContract {
             max_memory_bytes: 256 * 1024 * 1024, // 256MB
             max_io_ops_per_sec: Some(10000),
             guaranteed_bandwidth_mbps: None,
-            max_execution_time: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
+            max_execution_time: Some(prost_types::Duration {
+                seconds: 60,
+                nanos: 0,
+            }),
         }
     }
 
@@ -102,7 +116,10 @@ impl ResourceContractExt for ResourceContract {
             max_memory_bytes: 512 * 1024 * 1024, // 512MB
             max_io_ops_per_sec: Some(1000),
             guaranteed_bandwidth_mbps: Some(100),
-            max_execution_time: Some(prost_types::Duration { seconds: 120, nanos: 0 }),
+            max_execution_time: Some(prost_types::Duration {
+                seconds: 120,
+                nanos: 0,
+            }),
         }
     }
 
@@ -235,10 +252,22 @@ mod tests {
 
     #[test]
     fn test_resource_violation_codes() {
-        let v = ResourceViolation::CpuExceeded { allowed: 10.0, actual: 50.0 };
-        assert_eq!(v.code(), ResourceViolationCode::ResourceViolationCodeCpuExceeded);
+        let v = ResourceViolation::CpuExceeded {
+            allowed: 10.0,
+            actual: 50.0,
+        };
+        assert_eq!(
+            v.code(),
+            ResourceViolationCode::ResourceViolationCodeCpuExceeded
+        );
 
-        let v = ResourceViolation::MemoryExceeded { allowed: 100, actual: 200 };
-        assert_eq!(v.code(), ResourceViolationCode::ResourceViolationCodeMemoryExceeded);
+        let v = ResourceViolation::MemoryExceeded {
+            allowed: 100,
+            actual: 200,
+        };
+        assert_eq!(
+            v.code(),
+            ResourceViolationCode::ResourceViolationCodeMemoryExceeded
+        );
     }
 }

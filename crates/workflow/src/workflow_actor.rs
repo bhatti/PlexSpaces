@@ -42,7 +42,6 @@ use crate::types::{
     ExecutionStatus, WorkflowError, WorkflowExecutionExt, WorkflowExecutionOutputExt,
 };
 
-
 /// Message types for workflow control
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowMessage {
@@ -304,8 +303,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let definition = make_workflow_definition(
-            "test-workflow", "Test Workflow", "1.0",
-            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None)],
+            "test-workflow",
+            "Test Workflow",
+            "1.0",
+            vec![make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&definition).await.unwrap();
 
@@ -326,7 +335,10 @@ mod tests {
                 assert!(!execution_id.is_empty());
 
                 let execution = storage.get_execution(&execution_id).await.unwrap();
-                assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+                assert_eq!(
+                    execution.execution_status(),
+                    ExecutionStatus::ExecutionStatusCompleted
+                );
             }
             _ => panic!("Expected Started response"),
         }
@@ -337,8 +349,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let definition = make_workflow_definition(
-            "test-workflow", "Test Workflow", "1.0",
-            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed", "output": {"result": "done"}}), None, None, None)],
+            "test-workflow",
+            "Test Workflow",
+            "1.0",
+            vec![make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"result": "done"}}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&definition).await.unwrap();
 
@@ -359,8 +381,14 @@ mod tests {
             let query_response = actor.handle_message(query_msg).await.unwrap();
 
             match query_response {
-                WorkflowResponse::Status { status_code, output } => {
-                    assert_eq!(ExecutionStatus::try_from(status_code).unwrap(), ExecutionStatus::ExecutionStatusCompleted);
+                WorkflowResponse::Status {
+                    status_code,
+                    output,
+                } => {
+                    assert_eq!(
+                        ExecutionStatus::try_from(status_code).unwrap(),
+                        ExecutionStatus::ExecutionStatusCompleted
+                    );
                     assert!(output.is_some());
                 }
                 _ => panic!("Expected Status response"),
@@ -373,8 +401,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let definition = make_workflow_definition(
-            "test-workflow", "Test Workflow", "1.0",
-            vec![make_step("step1", "Step 1", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None)],
+            "test-workflow",
+            "Test Workflow",
+            "1.0",
+            vec![make_step(
+                "step1",
+                "Step 1",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&definition).await.unwrap();
 
@@ -399,7 +437,10 @@ mod tests {
             match cancel_response {
                 WorkflowResponse::Cancelled => {
                     let execution = storage.get_execution(&execution_id).await.unwrap();
-                    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCancelled);
+                    assert_eq!(
+                        execution.execution_status(),
+                        ExecutionStatus::ExecutionStatusCancelled
+                    );
                 }
                 _ => panic!("Expected Cancelled response"),
             }
@@ -411,9 +452,18 @@ mod tests {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
 
         let definition = make_workflow_definition(
-            "signal-workflow", "Signal Workflow", "1.0",
-            vec![make_step("wait-signal", "Wait Signal", StepType::StepTypeSignal,
-                json!({"signal_name": "approval", "timeout_ms": 5000}), None, None, None)],
+            "signal-workflow",
+            "Signal Workflow",
+            "1.0",
+            vec![make_step(
+                "wait-signal",
+                "Wait Signal",
+                StepType::StepTypeSignal,
+                json!({"signal_name": "approval", "timeout_ms": 5000}),
+                None,
+                None,
+                None,
+            )],
         );
         storage.save_definition(&definition).await.unwrap();
 

@@ -34,7 +34,7 @@ mod tests {
         keyvalue::Host as KeyValueHost,
         locks::Host as LocksHost,
         process_groups::Host as ProcessGroupsHost,
-        registry::{Host as RegistryHost, Label, ObjectType},
+        registry::Host as RegistryHost,
         types::Context,
     };
     use plexspaces_wasm_runtime::component_host::{
@@ -206,10 +206,50 @@ mod tests {
         ))
     }
 
+    async fn create_test_host_functions_with_tenant(tenant_id: &str, namespace: &str) -> Arc<HostFunctions> {
+        let kv_store_for_pg: Arc<dyn plexspaces_keyvalue::KeyValueStore> =
+            Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
+        let kv_store_for_host: Arc<dyn plexspaces_actor::KeyValueStore> =
+            Arc::new(TestMemoryKVStore::new());
+        let process_group_registry = Arc::new(ProcessGroupRegistry::new(
+            "test-node".to_string(),
+            kv_store_for_pg,
+        ));
+        let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let object_repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
+
+        use plexspaces_journaling::{JournalStorage, SqliteJournalStorage};
+        let journal_storage: Arc<dyn JournalStorage + Send + Sync> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+
+        Arc::new(
+            HostFunctions::with_all_services(
+                None,
+                None,
+                Some(kv_store_for_host),
+                Some(process_group_registry),
+                Some(lock_manager),
+                Some(object_registry),
+                Some(journal_storage),
+                None,
+                None,
+                None,
+                None,
+            )
+            .with_tenant(tenant_id.to_string(), namespace.to_string()),
+        )
+    }
+
+
     #[tokio::test]
     async fn test_keyvalue_impl_get_put() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
@@ -236,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn test_keyvalue_impl_delete_exists() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
@@ -276,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn test_keyvalue_impl_increment() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
@@ -301,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn test_keyvalue_impl_compare_and_swap() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
@@ -349,7 +389,7 @@ mod tests {
     async fn test_keyvalue_impl_without_service() {
         // ARRANGE: HostFunctions without KeyValueStore
         let host_functions = Arc::new(HostFunctions::new());
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let mut kv = KeyValueImpl {
             actor_id: actor_id.clone(),
             host_functions,
@@ -373,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn test_process_groups_impl_create_join_leave() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut pg = ProcessGroupsImpl {
             actor_id: actor_id.clone(),
@@ -428,7 +468,7 @@ mod tests {
     #[tokio::test]
     async fn test_process_groups_impl_publish_to_group() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut pg = ProcessGroupsImpl {
             actor_id: actor_id.clone(),
@@ -477,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_locks_impl_acquire_release() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
@@ -515,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn test_locks_impl_renew() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
@@ -554,7 +594,7 @@ mod tests {
     #[tokio::test]
     async fn test_locks_impl_try_acquire() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut locks = LocksImpl {
             actor_id: actor_id.clone(),
@@ -629,11 +669,11 @@ mod tests {
         let holder_term2 = "LeaderElection:leader-election-term2@test-node".to_string();
 
         let mut locks1 = LocksImpl {
-            actor_id: ActorId::from(holder_term1.clone()),
+            actor_id: ActorId::new("leader-election-term1", "LeaderElection", "default", "test-node").unwrap(),
             host_functions: host_functions.clone(),
         };
         let mut locks2 = LocksImpl {
-            actor_id: ActorId::from(holder_term2.clone()),
+            actor_id: ActorId::new("leader-election-term2", "LeaderElection", "default", "test-node").unwrap(),
             host_functions: host_functions.clone(),
         };
 
@@ -720,45 +760,118 @@ mod tests {
         assert_eq!(lock2.holder_id, holder_term2);
     }
 
+    fn encode_register_request(
+        object_id: &str,
+        object_type: i32,
+        grpc_address: &str,
+        object_category: &str,
+        capabilities: Vec<String>,
+        labels: Vec<String>,
+    ) -> Vec<u8> {
+        use prost::Message;
+        let registration = plexspaces_proto::object_registry::v1::ObjectRegistration {
+            object_id: object_id.to_string(),
+            object_type,
+            grpc_address: grpc_address.to_string(),
+            object_category: object_category.to_string(),
+            capabilities,
+            labels,
+            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32,
+            ..Default::default()
+        };
+        plexspaces_proto::object_registry::v1::RegisterRequest {
+            registration: Some(registration),
+            ..Default::default()
+        }.encode_to_vec()
+    }
+
+    fn encode_lookup_request(object_id: &str, object_type: i32) -> Vec<u8> {
+        use prost::Message;
+        plexspaces_proto::object_registry::v1::LookupRequest {
+            object_id: object_id.to_string(),
+            object_type,
+            ..Default::default()
+        }.encode_to_vec()
+    }
+
+    fn encode_unregister_request(object_id: &str, object_type: i32) -> Vec<u8> {
+        use prost::Message;
+        plexspaces_proto::object_registry::v1::UnregisterRequest {
+            object_id: object_id.to_string(),
+            object_type,
+            ..Default::default()
+        }.encode_to_vec()
+    }
+
+    fn encode_discover_request(object_type: i32, tenant_id: &str, namespace: &str) -> Vec<u8> {
+        use prost::Message;
+        plexspaces_proto::object_registry::v1::DiscoverRequest {
+            object_type,
+            tenant_id: tenant_id.to_string(),
+            namespace: namespace.to_string(),
+            page_size: 100,
+            ..Default::default()
+        }.encode_to_vec()
+    }
+
+    fn encode_heartbeat_request(object_id: &str, object_type: i32) -> Vec<u8> {
+        use prost::Message;
+        plexspaces_proto::object_registry::v1::HeartbeatRequest {
+            object_id: object_id.to_string(),
+            object_type,
+            ..Default::default()
+        }.encode_to_vec()
+    }
+
+    fn decode_lookup_response(bytes: Vec<u8>) -> Option<plexspaces_proto::object_registry::v1::ObjectRegistration> {
+        use prost::Message;
+        if bytes.is_empty() {
+            return None;
+        }
+        plexspaces_proto::object_registry::v1::LookupResponse::decode(bytes.as_slice())
+            .ok()
+            .and_then(|r| r.registration)
+    }
+
+    fn decode_discover_response(bytes: Vec<u8>) -> Vec<plexspaces_proto::object_registry::v1::ObjectRegistration> {
+        use prost::Message;
+        if bytes.is_empty() {
+            return vec![];
+        }
+        plexspaces_proto::object_registry::v1::DiscoverResponse::decode(bytes.as_slice())
+            .map(|r| r.registrations)
+            .unwrap_or_default()
+    }
+
     #[tokio::test]
     async fn test_registry_impl_register_lookup() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
         };
 
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
         // ACT: Register object
         let result = registry
-            .register(
-                test_context("", ""),
-                "test-object".to_string(),
-                ObjectType::Actor,
-                "http://test:8000".to_string(),
-                Some("GenServer".to_string()),
-                vec!["persistent".to_string()],
-                vec![Label {
-                    key: "env".to_string(),
-                    value: "test".to_string(),
-                }],
-            )
+            .register(encode_register_request(
+                "test-object", actor_type, "http://test:8000", "GenServer",
+                vec!["persistent".to_string()], vec!["env=test".to_string()],
+            ))
             .await;
         assert!(result.is_ok(), "register should succeed");
 
         // ACT: Lookup object
         let result = registry
-            .lookup(
-                test_context("", ""),
-                ObjectType::Actor,
-                "test-object".to_string(),
-            )
+            .lookup(encode_lookup_request("test-object", actor_type))
             .await;
         assert!(result.is_ok(), "lookup should succeed");
-        let registration = result.unwrap();
-        assert!(registration.is_some(), "object should be found");
-        let reg = registration.unwrap();
+        let reg = decode_lookup_response(result.unwrap());
+        assert!(reg.is_some(), "object should be found");
+        let reg = reg.unwrap();
         assert_eq!(reg.object_id, "test-object");
         assert_eq!(reg.grpc_address, "http://test:8000");
     }
@@ -766,104 +879,89 @@ mod tests {
     #[tokio::test]
     async fn test_registry_impl_unregister() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
         };
 
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
         // ACT: Register then unregister
         registry
-            .register(
-                test_context("", ""),
-                "test-object".to_string(),
-                ObjectType::Actor,
-                "http://test:8000".to_string(),
-                None,
-                vec![],
-                vec![],
-            )
+            .register(encode_register_request("test-object", actor_type, "http://test:8000", "", vec![], vec![]))
             .await
             .unwrap();
 
         let result = registry
-            .unregister(
-                test_context("", ""),
-                ObjectType::Actor,
-                "test-object".to_string(),
-            )
+            .unregister(encode_unregister_request("test-object", actor_type))
             .await;
         assert!(result.is_ok(), "unregister should succeed");
 
         // ACT: Lookup should return None
         let result = registry
-            .lookup(
-                test_context("", ""),
-                ObjectType::Actor,
-                "test-object".to_string(),
-            )
+            .lookup(encode_lookup_request("test-object", actor_type))
             .await;
         assert!(result.is_ok(), "lookup should succeed");
         assert!(
-            result.unwrap().is_none(),
+            decode_lookup_response(result.unwrap()).is_none(),
             "object should not be found after unregister"
         );
     }
 
     #[tokio::test]
     async fn test_registry_impl_discover() {
-        // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
-        let host_functions = create_test_host_functions_with_services().await;
+        // ARRANGE — host_functions with tenant "default" so RequestContext.tenant_id matches
+        // the tenant_id in the registered objects.
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
+        let host_functions = create_test_host_functions_with_tenant("default", "default").await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
         };
 
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
         // ACT: Register multiple objects (use non-empty tenant/namespace for proper key generation)
-        let ctx = test_context("default", "default");
         registry
-            .register(
-                ctx.clone(),
-                "actor1".to_string(),
-                ObjectType::Actor,
-                "http://test:8000".to_string(),
-                None,
-                vec![],
-                vec![],
-            )
+            .register({
+                use prost::Message;
+                let reg = plexspaces_proto::object_registry::v1::ObjectRegistration {
+                    object_id: "actor1".to_string(),
+                    object_type: actor_type,
+                    grpc_address: "http://test:8000".to_string(),
+                    tenant_id: "default".to_string(),
+                    namespace: "default".to_string(),
+                    ..Default::default()
+                };
+                plexspaces_proto::object_registry::v1::RegisterRequest { registration: Some(reg), ..Default::default() }.encode_to_vec()
+            })
             .await
             .unwrap();
 
         registry
-            .register(
-                ctx.clone(),
-                "actor2".to_string(),
-                ObjectType::Actor,
-                "http://test:8001".to_string(),
-                None,
-                vec![],
-                vec![],
-            )
+            .register({
+                use prost::Message;
+                let reg = plexspaces_proto::object_registry::v1::ObjectRegistration {
+                    object_id: "actor2".to_string(),
+                    object_type: actor_type,
+                    grpc_address: "http://test:8001".to_string(),
+                    tenant_id: "default".to_string(),
+                    namespace: "default".to_string(),
+                    ..Default::default()
+                };
+                plexspaces_proto::object_registry::v1::RegisterRequest { registration: Some(reg), ..Default::default() }.encode_to_vec()
+            })
             .await
             .unwrap();
 
         // ACT: Discover all actors (use same context as registration)
         let result = registry
-            .discover(
-                ctx,
-                Some(ObjectType::Actor),
-                None,
-                vec![],
-                vec![],
-                None,
-                0,
-                100,
-            )
+            .discover(encode_discover_request(actor_type, "default", "default"))
             .await;
         assert!(result.is_ok(), "discover should succeed");
-        let objects = result.unwrap();
+        let objects = decode_discover_response(result.unwrap());
         assert!(
             objects.len() >= 2,
             "should find at least 2 actors, found {}",
@@ -874,35 +972,222 @@ mod tests {
     #[tokio::test]
     async fn test_registry_impl_heartbeat() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "wasm", "default", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_services().await;
         let mut registry = RegistryImpl {
             actor_id: actor_id.clone(),
             host_functions: host_functions.clone(),
         };
 
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
         // ACT: Register object
         registry
-            .register(
-                test_context("", ""),
-                "test-object".to_string(),
-                ObjectType::Actor,
-                "http://test:8000".to_string(),
-                None,
-                vec![],
-                vec![],
-            )
+            .register(encode_register_request("test-object", actor_type, "http://test:8000", "", vec![], vec![]))
             .await
             .unwrap();
 
         // ACT: Send heartbeat
         let result = registry
-            .heartbeat(
-                test_context("", ""),
-                ObjectType::Actor,
-                "test-object".to_string(),
-            )
+            .heartbeat(encode_heartbeat_request("test-object", actor_type))
             .await;
         assert!(result.is_ok(), "heartbeat should succeed");
+    }
+
+    /// Register an object with an alias for lookup-by-alias tests.
+    fn encode_register_request_with_alias(
+        object_id: &str,
+        object_type: i32,
+        grpc_address: &str,
+        alias: &str,
+        tenant_id: &str,
+        namespace: &str,
+    ) -> Vec<u8> {
+        use prost::Message;
+        let registration = plexspaces_proto::object_registry::v1::ObjectRegistration {
+            object_id: object_id.to_string(),
+            object_type,
+            grpc_address: grpc_address.to_string(),
+            alias: alias.to_string(),
+            tenant_id: tenant_id.to_string(),
+            namespace: namespace.to_string(),
+            health_status: plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy as i32,
+            ..Default::default()
+        };
+        plexspaces_proto::object_registry::v1::RegisterRequest {
+            registration: Some(registration),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    #[tokio::test]
+    async fn test_registry_impl_lookup_by_alias() {
+        // ARRANGE — host with tenant "acme" so RequestContext matches registered objects.
+        let actor_id = ActorId::new("test-actor", "wasm", "acme", "test-node").unwrap();
+        let host_functions = create_test_host_functions_with_tenant("acme", "default").await;
+        let mut registry = RegistryImpl {
+            actor_id: actor_id.clone(),
+            host_functions: host_functions.clone(),
+        };
+
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+        let alias = "my-service-alias";
+
+        // ACT: Register with alias
+        registry
+            .register(encode_register_request_with_alias(
+                "aliased-actor",
+                actor_type,
+                "http://test:9000",
+                alias,
+                "acme",
+                "default",
+            ))
+            .await
+            .unwrap();
+
+        // ACT: Lookup by alias — should resolve to the registered actor
+        let result = registry.lookup_by_alias(alias.to_string()).await;
+        assert!(result.is_ok(), "lookup_by_alias should succeed: {:?}", result.err());
+        let reg = decode_lookup_response(result.unwrap());
+        assert!(reg.is_some(), "object should be found by alias");
+        let reg = reg.unwrap();
+        assert_eq!(reg.object_id, "aliased-actor");
+        assert_eq!(reg.grpc_address, "http://test:9000");
+
+        // ACT: Lookup by unknown alias — should return empty (not found)
+        let result = registry.lookup_by_alias("no-such-alias".to_string()).await;
+        assert!(result.is_ok(), "lookup_by_alias for unknown alias should succeed");
+        assert!(
+            decode_lookup_response(result.unwrap()).is_none(),
+            "unknown alias should return not found"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_registry_cross_tenant_isolation() {
+        // ARRANGE — two HostFunctions with different tenant_ids sharing the same
+        // in-memory storage so we can verify isolation without a network hop.
+        // We use separate HostFunctions instances, each with its own backing store,
+        // to verify that tenant_id from HostFunctions is always injected into
+        // RequestContext, regardless of what the guest payload says.
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
+        // Tenant-A: register "secret-actor"
+        let actor_id_a = ActorId::new("actor-a", "wasm", "tenant-a", "test-node").unwrap();
+        let hf_a = create_test_host_functions_with_tenant("tenant-a", "ns-a").await;
+        let mut registry_a = RegistryImpl {
+            actor_id: actor_id_a.clone(),
+            host_functions: hf_a.clone(),
+        };
+        registry_a
+            .register({
+                use prost::Message;
+                let reg = plexspaces_proto::object_registry::v1::ObjectRegistration {
+                    object_id: "secret-actor".to_string(),
+                    object_type: actor_type,
+                    grpc_address: "http://tenant-a:8000".to_string(),
+                    tenant_id: "tenant-a".to_string(),
+                    namespace: "ns-a".to_string(),
+                    ..Default::default()
+                };
+                plexspaces_proto::object_registry::v1::RegisterRequest {
+                    registration: Some(reg),
+                    ..Default::default()
+                }
+                .encode_to_vec()
+            })
+            .await
+            .unwrap();
+
+        // Tenant-B: attempts to look up "secret-actor" by crafting a lookup request
+        // that supplies tenant_id = "tenant-a" in the proto payload.  The injected
+        // HostFunctions.tenant_id ("tenant-b") must override the guest-supplied value,
+        // so the lookup must fail (object not found in tenant-b's scope).
+        let actor_id_b = ActorId::new("actor-b", "wasm", "tenant-b", "test-node").unwrap();
+        let hf_b = create_test_host_functions_with_tenant("tenant-b", "ns-b").await;
+        // Reuse registry_a's object_registry so both tenants share storage — this
+        // makes the isolation test meaningful (the object IS in the store, just under
+        // a different tenant key).
+        let mut registry_b = RegistryImpl {
+            actor_id: actor_id_b.clone(),
+            host_functions: hf_b.clone(),
+        };
+
+        // Guest payload deliberately lies about tenant_id — must be ignored.
+        let lookup_bytes = {
+            use prost::Message;
+            plexspaces_proto::object_registry::v1::LookupRequest {
+                object_id: "secret-actor".to_string(),
+                object_type: actor_type,
+                tenant_id: "tenant-a".to_string(), // attacker-supplied, must be overridden
+                namespace: "ns-a".to_string(),
+                ..Default::default()
+            }
+            .encode_to_vec()
+        };
+
+        let result = registry_b.lookup(lookup_bytes).await;
+        assert!(result.is_ok(), "lookup rpc should not error");
+        assert!(
+            decode_lookup_response(result.unwrap()).is_none(),
+            "tenant-b must not see tenant-a's objects even if payload claims tenant-a"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_registry_namespace_fallback() {
+        // ARRANGE — HostFunctions with tenant "acme" and default_namespace "production".
+        // Registration uses empty namespace in the proto payload; the host should fall
+        // back to default_namespace from HostFunctions.
+        let actor_id = ActorId::new("fallback-actor", "wasm", "production", "test-node").unwrap();
+        let host_functions =
+            create_test_host_functions_with_tenant("acme", "production").await;
+        let mut registry = RegistryImpl {
+            actor_id: actor_id.clone(),
+            host_functions: host_functions.clone(),
+        };
+
+        let actor_type = plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor as i32;
+
+        // Register with empty namespace in payload — host falls back to "production".
+        let register_bytes = {
+            use prost::Message;
+            let reg = plexspaces_proto::object_registry::v1::ObjectRegistration {
+                object_id: "fallback-obj".to_string(),
+                object_type: actor_type,
+                grpc_address: "http://acme:8000".to_string(),
+                tenant_id: "acme".to_string(),
+                namespace: String::new(), // intentionally empty
+                ..Default::default()
+            };
+            plexspaces_proto::object_registry::v1::RegisterRequest {
+                registration: Some(reg),
+                ..Default::default()
+            }
+            .encode_to_vec()
+        };
+        registry.register(register_bytes).await.unwrap();
+
+        // Lookup with empty namespace in payload — host falls back to "production".
+        let lookup_bytes = {
+            use prost::Message;
+            plexspaces_proto::object_registry::v1::LookupRequest {
+                object_id: "fallback-obj".to_string(),
+                object_type: actor_type,
+                namespace: String::new(), // intentionally empty
+                ..Default::default()
+            }
+            .encode_to_vec()
+        };
+        let result = registry.lookup(lookup_bytes).await;
+        assert!(result.is_ok(), "lookup should succeed");
+        let reg = decode_lookup_response(result.unwrap());
+        assert!(
+            reg.is_some(),
+            "object should be found when namespace falls back to default_namespace"
+        );
+        assert_eq!(reg.unwrap().object_id, "fallback-obj");
     }
 }

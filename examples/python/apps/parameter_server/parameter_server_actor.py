@@ -680,7 +680,3 @@ class Worker:
         }
 
 
-ACTOR_ROLES = {
-    "leader": Leader,
-    "worker": Worker,
-}

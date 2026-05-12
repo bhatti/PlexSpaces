@@ -70,7 +70,7 @@ pub use journal_storage::{JournalError, JournalResult, JournalStorage};
 pub use message_sender::MessageSender;
 pub use metrics::MetricsServiceAccess;
 pub use node_connectivity::{ConnectNodesResult, NodeConnectivity};
-pub use object_registry::{ObjectRegistration, ObjectRegistry};
+pub use object_registry::{ObjectRegistration, ObjectRegistry, RegisterResult};
 pub use outbound_http::{
     HttpHeader, OutboundHttpClient, OutboundHttpClientError, OutboundHttpRequest,
     OutboundHttpResponse,

@@ -81,6 +81,13 @@ try:
 except ImportError:
     pass
 
+_registry_impl = None
+try:
+    from wit_world.imports import registry as _wit_registry_eager
+    _registry_impl = _wit_registry_eager
+except ImportError:
+    pass
+
 
 def _to_payload_bytes(data: str) -> bytes:
     """Encode a JSON/string payload to bytes for WIT payload (list<u8>) parameters.
@@ -140,6 +147,14 @@ def _get_channels():
     global _channels_impl
     if _channels_impl is not None:
         return _channels_impl
+    return _get_host()
+
+
+def _get_registry():
+    """Get the registry WIT import (real or mock fallback to _get_host())."""
+    global _registry_impl
+    if _registry_impl is not None:
+        return _registry_impl
     return _get_host()
 
 
@@ -604,6 +619,64 @@ class _MockHost:
     def channel_depth(self, ctx: str, channel_name: str) -> str:
         return str(len(self._channel_queues.get(channel_name, [])))
 
+    # ========================================================================
+    # Object Registry mock
+    # ========================================================================
+
+    def registry_register(self, ctx: str, object_id: str, object_type: str, grpc_address: str,
+                          object_category: Optional[str], capabilities: List[str],
+                          labels: List[str]) -> str:
+        if not hasattr(self, "_registry"):
+            self._registry: Dict[str, Any] = {}
+        self._registry[object_id] = {
+            "object_id": object_id,
+            "object_type": object_type,
+            "grpc_address": grpc_address,
+            "object_category": object_category or "",
+            "capabilities": capabilities,
+            "labels": labels,
+            "health_status": "healthy",
+        }
+        return ""
+
+    def registry_unregister(self, ctx: str, object_type: str, object_id: str) -> str:
+        if hasattr(self, "_registry"):
+            self._registry.pop(object_id, None)
+        return ""
+
+    def registry_lookup(self, ctx: str, object_type: str, object_id: str) -> str:
+        if not hasattr(self, "_registry"):
+            return "null"
+        reg = self._registry.get(object_id)
+        return json.dumps(reg) if reg else "null"
+
+    def registry_lookup_by_alias(self, ctx: str, alias: str) -> str:
+        if not hasattr(self, "_registry"):
+            return "null"
+        for reg in self._registry.values():
+            if reg.get("alias") == alias:
+                return json.dumps(reg)
+        return "null"
+
+    def registry_discover(self, ctx: str, object_type: Optional[str], object_category: Optional[str],
+                          capabilities: List[str], labels: List[str], health_status: Optional[str],
+                          offset: int, limit: int) -> str:
+        if not hasattr(self, "_registry"):
+            return "[]"
+        results = []
+        for reg in self._registry.values():
+            if object_type and reg.get("object_type") != object_type:
+                continue
+            if object_category and reg.get("object_category") != object_category:
+                continue
+            if health_status and reg.get("health_status") != health_status:
+                continue
+            results.append(reg)
+        return json.dumps(results[offset:offset + limit])
+
+    def registry_heartbeat(self, ctx: str, object_type: str, object_id: str) -> str:
+        return ""
+
 
 class _TupleSpaceHelper:
     """
@@ -988,6 +1061,139 @@ class Channel:
             return 0
 
 
+class Registry:
+    """
+    Object Registry host functions for registration and discovery.
+
+    Enables actors to register themselves and discover other actors,
+    services, and nodes by type, category, capabilities, or alias.
+
+    Example::
+
+        from plexspaces import host
+
+        # Register this actor
+        host.registry.register(ctx, my_id, "actor", grpc_address, "GenServer", [], [])
+
+        # Look up an actor by alias (Orleans grain directory pattern)
+        reg = host.registry.lookup_by_alias(ctx, "Counter:my-counter:default:tenant1")
+        if reg:
+            actor_grpc = reg["grpc_address"]
+
+        # Discover all actors of a given category
+        actors = host.registry.discover(ctx, object_type="actor", object_category="GenServer")
+    """
+
+    def register(
+        self,
+        ctx: Any,
+        object_id: str,
+        object_type: str,
+        grpc_address: str,
+        object_category: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        labels: Optional[List[str]] = None,
+    ) -> None:
+        """Register an object in the registry."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        # Real WIT registry module exposes unprefixed names; _MockHost uses registry_ prefix.
+        fn = getattr(h, "register", None) if _registry_impl is not None else getattr(h, "registry_register", None)
+        if fn is None:
+            raise RuntimeError("registry.register not available")
+        result = fn(ctx_json, object_id, object_type, grpc_address,
+                    object_category, capabilities or [], labels or [])
+        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
+        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
+            raise RuntimeError(result_str)
+
+    def unregister(self, ctx: Any, object_type: str, object_id: str) -> None:
+        """Unregister an object from the registry."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        fn = getattr(h, "unregister", None) if _registry_impl is not None else getattr(h, "registry_unregister", None)
+        if fn is None:
+            raise RuntimeError("registry.unregister not available")
+        result = fn(ctx_json, object_type, object_id)
+        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
+        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
+            raise RuntimeError(result_str)
+
+    def lookup(self, ctx: Any, object_type: str, object_id: str) -> Optional[Dict[str, Any]]:
+        """Look up an object by ID. Returns the registration dict or None; raises on errors."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        fn = getattr(h, "lookup", None) if _registry_impl is not None else getattr(h, "registry_lookup", None)
+        if fn is None:
+            raise RuntimeError("registry.lookup not available")
+        raw = fn(ctx_json, object_type, object_id)
+        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        if isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            parsed = json.loads(result)
+            return parsed if parsed is not None else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def lookup_by_alias(self, ctx: Any, alias: str) -> Optional[Dict[str, Any]]:
+        """Look up an object by alias. Returns the registration dict or None; raises on errors."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        fn = getattr(h, "lookup_by_alias", None) if _registry_impl is not None else getattr(h, "registry_lookup_by_alias", None)
+        if fn is None:
+            raise RuntimeError("registry.lookup_by_alias not available")
+        raw = fn(ctx_json, alias)
+        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        if isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            parsed = json.loads(result)
+            return parsed if parsed is not None else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def discover(
+        self,
+        ctx: Any,
+        object_type: Optional[str] = None,
+        object_category: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        labels: Optional[List[str]] = None,
+        health_status: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Discover objects with optional filtering. Returns list of registration dicts."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        fn = getattr(h, "discover", None) if _registry_impl is not None else getattr(h, "registry_discover", None)
+        if fn is None:
+            raise RuntimeError("registry.discover not available")
+        raw = fn(ctx_json, object_type, object_category, capabilities or [],
+                 labels or [], health_status, offset, limit)
+        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "[]")
+        if isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        try:
+            parsed = json.loads(result)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def heartbeat(self, ctx: Any, object_type: str, object_id: str) -> None:
+        """Update the heartbeat for a registered object."""
+        h = _get_registry()
+        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+        fn = getattr(h, "heartbeat", None) if _registry_impl is not None else getattr(h, "registry_heartbeat", None)
+        if fn is None:
+            raise RuntimeError("registry.heartbeat not available")
+        result = fn(ctx_json, object_type, object_id)
+        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
+        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
+            raise RuntimeError(result_str)
+
+
 class Host:
     """
     PlexSpaces host function interface.
@@ -999,7 +1205,8 @@ class Host:
         self.process_groups = ProcessGroups()
         self.ts = _TupleSpaceHelper(self)
         self.channel = Channel()
-    
+        self.registry = Registry()
+
     def send(self, to: str, msg_type: str, payload: Optional[Union[str, Dict[str, Any], List[Any]]] = None) -> str:
         """
         Send a message to another actor (fire-and-forget).
@@ -1875,3 +2082,12 @@ class ServiceHttpClient:
 
 # Global host instance
 host = Host()
+
+
+def pg_first(group: str) -> str | None:
+    """Return the first process-group member, or None when the group is empty."""
+    try:
+        members = host.process_groups.members(group)
+    except Exception:
+        return None
+    return members[0] if members else None

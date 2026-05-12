@@ -35,13 +35,42 @@ async fn test_choice_greater_than_operator() -> Result<(), Box<dyn std::error::E
         "Choice Greater Than",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 150}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 150}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100, "next": "high-value"}], "default": "low-value"}),
-                None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -51,7 +80,10 @@ async fn test_choice_greater_than_operator() -> Result<(), Box<dyn std::error::E
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -71,13 +103,42 @@ async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Erro
         "Choice Less Than",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 50}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 50}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "less_than", "value": 100, "next": "low-value"}], "default": "high-value"}),
-                None, None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -86,7 +147,10 @@ async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Erro
         WorkflowExecutor::start_execution(&storage, "choice-less-than", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -105,8 +169,15 @@ async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>>
         "wait-invalid-timestamp",
         "Wait Invalid Timestamp",
         "1.0",
-        vec![make_step("wait-step", "Wait Invalid", StepType::StepTypeWait,
-            json!({"until": "not-a-valid-timestamp"}), None, None, None)],
+        vec![make_step(
+            "wait-step",
+            "Wait Invalid",
+            StepType::StepTypeWait,
+            json!({"until": "not-a-valid-timestamp"}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -115,7 +186,10 @@ async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>>
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusFailed
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let wait_exec = history
@@ -139,8 +213,15 @@ async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> 
         "signal-missing-config",
         "Signal Missing Config",
         "1.0",
-        vec![make_step("wait-signal", "Wait Signal", StepType::StepTypeSignal,
-            json!({"timeout_ms": 1000}), None, None, None)],
+        vec![make_step(
+            "wait-signal",
+            "Wait Signal",
+            StepType::StepTypeSignal,
+            json!({"timeout_ms": 1000}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -149,7 +230,10 @@ async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> 
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusFailed
+    );
 
     Ok(())
 }
@@ -163,8 +247,15 @@ async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> 
         "wait-missing-duration",
         "Wait Missing Duration",
         "1.0",
-        vec![make_step("wait-step", "Wait Missing Duration", StepType::StepTypeWait,
-            json!({}), None, None, None)],
+        vec![make_step(
+            "wait-step",
+            "Wait Missing Duration",
+            StepType::StepTypeWait,
+            json!({}),
+            None,
+            None,
+            None,
+        )],
     );
     storage.save_definition(&definition).await?;
 
@@ -173,7 +264,10 @@ async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> 
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusFailed);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusFailed
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let wait_exec = history
@@ -198,13 +292,42 @@ async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::
         "Choice Non-Numeric",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": "not-a-number"}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": "not-a-number"}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100, "next": "high-value"}], "default": "low-value"}),
-                None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -213,7 +336,10 @@ async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::
         WorkflowExecutor::start_execution(&storage, "choice-non-numeric", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -233,13 +359,42 @@ async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Erro
         "Choice Float GT",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 150.5}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 150.5}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100.0, "next": "high-value"}], "default": "low-value"}),
-                None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -248,7 +403,10 @@ async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Erro
         WorkflowExecutor::start_execution(&storage, "choice-float-gt", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -267,13 +425,42 @@ async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>>
         "Choice Float LT",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 50.5}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 50.5}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "less_than", "value": 100.0, "next": "low-value"}], "default": "high-value"}),
-                None, None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -282,7 +469,10 @@ async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>>
         WorkflowExecutor::start_execution(&storage, "choice-float-lt", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -315,7 +505,10 @@ async fn test_execute_from_state_empty_workflow() -> Result<(), Box<dyn std::err
     WorkflowExecutor::execute_from_state(&storage, &execution_id).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     Ok(())
 }
@@ -330,11 +523,24 @@ async fn test_choice_invalid_next_step() -> Result<(), Box<dyn std::error::Error
         "Choice Invalid Next",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 150}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 150}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100, "next": "non-existent-step"}]}),
-                None, None, None),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -344,7 +550,10 @@ async fn test_choice_invalid_next_step() -> Result<(), Box<dyn std::error::Error
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     Ok(())
 }
@@ -359,12 +568,33 @@ async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Err
         "Choice No Match",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 50}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 50}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100, "next": "high-value"}]}),
-                None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -373,7 +603,10 @@ async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Err
         WorkflowExecutor::start_execution(&storage, "choice-no-match", "1.0", json!({})).await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     let history = storage.get_step_execution_history(&execution_id).await?;
     let step_ids: Vec<String> = history.iter().map(|s| s.step_id.clone()).collect();
@@ -392,14 +625,42 @@ async fn test_choice_path_invalid_next() -> Result<(), Box<dyn std::error::Error
         "Choice Path Invalid",
         "1.0",
         vec![
-            make_step("start", "Start", StepType::StepTypeTask,
-                json!({"action": "succeed", "output": {"value": 150}}), None, None, None),
-            make_step("check-value", "Check Value", StepType::StepTypeChoice,
+            make_step(
+                "start",
+                "Start",
+                StepType::StepTypeTask,
+                json!({"action": "succeed", "output": {"value": 150}}),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "check-value",
+                "Check Value",
+                StepType::StepTypeChoice,
                 json!({"choices": [{"variable": "$.value", "operator": "greater_than", "value": 100, "next": "high-value"}], "default": "low-value"}),
-                None, None, None),
-            make_step("high-value", "High Value", StepType::StepTypeTask,
-                json!({"action": "succeed"}), Some("non-existent-step".to_string()), None, None),
-            make_step("low-value", "Low Value", StepType::StepTypeTask, json!({"action": "succeed"}), None, None, None),
+                None,
+                None,
+                None,
+            ),
+            make_step(
+                "high-value",
+                "High Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                Some("non-existent-step".to_string()),
+                None,
+                None,
+            ),
+            make_step(
+                "low-value",
+                "Low Value",
+                StepType::StepTypeTask,
+                json!({"action": "succeed"}),
+                None,
+                None,
+                None,
+            ),
         ],
     );
     storage.save_definition(&definition).await?;
@@ -409,7 +670,10 @@ async fn test_choice_path_invalid_next() -> Result<(), Box<dyn std::error::Error
             .await?;
 
     let execution = storage.get_execution(&execution_id).await?;
-    assert_eq!(execution.execution_status(), ExecutionStatus::ExecutionStatusCompleted);
+    assert_eq!(
+        execution.execution_status(),
+        ExecutionStatus::ExecutionStatusCompleted
+    );
 
     Ok(())
 }

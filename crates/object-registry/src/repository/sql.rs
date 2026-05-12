@@ -87,6 +87,8 @@ impl SqliteObjectRegistryRepository {
             object_type INTEGER NOT NULL, object_name TEXT, version TEXT, node_id TEXT,
             grpc_address TEXT NOT NULL, object_category TEXT, health_status INTEGER NOT NULL DEFAULT 0,
             last_heartbeat BIGINT, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+            alias TEXT, max_heartbeat_failures INTEGER NOT NULL DEFAULT 3,
+            heartbeat_failure_count INTEGER NOT NULL DEFAULT 0,
             registration_blob BLOB NOT NULL, PRIMARY KEY (tenant_id, namespace, object_id))"#;
         sqlx::query(SCHEMA)
             .execute(pool)
@@ -99,6 +101,7 @@ impl SqliteObjectRegistryRepository {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_health ON object_registrations(tenant_id, namespace, health_status)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_category ON object_registrations(tenant_id, namespace, object_category)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_type_health ON object_registrations(tenant_id, namespace, object_type, health_status)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_object_registrations_alias ON object_registrations(alias) WHERE alias IS NOT NULL AND alias != ''").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         debug!("Object registry SQLite schema created");
         Ok(())
     }
@@ -109,6 +112,27 @@ impl SqliteObjectRegistryRepository {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64
+    }
+
+    /// Merge indexed columns into a decoded registration.
+    ///
+    /// The indexed columns `health_status`, `heartbeat_failure_count`, and
+    /// `max_heartbeat_failures` are written directly without a blob round-trip,
+    /// so they always reflect current state and must override any stale blob values.
+    fn merge_indexed_row(
+        blob: Vec<u8>,
+        health_status: i32,
+        failure_count: i64,
+        max_failures: i64,
+    ) -> RepositoryResult<ObjectRegistration> {
+        let mut reg = ObjectRegistration::decode(&blob[..])
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+        reg.health_status = health_status;
+        reg.heartbeat_failure_count = failure_count as u32;
+        if max_failures > 0 {
+            reg.max_heartbeat_failures = max_failures as u32;
+        }
+        Ok(reg)
     }
 }
 
@@ -124,13 +148,26 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         let blob = registration.encode_to_vec();
         let last_heartbeat = registration.last_heartbeat.as_ref().map(|t| t.seconds);
 
+        let alias_val = if registration.alias.is_empty() {
+            None
+        } else {
+            Some(registration.alias.clone())
+        };
+        let max_failures = if registration.max_heartbeat_failures == 0 {
+            3i64
+        } else {
+            registration.max_heartbeat_failures as i64
+        };
+
         sqlx::query(
             r#"
             INSERT INTO object_registrations (
                 tenant_id, namespace, object_id, object_type, object_name, version,
                 node_id, grpc_address, object_category, health_status,
-                last_heartbeat, created_at, updated_at, registration_blob
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_heartbeat, created_at, updated_at,
+                alias, max_heartbeat_failures, heartbeat_failure_count,
+                registration_blob
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             ON CONFLICT(tenant_id, namespace, object_id) DO UPDATE SET
                 object_type = excluded.object_type,
                 object_name = excluded.object_name,
@@ -141,6 +178,9 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                 health_status = excluded.health_status,
                 last_heartbeat = excluded.last_heartbeat,
                 updated_at = excluded.updated_at,
+                alias = excluded.alias,
+                max_heartbeat_failures = excluded.max_heartbeat_failures,
+                heartbeat_failure_count = 0,
                 registration_blob = excluded.registration_blob
             "#,
         )
@@ -157,6 +197,8 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         .bind(last_heartbeat)
         .bind(now)
         .bind(now)
+        .bind(alias_val)
+        .bind(max_failures)
         .bind(&blob)
         .execute(&self.pool)
         .await
@@ -174,7 +216,9 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         // Fetch both blob and indexed columns (last_heartbeat, health_status may have been updated separately)
         let row = sqlx::query(
             r#"
-            SELECT registration_blob, last_heartbeat, health_status FROM object_registrations
+            SELECT registration_blob, last_heartbeat, health_status,
+                   heartbeat_failure_count, max_heartbeat_failures
+            FROM object_registrations
             WHERE tenant_id = ? AND namespace = ? AND object_id = ?
             "#,
         )
@@ -194,8 +238,6 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
                 // Merge indexed columns that may have been updated separately (heartbeat optimization).
-                // Only overwrite when the indexed seconds differ from what the blob already has —
-                // this preserves nanosecond precision when the blob is authoritative.
                 let last_heartbeat: Option<i64> = row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
                     let blob_seconds = registration
@@ -211,11 +253,21 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                     }
                 }
 
-                // Also merge health_status from indexed column
+                // Merge health_status and failure counts from indexed columns
                 let health_status: i32 = row
                     .try_get("health_status")
                     .unwrap_or(registration.health_status);
                 registration.health_status = health_status;
+
+                let failure_count: i64 =
+                    row.try_get("heartbeat_failure_count").unwrap_or(0);
+                registration.heartbeat_failure_count = failure_count as u32;
+
+                let max_failures: i64 =
+                    row.try_get("max_heartbeat_failures").unwrap_or(3);
+                if max_failures > 0 {
+                    registration.max_heartbeat_failures = max_failures as u32;
+                }
 
                 Ok(Some(registration))
             }
@@ -601,6 +653,218 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
 
         Ok(row.is_some())
     }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), alias = %alias))]
+    async fn get_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> RepositoryResult<Option<ObjectRegistration>> {
+        if alias.is_empty() {
+            return Ok(None);
+        }
+        // Alias is scoped to tenant+namespace (alias format encodes them, and the
+        // WHERE clause enforces isolation so cross-tenant collisions are impossible).
+        let row = sqlx::query(
+            r#"
+            SELECT registration_blob, health_status,
+                   heartbeat_failure_count, max_heartbeat_failures
+            FROM object_registrations
+            WHERE tenant_id = ? AND namespace = ? AND alias = ?
+            "#,
+        )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(alias)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        match row {
+            Some(row) => {
+                let blob: Vec<u8> = row
+                    .try_get("registration_blob")
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+                let health_status: i32 = row.try_get("health_status").unwrap_or(0);
+                let failure_count: i64 = row.try_get("heartbeat_failure_count").unwrap_or(0);
+                let max_failures: i64 = row.try_get("max_heartbeat_failures").unwrap_or(3);
+                Ok(Some(Self::merge_indexed_row(
+                    blob,
+                    health_status,
+                    failure_count,
+                    max_failures,
+                )?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn increment_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<u32> {
+        let now = Self::now_unix();
+        let row = sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET heartbeat_failure_count = heartbeat_failure_count + 1, updated_at = ?
+            WHERE tenant_id = ? AND namespace = ? AND object_id = ?
+            RETURNING heartbeat_failure_count
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(object_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        match row {
+            Some(row) => {
+                let count: i64 = row.try_get("heartbeat_failure_count").unwrap_or(1);
+                Ok(count as u32)
+            }
+            None => Err(RepositoryError::NotFound(object_id.to_string())),
+        }
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn reset_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<()> {
+        let now = Self::now_unix();
+        sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET heartbeat_failure_count = 0, updated_at = ?
+            WHERE tenant_id = ? AND namespace = ? AND object_id = ?
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(object_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Mark all live objects on `node_id` as DEAD.
+    ///
+    /// Scoped to the calling tenant/namespace so a node failure in one tenant cannot
+    /// cascade into another tenant's objects.  The heartbeat monitor calls this with
+    /// a system-scope context only when auth is disabled.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), node_id = %node_id))]
+    async fn mark_dead_by_node_id(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> RepositoryResult<u64> {
+        let now = Self::now_unix();
+        // DEAD=3, HEALTHY=1, DEGRADED=2, STARTING=4
+        // Scoped to tenant+namespace so cross-tenant cascade is impossible.
+        let result = sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET health_status = 3, updated_at = ?
+            WHERE tenant_id = ? AND namespace = ? AND node_id = ?
+              AND health_status IN (1, 2, 4)
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(node_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(result.rows_affected())
+    }
+
+    /// Find registrations whose heartbeat is older than `threshold_seconds`.
+    ///
+    /// Only returns HEALTHY (1) or DEGRADED (2) objects — DEAD/STOPPING are excluded
+    /// since they are already handled.  The context scopes the scan: pass an admin
+    /// context with empty tenant_id to scan all tenants (used by HeartbeatMonitor).
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), threshold_seconds = %threshold_seconds, limit = %limit))]
+    async fn find_stale_heartbeats(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> RepositoryResult<Vec<ObjectRegistration>> {
+        let cutoff = Self::now_unix() - threshold_seconds;
+
+        // When called with a non-empty tenant (normal tenant scope) restrict to that tenant.
+        // When called with an admin context and empty tenant (system monitor) scan all tenants.
+        let (query, bindings_extra): (&str, bool) = if !ctx.tenant_id().is_empty() {
+            (
+                r#"
+                SELECT registration_blob, health_status,
+                       heartbeat_failure_count, max_heartbeat_failures
+                FROM object_registrations
+                WHERE tenant_id = ? AND namespace = ?
+                  AND health_status IN (1, 2)
+                  AND (last_heartbeat IS NULL OR last_heartbeat < ?)
+                LIMIT ?
+                "#,
+                true,
+            )
+        } else {
+            (
+                r#"
+                SELECT registration_blob, health_status,
+                       heartbeat_failure_count, max_heartbeat_failures
+                FROM object_registrations
+                WHERE health_status IN (1, 2)
+                  AND (last_heartbeat IS NULL OR last_heartbeat < ?)
+                LIMIT ?
+                "#,
+                false,
+            )
+        };
+
+        let rows = if bindings_extra {
+            sqlx::query(query)
+                .bind(ctx.tenant_id())
+                .bind(ctx.namespace())
+                .bind(cutoff)
+                .bind(limit as i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?
+        } else {
+            sqlx::query(query)
+                .bind(cutoff)
+                .bind(limit as i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?
+        };
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let blob: Vec<u8> = row
+                .try_get("registration_blob")
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+            let health_status: i32 = row.try_get("health_status").unwrap_or(1);
+            let failure_count: i64 = row.try_get("heartbeat_failure_count").unwrap_or(0);
+            let max_failures: i64 = row.try_get("max_heartbeat_failures").unwrap_or(3);
+            results.push(Self::merge_indexed_row(
+                blob,
+                health_status,
+                failure_count,
+                max_failures,
+            )?);
+        }
+        Ok(results)
+    }
 }
 
 /// PostgreSQL Object Registry Repository
@@ -639,6 +903,27 @@ impl PostgresObjectRegistryRepository {
     fn now_timestamp() -> chrono::DateTime<chrono::Utc> {
         chrono::Utc::now()
     }
+
+    /// Merge indexed columns into a decoded registration.
+    ///
+    /// The indexed columns `health_status`, `heartbeat_failure_count`, and
+    /// `max_heartbeat_failures` are written directly without a blob round-trip,
+    /// so they always reflect current state and must override any stale blob values.
+    fn merge_indexed_row(
+        blob: Vec<u8>,
+        health_status: i32,
+        failure_count: i32,
+        max_failures: i32,
+    ) -> RepositoryResult<ObjectRegistration> {
+        let mut reg = ObjectRegistration::decode(&blob[..])
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+        reg.health_status = health_status;
+        reg.heartbeat_failure_count = failure_count as u32;
+        if max_failures > 0 {
+            reg.max_heartbeat_failures = max_failures as u32;
+        }
+        Ok(reg)
+    }
 }
 
 #[async_trait]
@@ -656,13 +941,26 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
             .as_ref()
             .map(|t| chrono::DateTime::from_timestamp(t.seconds, 0).unwrap_or(now));
 
+        let alias_val = if registration.alias.is_empty() {
+            None
+        } else {
+            Some(registration.alias.clone())
+        };
+        let max_failures = if registration.max_heartbeat_failures == 0 {
+            3i32
+        } else {
+            registration.max_heartbeat_failures as i32
+        };
+
         sqlx::query(
             r#"
             INSERT INTO object_registrations (
                 tenant_id, namespace, object_id, object_type, object_name, version,
                 node_id, grpc_address, object_category, health_status,
-                last_heartbeat, created_at, updated_at, registration_blob
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                last_heartbeat, created_at, updated_at,
+                alias, max_heartbeat_failures, heartbeat_failure_count,
+                registration_blob
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16)
             ON CONFLICT(tenant_id, namespace, object_id) DO UPDATE SET
                 object_type = EXCLUDED.object_type,
                 object_name = EXCLUDED.object_name,
@@ -673,6 +971,9 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
                 health_status = EXCLUDED.health_status,
                 last_heartbeat = EXCLUDED.last_heartbeat,
                 updated_at = EXCLUDED.updated_at,
+                alias = EXCLUDED.alias,
+                max_heartbeat_failures = EXCLUDED.max_heartbeat_failures,
+                heartbeat_failure_count = 0,
                 registration_blob = EXCLUDED.registration_blob
             "#,
         )
@@ -689,6 +990,8 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         .bind(last_heartbeat)
         .bind(now)
         .bind(now)
+        .bind(alias_val)
+        .bind(max_failures)
         .bind(&blob)
         .execute(&self.pool)
         .await
@@ -706,7 +1009,9 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         // Fetch both blob and indexed columns (last_heartbeat, health_status may have been updated separately)
         let row = sqlx::query(
             r#"
-            SELECT registration_blob, last_heartbeat, health_status FROM object_registrations
+            SELECT registration_blob, last_heartbeat, health_status,
+                   heartbeat_failure_count, max_heartbeat_failures
+            FROM object_registrations
             WHERE tenant_id = $1 AND namespace = $2 AND object_id = $3
             "#,
         )
@@ -725,9 +1030,7 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
                 let mut registration = ObjectRegistration::decode(&blob[..])
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-                // Merge indexed columns that may have been updated separately (heartbeat optimization).
-                // Only overwrite when the indexed seconds differ from what the blob already has —
-                // this preserves nanosecond precision when the blob is authoritative.
+                // Merge indexed columns that may have been updated separately.
                 let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> =
                     row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
@@ -745,11 +1048,18 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
                     }
                 }
 
-                // Also merge health_status from indexed column
                 let health_status: i32 = row
                     .try_get("health_status")
                     .unwrap_or(registration.health_status);
                 registration.health_status = health_status;
+
+                let failure_count: i32 = row.try_get("heartbeat_failure_count").unwrap_or(0);
+                registration.heartbeat_failure_count = failure_count as u32;
+
+                let max_failures: i32 = row.try_get("max_heartbeat_failures").unwrap_or(3);
+                if max_failures > 0 {
+                    registration.max_heartbeat_failures = max_failures as u32;
+                }
 
                 Ok(Some(registration))
             }
@@ -1186,6 +1496,193 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
 
         Ok(row.is_some())
     }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), alias = %alias))]
+    async fn get_by_alias(
+        &self,
+        ctx: &RequestContext,
+        alias: &str,
+    ) -> RepositoryResult<Option<ObjectRegistration>> {
+        if alias.is_empty() {
+            return Ok(None);
+        }
+        let row = sqlx::query(
+            r#"
+            SELECT registration_blob, health_status,
+                   heartbeat_failure_count, max_heartbeat_failures
+            FROM object_registrations
+            WHERE tenant_id = $1 AND namespace = $2 AND alias = $3
+            "#,
+        )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(alias)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        match row {
+            Some(row) => {
+                let blob: Vec<u8> = row
+                    .try_get("registration_blob")
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+                let health_status: i32 = row.try_get("health_status").unwrap_or(0);
+                let failure_count: i32 = row.try_get("heartbeat_failure_count").unwrap_or(0);
+                let max_failures: i32 = row.try_get("max_heartbeat_failures").unwrap_or(3);
+                Ok(Some(Self::merge_indexed_row(
+                    blob,
+                    health_status,
+                    failure_count,
+                    max_failures,
+                )?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn increment_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<u32> {
+        let now = Self::now_timestamp();
+        let row = sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET heartbeat_failure_count = heartbeat_failure_count + 1, updated_at = $1
+            WHERE tenant_id = $2 AND namespace = $3 AND object_id = $4
+            RETURNING heartbeat_failure_count
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(object_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        match row {
+            Some(row) => {
+                let count: i32 = row.try_get("heartbeat_failure_count").unwrap_or(1);
+                Ok(count as u32)
+            }
+            None => Err(RepositoryError::NotFound(object_id.to_string())),
+        }
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_id = %object_id))]
+    async fn reset_heartbeat_failures(
+        &self,
+        ctx: &RequestContext,
+        object_id: &str,
+    ) -> RepositoryResult<()> {
+        let now = Self::now_timestamp();
+        sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET heartbeat_failure_count = 0, updated_at = $1
+            WHERE tenant_id = $2 AND namespace = $3 AND object_id = $4
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(object_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Mark all live objects on `node_id` as DEAD, scoped to tenant/namespace.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), node_id = %node_id))]
+    async fn mark_dead_by_node_id(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> RepositoryResult<u64> {
+        let now = Self::now_timestamp();
+        // DEAD=3, HEALTHY=1, DEGRADED=2, STARTING=4.  Scoped to tenant+namespace.
+        let result = sqlx::query(
+            r#"
+            UPDATE object_registrations
+            SET health_status = 3, updated_at = $1
+            WHERE tenant_id = $2 AND namespace = $3 AND node_id = $4
+              AND health_status IN (1, 2, 4)
+            "#,
+        )
+        .bind(now)
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(node_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(result.rows_affected())
+    }
+
+    /// Find registrations with stale heartbeats, scoped to tenant/namespace or cross-tenant
+    /// when called with an admin context and empty tenant_id (system heartbeat monitor).
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), threshold_seconds = %threshold_seconds, limit = %limit))]
+    async fn find_stale_heartbeats(
+        &self,
+        ctx: &RequestContext,
+        threshold_seconds: i64,
+        limit: usize,
+    ) -> RepositoryResult<Vec<ObjectRegistration>> {
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(threshold_seconds);
+
+        let rows = if !ctx.tenant_id().is_empty() {
+            sqlx::query(
+                r#"
+                SELECT registration_blob, health_status,
+                       heartbeat_failure_count, max_heartbeat_failures
+                FROM object_registrations
+                WHERE tenant_id = $1 AND namespace = $2
+                  AND health_status IN (1, 2)
+                  AND (last_heartbeat IS NULL OR last_heartbeat < $3)
+                LIMIT $4
+                "#,
+            )
+            .bind(ctx.tenant_id())
+            .bind(ctx.namespace())
+            .bind(cutoff)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT registration_blob, health_status,
+                       heartbeat_failure_count, max_heartbeat_failures
+                FROM object_registrations
+                WHERE health_status IN (1, 2)
+                  AND (last_heartbeat IS NULL OR last_heartbeat < $1)
+                LIMIT $2
+                "#,
+            )
+            .bind(cutoff)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?
+        };
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let blob: Vec<u8> = row
+                .try_get("registration_blob")
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+            let health_status: i32 = row.try_get("health_status").unwrap_or(1);
+            let failure_count: i32 = row.try_get("heartbeat_failure_count").unwrap_or(0);
+            let max_failures: i32 = row.try_get("max_heartbeat_failures").unwrap_or(3);
+            results.push(Self::merge_indexed_row(blob, health_status, failure_count, max_failures)?);
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -1394,5 +1891,127 @@ mod tests {
             .unwrap();
 
         assert_eq!(count, 2);
+    }
+
+    // ---- New method tests ----
+
+    #[tokio::test]
+    async fn test_sqlite_get_by_alias_scoped_to_tenant() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns".to_string());
+        let ctx_b = RequestContext::new_without_auth("tenant-b".to_string(), "ns".to_string());
+
+        let mut reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        reg.alias = "Counter:worker:ns:tenant-a".to_string();
+        repo.put(&ctx_a, &reg).await.unwrap();
+
+        // Same alias is invisible to tenant-b
+        let found_b = repo
+            .get_by_alias(&ctx_b, "Counter:worker:ns:tenant-a")
+            .await
+            .unwrap();
+        assert!(found_b.is_none());
+
+        // Correct tenant can find it
+        let found_a = repo
+            .get_by_alias(&ctx_a, "Counter:worker:ns:tenant-a")
+            .await
+            .unwrap();
+        assert!(found_a.is_some());
+        assert_eq!(found_a.unwrap().object_id, "actor-1");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_increment_and_reset_heartbeat_failures() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+
+        let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        repo.put(&ctx, &reg).await.unwrap();
+
+        let c1 = repo.increment_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+        assert_eq!(c1, 1);
+        let c2 = repo.increment_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+        assert_eq!(c2, 2);
+
+        repo.reset_heartbeat_failures(&ctx, "actor-1").await.unwrap();
+
+        let found = repo.get(&ctx, "actor-1").await.unwrap().unwrap();
+        assert_eq!(found.heartbeat_failure_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_mark_dead_by_node_id_scoped_to_tenant() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns".to_string());
+        let ctx_b = RequestContext::new_without_auth("tenant-b".to_string(), "ns".to_string());
+
+        // Register actor on node-1 for both tenants
+        let mut reg_a = create_test_registration("actor-a", ObjectType::ObjectTypeActor);
+        reg_a.node_id = "node-1".to_string();
+        repo.put(&ctx_a, &reg_a).await.unwrap();
+
+        let mut reg_b = create_test_registration("actor-b", ObjectType::ObjectTypeActor);
+        reg_b.node_id = "node-1".to_string();
+        repo.put(&ctx_b, &reg_b).await.unwrap();
+
+        // Mark dead only for tenant-a
+        let affected = repo.mark_dead_by_node_id(&ctx_a, "node-1").await.unwrap();
+        assert_eq!(affected, 1);
+
+        // tenant-a actor is DEAD
+        let a = repo.get(&ctx_a, "actor-a").await.unwrap().unwrap();
+        assert_eq!(a.health_status, HealthStatus::HealthStatusDead as i32);
+
+        // tenant-b actor is still HEALTHY
+        let b = repo.get(&ctx_b, "actor-b").await.unwrap().unwrap();
+        assert_eq!(b.health_status, HealthStatus::HealthStatusHealthy as i32);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_find_stale_heartbeats_tenant_scoped() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+        let ctx_other = RequestContext::new_without_auth("t2".to_string(), "ns".to_string());
+
+        // Actor with no heartbeat (stale by definition)
+        let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
+        repo.put(&ctx, &reg).await.unwrap();
+
+        // Other tenant's actor — should not appear
+        let reg2 = create_test_registration("actor-2", ObjectType::ObjectTypeActor);
+        repo.put(&ctx_other, &reg2).await.unwrap();
+
+        // threshold=0 means cutoff=now → any actor without a recent heartbeat qualifies
+        let stale = repo.find_stale_heartbeats(&ctx, 0, 100).await.unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].object_id, "actor-1");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_find_stale_cross_tenant_with_admin_ctx() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx_a = RequestContext::new_without_auth("t1".to_string(), "ns".to_string());
+        let ctx_b = RequestContext::new_without_auth("t2".to_string(), "ns".to_string());
+        let admin = RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        let reg_a = create_test_registration("actor-a", ObjectType::ObjectTypeActor);
+        repo.put(&ctx_a, &reg_a).await.unwrap();
+        let reg_b = create_test_registration("actor-b", ObjectType::ObjectTypeActor);
+        repo.put(&ctx_b, &reg_b).await.unwrap();
+
+        // Admin with empty tenant sees all stale entries
+        let stale = repo.find_stale_heartbeats(&admin, 0, 100).await.unwrap();
+        assert_eq!(stale.len(), 2);
     }
 }

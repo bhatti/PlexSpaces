@@ -35,8 +35,8 @@ use futures::stream::BoxStream;
 use plexspaces_actor::actor_context::{
     ActorService, ChannelService, ProcessGroupService, TupleSpaceProvider,
 };
-use plexspaces_common::ServiceNameExt;
 use plexspaces_actor::Service;
+use plexspaces_common::ServiceNameExt;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
@@ -125,7 +125,9 @@ impl Default for ChannelServiceWrapper {
 
 impl Service for ChannelServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameChannelService.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameChannelService
+            .as_str()
+            .to_string()
     }
 }
 
@@ -184,7 +186,9 @@ impl ProcessGroupServiceWrapper {
 
 impl Service for ProcessGroupServiceWrapper {
     fn service_name(&self) -> String {
-        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry.as_str().to_string()
+        plexspaces_actor::ServiceName::ServiceNameProcessGroupRegistry
+            .as_str()
+            .to_string()
     }
 }
 

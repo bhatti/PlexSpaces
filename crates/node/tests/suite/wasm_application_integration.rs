@@ -29,7 +29,9 @@ use super::test_helpers::app_request_with_tenant;
 use async_trait::async_trait;
 use plexspaces_actor::JournalStorage as _;
 use plexspaces_actor::{
-    ActorId, ActorStateHandle, ApplicationManager, Message, MessageSender, ServiceLocator, RequestContextExt};
+    ActorId, ActorStateHandle, ApplicationManager, Message, MessageSender, RequestContextExt,
+    ServiceLocator,
+};
 use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeId};
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
@@ -38,10 +40,13 @@ use plexspaces_proto::actor::v1::{
 };
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType,
-    DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest, ShutdownStrategy,
+    DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest,
+    ShutdownStrategy,
 };
-use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec};
 use plexspaces_proto::common::v1::{ActorIdentity, Facet, Metadata};
+use plexspaces_proto::supervision::v1::{
+    ChildSpec, RestartPolicy, SupervisionStrategy, SupervisorSpec,
+};
 use plexspaces_proto::v1::journaling::Checkpoint;
 use plexspaces_proto::wasm::v1::WasmModule;
 use plexspaces_services::actor_service::ActorServiceImpl;
@@ -2597,4 +2602,196 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
         );
         sleep(Duration::from_millis(100)).await;
     }
+}
+
+// ── Multi-actor dispatch integration tests ──────────────────────────────────
+//
+// Verifies the end-to-end dispatch contract:
+//   framework sets actor_type in init config → SDK exact-matches → correct handler runs.
+//
+// Python parameter_server has two distinct classes (Leader / Worker) with unique
+// handlers: "train" on Leader, "compute_gradient" on Worker.  Wrong dispatch
+// returns {"error":"Unknown message type: ..."}.
+
+fn load_dispatch_test_wasm() -> Vec<u8> {
+    // Pre-built fixture: two classes (PingActor, EchoActor) with distinct handlers.
+    // Rebuild with: bash crates/wasm-runtime/tests/fixtures/dispatch_test/build.sh
+    let fixture_path = format!(
+        "{}/../wasm-runtime/tests/fixtures/dispatch_test/dispatch_test_actor.wasm",
+        env!("CARGO_MANIFEST_DIR"),
+    );
+    std::fs::read(&fixture_path).unwrap_or_else(|e| {
+        panic!(
+            "dispatch_test_actor.wasm not found at {}. Run the build.sh in that directory first. Error: {}",
+            fixture_path, e
+        )
+    })
+}
+
+/// Verifies that the framework dispatches each virtual-actor activation to the
+/// correct Python class based solely on ``actor_type`` (exact match).
+///
+/// - ``PingActor`` handles ``ping``  → ``{"pong": true, ...}``
+/// - ``EchoActor`` handles ``echo``  → ``{"echoed": "hello"}``
+///
+/// Wrong dispatch returns ``{"error":"Unknown message type: ..."}`` which fails
+/// the assertion, proving that exact ``actor_type`` dispatch is working.
+#[tokio::test]
+async fn test_multi_actor_dispatch_by_actor_type() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+
+    let app_id = "dispatch-test-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = load_dispatch_test_wasm();
+
+    // Build ApplicationSpec inline — avoids any seed_nodes or cluster config.
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                actor_identity: Some(ActorIdentity {
+                    name: "ping".to_string(),
+                    actor_type: "PingActor".to_string(),
+                }),
+                role: "ping".to_string(),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+                ..Default::default()
+            },
+            ChildSpec {
+                actor_identity: Some(ActorIdentity {
+                    name: "echo".to_string(),
+                    actor_type: "EchoActor".to_string(),
+                }),
+                role: "echo".to_string(),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        namespace: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        description: "Multi-actor dispatch integration test".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        required_service_links: vec![],
+        metadata: None,
+    };
+
+    service
+        .deploy_application(app_request_in_scope(
+            DeployApplicationRequest {
+                application_id: app_id.to_string(),
+                name: app_id.to_string(),
+                version: "1.0.0".to_string(),
+                wasm_module: Some(WasmModule {
+                    name: app_id.to_string(),
+                    version: "1.0.0".to_string(),
+                    module_bytes: wasm_bytes,
+                    module_hash: String::new(),
+                    ..Default::default()
+                }),
+                config: Some(app_spec),
+                initial_state: vec![],
+            },
+            tenant_id,
+            app_id,
+        ))
+        .await
+        .expect("deployment should succeed");
+
+    // PingActor receives "ping" — handler unique to PingActor.
+    let ping_reply = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "PingActor:ping",
+        serde_json::json!({ "op": "ping" }),
+    )
+    .await;
+    assert!(
+        ping_reply.get("error").is_none(),
+        "PingActor should handle 'ping'; wrong dispatch returns an error. Got: {:?}",
+        ping_reply
+    );
+    assert_eq!(
+        ping_reply["pong"],
+        serde_json::json!(true),
+        "PingActor 'ping' must return pong=true, got: {:?}",
+        ping_reply
+    );
+
+    // EchoActor receives "echo" — handler unique to EchoActor.
+    let echo_reply = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "EchoActor:echo",
+        serde_json::json!({ "op": "echo", "message": "hello" }),
+    )
+    .await;
+    assert!(
+        echo_reply.get("error").is_none(),
+        "EchoActor should handle 'echo'; wrong dispatch returns an error. Got: {:?}",
+        echo_reply
+    );
+    assert_eq!(
+        echo_reply["echoed"],
+        serde_json::json!("hello"),
+        "EchoActor 'echo' must return echoed=hello, got: {:?}",
+        echo_reply
+    );
 }

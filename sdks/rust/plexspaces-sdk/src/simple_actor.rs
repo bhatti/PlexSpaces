@@ -173,8 +173,8 @@ pub fn kv_get_json<T: serde::de::DeserializeOwned>(key: &str) -> Result<Option<T
 /// kv_put_json("queue:pending:1", &task)?;
 /// ```
 pub fn kv_put_json<T: serde::Serialize>(key: &str, value: &T) -> Result<(), String> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|e| format!("kv_put_json({key:?}): serialize: {e}"))?;
+    let bytes =
+        serde_json::to_vec(value).map_err(|e| format!("kv_put_json({key:?}): serialize: {e}"))?;
     host::kv_put(key, &bytes)
 }
 
@@ -200,10 +200,8 @@ pub fn incr_counter(application_id: &str, name: &str) {
 pub fn incr_counters(application_id: &str, counters: &[(&str, u64)]) {
     use prost::Message as ProstMessage;
 
-    let counter_metrics: std::collections::HashMap<String, u64> = counters
-        .iter()
-        .map(|(k, v)| (k.to_string(), *v))
-        .collect();
+    let counter_metrics: std::collections::HashMap<String, u64> =
+        counters.iter().map(|(k, v)| (k.to_string(), *v)).collect();
 
     let metrics = plexspaces_proto::application::v1::ApplicationMetrics {
         message_count: counters.len() as u64,
@@ -212,7 +210,10 @@ pub fn incr_counters(application_id: &str, counters: &[(&str, u64)]) {
     };
     let bytes = metrics.encode_to_vec();
     if let Err(e) = host::application_metrics_add(application_id, &bytes) {
-        host::log("warn", &format!("incr_counters: metrics update failed: {e}"));
+        host::log(
+            "warn",
+            &format!("incr_counters: metrics update failed: {e}"),
+        );
     }
 }
 
@@ -320,8 +321,8 @@ macro_rules! export_actor_world_app {
 #[cfg(test)]
 mod tests {
     use super::{kv_get_json, kv_put_json};
-    use prost::Message as ProstMessage;
     use plexspaces_proto::application::v1::ApplicationMetrics;
+    use prost::Message as ProstMessage;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -333,7 +334,10 @@ mod tests {
     // kv_put_json encodes to valid JSON bytes that kv_get_json round-trips
     #[test]
     fn kv_put_json_produces_bytes_that_deserialize_correctly() {
-        let task = Task { seq: 42, task_type: "summarize".into() };
+        let task = Task {
+            seq: 42,
+            task_type: "summarize".into(),
+        };
         let bytes = serde_json::to_vec(&task).expect("serialize");
         let restored: Task = serde_json::from_slice(&bytes).expect("deserialize");
         assert_eq!(restored, task);

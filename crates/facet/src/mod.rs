@@ -644,7 +644,10 @@ impl FacetContainer {
         // Run in reverse order for after interceptors
         for facet in self.facets.iter().rev() {
             let facet = facet.read().await;
-            match facet.after_method(method, args, &current_result, headers).await? {
+            match facet
+                .after_method(method, args, &current_result, headers)
+                .await?
+            {
                 InterceptResult::Continue => {}
                 InterceptResult::ReplaceResult(new_result) => {
                     current_result = new_result;

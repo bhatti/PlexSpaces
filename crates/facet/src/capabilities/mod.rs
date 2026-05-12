@@ -26,7 +26,6 @@
 //! - all capabilities implement the standard `Facet` trait. If namespace/contract information
 //! is needed, it can be stored in facet metadata/config.
 
-
 pub mod http_client;
 pub mod keyvalue;
 pub mod locks;

@@ -1,0 +1,115 @@
+name = "py-chat-room-large-scale"
+version = "1.0.0"
+namespace = "py-chat-room-large-scale"
+seed_nodes = ["127.0.0.1:8091"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "SessionActor"
+actor_type = "SessionActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "20m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 3 } },
+  { type = "process_group", priority = 80, config = {} }
+]
+
+[[supervisor.children]]
+name = "GuildActor"
+actor_type = "GuildActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 3 } }
+]
+
+[[supervisor.children]]
+name = "ChannelActor"
+actor_type = "ChannelActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 2 } },
+  { type = "timer", priority = 80, config = {} },
+  { type = "process_group", priority = 70, config = {} }
+]
+
+[[supervisor.children]]
+name = "PresenceActor"
+actor_type = "PresenceActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "20m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 2 } },
+  { type = "reminder", priority = 80, config = {} }
+]
+
+[[supervisor.children]]
+name = "MessageStoreActor"
+actor_type = "MessageStoreActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "45m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 2 } }
+]
+
+[[supervisor.children]]
+name = "FanoutActor"
+actor_type = "FanoutActor"
+instances = [{ name = "singleton" }]
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "45m", activation_strategy = "eager" } },
+  { type = "process_group", priority = 90, config = {} }
+]
+
+[[supervisor.children]]
+name = "AuditEventActor"
+actor_type = "AuditEventActor"
+instances = [{ name = "singleton" }]
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "45m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 2 } },
+  { type = "process_group", priority = 80, config = {} }
+]
+
+[[supervisor.children]]
+name = "ConnectionFSM"
+actor_type = "ConnectionFSM"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]
+
+[[supervisor.children]]
+name = "ModerationWorkflow"
+actor_type = "ModerationWorkflow"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+behavior_kind = "Workflow"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 2 } }
+]

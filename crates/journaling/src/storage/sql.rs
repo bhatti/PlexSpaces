@@ -69,9 +69,9 @@ use crate::storage::{ReminderRegistration, ReminderState};
 use crate::{ActorEvent, ActorHistory, Checkpoint, JournalEntry, JournalStats};
 use async_trait::async_trait;
 use plexspaces_common::ServiceNameExt;
-use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::prost_types;
+use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
 use prost::Message;
 use sqlx::{Pool, Row, Sqlite};
 use std::collections::HashMap;
@@ -3236,4 +3236,3 @@ mod tests {
         assert_eq!(seq3, 1);
     }
 }
-

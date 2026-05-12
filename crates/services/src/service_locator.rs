@@ -171,14 +171,14 @@ use plexspaces_actor::metrics_renderer::MetricsPrometheusRenderer;
 use plexspaces_actor::metrics_service_access::MetricsServiceAccess;
 use plexspaces_actor::monitoring::NodeConnectionInfo;
 use plexspaces_actor::JournalStorage;
-use plexspaces_actor::{InitializableServiceLocator, ServiceLocator};
 use plexspaces_actor::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-use plexspaces_service_traits::ServiceLocatorBase;
+use plexspaces_actor::{InitializableServiceLocator, ServiceLocator};
 use plexspaces_common::RequestContextExt;
+use plexspaces_service_traits::ServiceLocatorBase;
 
+use plexspaces_actor::Service;
 pub use plexspaces_actor::ServiceName;
 use plexspaces_common::ServiceNameExt;
-use plexspaces_actor::Service;
 
 /// Wrapper to store Arc<T> with type name for TypeId-independent extraction
 ///
@@ -1121,8 +1121,10 @@ impl ServiceLocatorImpl {
     /// let manager = service_locator.virtual_actor_manager().await?;
     /// ```
     pub async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
-        self.get_service_by_name::<VirtualActorManager>(ServiceName::ServiceNameVirtualActorManager.as_str())
-            .await
+        self.get_service_by_name::<VirtualActorManager>(
+            ServiceName::ServiceNameVirtualActorManager.as_str(),
+        )
+        .await
     }
 
     /// Get FacetManager service wrapper
@@ -1135,8 +1137,10 @@ impl ServiceLocatorImpl {
     /// let facet_manager = service_locator.facet_manager().await?;
     /// ```
     pub async fn facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
-        self.get_service_by_name::<FacetManagerServiceWrapper>(ServiceName::ServiceNameFacetManager.as_str())
-            .await
+        self.get_service_by_name::<FacetManagerServiceWrapper>(
+            ServiceName::ServiceNameFacetManager.as_str(),
+        )
+        .await
     }
 
     /// Get FacetRegistry service wrapper
@@ -1149,8 +1153,10 @@ impl ServiceLocatorImpl {
     /// let facet_registry = service_locator.facet_registry().await?;
     /// ```
     pub async fn facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
-        self.get_service_by_name::<FacetRegistryServiceWrapper>(ServiceName::ServiceNameFacetRegistry.as_str())
-            .await
+        self.get_service_by_name::<FacetRegistryServiceWrapper>(
+            ServiceName::ServiceNameFacetRegistry.as_str(),
+        )
+        .await
     }
 
     /// Get ReplyWaiterRegistry service
@@ -1163,8 +1169,10 @@ impl ServiceLocatorImpl {
     /// let registry = service_locator.reply_waiter_registry().await?;
     /// ```
     pub async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        self.get_service_by_name::<ReplyWaiterRegistry>(ServiceName::ServiceNameReplyWaiterRegistry.as_str())
-            .await
+        self.get_service_by_name::<ReplyWaiterRegistry>(
+            ServiceName::ServiceNameReplyWaiterRegistry.as_str(),
+        )
+        .await
     }
 
     /// Create a mailbox with default configuration (memory backend)
@@ -1396,20 +1404,18 @@ impl ServiceLocatorImpl {
 
 #[async_trait::async_trait]
 impl plexspaces_service_traits::ServiceLocatorBase for ServiceLocatorImpl {
-    async fn get_actor_service(
-        &self,
-    ) -> Option<Arc<dyn plexspaces_service_traits::ActorService>> {
+    async fn get_actor_service(&self) -> Option<Arc<dyn plexspaces_service_traits::ActorService>> {
         ServiceLocatorImpl::get_actor_service(self).await
     }
 
-    async fn get_journal_storage(&self) -> Option<Arc<dyn plexspaces_service_traits::JournalStorage + Send + Sync>> {
+    async fn get_journal_storage(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_service_traits::JournalStorage + Send + Sync>> {
         let storage = self.journal_storage.read().await;
         storage.clone()
     }
 
-    async fn get_keyvalue_store(
-        &self,
-    ) -> Option<Arc<dyn plexspaces_common::KeyValueStore>> {
+    async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_common::KeyValueStore>> {
         let store = self.keyvalue_store.read().await;
         store.clone()
     }
@@ -1424,7 +1430,8 @@ impl plexspaces_service_traits::ServiceLocatorBase for ServiceLocatorImpl {
     async fn get_actor_state_checker(
         &self,
     ) -> Option<Arc<dyn plexspaces_service_traits::ActorStateChecker>> {
-        self.actor_registry().await
+        self.actor_registry()
+            .await
             .map(|r| r as Arc<dyn plexspaces_service_traits::ActorStateChecker>)
     }
 
@@ -2067,7 +2074,8 @@ async fn initialize_services_impl(
         };
 
     // Register LockManager in ServiceLocator (use locks::LockManager directly)
-    let service_locator: &dyn plexspaces_actor::InitializableServiceLocator = service_locator_impl.as_ref();
+    let service_locator: &dyn plexspaces_actor::InitializableServiceLocator =
+        service_locator_impl.as_ref();
     service_locator
         .register_lock_manager(lock_manager.clone())
         .await;
@@ -2203,7 +2211,8 @@ async fn initialize_services_impl(
     let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager.clone()));
 
     // Register all services using explicit service names for consistency
-    let service_locator: &dyn plexspaces_actor::InitializableServiceLocator = service_locator_impl.as_ref();
+    let service_locator: &dyn plexspaces_actor::InitializableServiceLocator =
+        service_locator_impl.as_ref();
     service_locator
         .register_object_registry(object_registry_trait.clone())
         .await;
@@ -2218,16 +2227,28 @@ async fn initialize_services_impl(
         )
         .await;
     service_locator_impl
-        .register_service_by_name(ServiceName::ServiceNameActorRegistry.as_str(), actor_registry.clone())
+        .register_service_by_name(
+            ServiceName::ServiceNameActorRegistry.as_str(),
+            actor_registry.clone(),
+        )
         .await;
     service_locator_impl
-        .register_service_by_name(ServiceName::ServiceNameReplyWaiterRegistry.as_str(), reply_waiter_registry)
+        .register_service_by_name(
+            ServiceName::ServiceNameReplyWaiterRegistry.as_str(),
+            reply_waiter_registry,
+        )
         .await;
     service_locator_impl
-        .register_service_by_name(ServiceName::ServiceNameVirtualActorManager.as_str(), virtual_actor_manager)
+        .register_service_by_name(
+            ServiceName::ServiceNameVirtualActorManager.as_str(),
+            virtual_actor_manager,
+        )
         .await;
     service_locator_impl
-        .register_service_by_name(ServiceName::ServiceNameFacetManager.as_str(), facet_manager_wrapper)
+        .register_service_by_name(
+            ServiceName::ServiceNameFacetManager.as_str(),
+            facet_manager_wrapper,
+        )
         .await;
     service_locator
         .register_facet_registry(facet_registry_wrapper)

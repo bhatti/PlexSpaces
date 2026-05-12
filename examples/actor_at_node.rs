@@ -12,7 +12,9 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContextExt};
+use plexspaces_actor::{
+    Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContextExt,
+};
 use plexspaces_node::{Node, NodeBuilder};
 
 /// Helper to create a proto Message with payload

@@ -73,6 +73,11 @@ class SqsConfig(betterproto.Message):
     dlq: "DlqConfig" = betterproto.message_field(6)
     """Dead letter queue configuration"""
 
+    receive_message_wait_time_seconds: int = betterproto.uint32_field(7)
+    """
+    Receive message wait time in seconds for long polling (0 = short polling, default: 20)
+    """
+
 
 @dataclass(eq=False, repr=False)
 class S3Config(betterproto.Message):

@@ -437,11 +437,18 @@ impl NodeBuilder {
         let disable_auth = self.disable_auth;
         let node = Node::new(self.node_id, self.config);
 
-        // Set release_spec if provided
+        // Set release_spec if provided explicitly.
+        // Test builds must remain independent from the caller's current working directory, so
+        // unit tests skip implicit release file discovery here. Production startup still supports
+        // auto-loading release config in `Node::start()`.
         if let Some(release_spec) = self.release_spec {
             node.set_release_spec(release_spec).await;
-        } else if let Ok(release_spec) = node.load_release_config().await {
-            node.set_release_spec(release_spec).await;
+        } else if !cfg!(test) {
+            if let Ok(release_spec) = node.load_release_config().await {
+                node.set_release_spec(release_spec).await;
+            }
+        } else {
+            // Test builds intentionally do not auto-load release files during `build()`.
         }
 
         // Initialize all services immediately

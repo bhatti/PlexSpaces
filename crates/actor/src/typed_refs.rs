@@ -53,8 +53,8 @@
 //! logger.emit("user_login", &event).await?;
 //! ```
 
-use crate::ActorRef;
 use crate::core::{Message, RequestContext};
+use crate::ActorRef;
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
@@ -203,7 +203,9 @@ impl WorkflowRefError {
     pub fn code(&self) -> plexspaces_proto::actor::v1::WorkflowRefErrorCode {
         use plexspaces_proto::actor::v1::WorkflowRefErrorCode;
         match self {
-            WorkflowRefError::Serialization(_) => WorkflowRefErrorCode::WorkflowRefErrorSerialization,
+            WorkflowRefError::Serialization(_) => {
+                WorkflowRefErrorCode::WorkflowRefErrorSerialization
+            }
             WorkflowRefError::Execution(_) => WorkflowRefErrorCode::WorkflowRefErrorExecution,
             WorkflowRefError::Spawn(_) => WorkflowRefErrorCode::WorkflowRefErrorSpawn,
         }
@@ -483,7 +485,8 @@ impl FsmRef {
         &self,
         ctx: &RequestContext,
     ) -> Result<S, FsmError> {
-        self.query_state_with_timeout(ctx, DEFAULT_FSM_TIMEOUT).await
+        self.query_state_with_timeout(ctx, DEFAULT_FSM_TIMEOUT)
+            .await
     }
 
     /// Query the current FSM state with custom timeout.
@@ -521,7 +524,8 @@ impl FsmRef {
         ctx: &RequestContext,
         name: &str,
     ) -> Result<O, FsmError> {
-        self.query_with_timeout(ctx, name, DEFAULT_FSM_TIMEOUT).await
+        self.query_with_timeout(ctx, name, DEFAULT_FSM_TIMEOUT)
+            .await
     }
 
     /// Query FSM with custom timeout.

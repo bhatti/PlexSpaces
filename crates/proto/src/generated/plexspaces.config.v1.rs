@@ -64,7 +64,7 @@ pub struct S3Config {
     /// Optional endpoint URL for local/test overrides (e.g., "<http://localhost:9000">)
     #[prost(string, tag="3")]
     pub endpoint_url: ::prost::alloc::string::String,
-    /// Use path-style URLs (required for MinIO and some S3-compatible stores)
+    /// Use path-style URLs (required for embedded and some S3-compatible stores)
     #[prost(bool, tag="4")]
     pub use_path_style: bool,
 }

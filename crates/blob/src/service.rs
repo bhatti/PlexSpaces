@@ -36,8 +36,8 @@ use crate::{
 use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
-/// Ensures the S3/MinIO bucket exists, creating it if necessary.
-/// This is called during BlobService initialization for s3/minio backends.
+/// Ensures the S3-compatible bucket exists, creating it if necessary.
+/// Called during BlobService initialization for s3/embedded backends.
 #[cfg(feature = "s3-backend")]
 async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
     use aws_sdk_s3::config::{Credentials, Region};
@@ -63,7 +63,7 @@ async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
         .region(Region::new(region.clone()))
         .behavior_version_latest();
 
-    // For MinIO or custom endpoints, set the endpoint URL
+    // For custom or embedded endpoints, set the endpoint URL
     if !config.endpoint.is_empty() {
         s3_config_builder = s3_config_builder
             .endpoint_url(&config.endpoint)
@@ -208,17 +208,18 @@ impl BlobService {
                     BlobError::ConfigError(format!("Failed to build S3 store: {}", e))
                 })?)
             }
-            "minio" => {
+            "embedded" => {
                 if config.endpoint.is_empty() {
                     return Err(BlobError::ConfigError(
-                        "endpoint required for MinIO".to_string(),
+                        "embedded endpoint must be set (populated by EmbeddedObjectStore::start or BLOB_ENDPOINT env var)".to_string(),
                     ));
                 }
 
                 let mut builder = AmazonS3Builder::new()
                     .with_bucket_name(&config.bucket)
                     .with_endpoint(&config.endpoint)
-                    .with_allow_http(!config.use_ssl);
+                    .with_allow_http(true)
+                    .with_virtual_hosted_style_request(false);
 
                 if let Some(access_key_id) = config.get_access_key_id() {
                     builder = builder.with_access_key_id(&access_key_id);
@@ -229,7 +230,7 @@ impl BlobService {
                 }
 
                 Arc::new(builder.build().map_err(|e| {
-                    BlobError::ConfigError(format!("Failed to build MinIO store: {}", e))
+                    BlobError::ConfigError(format!("Failed to build embedded object store: {}", e))
                 })?)
             }
             "gcp" => {
@@ -279,8 +280,8 @@ impl BlobService {
             }
         };
 
-        // For S3/MinIO backends, ensure the bucket exists (auto-create if needed)
-        if config.backend == "s3" || config.backend == "minio" {
+        // For S3-compatible backends (s3, embedded), auto-create the bucket if missing
+        if config.backend == "s3" || config.backend == "embedded" {
             ensure_bucket_exists(&config).await?;
         }
 

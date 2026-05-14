@@ -27,7 +27,7 @@ docker run -d \
 ### Docker Compose (Production Setup)
 
 ```bash
-# Start node with PostgreSQL and MinIO
+# Start node with PostgreSQL and embedded object store
 docker-compose up -d
 
 # Check status
@@ -93,7 +93,7 @@ docker run -d \
 
 #### Docker Compose (Multi-Node with Dependencies)
 
-The `docker-compose.yml` file provides a production-ready setup with PostgreSQL and MinIO:
+The `docker-compose.yml` file provides a production-ready setup with PostgreSQL and the embedded object store (rustfs):
 
 ```bash
 # Start all services (auth enabled by default)
@@ -112,7 +112,7 @@ docker-compose down
 The compose file includes:
 - **PlexSpaces Node**: Empty node ready for WASM deployments
 - **PostgreSQL**: Shared database for scheduler, workflow, journaling, etc.
-- **MinIO**: S3-compatible blob storage
+- **Embedded object store (rustfs)**: S3-compatible blob storage (auto-started by the node when no external endpoint is configured)
 
 **Configuration**:
 - Auth is **enabled by default** in `docker-compose.yml` (production-ready)

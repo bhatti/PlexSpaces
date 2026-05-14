@@ -457,7 +457,7 @@ fn test_error_display() {
 ///
 /// This simulates the scenario where:
 /// 1. A blob is uploaded and exists in both DB and object store
-/// 2. The object store is cleared (e.g., MinIO restart) but DB metadata remains
+/// 2. The object store is cleared (e.g., store restart) but DB metadata remains
 /// 3. A new upload with the same content should detect the stale metadata,
 ///    clean it up, and proceed with a fresh upload
 #[tokio::test]
@@ -491,7 +491,7 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
         .unwrap();
     assert_eq!(downloaded, data);
 
-    // Step 2: Delete the blob file from object store DIRECTLY (simulating MinIO restart)
+    // Step 2: Delete the blob file from object store DIRECTLY (simulating store restart)
     // The metadata still exists in the database (stale state)
     let storage_path = format!(
         "/plexspaces/{}/{}/{}",

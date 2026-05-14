@@ -28,7 +28,7 @@ cd examples/rust/apps/abstractions
 
 The verifier uses the actor `/ask` endpoint for steps that inspect returned payloads. The plain actor POST endpoint is tell/cast-only and returns an acknowledgement envelope, not the handler response body.
 
-`./scripts/server.sh` uses the checked-in `release.yaml`, which now enables the local blob backend by default so this example can validate blob APIs without requiring MinIO.
+`./scripts/server.sh` uses the checked-in `release.yaml`, which enables the local blob backend by default so this example can validate blob APIs without an external object store.
 
 The crate still keeps native Rust contract tests for the annotation-based SDK surface so the example validates both:
 

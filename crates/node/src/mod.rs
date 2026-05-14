@@ -123,6 +123,8 @@ pub struct Node {
     /// Blob storage service (S3-compatible object storage)
     /// Created in start() if blob config is provided
     blob_service: Arc<RwLock<Option<Arc<plexspaces_blob::BlobService>>>>,
+    /// Embedded object store process (kept alive for node's lifetime when using embedded backend)
+    _embedded_object_store: Arc<RwLock<Option<plexspaces_blob::embedded_object_store::EmbeddedObjectStore>>>,
     /// Shutdown trigger for programmatic shutdown (allows shutdown() to stop gRPC server)
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
     /// ServiceLocator for centralized service registration and gRPC client caching
@@ -153,7 +155,23 @@ pub fn default_node_config() -> plexspaces_proto::node::v1::NodeConfig {
         metadata: HashMap::new(),
         node_registry: None,         // Use defaults from NodeRegistryConfig
         grpc_address: String::new(), // Derived from listen_addr if empty
+        blob_http_port: 0,           // 0 = derive as grpc_port + 100
     }
+}
+
+/// Resolve the blob HTTP port from config, defaulting to `grpc_port + 100`.
+///
+/// Used for both the Axum REST server (non-embedded) and the embedded rustfs
+/// subprocess — they share a single `blob_http_port`.
+fn resolve_blob_http_port(config: &plexspaces_proto::node::v1::NodeConfig) -> u16 {
+    if config.blob_http_port != 0 {
+        return config.blob_http_port as u16;
+    }
+    config
+        .listen_addr
+        .parse::<std::net::SocketAddr>()
+        .map(|a| a.port().saturating_add(100))
+        .unwrap_or(8100)
 }
 
 // Note: NodeMetrics is from proto crate, so we can't add methods to it
@@ -212,6 +230,7 @@ impl Node {
             task_router: Arc::new(RwLock::new(None)), // Phase 5: Task router (created in start())
             wasm_runtime: Arc::new(RwLock::new(None)), // WASM runtime (created in start())
             blob_service: Arc::new(RwLock::new(None)), // Blob service (created in start())
+            _embedded_object_store: Arc::new(RwLock::new(None)), // Embedded object store process (if any)
             health_reporter: Arc::new(RwLock::new(None)), // Health reporter (created in start())
             release_spec: Arc::new(RwLock::new(None)), // ReleaseSpec (optional, loaded from config)
             application_manager: Arc::new(ApplicationManager::new()), // ApplicationManager (NOT in ServiceLocator)
@@ -245,12 +264,12 @@ impl Node {
                     config.id = actual_node_id.clone();
                     config
                 } else {
-                    // ReleaseSpec exists but node is None - create default
+                    // ReleaseSpec exists but node is None - create default from Node config
                     plexspaces_proto::node::v1::NodeConfig {
                         id: actual_node_id.clone(),
                         listen_addr: self.config.listen_addr.clone(),
-                        cluster_seed_nodes: vec![],
-                        cluster_name: String::new(),
+                        cluster_seed_nodes: self.config.cluster_seed_nodes.clone(),
+                        cluster_name: self.config.cluster_name.clone(),
                         max_connections: self.config.max_connections,
                         heartbeat_interval_ms: self.config.heartbeat_interval_ms,
                         clustering_enabled: self.config.clustering_enabled,
@@ -258,6 +277,7 @@ impl Node {
                         metadata: self.config.metadata.clone(),
                         node_registry: None,
                         grpc_address: self.config.grpc_address.clone(),
+                        blob_http_port: self.config.blob_http_port,
                     }
                 }
             } else {
@@ -265,8 +285,8 @@ impl Node {
                 plexspaces_proto::node::v1::NodeConfig {
                     id: actual_node_id.clone(),
                     listen_addr: self.config.listen_addr.clone(),
-                    cluster_seed_nodes: vec![],
-                    cluster_name: String::new(),
+                    cluster_seed_nodes: self.config.cluster_seed_nodes.clone(),
+                    cluster_name: self.config.cluster_name.clone(),
                     max_connections: self.config.max_connections,
                     heartbeat_interval_ms: self.config.heartbeat_interval_ms,
                     clustering_enabled: self.config.clustering_enabled,
@@ -274,6 +294,7 @@ impl Node {
                     metadata: self.config.metadata.clone(),
                     node_registry: None,
                     grpc_address: self.config.grpc_address.clone(),
+                    blob_http_port: self.config.blob_http_port,
                 }
             }
         };
@@ -287,6 +308,10 @@ impl Node {
             proto_node_config.grpc_address = self.config.grpc_address.clone();
         } else {
             proto_node_config.grpc_address = self.config.listen_addr.clone();
+        }
+        // Propagate cluster_name from NodeBuilder config if explicitly set
+        if !self.config.cluster_name.is_empty() {
+            proto_node_config.cluster_name = self.config.cluster_name.clone();
         }
 
         // CRITICAL: Set PLEXSPACES_NODE_ID env var so config_manager::initialize() uses correct node ID
@@ -1222,16 +1247,26 @@ impl Node {
         let db_url = self.get_shared_database_url().await;
         let locator: Arc<dyn plexspaces_actor::InitializableServiceLocator + Send + Sync> =
             self.service_locator.clone();
-        let service_arc = plexspaces_blob::node_startup::create_and_register_blob_service(
-            locator,
-            &db_url,
-            blob_config,
-        )
-        .await
-        .map_err(|e| NodeError::ConfigError(e.to_string()))?;
+
+        // The embedded rustfs subprocess serves on blob_http_port (same port as blob REST).
+        let embedded_port = resolve_blob_http_port(&self.config);
+
+        let (service_arc, embedded_store) =
+            plexspaces_blob::node_startup::create_and_register_blob_service(
+                locator,
+                &db_url,
+                blob_config,
+                embedded_port,
+            )
+            .await
+            .map_err(|e| NodeError::ConfigError(e.to_string()))?;
         {
             let mut blob_service_guard = self.blob_service.write().await;
             *blob_service_guard = Some(service_arc.clone());
+        }
+        if let Some(store) = embedded_store {
+            let mut store_guard = self._embedded_object_store.write().await;
+            *store_guard = Some(store);
         }
         Ok(service_arc)
     }
@@ -1496,59 +1531,63 @@ impl Node {
         // Register Node in ServiceLocator so ActorServiceImpl can access it
         self.service_locator.register_service(self.clone()).await;
 
-        // Initialize blob service - optional; node starts without blob storage if init fails (e.g. MinIO down)
+        // Initialize blob service - optional; node starts without blob storage if init fails (e.g. backend unreachable)
         let blob_service = match self.init_blob_service().await {
             Ok(service) => Some(service),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    "Blob service unavailable (e.g. MinIO/S3 not running or bucket missing). Node will start without blob storage."
+                    "Blob service unavailable (e.g. S3-compatible backend not running or bucket missing). Node will start without blob storage."
                 );
                 None
             }
         };
 
-        // Start blob HTTP server on separate task only when blob service is available
-        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> = if let Some(ref blob_svc) =
-            blob_service
-        {
-            // Create Axum router for blob HTTP endpoints
-            use plexspaces_blob::server::http_axum::create_blob_router;
-            let router = create_blob_router(blob_svc.clone());
-
-            // Parse the listen address to get the port, then use port+100 for HTTP
-            // Using +100 to avoid conflicts with MinIO console (which uses gRPC_PORT + 1)
-            let grpc_addr: std::net::SocketAddr = self
-                .config
-                .listen_addr
-                .parse()
-                .unwrap_or_else(|_| "127.0.0.1:9999".parse().unwrap());
-            let http_port = grpc_addr.port() + 100;
-            let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
-                .parse::<std::net::SocketAddr>()
-                .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
-
-            tracing::info!("🌐 Starting blob HTTP server on http://{}", http_addr);
-
-            // Bind port before spawning; skip blob HTTP server if bind fails (non-fatal)
-            match tokio::net::TcpListener::bind(http_addr).await {
-                Ok(listener) => Some(tokio::spawn(async move {
-                    use axum::serve;
-                    if let Err(e) = serve(listener, router).await {
-                        tracing::error!("Blob HTTP server error: {}", e);
-                    }
-                })),
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "Could not bind blob HTTP server. Blob HTTP endpoints will be unavailable."
-                    );
-                    None
-                }
-            }
-        } else {
-            None
+        // Read blob backend to decide whether to start the Axum REST wrapper.
+        // When backend = "embedded", rustfs already owns blob_http_port — no separate Axum server.
+        let blob_backend = {
+            let release_spec = self.release_spec.read().await;
+            plexspaces_blob::node_startup::blob_config_from_release_spec(release_spec.as_ref())
+                .backend
         };
+
+        // Start the Axum blob REST server only for non-embedded backends (s3, gcp, azure).
+        // For "embedded", rustfs itself handles all HTTP on blob_http_port.
+        let _blob_http_handle: Option<tokio::task::JoinHandle<()>> =
+            if blob_service.is_some() && blob_backend != "embedded" {
+                use plexspaces_blob::server::http_axum::create_blob_router;
+                let router = create_blob_router(blob_service.as_ref().unwrap().clone());
+
+                let grpc_addr: std::net::SocketAddr = self
+                    .config
+                    .listen_addr
+                    .parse()
+                    .unwrap_or_else(|_| "127.0.0.1:9999".parse().unwrap());
+                let http_port = resolve_blob_http_port(&self.config);
+                let http_addr = format!("{}:{}", grpc_addr.ip(), http_port)
+                    .parse::<std::net::SocketAddr>()
+                    .unwrap_or_else(|_| "127.0.0.1:10000".parse().unwrap());
+
+                tracing::info!(addr = %http_addr, "Starting blob HTTP server");
+
+                match tokio::net::TcpListener::bind(http_addr).await {
+                    Ok(listener) => Some(tokio::spawn(async move {
+                        use axum::serve;
+                        if let Err(e) = serve(listener, router).await {
+                            tracing::error!(error = %e, "Blob HTTP server error");
+                        }
+                    })),
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Could not bind blob HTTP server; blob HTTP endpoints will be unavailable"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
 
         // Create gRPC services
         // Note: ActorServiceImpl will be created with health reporter after HealthService is initialized
@@ -1885,10 +1924,7 @@ impl Node {
                 tracing::warn!("Warning: Failed to register built-in dependencies: {}", e);
                 0
             });
-        tracing::warn!(
-            "✅ Registered {} built-in dependency checkers",
-            deps_registered
-        );
+        tracing::info!(count = deps_registered, "Registered built-in dependency health checkers");
 
         // Register dependencies from object-registry if configured
         // This allows registering dependencies by name/type from the registry

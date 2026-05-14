@@ -40,7 +40,7 @@
 //! - `kafka_available()` - Kafka (localhost:9092)
 //! - `postgres_available()` - PostgreSQL (localhost:5432)
 //! - `firecracker_available()` - Firecracker binary + kernel + rootfs
-//! - `minio_available()` - MinIO/S3 (localhost:9000)
+//! - `object_store_available()` - S3-compatible object store (BLOB_ENDPOINT or localhost:9000)
 
 use std::path::Path;
 use std::process::Command;
@@ -101,7 +101,7 @@ static REDIS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::n
 static NATS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static KAFKA_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static POSTGRES_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
-static MINIO_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+static OBJECT_STORE_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 
 /// Check if DynamoDB Local is running on the default port
 /// Uses a static cache to avoid checking for every test
@@ -361,38 +361,38 @@ pub fn get_postgres_url() -> String {
 }
 
 // ============================================================================
-// MinIO/S3 Service Guard
+// Object Store Service Guard
 // ============================================================================
 
-/// Check if MinIO/S3 is running on the default port (9000)
-/// Uses a static cache to avoid checking for every test
-/// Fast timeout (500ms) for quick failure when service is not available
+/// Check if the configured S3-compatible object store is reachable at BLOB_ENDPOINT.
+/// Uses a static cache to avoid checking for every test.
 ///
 /// ## Environment Variables
-/// - `MINIO_ENDPOINT`: Override default endpoint (default: http://localhost:9000)
-pub async fn minio_available() -> bool {
-    let cache = MINIO_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
+/// - `BLOB_ENDPOINT`: Object store endpoint URL (default: http://localhost:9000)
+pub async fn object_store_available() -> bool {
+    let cache = OBJECT_STORE_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
 
     if let Some(available) = *cached {
         return available;
     }
 
-    // Check MinIO by attempting TCP connection to default port
-    let minio_addr = std::env::var("MINIO_ENDPOINT")
-        .unwrap_or_else(|_| "localhost:9000".to_string())
+    let addr = std::env::var("BLOB_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
         .replace("http://", "")
         .replace("https://", "");
-    let available = check_tcp_port(&minio_addr, Duration::from_millis(500)).await;
+    let available = check_tcp_port(&addr, Duration::from_millis(500)).await;
     *cached = Some(available);
     available
 }
 
-/// Get MinIO endpoint URL (from env or default)
-pub fn get_minio_endpoint() -> String {
-    std::env::var("MINIO_ENDPOINT")
-        .or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
-        .unwrap_or_else(|_| "http://localhost:9000".to_string())
+/// Get object store endpoint URL.
+///
+/// Returns `BLOB_ENDPOINT` if set, otherwise the default port used by the embedded object
+/// store auto-started by the node (`http://127.0.0.1:9000`).
+pub fn get_object_store_endpoint() -> String {
+    std::env::var("BLOB_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
 }
 
 // ============================================================================

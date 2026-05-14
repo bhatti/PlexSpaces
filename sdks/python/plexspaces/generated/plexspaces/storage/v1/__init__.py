@@ -109,7 +109,7 @@ class BlobConfig(betterproto.Message):
     Blob storage configuration
 
      ## Purpose
-     Configuration for S3-compatible blob storage backend (S3, MinIO, GCP, Azure).
+     Configuration for S3-compatible blob storage backend (S3, embedded, GCP, Azure).
      Used for storing large binary objects with metadata management.
 
      ## Usage
@@ -118,13 +118,16 @@ class BlobConfig(betterproto.Message):
     """
 
     backend: str = betterproto.string_field(1)
-    """Backend type (s3, minio, gcp, azure)"""
+    """
+    Backend type (s3, embedded, gcp, azure)
+     "embedded" uses a local S3-compatible subprocess (default for local dev/test)
+    """
 
     bucket: str = betterproto.string_field(2)
     """Bucket name"""
 
     endpoint: str = betterproto.string_field(3)
-    """Endpoint URL (for MinIO or custom S3-compatible)"""
+    """Endpoint URL (for SeaweedFS or custom S3-compatible)"""
 
     region: str = betterproto.string_field(4)
     """Region (for S3/GCP/Azure)"""

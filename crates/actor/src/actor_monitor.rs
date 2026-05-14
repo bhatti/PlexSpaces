@@ -230,14 +230,14 @@ impl ActorMonitor {
             return Err("Cannot link actor to itself");
         }
         let mut links = self.links.write().await;
-        links
-            .entry(actor1_id.clone())
-            .or_default()
-            .push(actor2_id.clone());
-        links
-            .entry(actor2_id.clone())
-            .or_default()
-            .push(actor1_id.clone());
+        let a_links = links.entry(actor1_id.clone()).or_default();
+        if !a_links.contains(actor2_id) {
+            a_links.push(actor2_id.clone());
+        }
+        let b_links = links.entry(actor2_id.clone()).or_default();
+        if !b_links.contains(actor1_id) {
+            b_links.push(actor1_id.clone());
+        }
         tracing::debug!(actor1 = %actor1_id, actor2 = %actor2_id, "Linked actors");
         Ok(())
     }

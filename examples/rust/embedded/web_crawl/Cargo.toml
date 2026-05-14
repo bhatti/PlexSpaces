@@ -1,0 +1,42 @@
+# Web Crawl - Rust Embedded example
+#
+# Single-binary example: PlexSpaces node + actors in one process.
+# Uses ElasticPool (fetcher pool) and ShardGroup (map-reduce word frequency).
+# Modeled after Ray's web-crawl and map-reduce examples.
+#
+# Build: cargo build --release
+# Run:   ./target/release/web_crawl [seed_url ...]
+
+[workspace]
+
+[package]
+name = "web_crawl"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Parallel web crawler: ElasticPool + ShardGroup (embedded single-binary)"
+
+[[bin]]
+name = "web_crawl"
+path = "src/main.rs"
+
+[dependencies]
+# PlexSpaces SDK and core - local paths (same repo build)
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-node = { path = "../../../../crates/node" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+anyhow = "1.0"

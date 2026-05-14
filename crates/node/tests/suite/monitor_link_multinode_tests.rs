@@ -24,6 +24,7 @@ use tonic::transport::Server;
 use super::test_helpers::{register_actor_with_message_sender, test_runtime_actor_id};
 
 /// Start `ActorService` for `node` on an ephemeral port; returns `host:port` (no scheme).
+/// Polls with TCP connect until the server is actually accepting connections.
 async fn start_actor_grpc_server(node: Arc<plexspaces_node::Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
@@ -39,8 +40,17 @@ async fn start_actor_grpc_server(node: Arc<plexspaces_node::Node>) -> String {
             .expect("ActorService test server failed");
     });
 
-    tokio::task::yield_now().await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Poll until the port is accepting TCP connections (replaces flaky fixed sleep)
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if tokio::net::TcpStream::connect(bound_addr).await.is_ok() {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("ActorService server on {} not ready within 5s", bound_addr);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     bound_addr.to_string()
 }
@@ -72,13 +82,13 @@ async fn wait_for_down(
 
 #[tokio::test]
 async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
-    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(NodeBuilder::new("demonitor-node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("demonitor-node2").with_auth_disabled().build().await);
 
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
 
-    let worker_id = test_runtime_actor_id("remote-w", "node2");
-    let sup_id = test_runtime_actor_id("remote-s", "node1");
+    let worker_id = test_runtime_actor_id("remote-w", "demonitor-node2");
+    let sup_id = test_runtime_actor_id("remote-s", "demonitor-node1");
 
     let sup_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), sup_id.to_string())
@@ -107,13 +117,13 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
         .register_node(
             &ctx,
             NodeRegistration {
-                node_id: "node2".to_string(),
+                node_id: "demonitor-node2".to_string(),
                 node_address: format!("http://{}", node2_listen),
                 ..Default::default()
             },
         )
         .await
-        .expect("register peer node2");
+        .expect("register peer demonitor-node2");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -121,7 +131,7 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
         .service_locator()
         .actor_registry()
         .await
-        .expect("node2 ActorRegistry");
+        .expect("demonitor-node2 ActorRegistry");
     assert!(
         reg2.actor_monitor()
             .get_monitors(&worker_id)
@@ -157,14 +167,14 @@ async fn test_remote_monitor_then_demonitor_clears_registry_on_worker_node() {
 
 #[tokio::test]
 async fn test_cross_node_link_registers_on_both_actor_registries() {
-    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(NodeBuilder::new("link-node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("link-node2").with_auth_disabled().build().await);
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
 
-    let a_id = test_runtime_actor_id("link-a", "node1");
-    let b_id = test_runtime_actor_id("link-b", "node2");
+    let a_id = test_runtime_actor_id("link-a", "link-node1");
+    let b_id = test_runtime_actor_id("link-b", "link-node2");
 
     let ma = Arc::new(
         Mailbox::new(MailboxConfig::default(), a_id.to_string())
@@ -191,23 +201,23 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
     nr1.register_node(
         &ctx_sys,
         NodeRegistration {
-            node_id: "node1".to_string(),
+            node_id: "link-node1".to_string(),
             node_address: format!("http://{}", node1_listen),
             ..Default::default()
         },
     )
     .await
-    .expect("register node1 on node1 (lookup for local link RPC)");
+    .expect("register link-node1 on link-node1");
     nr1.register_node(
         &ctx_sys,
         NodeRegistration {
-            node_id: "node2".to_string(),
+            node_id: "link-node2".to_string(),
             node_address: format!("http://{}", node2_listen),
             ..Default::default()
         },
     )
     .await
-    .expect("register node2 on node1");
+    .expect("register link-node2 on link-node1");
 
     let ctx_sys2 = node2
         .service_locator()
@@ -217,27 +227,27 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
         .service_locator()
         .get_node_registry()
         .await
-        .expect("node2 NodeRegistry");
+        .expect("link-node2 NodeRegistry");
     nr2.register_node(
         &ctx_sys2,
         NodeRegistration {
-            node_id: "node1".to_string(),
+            node_id: "link-node1".to_string(),
             node_address: format!("http://{}", node1_listen),
             ..Default::default()
         },
     )
     .await
-    .expect("register node1 on node2");
+    .expect("register link-node1 on link-node2");
     nr2.register_node(
         &ctx_sys2,
         NodeRegistration {
-            node_id: "node2".to_string(),
+            node_id: "link-node2".to_string(),
             node_address: format!("http://{}", node2_listen),
             ..Default::default()
         },
     )
     .await
-    .expect("register node2 on node2 (lookup for local link RPC)");
+    .expect("register link-node2 on link-node2");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -269,14 +279,14 @@ async fn test_cross_node_link_registers_on_both_actor_registries() {
 /// routing to the supervisor's canonical `ActorId`).
 #[tokio::test]
 async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
-    let node1 = Arc::new(NodeBuilder::new("node1").with_auth_disabled().build().await);
-    let node2 = Arc::new(NodeBuilder::new("node2").with_auth_disabled().build().await);
+    let node1 = Arc::new(NodeBuilder::new("down-node1").with_auth_disabled().build().await);
+    let node2 = Arc::new(NodeBuilder::new("down-node2").with_auth_disabled().build().await);
 
     let node1_listen = start_actor_grpc_server(node1.clone()).await;
     let node2_listen = start_actor_grpc_server(node2.clone()).await;
 
-    let worker_id = test_runtime_actor_id("down-worker", "node2");
-    let supervisor_id = test_runtime_actor_id("down-supervisor", "node1");
+    let worker_id = test_runtime_actor_id("down-worker", "down-node2");
+    let supervisor_id = test_runtime_actor_id("down-supervisor", "down-node1");
 
     let supervisor_mailbox = Arc::new(
         Mailbox::new(MailboxConfig::default(), supervisor_id.to_string())
@@ -300,22 +310,22 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
         .service_locator()
         .get_node_registry()
         .await
-        .expect("node1 NodeRegistry");
+        .expect("down-node1 NodeRegistry");
     for reg in [
         NodeRegistration {
-            node_id: "node1".to_string(),
+            node_id: "down-node1".to_string(),
             node_address: format!("http://{}", node1_listen),
             ..Default::default()
         },
         NodeRegistration {
-            node_id: "node2".to_string(),
+            node_id: "down-node2".to_string(),
             node_address: format!("http://{}", node2_listen),
             ..Default::default()
         },
     ] {
         nr1.register_node(&ctx1, reg)
             .await
-            .expect("node1 nr register");
+            .expect("down-node1 nr register");
     }
 
     let ctx2 = node2
@@ -326,22 +336,22 @@ async fn test_remote_monitor_down_delivered_to_supervisor_mailbox() {
         .service_locator()
         .get_node_registry()
         .await
-        .expect("node2 NodeRegistry");
+        .expect("down-node2 NodeRegistry");
     for reg in [
         NodeRegistration {
-            node_id: "node1".to_string(),
+            node_id: "down-node1".to_string(),
             node_address: format!("http://{}", node1_listen),
             ..Default::default()
         },
         NodeRegistration {
-            node_id: "node2".to_string(),
+            node_id: "down-node2".to_string(),
             node_address: format!("http://{}", node2_listen),
             ..Default::default()
         },
     ] {
         nr2.register_node(&ctx2, reg)
             .await
-            .expect("node2 nr register");
+            .expect("down-node2 nr register");
     }
 
     tokio::time::sleep(Duration::from_millis(50)).await;

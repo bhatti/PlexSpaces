@@ -37,7 +37,7 @@ pub trait BlobConfigExt {
 impl BlobConfigExt for BlobConfig {
     fn validate(&self) -> Result<(), BlobError> {
         match self.backend.as_str() {
-            "s3" | "minio" | "gcp" | "azure" | "local" => {}
+            "s3" | "embedded" | "gcp" | "azure" | "local" => {}
             _ => {
                 return Err(BlobError::ConfigError(format!(
                     "Invalid backend: {}",
@@ -46,14 +46,8 @@ impl BlobConfigExt for BlobConfig {
             }
         }
 
-        if self.bucket.is_empty() && self.backend != "local" {
+        if self.bucket.is_empty() && self.backend != "local" && self.backend != "embedded" {
             return Err(BlobError::ConfigError("bucket is required".to_string()));
-        }
-
-        if self.backend == "minio" && self.endpoint.is_empty() {
-            return Err(BlobError::ConfigError(
-                "endpoint is required for MinIO backend".to_string(),
-            ));
         }
 
         if self.backend == "s3" && self.region.is_empty() {

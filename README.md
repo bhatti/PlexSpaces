@@ -432,10 +432,10 @@ Example output showing backend initialization:
 INFO plexspaces_keyvalue: KeyValue storage initialized db_path="/tmp/plexspaces-test-node.db" table="kv_store" backend="SQLite"
 INFO plexspaces_locks: Locks storage initialized db_url="sqlite:///tmp/plexspaces.db" table="locks" backend="SQLite"
 INFO plexspaces_journaling: Journal storage initialized backend="InMemory"
-INFO plexspaces_blob: Blob storage initialized backend="minio" bucket="plexspaces" endpoint="http://localhost:9000"
+INFO plexspaces_blob: Blob storage initialized backend="embedded" bucket="plexspaces" endpoint="http://localhost:9000"
 ```
 
-Supported backends: SQLite, PostgreSQL, Redis, DynamoDB, MinIO/S3/GCP/Azure (blob), InMemory.
+Supported backends: SQLite, PostgreSQL, Redis, DynamoDB, embedded object store (rustfs)/S3/GCP/Azure (blob), InMemory.
 
 ## License
 

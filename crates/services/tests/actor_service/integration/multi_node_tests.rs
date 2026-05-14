@@ -220,6 +220,7 @@ async fn create_test_registry_with_remote_actors(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: String::new(),
+        blob_http_port: 0,
     };
     service_locator.register_node_config(node_config).await;
 

@@ -667,36 +667,29 @@ runtime:
     prefix: "/tmp/plexspaces-blobs"
 ```
 
-### Optional MinIO for S3-Compatible Testing
+### Embedded Object Store (Default S3-Compatible Backend)
 
-For S3-compatible blob storage testing, run MinIO locally:
+The node auto-starts the embedded object store (`rustfs` binary) when no external endpoint is configured. No credentials or separate Docker container are required.
 
+To override the binary used:
 ```bash
-# Start MinIO
-docker run -d \
-  -p 9000:9000 \
-  -p 9090:9090 \
-  --name minio_server \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  -v ./data:/data \
-  quay.io/minio/minio server /data --console-address :9090
-
-# Access MinIO Console at http://localhost:9090
-# Create bucket: plexspaces-blobs
+export EMBEDDED_OBJECT_STORE_BIN=/usr/local/bin/rustfs
 ```
 
-Configure in `release.yaml`:
+To install `rustfs`:
+```bash
+cargo install rustfs
+```
+
+Configure in `release.yaml` (only needed to point at an external endpoint):
 
 ```yaml
 runtime:
   blob:
-    backend: minio
-    bucket: plexspaces-blobs  # Must create this bucket in MinIO first
-    endpoint: http://localhost:9000
+    backend: embedded
+    bucket: plexspaces-blobs
+    endpoint: http://localhost:9000  # omit to use auto-started embedded store
     region: us-east-1
-    access_key_id: minioadmin
-    secret_access_key: minioadmin
     use_ssl: false
     prefix: "/plexspaces"
 ```

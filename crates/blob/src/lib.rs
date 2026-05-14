@@ -20,43 +20,16 @@
 //!
 //! ## Purpose
 //! Provides S3-compatible blob storage with metadata management for PlexSpaces.
-//! Supports multiple backends: S3, MinIO, GCP Cloud Storage, Azure Blob Storage.
+//! Supports multiple backends: embedded S3-compatible store (default, auto-started), AWS S3, GCP Cloud Storage, Azure Blob Storage.
 //!
 //! ## Architecture
 //! - **Blob Storage**: Actual binary data stored in S3-compatible backend
 //! - **Metadata Storage**: BlobMetadata stored in SQL (SQLite/PostgreSQL) for querying
 //! - **Multi-tenancy**: Isolation via tenant_id and namespace
 //! - **Path Structure**: /plexspaces/{tenant_id}/{namespace}/{blob_id}
-//!
-//! ## Usage
-//! ```rust,no_run
-//! use plexspaces_blob::{BlobService, BlobConfig, BlobMetadata};
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let config = BlobConfig {
-//!     backend: "minio".to_string(),
-//!     bucket: "plexspaces".to_string(),
-//!     endpoint: Some("http://localhost:9000".to_string()),
-//!     // ... other config
-//! };
-//!
-//! let blob_service = BlobService::new(config).await?;
-//!
-//! // Upload a blob
-//! let metadata = blob_service.upload_blob(
-//!     "tenant-1",
-//!     "namespace-1",
-//!     "my-file.txt",
-//!     b"file contents".to_vec(),
-//! ).await?;
-//!
-//! // Download a blob
-//! let data = blob_service.download_blob(&metadata.blob_id).await?;
-//! # Ok(())
-//! # }
-//! ```
 
 pub mod config_ext;
+pub mod embedded_object_store;
 pub mod error;
 pub mod helpers;
 pub mod repository;

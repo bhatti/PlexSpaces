@@ -19,7 +19,7 @@
 //! Blob-based KeyValue store implementation using object_store directly.
 //!
 //! ## Purpose
-//! Provides a KeyValue store implementation using S3-compatible object storage (MinIO, AWS S3, etc.)
+//! Provides a KeyValue store implementation using S3-compatible object storage (embedded, AWS S3, etc.)
 //! directly, without requiring blob service or SQL database dependencies.
 //!
 //! ## Design
@@ -33,7 +33,7 @@
 //! ```
 //! KeyValue Store (Blob Backend)
 //!     ↓
-//! Object Store (MinIO/S3/GCP/Azure)
+//! Object Store (embedded/S3/GCP/Azure)
 //!     - Objects stored at: {prefix}/keyvalue/{tenant}/{namespace}/{key}
 //!     - No SQL database needed
 //!     - All metadata in object paths/names
@@ -69,11 +69,11 @@ use tracing::{debug, error, info, instrument, trace, warn};
 pub struct BlobKVConfig {
     /// Storage prefix (e.g., "/plexspaces")
     pub prefix: String,
-    /// Backend type (minio, s3, gcp, azure, local)
+    /// Backend type (embedded, s3, gcp, azure, local)
     pub backend: String,
     /// Bucket name
     pub bucket: String,
-    /// Endpoint URL (for MinIO)
+    /// Endpoint URL (for embedded or custom S3-compatible stores)
     pub endpoint: Option<String>,
     /// Region (for S3/GCP/Azure)
     pub region: Option<String>,
@@ -97,7 +97,7 @@ impl BlobKVConfig {
         use std::env;
         Self {
             prefix: env::var("BLOB_PREFIX").unwrap_or_else(|_| "/plexspaces".to_string()),
-            backend: env::var("BLOB_BACKEND").unwrap_or_else(|_| "minio".to_string()),
+            backend: env::var("BLOB_BACKEND").unwrap_or_else(|_| "embedded".to_string()),
             bucket: env::var("BLOB_BUCKET").unwrap_or_else(|_| "plexspaces".to_string()),
             endpoint: env::var("BLOB_ENDPOINT").ok(),
             region: env::var("BLOB_REGION").ok(),
@@ -139,15 +139,18 @@ impl BlobKVConfig {
                     KVError::ConfigError(format!("Failed to build S3 store: {}", e))
                 })?)
             }
-            "minio" => {
+            "embedded" => {
                 let endpoint = self.endpoint.as_ref().ok_or_else(|| {
-                    KVError::ConfigError("endpoint required for MinIO".to_string())
+                    KVError::ConfigError(
+                        "endpoint required for embedded backend (set BLOB_ENDPOINT)".to_string(),
+                    )
                 })?;
 
                 let mut builder = AmazonS3Builder::new()
                     .with_bucket_name(&self.bucket)
                     .with_endpoint(endpoint)
-                    .with_allow_http(!self.use_ssl);
+                    .with_allow_http(true)
+                    .with_virtual_hosted_style_request(false);
 
                 if let Some(ref access_key_id) = self.access_key_id {
                     builder = builder.with_access_key_id(access_key_id);
@@ -158,7 +161,7 @@ impl BlobKVConfig {
                 }
 
                 Arc::new(builder.build().map_err(|e| {
-                    KVError::ConfigError(format!("Failed to build MinIO store: {}", e))
+                    KVError::ConfigError(format!("Failed to build embedded object store: {}", e))
                 })?)
             }
             "gcp" => {

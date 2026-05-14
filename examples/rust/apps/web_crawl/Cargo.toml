@@ -1,0 +1,31 @@
+# Web Crawl - Rust WASM app
+#
+# Deployable WASM component using the plexspaces:actor WIT host surface.
+# Build: ./build.sh
+# Test:  ./test.sh [HTTP_PORT|host:port ...]
+
+[workspace]
+
+[package]
+name = "web-crawl-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Parallel web crawler WASM app: ElasticPool + TupleSpace + ShardGroup"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
+plexspaces-sdk   = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
+prost            = "0.12"
+serde            = { version = "1.0", features = ["derive"] }
+serde_json       = "1.0"
+wit-bindgen      = "0.51.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

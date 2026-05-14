@@ -1,0 +1,49 @@
+# Web Crawl (Rust WASM): Orchestrator + fetcher pool + analyzer shards
+
+name = "web-crawl-rust"
+version = "1.0.0"
+namespace = "web-crawl-rust"
+seed_nodes = ["localhost:8091"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Orchestrator: coordinates BFS crawl
+[[supervisor.children]]
+name = "orchestrator"
+actor_type = "web_crawl_wasm"
+role = "orchestrator"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+args = { role = "orchestrator" }
+
+# Fetcher pool: 4 workers (ElasticPool pattern — reused round-robin across URLs)
+[[supervisor.children]]
+name = "fetcher"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+# Analyzer shards (ShardGroup pattern — map-reduce word counts)
+[[supervisor.children]]
+name = "analyzer-0"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "analyzer", shard_id = "0" }
+
+[[supervisor.children]]
+name = "analyzer-1"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "analyzer", shard_id = "1" }

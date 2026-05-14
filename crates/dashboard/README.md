@@ -16,7 +16,7 @@ Dashboard service and UI for monitoring PlexSpaces nodes, applications, tenants,
 - **Multi-node Support**: Aggregate metrics from multiple nodes in a cluster
 - **Tenant Isolation**: Role-based filtering (admin vs non-admin)
 - **System Metrics**: Process-local CPU and memory for node dashboard views, plus host/system metrics where explicitly requested
-- **Dependency Health Monitoring**: Monitor external dependencies (PostgreSQL, Redis, Kafka, MinIO, DynamoDB, SQS) with circuit breaker state
+- **Dependency Health Monitoring**: Monitor external dependencies (PostgreSQL, Redis, Kafka, object-store, DynamoDB, SQS) with circuit breaker state
 
 ## Architecture
 
@@ -86,7 +86,7 @@ curl http://localhost:8000/api/v1/dashboard/dependencies | jq
 ```
 
 Response includes:
-- **Dependency checks**: Status of each dependency (PostgreSQL, Redis, Kafka, MinIO, DynamoDB, SQS)
+- **Dependency checks**: Status of each dependency (PostgreSQL, Redis, Kafka, object-store, DynamoDB, SQS)
 - **Circuit breaker state**: Current state (Closed, Open, Half-Open) for each dependency
 - **Circuit breaker metrics**: Error rates, request counts, trip counts, time in state
 - **Criticality**: Whether each dependency is critical (affects readiness) or non-critical (degraded mode)
@@ -167,16 +167,16 @@ Access dashboard at: http://localhost:8000
 
 ### Step 2b: Deploy Test Environment (Kubernetes)
 
-For Kubernetes testing, deploy 2 PlexSpaces nodes with MinIO and PostgreSQL:
+For Kubernetes testing, deploy 2 PlexSpaces nodes with the embedded object store and PostgreSQL:
 
 ```bash
-# Deploy all components (namespace, MinIO, PostgreSQL, nodes, services)
+# Deploy all components (namespace, object-store, PostgreSQL, nodes, services)
 ./scripts/deploy-dashboard-k8s-test.sh
 ```
 
 This script will:
 1. Create `plexspaces-test` namespace
-2. Deploy MinIO (object storage for blob service)
+2. Deploy the embedded object store (rustfs) as the `object-store` service
 3. Deploy PostgreSQL (database for persistence)
 4. Deploy 2 PlexSpaces nodes (node-1 and node-2) with dashboard enabled
 5. Create ClusterIP services for all components
@@ -185,9 +185,9 @@ This script will:
 ```
 🚀 Deploying PlexSpaces dashboard test environment...
 📦 Creating namespace...
-📦 Deploying MinIO...
+📦 Deploying object-store...
 📦 Deploying PostgreSQL...
-⏳ Waiting for MinIO and PostgreSQL to be ready...
+⏳ Waiting for object-store and PostgreSQL to be ready...
 📦 Deploying PlexSpaces nodes...
 📦 Deploying services...
 ⏳ Waiting for nodes to be ready...
@@ -208,7 +208,7 @@ kubectl get pods -n plexspaces-test
 
 # Expected output:
 # NAME                                  READY   STATUS    RESTARTS   AGE
-# minio-xxx                             1/1     Running   0          2m
+# object-store-xxx                      1/1     Running   0          2m
 # postgres-xxx                          1/1     Running   0          2m
 # plexspaces-node-1-xxx                1/1     Running   0          1m
 # plexspaces-node-2-xxx                1/1     Running   0          1m

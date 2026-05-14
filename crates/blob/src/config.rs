@@ -24,13 +24,13 @@ use std::env;
 /// Blob storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobConfig {
-    /// Backend type (s3, minio, gcp, azure)
+    /// Backend type (s3, embedded, gcp, azure)
     pub backend: String,
 
     /// Bucket name
     pub bucket: String,
 
-    /// Endpoint URL (for MinIO or custom S3-compatible)
+    /// Endpoint URL for embedded or custom S3-compatible store (e.g., "http://127.0.0.1:9100")
     pub endpoint: Option<String>,
 
     /// Region (for S3/GCP/Azure)
@@ -61,9 +61,9 @@ pub struct BlobConfig {
 impl Default for BlobConfig {
     fn default() -> Self {
         Self {
-            backend: "minio".to_string(),
+            backend: "embedded".to_string(),
             bucket: "plexspaces".to_string(),
-            endpoint: Some("http://localhost:9000".to_string()),
+            endpoint: None,
             region: None,
             access_key_id: None,
             secret_access_key: None,
@@ -81,7 +81,7 @@ impl BlobConfig {
     pub fn from_env() -> Self {
         Self {
             backend: env::var("BLOB_BACKEND")
-                .unwrap_or_else(|_| "minio".to_string()),
+                .unwrap_or_else(|_| "embedded".to_string()),
             bucket: env::var("BLOB_BUCKET")
                 .unwrap_or_else(|_| "plexspaces".to_string()),
             endpoint: env::var("BLOB_ENDPOINT").ok(),
@@ -107,16 +107,12 @@ impl BlobConfig {
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
         match self.backend.as_str() {
-            "s3" | "minio" | "gcp" | "azure" => {}
+            "s3" | "embedded" | "gcp" | "azure" => {}
             _ => return Err(format!("Invalid backend: {}", self.backend)),
         }
 
-        if self.bucket.is_empty() {
+        if self.bucket.is_empty() && self.backend != "embedded" {
             return Err("bucket is required".to_string());
-        }
-
-        if self.backend == "minio" && self.endpoint.is_none() {
-            return Err("endpoint is required for MinIO backend".to_string());
         }
 
         if self.backend == "s3" && self.region.is_none() {

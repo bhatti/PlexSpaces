@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Embedded S3-compatible object store for blob storage testing.
+# Uses rustfs (https://github.com/rustfs/rustfs) as the default image.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: object-store
+  namespace: plexspaces-test
+  labels:
+    app: object-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: object-store
+  template:
+    metadata:
+      labels:
+        app: object-store
+    spec:
+      containers:
+      - name: object-store
+        image: rustfs/rustfs:latest
+        args:
+        - server
+        - --address
+        - "0.0.0.0:9000"
+        - --data
+        - /data
+        ports:
+        - name: s3
+          containerPort: 9000
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: object-store
+  namespace: plexspaces-test
+spec:
+  type: ClusterIP
+  ports:
+  - name: s3
+    port: 9000
+    targetPort: 9000
+  selector:
+    app: object-store

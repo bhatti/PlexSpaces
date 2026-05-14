@@ -83,7 +83,7 @@ pub mod grpc_health_service;
 // Automatic dependency registration (includes built-in dependencies)
 pub mod dependency_registration;
 
-// External dependency health checkers (MinIO, DynamoDB, SQS)
+// External dependency health checkers (embedded object store, DynamoDB, SQS)
 pub mod external_dependency_checkers;
 
 // Application implementations moved to plexspaces-application crate

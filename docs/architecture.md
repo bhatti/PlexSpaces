@@ -1409,6 +1409,30 @@ See [Multi-Tenancy Architecture](#multi-tenancy-architecture) and [Security Guid
 - Service mesh integration
 - Firewall rules
 
+## SDK Distribution
+
+PlexSpaces SDKs are designed so external projects can import them without a local checkout.
+
+### Import by Language
+
+| Language | Import Method | Example |
+|---|---|---|
+| Rust | Git-tag Cargo dependency | `plexspaces-sdk = { git = "https://github.com/plexobject/plexspaces", tag = "v0.1.0" }` |
+| Go | Go module proxy | `require github.com/plexobject/plexspaces/sdks/go v0.1.0` |
+| Python | PyPI | `pip install plexspaces==0.1.0` |
+| TypeScript | npm | `npm install @plexspaces/sdk@0.1.0` |
+
+### Release Process
+
+1. Run `scripts/tag-release.sh <VERSION>` — validates build, bumps workspace version, prints exact `git tag` commands
+2. User pushes the git tags (user controls all git operations — Rule #5)
+3. `.github/workflows/release.yml` CI pipeline runs on tag push: publishes Python SDK to PyPI, TypeScript SDK to npm, Docker image; creates GitHub release
+
+### Notes
+
+- **Rust**: Git-tag import lets Cargo resolve the entire workspace from a single reference — no individual crate publishing to crates.io needed for the ~15 internal workspace crates.
+- **Go**: Tag named `sdks/go/v0.1.0` makes the module importable via Go module proxy — no separate repo needed.
+
 ## See Also
 
 - [Concepts](concepts.md): Core concepts explained in detail

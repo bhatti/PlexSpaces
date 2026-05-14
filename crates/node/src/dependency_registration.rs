@@ -36,7 +36,7 @@
 //! - Supports both critical and non-critical dependencies
 
 use crate::external_dependency_checkers::{
-    DynamoDBHealthChecker, MinIOHealthChecker, SQSHealthChecker,
+    DynamoDBHealthChecker, EmbeddedObjectStoreHealthChecker, SQSHealthChecker,
 };
 use crate::health::circuit_breaker::CircuitBreakerHealthChecker;
 use plexspaces_actor::ObjectRegistry;
@@ -82,7 +82,7 @@ pub async fn register_builtin_dependencies(
             .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        tracing::warn!("✅ Registered Redis health checker (critical) with circuit breaker");
+        tracing::info!(url = %redis_url, "Registered Redis health checker (critical) with circuit breaker");
     }
 
     // Check for PostgreSQL (used by KeyValue store and TupleSpace)
@@ -102,7 +102,7 @@ pub async fn register_builtin_dependencies(
             .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        tracing::warn!("✅ Registered PostgreSQL health checker (critical) with circuit breaker");
+        tracing::info!(url = %postgres_url, "Registered PostgreSQL health checker (critical) with circuit breaker");
     }
 
     // Check for Kafka (messaging)
@@ -119,43 +119,32 @@ pub async fn register_builtin_dependencies(
             .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
-        tracing::warn!("✅ Registered Kafka health checker (critical) with circuit breaker");
+        tracing::info!(brokers = %kafka_brokers, "Registered Kafka health checker (critical) with circuit breaker");
     }
 
-    // Check for MinIO (blob storage)
-    if let Ok(minio_endpoint) =
-        std::env::var("BLOB_ENDPOINT").or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
-    {
-        let access_key = std::env::var("BLOB_ACCESS_KEY_ID")
-            .or_else(|_| std::env::var("PLEXSPACES_MINIO_ACCESS_KEY"))
-            .ok();
-        let secret_key = std::env::var("BLOB_SECRET_ACCESS_KEY")
-            .or_else(|_| std::env::var("PLEXSPACES_MINIO_SECRET_KEY"))
-            .ok();
-
-        // MinIO is critical if blob backend is minio
-        let is_critical = std::env::var("BLOB_BACKEND")
-            .unwrap_or_default()
-            .to_lowercase()
-            == "minio";
-
-        let checker =
-            MinIOHealthChecker::new(minio_endpoint.clone(), access_key, secret_key, is_critical);
-        let checker = Arc::new(checker);
-        // Wrap with circuit breaker (using existing CircuitBreaker implementation)
-        let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
-        let cb_checker = Arc::new(cb_checker);
-        reporter
-            .register_readiness_checker(cb_checker.clone())
-            .await;
-        if is_critical {
+    // Check for embedded/external S3-compatible blob storage endpoint.
+    // Registers a health checker for any configured S3-compatible endpoint.
+    if let Ok(blob_endpoint) = std::env::var("BLOB_ENDPOINT") {
+        let backend = std::env::var("BLOB_BACKEND")
+            .unwrap_or_else(|_| "embedded".to_string())
+            .to_lowercase();
+        // Register health check for s3-compatible backends (embedded and s3)
+        if backend == "embedded" || backend == "s3" {
+            let checker = EmbeddedObjectStoreHealthChecker::new(blob_endpoint.clone(), true);
+            let checker = Arc::new(checker);
+            let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
+            let cb_checker = Arc::new(cb_checker);
+            reporter
+                .register_readiness_checker(cb_checker.clone())
+                .await;
             reporter.register_startup_checker(cb_checker.clone()).await;
+            registered_count += 1;
+            tracing::info!(
+                endpoint = %blob_endpoint,
+                backend = %backend,
+                "Registered object store health checker (critical) with circuit breaker"
+            );
         }
-        registered_count += 1;
-        tracing::warn!(
-            "✅ Registered MinIO health checker (critical: {}) with circuit breaker",
-            is_critical
-        );
     }
 
     // Check for DynamoDB (storage backend)
@@ -183,9 +172,10 @@ pub async fn register_builtin_dependencies(
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        tracing::warn!(
-            "✅ Registered DynamoDB health checker (critical: {}) with circuit breaker",
-            is_critical
+        tracing::info!(
+            region = %aws_region,
+            critical = is_critical,
+            "Registered DynamoDB health checker with circuit breaker"
         );
     }
 
@@ -213,9 +203,10 @@ pub async fn register_builtin_dependencies(
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        tracing::warn!(
-            "✅ Registered SQS health checker (critical: {}) with circuit breaker",
-            is_critical
+        tracing::info!(
+            region = %aws_region,
+            critical = is_critical,
+            "Registered SQS health checker with circuit breaker"
         );
     }
 
@@ -311,10 +302,10 @@ pub async fn register_dependencies(
         }
 
         registered_count += 1;
-        tracing::warn!(
-            "✅ Registered dependency checker: {} (critical: {})",
-            dep_name,
-            is_critical
+        tracing::info!(
+            dependency = %dep_name,
+            critical = is_critical,
+            "Registered dependency health checker"
         );
     }
 

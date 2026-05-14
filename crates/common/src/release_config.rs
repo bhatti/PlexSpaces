@@ -124,6 +124,7 @@ pub async fn create_default_release_config(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: format!("http://{}", listen_addr),
+        blob_http_port: 0,
     };
 
     // Create default gRPC config

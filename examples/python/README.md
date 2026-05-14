@@ -299,7 +299,7 @@ The [PlexSpaces Python SDK](../../docs/sdk.md) provides decorator-based actor de
 | `apps/bank_account/` | Bank account with durability | `@actor(facets=["durability"])`, state(), checkpoint via WasmConfig.durability_enabled | ✅ Complete (2.2) |
 | `apps/payment_handler/` | Payment microservice | GenServer, KV idempotency, locks, `@gen_server_actor(facets=["durability"])` | ✅ Complete (2.5 microservices) |
 | `apps/job_processing/` | Distributed job processing | TupleSpace scatter/gather, ts_write/ts_take/ts_read_all | ✅ Complete (2.5 MPI-like) |
-| `apps/cdn_cache/` | Blob storage for assets | blob_upload/download/list/delete, MinIO/S3 | ✅ Complete (2.7) |
+| `apps/cdn_cache/` | Blob storage for assets | blob_upload/download/list/delete, embedded/S3 | ✅ Complete (2.7) |
 | `apps/leader_election/` | **Locks (2.8)** | host.lock_acquire/lock_release, leader election (cron singleton, task scheduler) | ✅ Complete |
 | `apps/audit_log/` | Event-driven audit log | @event_actor, host.log | Pending (2.3) |
 | `apps/feature_flags/` | Gradual rollout | KV, consistent hashing | Pending |

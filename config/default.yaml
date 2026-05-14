@@ -29,12 +29,12 @@ firecracker:
   socket_dir: "/tmp/firecracker"
 
 blob:
-  backend: "minio"
+  backend: "embedded"
   bucket: "plexspaces"
-  endpoint: "http://localhost:9000"
+  endpoint: ""
   region: ""
-  access_key_id: "minioadmin_user"
-  secret_access_key: "minioadmin_pass"
+  access_key_id: ""
+  secret_access_key: ""
   use_ssl: false
   prefix: "/plexspaces"
 
@@ -97,16 +97,16 @@ aws:
     # Bucket name (default: "plexspaces")
     bucket: "plexspaces"
     
-    # Endpoint URL for local testing with MinIO or S3 Local
+    # Endpoint URL for local testing with S3-compatible object store
     # Leave empty for production (uses AWS service)
     # For local testing: "http://localhost:9000"
     endpoint_url: ""
-    
+
     # Region for S3 (defaults to AWS region if not specified)
     region: ""
-    
+
     # Use path-style addressing (default: false)
-    # Set to true for MinIO and S3 Local
+    # Set to true for S3-compatible embedded stores
     use_path_style: false
 
 

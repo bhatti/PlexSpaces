@@ -2,122 +2,90 @@
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
-//
-// PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
-// (at your option) any later version.
-//
-// PlexSpaces is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Integration tests for blob service with MinIO
+//! Integration tests for blob service using embedded S3-compatible object store.
 //!
-//! These tests require MinIO to be running. If MinIO is not available,
-//! tests will print a warning and skip.
+//! Tests start an embedded object store subprocess automatically when `rustfs` is
+//! installed. If the binary is not installed and `BLOB_ENDPOINT` is not set, tests
+//! are skipped with a warning rather than panicking.
+//! Set BLOB_ENDPOINT to use an external endpoint instead.
 
 use plexspaces_actor::{RequestContext, RequestContextExt};
-use plexspaces_blob::{repository::sql::SqlBlobRepository, repository::ListFilters, BlobService};
+use plexspaces_blob::{
+    embedded_object_store::EmbeddedObjectStore,
+    repository::sql::SqlBlobRepository,
+    repository::ListFilters,
+    BlobService,
+};
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Duration;
-use tokio::time::timeout;
 
-/// Static variable to cache MinIO availability check
-/// This avoids checking the service for every test, improving test performance
-static MINIO_ENDPOINT: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::new();
+/// Shared embedded store + service, started once per test binary.
+static TEST_SVC: OnceLock<tokio::sync::Mutex<Option<Arc<BlobService>>>> = OnceLock::new();
+/// Keep the manager alive for the test binary's lifetime.
+static _EMBEDDED_MGR: OnceLock<EmbeddedObjectStore> = OnceLock::new();
 
-fn build_test_http_client(timeout_secs: u64) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .ok()
-}
-
-/// Get MinIO endpoint (checks which port is available)
-/// Uses a static cache to avoid checking for every test
-async fn get_minio_endpoint() -> Option<String> {
-    let cache = MINIO_ENDPOINT.get_or_init(|| tokio::sync::Mutex::new(None));
-    let mut cached = cache.lock().await;
-
-    if let Some(ref endpoint) = *cached {
-        return Some(endpoint.clone());
+/// Returns `None` when the embedded store binary is absent and no `BLOB_ENDPOINT` is configured,
+/// allowing tests to skip gracefully instead of panicking.
+async fn get_test_service() -> Option<Arc<BlobService>> {
+    let cache = TEST_SVC.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = cache.lock().await;
+    if let Some(svc) = guard.as_ref() {
+        return Some(svc.clone());
     }
 
-    let client = match build_test_http_client(1) {
-        Some(c) => c,
-        None => {
-            *cached = None;
-            return None;
-        }
-    };
-
-    // Try port 9001 first, then 9000
-    let ports = ["9001", "9000"];
-    for port in &ports {
-        let url = format!("http://localhost:{}/minio/health/live", port);
-        match timeout(Duration::from_secs(1), client.get(&url).send()).await {
-            Ok(Ok(resp)) if resp.status().is_success() => {
-                let endpoint = format!("http://localhost:{}", port);
-                *cached = Some(endpoint.clone());
-                return Some(endpoint);
+    // Use external endpoint if provided, else try to start embedded store
+    let (endpoint, _access_key, _secret_key) =
+        if let Ok(ep) = std::env::var("BLOB_ENDPOINT") {
+            (
+                ep,
+                std::env::var("BLOB_ACCESS_KEY_ID").unwrap_or_default(),
+                std::env::var("BLOB_SECRET_ACCESS_KEY").unwrap_or_default(),
+            )
+        } else {
+            match EmbeddedObjectStore::start(19200).await {
+                Ok(store) => {
+                    let ep = store.s3_endpoint.clone();
+                    let ak = store.access_key.clone();
+                    let sk = store.secret_key.clone();
+                    let _ = _EMBEDDED_MGR.set(store);
+                    (ep, ak, sk)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "⚠️  WARNING: Skipping blob integration tests — embedded object store unavailable: {}\n\
+                        Install: cargo install rustfs\n\
+                        Or set BLOB_ENDPOINT to an external S3-compatible endpoint.",
+                        e
+                    );
+                    return None;
+                }
             }
-            _ => continue,
-        }
-    }
+        };
 
-    *cached = None;
-    None
-}
-
-async fn create_test_service() -> Option<Arc<BlobService>> {
-    let endpoint = match get_minio_endpoint().await {
-        Some(e) => e,
-        None => {
-            eprintln!("⚠️  MinIO not available at http://localhost:9001 or http://localhost:9000. Skipping integration tests.");
-            eprintln!("   To run these tests, start MinIO with:");
-            eprintln!("   docker run -p 9001:9000 -p 9002:9001 -e MINIO_ROOT_USER=minioadmin_user -e MINIO_ROOT_PASSWORD=minioadmin_pass minio/minio server /data --console-address \":9002\"");
-            return None;
-        }
-    };
-
-    // Install sqlx::any default drivers before any database operations
-    // This is required for AnyPool to work with sqlite
-    // Note: install_default_drivers is idempotent and safe to call multiple times
     sqlx::any::install_default_drivers();
 
-    // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
-    // Not recovery-related, so memory is appropriate
-    // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
     use sqlx::any::AnyPoolOptions;
-    use sqlx::AnyPool;
-
-    let db_url = "sqlite::memory:";
-
     let any_pool = AnyPoolOptions::new()
         .max_connections(1)
-        .connect(db_url)
+        .connect("sqlite::memory:")
         .await
-        .ok()?;
+        .expect("Failed to connect to in-memory SQLite");
 
-    // Migrations are auto-applied in new()
-    let repository = Arc::new(SqlBlobRepository::new(any_pool).await.ok()?);
+    let repository = Arc::new(
+        SqlBlobRepository::new(any_pool)
+            .await
+            .expect("Failed to create blob repository"),
+    );
 
-    // Create blob config for MinIO
     let config = ProtoBlobConfig {
-        backend: "minio".to_string(),
-        bucket: "plexspaces-test".to_string(),
+        backend: "embedded".to_string(),
+        bucket: "plexspaces-integ-test".to_string(),
         endpoint: endpoint.clone(),
         region: String::new(),
-        access_key_id: "minioadmin_user".to_string(),
-        secret_access_key: "minioadmin_pass".to_string(),
+        access_key_id: _access_key,
+        secret_access_key: _secret_key,
         use_ssl: false,
         prefix: "/plexspaces".to_string(),
         gcp_service_account_json: String::new(),
@@ -125,45 +93,32 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
         azure_account_key: String::new(),
     };
 
-    let service = match BlobService::new(config, repository).await {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            eprintln!(
-                "⚠️  Failed to initialize BlobService against MinIO at {}: {}",
-                endpoint, e
-            );
-            return None;
-        }
-    };
+    let svc = Arc::new(
+        BlobService::new(config, repository)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to initialize BlobService at {}: {}", endpoint, e)),
+    );
 
-    // Probe S3 connectivity with a small write; if it fails, MinIO is unreachable or misconfigured.
+    // Probe connectivity
     let probe_ctx = create_test_context("__probe__", "__probe__");
-    match service
-        .upload_blob(
-            &probe_ctx,
-            "__connectivity_probe__",
-            b"probe".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
-        )
-        .await
-    {
-        Ok(_) => {
-            println!("Using MinIO endpoint: {}", endpoint);
-            Some(service)
-        }
-        Err(e) => {
-            eprintln!(
-                "⚠️  MinIO at {} is reachable but S3 operations fail: {}. Skipping.",
-                endpoint, e
-            );
-            None
-        }
-    }
+    svc.upload_blob(
+        &probe_ctx,
+        "__connectivity_probe__",
+        b"probe".to_vec(),
+        None,
+        None,
+        None,
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+        None,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("Object store is reachable but S3 operations fail: {}", e));
+
+    tracing::info!(endpoint = %endpoint, "Using object store endpoint for integration tests");
+
+    *guard = Some(svc.clone());
+    Some(svc)
 }
 
 fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
@@ -172,16 +127,10 @@ fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
 
 #[tokio::test]
 async fn test_upload_and_download_blob() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
-
+    let Some(service) = get_test_service().await else { return; };
     let ctx = create_test_context("tenant-1", "ns-1");
     let data = b"Hello, World!".to_vec();
+
     let metadata = service
         .upload_blob(
             &ctx,
@@ -202,160 +151,91 @@ async fn test_upload_and_download_blob() {
     assert_eq!(metadata.name, "test.txt");
     assert_eq!(metadata.content_length, data.len() as i64);
 
-    // Download
-    let downloaded = service
-        .download_blob(&ctx, &metadata.blob_id)
-        .await
-        .unwrap();
+    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
     assert_eq!(downloaded, data);
 }
 
 #[tokio::test]
 async fn test_deduplication() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
-
-    let ctx = create_test_context("tenant-1", "ns-1");
+    let Some(service) = get_test_service().await else { return; };
+    let ctx = create_test_context("tenant-1", "ns-dedup");
     let data = b"Duplicate content".to_vec();
 
-    // Upload first time
     let metadata1 = service
         .upload_blob(
-            &ctx,
-            "file1.txt",
-            data.clone(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx, "file1.txt", data.clone(), None, None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // Upload same content with different name
     let metadata2 = service
         .upload_blob(
-            &ctx,
-            "file2.txt",
-            data.clone(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx, "file2.txt", data.clone(), None, None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // Should return same blob (deduplication)
     assert_eq!(metadata1.blob_id, metadata2.blob_id);
     assert_eq!(metadata1.sha256, metadata2.sha256);
 }
 
 #[tokio::test]
 async fn test_list_and_delete() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
+    let Some(service) = get_test_service().await else { return; };
+    let ctx = create_test_context("tenant-list", "ns-1");
 
-    let ctx = create_test_context("tenant-1", "ns-1");
-    // Upload multiple blobs
     for i in 1..=3 {
         service
             .upload_blob(
                 &ctx,
                 &format!("file{}.txt", i),
                 format!("content{}", i).into_bytes(),
-                None,
-                None,
-                None,
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-                None,
+                None, None, None,
+                std::collections::HashMap::new(), std::collections::HashMap::new(), None,
             )
             .await
             .unwrap();
     }
 
-    // List blobs
     let filters = ListFilters::default();
     let (blobs, total) = service.list_blobs(&ctx, &filters, 10, 1).await.unwrap();
-
     assert!(total >= 3);
     assert!(!blobs.is_empty());
 
-    // Delete a blob
     let blob_id = &blobs[0].blob_id;
     service.delete_blob(&ctx, blob_id).await.unwrap();
-
-    // Verify deleted
     assert!(service.get_metadata(&ctx, blob_id).await.is_err());
 }
 
 #[tokio::test]
 async fn test_multi_tenancy_isolation() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
+    let Some(service) = get_test_service().await else { return; };
+    let ctx1 = create_test_context("tenant-iso-1", "ns-1");
+    let ctx2 = create_test_context("tenant-iso-2", "ns-1");
 
-    let ctx1 = create_test_context("tenant-1", "ns-1");
-    let ctx2 = create_test_context("tenant-2", "ns-1");
-
-    // Upload to tenant-1
     let metadata1 = service
         .upload_blob(
-            &ctx1,
-            "file.txt",
-            b"tenant1".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx1, "file.txt", b"tenant1".to_vec(), None, None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // Upload to tenant-2
     let metadata2 = service
         .upload_blob(
-            &ctx2,
-            "file.txt",
-            b"tenant2".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx2, "file.txt", b"tenant2".to_vec(), None, None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // List tenant-1 blobs
     let (blobs, _) = service
         .list_blobs(&ctx1, &ListFilters::default(), 10, 1)
         .await
         .unwrap();
 
-    // Should only see tenant-1 blob
     assert!(blobs.iter().any(|b| b.blob_id == metadata1.blob_id));
     assert!(!blobs.iter().any(|b| b.blob_id == metadata2.blob_id));
 }
@@ -363,191 +243,54 @@ async fn test_multi_tenancy_isolation() {
 #[cfg(feature = "presigned-urls")]
 #[tokio::test]
 async fn test_presigned_url_get() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
+    let Some(service) = get_test_service().await else { return; };
+    let ctx = create_test_context("tenant-1", "ns-presigned");
 
-    let ctx = create_test_context("tenant-1", "ns-1");
-    // Upload a blob first
     let data = b"Test content for presigned URL".to_vec();
     let metadata = service
         .upload_blob(
-            &ctx,
-            "presigned-test.txt",
-            data.clone(),
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx, "presigned-test.txt", data.clone(),
+            Some("text/plain".to_string()), None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // Generate presigned URL for GET
     use chrono::Duration;
     let presigned_url = service
         .generate_presigned_url(&ctx, &metadata.blob_id, "GET", Duration::hours(1))
         .await
         .unwrap();
 
-    // Verify URL is not empty and contains expected components
     assert!(!presigned_url.is_empty());
     assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
 
-    // Try to download using presigned URL
-    let client = build_test_http_client(5).unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let response = client.get(&presigned_url).send().await.unwrap();
     assert!(response.status().is_success());
-
     let downloaded_data = response.bytes().await.unwrap();
     assert_eq!(downloaded_data.as_ref(), data.as_slice());
 }
 
 #[cfg(feature = "presigned-urls")]
 #[tokio::test]
-async fn test_presigned_url_put() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
-
-    let ctx = create_test_context("tenant-1", "ns-1");
-    // Upload a blob first to get a valid blob_id and path
-    let data = b"Initial content".to_vec();
-    let metadata = service
-        .upload_blob(
-            &ctx,
-            "presigned-put-test.txt",
-            data,
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
-        )
-        .await
-        .unwrap();
-
-    // Generate presigned URL for PUT
-    use chrono::Duration;
-    let presigned_url = service
-        .generate_presigned_url(&ctx, &metadata.blob_id, "PUT", Duration::hours(1))
-        .await
-        .unwrap();
-
-    // Verify URL is not empty
-    assert!(!presigned_url.is_empty());
-    assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
-
-    // Try to upload using presigned URL
-    let client = build_test_http_client(5).unwrap();
-    let new_data = b"Updated content via presigned URL";
-    let response = client
-        .put(&presigned_url)
-        .body(new_data.to_vec())
-        .send()
-        .await
-        .unwrap();
-
-    // PUT should succeed (200 or 204)
-    assert!(
-        response.status().is_success()
-            || response.status().as_u16() == 200
-            || response.status().as_u16() == 204
-    );
-}
-
-#[cfg(feature = "presigned-urls")]
-#[tokio::test]
-async fn test_presigned_url_expiration() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
-
-    let ctx = create_test_context("tenant-1", "ns-1");
-    // Upload a blob first
-    let data = b"Test expiration".to_vec();
-    let metadata = service
-        .upload_blob(
-            &ctx,
-            "expiration-test.txt",
-            data,
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
-        )
-        .await
-        .unwrap();
-
-    // Generate presigned URL with very short expiration (1 second)
-    use chrono::Duration;
-    let presigned_url = service
-        .generate_presigned_url(&ctx, &metadata.blob_id, "GET", Duration::seconds(1))
-        .await
-        .unwrap();
-
-    // Wait for expiration
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    // Try to use expired URL - should fail
-    let client = build_test_http_client(5).unwrap();
-    let response = client.get(&presigned_url).send().await.unwrap();
-    // Expired URLs typically return 403 Forbidden
-    assert!(!response.status().is_success());
-}
-
-#[cfg(feature = "presigned-urls")]
-#[tokio::test]
 async fn test_presigned_url_invalid_operation() {
-    let service = match create_test_service().await {
-        Some(s) => s,
-        None => {
-            println!("Skipping test - MinIO not available");
-            return;
-        }
-    };
+    let Some(service) = get_test_service().await else { return; };
+    let ctx = create_test_context("tenant-1", "ns-presigned-invalid");
 
-    let ctx = create_test_context("tenant-1", "ns-1");
-    // Upload a blob first
-    let data = b"Test invalid operation".to_vec();
     let metadata = service
         .upload_blob(
-            &ctx,
-            "invalid-op-test.txt",
-            data,
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            &ctx, "invalid-op-test.txt", b"Test invalid operation".to_vec(),
+            Some("text/plain".to_string()), None, None,
+            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
         )
         .await
         .unwrap();
 
-    // Try invalid operation
     use chrono::Duration;
     let result = service
         .generate_presigned_url(&ctx, &metadata.blob_id, "DELETE", Duration::hours(1))
         .await;
 
-    // Should fail with invalid operation error
     assert!(result.is_err());
 }

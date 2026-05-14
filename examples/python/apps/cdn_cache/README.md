@@ -19,7 +19,7 @@ Demonstrates **blob storage** for serving static assets with caching capabilitie
                                          ▼
                                 ┌─────────────────┐
                                 │  Blob Storage   │
-                                │  (S3/MinIO)     │
+                                │ (embedded/S3)   │
                                 └────────┬────────┘
                                          │ blob_download
                                          ▼
@@ -49,28 +49,16 @@ Demonstrates **blob storage** for serving static assets with caching capabilitie
 
 ## Quick Start
 
-### Prerequisites: MinIO for Blob Storage
+### Prerequisites: Blob Storage
+
+The PlexSpaces node auto-starts an embedded S3-compatible object store (`rustfs`) when no external endpoint is configured. No manual setup is required for local development.
+
+To use a custom S3-compatible store, set `BLOB_ENDPOINT` before starting the node:
 
 ```bash
-# Start MinIO (S3-compatible object storage)
-docker run -d \
-  -p 9000:9000 \
-  -p 9090:9090 \
-  --name minio_server \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  -v ./data:/data \
-  quay.io/minio/minio server /data --console-address :9090
-
-# Create bucket "plexspaces-blobs" via MinIO Console:
-#   1. Open http://localhost:9090 in browser
-#   2. Login with minioadmin / minioadmin
-#   3. Click "Buckets" → "Create Bucket"
-#   4. Name: plexspaces-blobs → Click "Create Bucket"
-#
-# Or use AWS CLI if installed:
-# AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
-#   aws --endpoint-url http://localhost:9000 s3 mb s3://plexspaces-blobs
+export BLOB_ENDPOINT=http://localhost:9000
+export BLOB_BACKEND=embedded   # or s3, gcp, azure
+export BLOB_BUCKET=plexspaces-blobs
 ```
 
 ### Build and Test
@@ -83,7 +71,7 @@ docker run -d \
 ### Start Node
 
 ```bash
-# Terminal 1: Start node (release.yaml has MinIO config)
+# Terminal 1: Start node (embedded object store auto-starts)
 ./scripts/server.sh
 
 # Terminal 2: Run tests
@@ -91,18 +79,17 @@ cd examples/python/apps/cdn_cache
 ./test.sh 8091
 ```
 
-### MinIO Configuration (release.yaml)
+### Blob Configuration (release.yaml)
 
 ```yaml
 runtime:
   blob:
-    storage_type: s3
-    bucket_name: plexspaces-blobs
-    endpoint: http://localhost:9000
-    region: us-east-1
-    access_key_id: minioadmin
-    secret_access_key: minioadmin
-    force_path_style: true
+    backend: embedded   # auto-starts rustfs; use s3/gcp/azure for cloud backends
+    bucket: plexspaces-blobs
+    endpoint: ""        # empty = auto-start embedded store
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
 ```
 
 ## Operations
@@ -159,7 +146,7 @@ Downloads include cache-control headers for CDN integration:
 1. **Binary data**: Store images, videos, documents natively
 2. **Content types**: Preserve MIME types for proper serving
 3. **Prefix listing**: Organize assets hierarchically
-4. **Scalable**: Backed by S3-compatible storage (MinIO)
+4. **Scalable**: Backed by S3-compatible storage (embedded by default, or AWS S3/GCP/Azure)
 5. **Durable**: Assets persist across actor restarts
 
 ## Files

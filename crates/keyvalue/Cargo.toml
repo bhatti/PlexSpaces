@@ -50,6 +50,8 @@ ulid = "1.2"
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any"] }
 # Test helpers for checking DynamoDB Local availability
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
+# Embedded object store for blob integration tests
+plexspaces-blob = { path = "../blob", features = [] }
 
 [features]
 default = []

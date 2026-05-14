@@ -1,0 +1,81 @@
+# Web Crawl (TypeScript WASM): orchestrator + fetcher pool + analyzer shards
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "orchestrator"
+actor_type = "web_crawl_wasm"
+role = "orchestrator"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+behavior_kind = "GenServer"
+args = { role = "orchestrator" }
+
+[[supervisor.children]]
+name = "fetcher-0"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "fetcher-1"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "fetcher-2"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "fetcher-3"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "analyzer-0"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "analyzer", shard_id = "0" }
+
+[[supervisor.children]]
+name = "analyzer-1"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "analyzer", shard_id = "1" }

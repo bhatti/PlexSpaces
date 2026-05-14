@@ -1981,6 +1981,7 @@ async fn initialize_services_impl(
         metadata: HashMap::new(),
         node_registry: None,
         grpc_address: String::new(),
+        blob_http_port: 0,
     };
 
     let mut final_node_config = release_config

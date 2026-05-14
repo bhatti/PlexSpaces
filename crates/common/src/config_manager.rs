@@ -203,7 +203,7 @@ pub const ENV_KAFKA_BROKERS: &str = "PLEXSPACES_KAFKA_BROKERS";
 // Blob Storage Environment Variables
 // ============================================================================
 
-/// Blob storage backend (minio, s3, gcs, azure)
+/// Blob storage backend (embedded, s3, gcs, azure)
 pub const ENV_BLOB_BACKEND: &str = "BLOB_BACKEND";
 
 /// Blob storage bucket name
@@ -236,14 +236,8 @@ pub const ENV_AZURE_ACCOUNT_NAME: &str = "AZURE_ACCOUNT_NAME";
 /// Azure account key
 pub const ENV_AZURE_ACCOUNT_KEY: &str = "AZURE_ACCOUNT_KEY";
 
-/// MinIO endpoint
-pub const ENV_MINIO_ENDPOINT: &str = "PLEXSPACES_MINIO_ENDPOINT";
-
-/// MinIO access key
-pub const ENV_MINIO_ACCESS_KEY: &str = "PLEXSPACES_MINIO_ACCESS_KEY";
-
-/// MinIO secret key
-pub const ENV_MINIO_SECRET_KEY: &str = "PLEXSPACES_MINIO_SECRET_KEY";
+/// Embedded object store binary override
+pub const ENV_EMBEDDED_OBJECT_STORE_BIN: &str = "EMBEDDED_OBJECT_STORE_BIN";
 
 // ============================================================================
 // Helper Functions

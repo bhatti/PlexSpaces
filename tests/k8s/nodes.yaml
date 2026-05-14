@@ -49,18 +49,10 @@ spec:
           value: "info"
         - name: PLEXSPACES_FEATURES
           value: "dashboard"
-        - name: PLEXSPACES_BLOB_ENDPOINT
-          value: "http://minio.plexspaces-test:9000"
-        - name: PLEXSPACES_BLOB_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: minio-credentials
-              key: access-key
-        - name: PLEXSPACES_BLOB_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: minio-credentials
-              key: secret-key
+        - name: BLOB_BACKEND
+          value: "embedded"
+        - name: BLOB_ENDPOINT
+          value: "http://object-store.plexspaces-test:9000"
         resources:
           requests:
             cpu: 100m
@@ -115,18 +107,10 @@ spec:
           value: "info"
         - name: PLEXSPACES_FEATURES
           value: "dashboard"
-        - name: PLEXSPACES_BLOB_ENDPOINT
-          value: "http://minio.plexspaces-test:9000"
-        - name: PLEXSPACES_BLOB_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: minio-credentials
-              key: access-key
-        - name: PLEXSPACES_BLOB_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: minio-credentials
-              key: secret-key
+        - name: BLOB_BACKEND
+          value: "embedded"
+        - name: BLOB_ENDPOINT
+          value: "http://object-store.plexspaces-test:9000"
         resources:
           requests:
             cpu: 100m

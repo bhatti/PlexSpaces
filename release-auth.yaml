@@ -25,7 +25,7 @@ runtime:
     middleware: []
   
   # Blob storage configuration for local development.
-  # This keeps auth e2e runs self-contained without requiring MinIO.
+  # Uses local filesystem backend; set backend: embedded for auto-started embedded object store.
   blob:
     backend: local
     bucket: plexspaces-blobs

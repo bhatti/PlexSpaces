@@ -151,6 +151,13 @@ message NodeConfig {
   // If not set, derived from listen_addr. Should be externally reachable.
   // Example: "http://node1.example.com:8000"
   string grpc_address = 21;
+
+  // Port for blob HTTP: the PlexSpaces blob REST API (non-embedded) or the
+  // embedded rustfs S3-compatible subprocess (when backend = "embedded").
+  //
+  // Set to 0 (default) to derive automatically as listen_addr port + 100.
+  // Example: if listen_addr is "0.0.0.0:8000", blob_http_port defaults to 8100.
+  uint32 blob_http_port = 22;
 }
 
 // Node registry configuration

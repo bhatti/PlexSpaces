@@ -58,26 +58,23 @@ pub async fn generate_presigned_url(
     // Build S3 config
     let mut builder = Builder::new()
         .credentials_provider(credentials)
-        .force_path_style(true); // Required for MinIO
+        .force_path_style(true); // Required for path-style S3-compatible stores
 
-    // Set region (required by SDK, but MinIO doesn't use it)
+    // Set region (required by SDK, but embedded stores don't use it)
     let region = if !config.region.is_empty() {
         Region::new(config.region.clone())
     } else {
-        Region::new("us-east-1") // Default for MinIO
+        Region::new("us-east-1") // Default region for S3-compatible backends
     };
     builder = builder.region(region);
 
-    // Set endpoint for MinIO or custom S3-compatible storage
-    if config.backend == "minio" || !config.endpoint.is_empty() {
-        let endpoint = if !config.endpoint.is_empty() {
-            &config.endpoint
-        } else {
-            return Err(BlobError::ConfigError(
-                "Endpoint is required for MinIO backend".to_string(),
-            ));
-        };
-        builder = builder.endpoint_url(endpoint);
+    // Set endpoint for embedded or custom S3-compatible storage
+    if !config.endpoint.is_empty() {
+        builder = builder.endpoint_url(&config.endpoint);
+    } else if config.backend == "embedded" {
+        return Err(BlobError::ConfigError(
+            "Endpoint is required for embedded backend presigned URLs".to_string(),
+        ));
     }
 
     // Build config and create client

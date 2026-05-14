@@ -132,12 +132,16 @@ async fn start_test_server(node: Arc<Node>) -> String {
             .expect("Server failed");
     });
 
-    let server_ready = async {
-        tokio::task::yield_now().await;
-    };
-    tokio::time::timeout(tokio::time::Duration::from_secs(1), server_ready)
-        .await
-        .expect("Server should start quickly");
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        if tokio::net::TcpStream::connect(bound_addr).await.is_ok() {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("gRPC test server on {} not ready within 5s", bound_addr);
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
 
     format!("http://{}", bound_addr)
 }

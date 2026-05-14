@@ -606,7 +606,7 @@ Binary large object storage with streaming support.
 #### Supported Backends
 
 - **Local**: File system storage
-- **S3**: AWS S3 / MinIO
+- **S3**: AWS S3 / S3-compatible (embedded object store)
 - **GCS**: Google Cloud Storage
 - **Azure**: Azure Blob Storage
 

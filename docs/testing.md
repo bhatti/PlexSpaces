@@ -79,7 +79,7 @@ cargo test --package plexspaces-wasm-runtime --test grpc_integration
 make test-integration
 
 # Note: Some integration tests require:
-# - MinIO (for blob storage tests)
+# - Embedded object store / S3-compatible endpoint (for blob storage tests)
 # - Redis (for distributed tests)
 # - Kafka (for messaging tests)
 # Workspace `make test` includes integration test binaries; tests that need live services usually skip until those services are up (see Test Guards below).
@@ -189,7 +189,7 @@ tests without failures, while still supporting integration testing when services
 - `postgres_available()` - PostgreSQL (localhost:5432)
 - `dynamodb_local_available()` - DynamoDB Local (localhost:8000)
 - `localstack_available()` / `sqs_simulator_available()` - LocalStack (localhost:4566)
-- `minio_available()` - MinIO/S3 (localhost:9000)
+- `object_store_available()` - S3-compatible object store endpoint (`BLOB_ENDPOINT` or localhost:9000)
 - `firecracker_available()` - Firecracker binary + kernel + rootfs
 
 **Usage in Tests**:
@@ -216,7 +216,7 @@ make test
 ### Previously Excluded Tests
 
 The following tests require external services but now skip gracefully:
-- AWS/MinIO blob storage tests (require MinIO running)
+- AWS/S3-compatible blob storage tests (require embedded object store or S3 endpoint running)
 - Distributed tests (require Redis/Kafka/NATS)
 - Firecracker tests (require Firecracker binary + kernel + rootfs)
 - Network-based tests (require external endpoints)
@@ -273,7 +273,7 @@ cargo test
 
 ### Integration Tests Require External Services
 
-**Cause**: Some integration tests need MinIO, Redis, or Kafka
+**Cause**: Some integration tests need an S3-compatible object store, Redis, or Kafka
 
 **Solution**: 
 - Use `make test` which excludes these tests

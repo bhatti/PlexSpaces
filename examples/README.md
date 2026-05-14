@@ -4,7 +4,7 @@ Examples live under `examples/<language>/{apps,embedded}/<name>/`. Each director
 
 **Framework migration:** Examples named `migrating_*` show how to model workloads that originally used another framework (Temporal, Merlin, Ray, Dapr, and so on). Treat them as migration guides, not generic tutorials.
 
-**Parallelism, collectives, scatter/gather, and workload / ML-style demos:** For MPI-style shard-group collectives, multi-node benchmarks, and ring/allreduce-style training narratives, start with **Go `mpi_collectives`**, **Rust embedded `matrix_vector_mpi`**, **Rust apps `ring_allreduce`**, **`data_parallel_worker`**, **`parameter_server`** (Rust, Python, Go), **`batch_image_classification`**, **`genomics_pipeline`**, **`heat_diffusion`** (apps and embedded), **`data_lake_rag`**, and **Python `job_processing`** (TupleSpace scatter/gather). **Rust embedded `event_analytics`** and **`realtime_stream_processor`** illustrate shard groups and streaming analytics at scale.
+**Parallelism, collectives, scatter/gather, and workload / ML-style demos:** For MPI-style shard-group collectives, multi-node benchmarks, and ring/allreduce-style training narratives, start with **Go `mpi_collectives`**, **Rust embedded `matrix_vector_mpi`**, **Rust apps `ring_allreduce`**, **`data_parallel_worker`**, **`parameter_server`** (Rust, Python, Go), **`batch_image_classification`**, **`genomics_pipeline`**, **`heat_diffusion`** (apps and embedded), **`data_lake_rag`**, and **Python `job_processing`** (TupleSpace scatter/gather). **Rust embedded `event_analytics`** and **`realtime_stream_processor`** illustrate shard groups and streaming analytics at scale. **`web_crawl`** (all five targets: Go, Python, Rust WASM, Rust embedded, TypeScript) demonstrates ElasticPool + TupleSpace + ShardGroup in a BFS web crawler with map-reduce word frequency — modeled after Ray's web-crawl and map-reduce examples.
 
 **AI agents, RAG, MCP, and A2A patterns:** For production AI/ML agent patterns see **Python `parallel_ai_inference`** and **Rust `parallel_ai_inference`** (all four parallelization mechanisms + MPI collectives + strong/weak scaling benchmarks), **Python `mcp_tool_server`** (Model Context Protocol tool calling), **Go `agentic_rag_pipeline`** (retrieve→generate→validate durable RAG), **Go `a2a_multi_agent`** (multi-agent A2A collaboration), **Go `miniclaw`** (mini agent framework with LLM routing, tool calling, agent loops), **Go `resource_aware_inference`** (cost-aware model routing with budget enforcement), and **TypeScript `llm_workflow_orchestrator`** (prompt chaining, routing, reflection, LLM-as-Judge). These examples collectively demonstrate all four behavior types (GenServer, GenEvent, GenFSM, Workflow) and all key facets (virtual_actor, durability, timer, metrics).
 
@@ -32,6 +32,7 @@ Further reading: [Component / service design (internal)](../archived_docs/compon
 | `migrating_rivet` | **Migration:** Rivet-style matchmaking. | Go SDK WASM; `native/` reference | [README](go/apps/migrating_rivet/README.md) |
 | `migrating_temporal` | **Migration:** Temporal-style order fulfillment workflow. | `WorkflowActor`, signals/queries; `native/` | [README](go/apps/migrating_temporal/README.md) |
 | `mpi_collectives` | **Parallel / MPI:** Benchmark of BroadcastShardGroup, ScatterGather, ReduceShardGroup, AllReduceShardGroup, BarrierShardGroup over a dynamic shard group. | Shard-group collectives, per-node metrics, registry placement | [README](go/apps/mpi_collectives/README.md) |
+| `web_crawl` | **Parallel:** BFS web crawler using ElasticPool (fetcher pool, round-robin), TupleSpace (url_queue), and ShardGroup pattern (scatter word counts to analyzer shards, reduce to top-N words). Imports SDK from GitHub tag — no local checkout needed. Modeled after Ray's web-crawl + map-reduce examples. | `ActorRouter`, `host.Ask`, `host.TS().Write`, ElasticPool pattern, ShardGroup reduce | [README](go/apps/web_crawl/README.md) |
 | `parameter_server` | **Workload / ML:** Synthetic distributed training coordination (leader/worker, shard groups, metrics). | `ActorRouter`, shard-group placement, application metrics | [README](go/apps/parameter_server/README.md) |
 
 **AI Agents & Workloads (Go)**
@@ -87,6 +88,7 @@ cd go/apps/<example>
 | `registry` | Service discovery via registry facet. | `RegistryFacet` | [README](python/apps/registry/README.md) |
 | `storefront` | E-commerce storefront API on host KV. | `host.kv_*`; see README for node feature requirements | [README](python/apps/storefront/README.md) |
 | `task-queue` | Background tasks with distributed locks. | `LockFacet`, task claiming | [README](python/apps/task-queue/README.md) |
+| `web_crawl` | **Parallel:** BFS web crawler using ElasticPool (4 fetchers), TupleSpace (url_queue), and ShardGroup pattern (2 analyzer shards, scatter-gather reduce). Installs SDK from PyPI — no local checkout needed. Modeled after Ray's web-crawl + map-reduce examples. | `@gen_server_actor`, `@handler`, `host.ask`, `host.tuplespace.write`, `ACTOR_ROLES` multi-role dispatch | [README](python/apps/web_crawl/README.md) |
 
 **AI Agents & Workloads (Python)**
 
@@ -125,6 +127,7 @@ cd python/apps/<app>
 | `ring_allreduce` | **Parallel / ML:** Ring all-reduce–style gradient aggregation narrative. | Leader/worker WASM, collective-style rounds | [README](rust/apps/ring_allreduce/README.md) |
 | `chat_room` | Large-scale real-time chat: multi-actor dispatch by type, process groups, FSM, durable workflow. Object Registry for FanoutActor and AuditEventActor. | `#[gen_server_actor(wasm)]`, 9 actor types, virtual_actor, durability, timer, process groups, WorkflowActor (ModerationWorkflow), GenEvent (AuditEventActor), GenFSM (ConnectionFSM) | [README](rust/apps/chat_room/README.md) |
 | `session_manager` | Idle timeout and heartbeat using WASM timer host calls. | `#[gen_server_actor(wasm)]`, `send_after` / touch | [README](rust/apps/session_manager/README.md) |
+| `web_crawl` | **Parallel:** BFS web crawler WASM component. ElasticPool pattern (4 fetchers), TupleSpace url_queue, ShardGroup pattern (2 analyzer shards, scatter-gather reduce). Imports SDK via git tag — no local checkout needed. Modeled after Ray's web-crawl + map-reduce examples. | WIT guest, `host::ask`, `host::tuplespace_write`, ElasticPool + ShardGroup patterns, native contract tests | [README](rust/apps/web_crawl/README.md) |
 | `test-common.sh` | Shared helpers invoked by Rust WASM app `test.sh` scripts (not a standalone example). | Shell helpers for deploy/test | [test-common.sh](rust/apps/test-common.sh) |
 
 ```bash
@@ -160,6 +163,7 @@ cd rust/apps/<app>
 | `timers` | In-memory timers (idle, heartbeat, retry). | `TimerFacet`, `spawn_with_facets` | [README](rust/embedded/timers/README.md) |
 | `timeseries_forecasting` | **Workload / ML:** Time-series forecasting pipeline. | Node spawn, pipeline actors | [README](rust/embedded/timeseries_forecasting/README.md) |
 | `webhook_handler` | HTTP-delivered webhook actor (list/deliver). | `#[gen_server_actor]`, AskReply/SendMessage HTTP paths | [README](rust/embedded/webhook_handler/README.md) |
+| `web_crawl` | **Parallel:** Single-binary BFS web crawler: Node + ElasticPool (4 PageFetchers), TupleSpace url_queue, ShardGroup (2 LinkAnalyzer shards, scatter-gather reduce word counts). All in one `main()`. Imports SDK via git tag — no local checkout needed. Modeled after Ray's web-crawl + map-reduce examples. | `#[gen_server_actor]`, `spawn()`, `GenServerRef`, NodeBuilder, `RequestContext` | [README](rust/embedded/web_crawl/README.md) |
 
 ```bash
 cd rust/embedded/<example>
@@ -188,6 +192,7 @@ cargo run
 | `migrating_temporal` | **Migration:** Temporal order fulfillment. | `native/temporal_order_workflow.ts` | [README](typescript/apps/migrating_temporal/README.md) |
 | `migrating_v8_isolates` | **Migration:** V8 isolates–style log processing. | `native/v8_isolates_ref.md` | [README](typescript/apps/migrating_v8_isolates/README.md) |
 | `streaming_pipeline` | Streaming data pipeline WASM actor. | TS SDK, streaming handlers | [README](typescript/apps/streaming_pipeline/README.md) |
+| `web_crawl` | **Parallel:** BFS web crawler WASM component. ElasticPool pattern (4 fetchers), TupleSpace url_queue, ShardGroup pattern (2 analyzer shards, scatter-gather reduce). Installs SDK from npm — no local checkout needed. Modeled after Ray's web-crawl + map-reduce examples. | `PlexSpacesActor`, `ActorRouter`, `host.ask`, `host.tuplespace.write`, async crawl loop | [README](typescript/apps/web_crawl/README.md) |
 
 **AI Agents & Workloads (TypeScript)**
 

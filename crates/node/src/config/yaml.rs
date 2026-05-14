@@ -32,7 +32,9 @@ pub struct NodeConfigYaml {
     pub listen_addr: String,
     #[serde(default)]
     pub cluster_seed_nodes: Vec<String>,
-    // Note: wasm_apps_directory moved to RuntimeConfigYaml
+    /// Port for blob HTTP (REST API or embedded rustfs). 0 = derive as listen_addr port + 100.
+    #[serde(default)]
+    pub blob_http_port: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -419,7 +421,7 @@ fn default_key_prefix() -> String {
 }
 
 fn default_blob_backend() -> String {
-    "minio".to_string()
+    "embedded".to_string()
 }
 
 fn default_blob_bucket() -> String {
@@ -427,7 +429,7 @@ fn default_blob_bucket() -> String {
 }
 
 fn default_blob_endpoint() -> String {
-    "http://minio:9000".to_string()
+    String::new()
 }
 
 fn default_outbound_transport() -> String {

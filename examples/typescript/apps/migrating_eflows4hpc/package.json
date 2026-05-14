@@ -1,7 +1,7 @@
 {
   "name": "migrating-eflows4hpc-ensemble",
   "version": "0.1.0",
-  "description": "EFlows4HPC → PlexSpaces: HPC Ensemble (TypeScript WASM)",
+  "description": "EFlows4HPC \u2192 PlexSpaces: HPC Ensemble (TypeScript WASM)",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "verify": "npm run build && echo 'Run ./test.sh 8091 with server (./scripts/server.sh) for e2e'"
   },
   "dependencies": {
-    "@plexspaces/sdk": "file:../../../../sdks/typescript"
+    "@plexspaces/sdk": "^0.1"
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.14.0",

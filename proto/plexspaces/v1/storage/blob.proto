@@ -20,7 +20,7 @@
 //
 // ## Purpose
 // Provides S3-compatible object storage for blobs (files, artifacts, etc.) with metadata
-// management. Supports multiple backends: S3, MinIO, GCP Cloud Storage, Azure Blob Storage.
+// management. Supports multiple backends: S3, embedded object store, GCP Cloud Storage, Azure Blob Storage.
 //
 // ## Architecture Context
 // This service provides the infrastructure layer for storing large binary objects:
@@ -162,7 +162,7 @@ message BlobMetadata {
 // Blob storage configuration
 //
 // ## Purpose
-// Configuration for S3-compatible blob storage backend (S3, MinIO, GCP, Azure).
+// Configuration for S3-compatible blob storage backend (S3, embedded, GCP, Azure).
 // Used for storing large binary objects with metadata management.
 //
 // ## Usage
@@ -176,13 +176,14 @@ message BlobConfig {
     }
   };
 
-  // Backend type (s3, minio, gcp, azure)
+  // Backend type (s3, embedded, gcp, azure)
+  // "embedded" uses a local S3-compatible subprocess (default for local dev/test)
   string backend = 1 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       in: [
         "s3",
-        "minio",
+        "embedded",
         "gcp",
         "azure"
       ]
@@ -198,7 +199,8 @@ message BlobConfig {
     }
   ];
 
-  // Endpoint URL (for MinIO or custom S3-compatible)
+  // Endpoint URL for embedded or custom S3-compatible store (e.g., "http://127.0.0.1:9100").
+  // Leave empty when using embedded backend — endpoint is set automatically after process start.
   string endpoint = 3 [(buf.validate.field).string = {max_len: 512}];
 
   // Region (for S3/GCP/Azure)

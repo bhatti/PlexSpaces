@@ -1,0 +1,2 @@
+# PlexSpaces Python SDK — published on PyPI
+plexspaces~=0.1

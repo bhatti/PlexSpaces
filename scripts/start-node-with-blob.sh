@@ -8,36 +8,37 @@
 #   ./scripts/start-node-with-blob.sh [OPTIONS]
 #
 # Options:
-#   --minio-url URL     MinIO endpoint (default: http://localhost:9000)
-#   --minio-key KEY     MinIO access key (default: minioadmin_user)
-#   --minio-secret SEC  MinIO secret key (default: minioadmin_pass)
+#   --blob-url URL      Object store endpoint (default: auto-start embedded)
+#   --blob-key KEY      Object store access key (default: empty)
+#   --blob-secret SEC   Object store secret key (default: empty)
 #   --bucket NAME       S3 bucket name (default: plexspaces)
-#   --port PORT         Node gRPC port (default: 9000)
+#   --port PORT         Node gRPC port (default: 0.0.0.0:8000)
 #   --help              Show this help message
 
 set -euo pipefail
 
-# Default values
-MINIO_URL="${BLOB_ENDPOINT:-http://localhost:9000}"
-MINIO_KEY="${BLOB_ACCESS_KEY_ID:-minioadmin_user}"
-MINIO_SECRET="${BLOB_SECRET_ACCESS_KEY:-minioadmin_pass}"
+# Default values — empty endpoint means embedded store is auto-started by the node
+BLOB_URL="${BLOB_ENDPOINT:-}"
+BLOB_KEY="${BLOB_ACCESS_KEY_ID:-}"
+BLOB_SECRET="${BLOB_SECRET_ACCESS_KEY:-}"
 BUCKET="${BLOB_BUCKET:-plexspaces}"
 PORT="${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:8000}"
 NODE_ID="${PLEXSPACES_NODE_ID:-node-$(date +%s)}"
+BACKEND="${BLOB_BACKEND:-embedded}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --minio-url)
-            MINIO_URL="$2"
+        --blob-url)
+            BLOB_URL="$2"
             shift 2
             ;;
-        --minio-key)
-            MINIO_KEY="$2"
+        --blob-key)
+            BLOB_KEY="$2"
             shift 2
             ;;
-        --minio-secret)
-            MINIO_SECRET="$2"
+        --blob-secret)
+            BLOB_SECRET="$2"
             shift 2
             ;;
         --bucket)
@@ -54,20 +55,22 @@ while [[ $# -gt 0 ]]; do
             echo "Start an empty PlexSpaces node with blob service enabled"
             echo ""
             echo "Options:"
-            echo "  --minio-url URL     MinIO endpoint (default: http://localhost:9000)"
-            echo "  --minio-key KEY     MinIO access key (default: minioadmin_user)"
-            echo "  --minio-secret SEC  MinIO secret key (default: minioadmin_pass)"
+            echo "  --blob-url URL      Object store endpoint (default: auto-start embedded)"
+            echo "  --blob-key KEY      Object store access key (default: empty)"
+            echo "  --blob-secret SEC   Object store secret key (default: empty)"
             echo "  --bucket NAME       S3 bucket name (default: plexspaces)"
             echo "  --port PORT         Node gRPC port (default: 0.0.0.0:9000)"
             echo "  --help              Show this help message"
             echo ""
             echo "Environment variables:"
-            echo "  BLOB_ENDPOINT           MinIO endpoint"
-            echo "  BLOB_ACCESS_KEY_ID      MinIO access key"
-            echo "  BLOB_SECRET_ACCESS_KEY  MinIO secret key"
-            echo "  BLOB_BUCKET             S3 bucket name"
-            echo "  PLEXSPACES_LISTEN_ADDR  Node listen address"
-            echo "  PLEXSPACES_NODE_ID      Node ID"
+            echo "  BLOB_ENDPOINT                  Object store endpoint (empty = auto-start embedded)"
+            echo "  BLOB_ACCESS_KEY_ID             Object store access key"
+            echo "  BLOB_SECRET_ACCESS_KEY         Object store secret key"
+            echo "  BLOB_BUCKET                    S3 bucket name"
+            echo "  BLOB_BACKEND                   Backend type: embedded (default), s3, gcp, azure"
+            echo "  EMBEDDED_OBJECT_STORE_BIN      Binary for embedded store (default: rustfs)"
+            echo "  PLEXSPACES_LISTEN_ADDR         Node listen address"
+            echo "  PLEXSPACES_NODE_ID             Node ID"
             exit 0
             ;;
         *)
@@ -91,43 +94,34 @@ echo ""
 echo "Configuration:"
 echo "  Node ID:        $NODE_ID"
 echo "  Listen Address: $PORT"
-echo "  Blob Backend:   MinIO"
-echo "  MinIO URL:      $MINIO_URL"
-echo "  Bucket:         $BUCKET"
-echo ""
-
-# Check if MinIO is available
-echo -e "${YELLOW}Checking MinIO availability...${NC}"
-if curl -s --max-time 2 "${MINIO_URL}/minio/health/live" > /dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} MinIO is available at $MINIO_URL"
+echo "  Blob Backend:   $BACKEND"
+if [ -n "$BLOB_URL" ]; then
+    echo "  Blob Endpoint:  $BLOB_URL"
 else
-    echo -e "${YELLOW}⚠${NC} MinIO not available at $MINIO_URL"
-    echo "  You may need to start MinIO first:"
-    echo "  docker run -d -p 9000:9000 -p 9001:9001 \\"
-    echo "    -e MINIO_ROOT_USER=minioadmin_user \\"
-    echo "    -e MINIO_ROOT_PASSWORD=minioadmin_pass \\"
-    echo "    minio/minio server /data --console-address \":9001\""
-    echo ""
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
+    echo "  Blob Endpoint:  (auto-start embedded object store)"
 fi
+echo "  Bucket:         $BUCKET"
 echo ""
 
 # Set environment variables
 export PLEXSPACES_NODE_ID="$NODE_ID"
 export PLEXSPACES_LISTEN_ADDR="$PORT"
 export BLOB_ENABLED="true"
-export BLOB_BACKEND="minio"
-export BLOB_ENDPOINT="$MINIO_URL"
-export BLOB_ACCESS_KEY_ID="$MINIO_KEY"
-export BLOB_SECRET_ACCESS_KEY="$MINIO_SECRET"
+export BLOB_BACKEND="$BACKEND"
 export BLOB_BUCKET="$BUCKET"
 export BLOB_PREFIX="/plexspaces"
 export BLOB_DATABASE_URL="sqlite:blob_metadata.db"
 export RUST_LOG="${RUST_LOG:-info}"
+
+if [ -n "$BLOB_URL" ]; then
+    export BLOB_ENDPOINT="$BLOB_URL"
+fi
+if [ -n "$BLOB_KEY" ]; then
+    export BLOB_ACCESS_KEY_ID="$BLOB_KEY"
+fi
+if [ -n "$BLOB_SECRET" ]; then
+    export BLOB_SECRET_ACCESS_KEY="$BLOB_SECRET"
+fi
 
 # Build CLI if needed
 echo -e "${YELLOW}Building CLI (if needed)...${NC}"
@@ -141,7 +135,6 @@ echo -e "${GREEN}Starting node...${NC}"
 echo ""
 
 # Extract port from address (e.g., "0.0.0.0:8000" -> "8000")
-# Blob HTTP server uses gRPC_PORT + 100 (separate from main gRPC+HTTP single port)
 GRPC_PORT="${PORT##*:}"
 HTTP_PORT=$((GRPC_PORT + 100))
 GRPC_HOST="${PORT%:*}"
@@ -172,5 +165,4 @@ echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
 echo ""
 
 # Run the node using CLI
-# Note: CLI compilation may show firecracker warnings/errors, but the 'start' command should work
 exec cargo run --package plexspaces-cli --bin plexspaces -- start --node-id "$NODE_ID" --listen-addr "$PORT"

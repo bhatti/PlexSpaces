@@ -1052,7 +1052,7 @@ pub struct KeyValueFacet {
 - **DynamoDB**: AWS-native distributed storage
 
 > **Note**: In-memory testing uses `SqliteKVStore::new(":memory:")` which provides fast, isolated storage without persistence.
-- **Blob**: Object storage (MinIO/S3/GCP/Azure) using object_store directly
+- **Blob**: Object storage (embedded object store/S3/GCP/Azure) using object_store directly
 
 **Use Cases**: Caching, session storage, configuration, feature flags
 
@@ -1081,7 +1081,7 @@ pub struct BlobStorageFacet {
 ```
 
 **Configuration**:
-- `backend`: `s3`, `gcs`, `azure`, `minio`
+- `backend`: `s3`, `gcs`, `azure`, `embedded`
 - `bucket`: Storage bucket name
 - `connection_string`: Backend connection
 
@@ -1481,7 +1481,7 @@ actor.attach_facet_by_type(
 
 ## Object Store (Blob Store)
 
-PlexSpaces provides a comprehensive blob storage service for storing and managing binary data objects. The service supports multiple backends (S3, MinIO, GCP, Azure) and provides both direct API access and presigned URLs for efficient client-to-storage communication.
+PlexSpaces provides a comprehensive blob storage service for storing and managing binary data objects. The service supports multiple backends (embedded object store, S3, GCP, Azure) and provides both direct API access and presigned URLs for efficient client-to-storage communication.
 
 ### Architecture
 
@@ -1502,7 +1502,7 @@ graph TB
     
     subgraph Storage["Object Storage Backend"]
         S3["AWS S3"]
-        MinIO["MinIO"]
+        Embedded["Embedded (rustfs)"]
         GCP["GCP Cloud Storage"]
         Azure["Azure Blob Storage"]
     end
@@ -1528,7 +1528,7 @@ graph TB
 
 #### Blob Storage vs Metadata Storage
 
-- **Blob Storage**: Actual binary data stored in S3-compatible backend (MinIO, AWS S3, GCP, Azure)
+- **Blob Storage**: Actual binary data stored in S3-compatible backend (embedded object store, AWS S3, GCP, Azure)
 - **Metadata Storage**: BlobMetadata stored in SQL database (SQLite/PostgreSQL) for querying and management
 - **Path Structure**: `/plexspaces/{tenant_id}/{namespace}/{blob_id}`
 
@@ -1542,7 +1542,7 @@ graph TB
 
 #### Supported Backends
 
-- **MinIO**: S3-compatible object storage (local development, self-hosted)
+- **Embedded (rustfs)**: S3-compatible object storage auto-started by the node (default; configurable via `EMBEDDED_OBJECT_STORE_BIN`)
 - **AWS S3**: Amazon Simple Storage Service
 - **GCP Cloud Storage**: Google Cloud Platform storage
 - **Azure Blob Storage**: Microsoft Azure storage
@@ -1551,23 +1551,24 @@ graph TB
 
 ```rust
 pub struct BlobConfig {
-    backend: String,              // "minio", "s3", "gcp", "azure"
+    backend: String,              // "embedded", "s3", "gcp", "azure"
     bucket: String,               // Storage bucket name
-    endpoint: String,             // Endpoint URL (for MinIO)
+    endpoint: String,             // Endpoint URL (optional; embedded store auto-started)
     region: String,               // Region (for S3/GCP/Azure)
-    access_key_id: String,        // Access credentials
-    secret_access_key: String,    // Secret credentials
+    access_key_id: String,        // Access credentials (optional for embedded)
+    secret_access_key: String,    // Secret credentials (optional for embedded)
     prefix: String,               // Path prefix (default: "/plexspaces")
 }
 ```
 
 **Environment Variables**:
-- `BLOB_BACKEND`: Backend type (default: "minio")
+- `BLOB_BACKEND`: Backend type (default: "embedded")
 - `BLOB_BUCKET`: Bucket name (default: "plexspaces")
-- `BLOB_ENDPOINT`: Endpoint URL (required for MinIO)
+- `BLOB_ENDPOINT`: Endpoint URL (optional; when unset and backend is "embedded", the node auto-starts `rustfs`)
+- `EMBEDDED_OBJECT_STORE_BIN`: Path to the embedded store binary (default: "rustfs")
 - `BLOB_REGION`: Region (required for S3)
-- `BLOB_ACCESS_KEY_ID` or `AWS_ACCESS_KEY_ID`: Access key
-- `BLOB_SECRET_ACCESS_KEY` or `AWS_SECRET_ACCESS_KEY`: Secret key
+- `BLOB_ACCESS_KEY_ID` or `AWS_ACCESS_KEY_ID`: Access key (optional for embedded)
+- `BLOB_SECRET_ACCESS_KEY` or `AWS_SECRET_ACCESS_KEY`: Secret key (optional for embedded)
 - `BLOB_PREFIX`: Path prefix (default: "/plexspaces")
 
 ### API Endpoints
@@ -1647,7 +1648,7 @@ sequenceDiagram
 - **GET Operations**: Generate presigned URLs for downloading blobs
 - **PUT Operations**: Generate presigned URLs for uploading/updating blobs
 - **Configurable Expiration**: Set expiration from 1 second to 7 days (AWS S3 limit)
-- **MinIO Support**: Works with MinIO and custom S3-compatible endpoints
+- **Embedded Store Support**: Works with the embedded object store (rustfs) and any custom S3-compatible endpoint
 - **AWS S3 Support**: Full compatibility with AWS S3
 
 #### Usage
@@ -1795,7 +1796,7 @@ Actors can access blob storage via the `BlobStorageFacet`:
 
 ```rust
 let blob_facet = BlobStorageFacet::new()
-    .with_backend(BlobBackend::MinIO, "http://localhost:9000")
+    .with_backend(BlobBackend::Embedded, "http://localhost:9000")
     .with_bucket("plexspaces");
 
 actor.attach_facet(Box::new(blob_facet), 200, serde_json::json!({})).await?;
@@ -1811,7 +1812,7 @@ let metadata = ctx.facet_service()
 
 #### Integration Tests
 
-Integration tests require MinIO running on port 9001 or 9000:
+Integration tests require the embedded object store (or any S3-compatible endpoint) running on port 9001 or 9000. When no external endpoint is configured, the node auto-starts `rustfs`.
 
 ```bash
 # Run integration tests
@@ -1878,7 +1879,7 @@ let pattern = Pattern::new(vec![
 - **PostgreSQL**: Multi-node, transactional
 
 > **Note**: In-memory testing uses `SqlStorage::new_sqlite(":memory:")` which provides fast, isolated storage without persistence.
-- **Blob**: Object storage (MinIO/S3/GCP/Azure) - uses object_store directly, no SQL database needed
+- **Blob**: Object storage (embedded object store/S3/GCP/Azure) - uses object_store directly, no SQL database needed
 
 ## Elastic pool
 

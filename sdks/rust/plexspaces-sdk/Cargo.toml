@@ -6,8 +6,12 @@
 name = "plexspaces-sdk"
 version = "0.1.0"
 edition = "2021"
-publish = false
 description = "Rust SDK for PlexSpaces (re-exports, helpers, and attribute macros)"
+repository = "https://github.com/plexobject/plexspaces"
+homepage = "https://github.com/plexobject/plexspaces"
+keywords = ["actors", "distributed", "wasm", "tuplespace", "workflow"]
+categories = ["concurrency", "distributed-systems", "web-programming", "wasm"]
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 plexspaces-sdk-macros = { path = "../plexspaces-sdk-macros" }

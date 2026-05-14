@@ -1961,18 +1961,27 @@ impl ActorRegistry {
             }
             self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
                 .await?;
+            // Guard: if this node already recorded the link, a return-RPC from the peer arrived.
+            // Registering locally without calling back breaks the cross-node echo cycle.
+            let already_linked = self.get_links(actor1_id).await.contains(actor2_id);
             self.local_link(actor1_id, actor2_id).await?;
-            let svc = self.actor_service.read().await.clone();
-            svc.link_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
-                .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            if !already_linked {
+                let svc = self.actor_service.read().await.clone();
+                svc.link_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+                    .await
+                    .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            }
             return Ok(());
         }
         if actor2_id.is_on_node(local) {
-            let svc = self.actor_service.read().await.clone();
-            svc.link_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
-                .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            // Guard: if this node already recorded the link, the peer has already been notified.
+            let already_linked = self.get_links(actor2_id).await.contains(actor1_id);
+            if !already_linked {
+                let svc = self.actor_service.read().await.clone();
+                svc.link_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+                    .await
+                    .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            }
             self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
                 .await?;
             self.local_link(actor1_id, actor2_id).await?;
@@ -2004,18 +2013,26 @@ impl ActorRegistry {
             }
             self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
                 .await?;
+            // Guard: only send the RPC if the link exists locally; absence means the return-RPC
+            // from the peer already processed this unlink and we must not echo back.
+            let was_linked = self.get_links(actor1_id).await.contains(actor2_id);
             self.local_unlink(actor1_id, actor2_id).await?;
-            let svc = self.actor_service.read().await.clone();
-            svc.unlink_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
-                .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            if was_linked {
+                let svc = self.actor_service.read().await.clone();
+                svc.unlink_actor(ctx, actor2_id.as_str(), actor1_id.as_str())
+                    .await
+                    .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            }
             return Ok(());
         }
         if actor2_id.is_on_node(local) {
-            let svc = self.actor_service.read().await.clone();
-            svc.unlink_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
-                .await
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            let was_linked = self.get_links(actor2_id).await.contains(actor1_id);
+            if was_linked {
+                let svc = self.actor_service.read().await.clone();
+                svc.unlink_actor(ctx, actor1_id.as_str(), actor2_id.as_str())
+                    .await
+                    .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
+            }
             self.validate_link_monitor_operand_scope(ctx, &[actor1_id, actor2_id])
                 .await?;
             self.local_unlink(actor1_id, actor2_id).await?;

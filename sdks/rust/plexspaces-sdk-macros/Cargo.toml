@@ -5,8 +5,12 @@
 name = "plexspaces-sdk-macros"
 version = "0.1.0"
 edition = "2021"
-publish = false
 description = "Procedural macros for PlexSpaces Rust SDK"
+repository = "https://github.com/plexobject/plexspaces"
+homepage = "https://github.com/plexobject/plexspaces"
+keywords = ["actors", "distributed", "macros", "tuplespace"]
+categories = ["concurrency", "distributed-systems"]
+license = "AGPL-3.0-or-later"
 
 [lib]
 proc-macro = true

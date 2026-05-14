@@ -2,13 +2,13 @@
 # Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 #
 # Docker Compose for PlexSpaces deployment
-# Production-ready setup with PostgreSQL and MinIO
+# Production-ready setup with PostgreSQL and an S3-compatible object store
 #
 # This setup demonstrates:
 # - Empty node with default application (no actors)
 # - Shared PostgreSQL database for scheduler, workflow, object-registry, journaling, blob, locks
 # - SQLite for channels (single-node durability)
-# - MinIO for blob storage (S3-compatible)
+# - RustFS for blob storage (S3-compatible, pure Rust)
 #
 # Configuration is managed via release.yaml and environment variables
 
@@ -35,41 +35,22 @@ services:
     networks:
       - plexspaces-net
 
-  # MinIO for blob storage (S3-compatible)
-  minio:
-    image: minio/minio:latest
-    container_name: plexspaces-minio
+  # RustFS for blob storage (S3-compatible, pure Rust)
+  object-store:
+    image: rustfs/rustfs:latest
+    container_name: plexspaces-object-store
     ports:
-      - "9000:9000"  # API
-      - "9001:9001"  # Console
+      - "9000:9000"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ADDRESS: "0.0.0.0:9000"
+      RUSTFS_DATA: /data
     volumes:
-      - minio-data:/data
-    command: server /data --console-address ":9001"
+      - object-store-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - plexspaces-net
-
-  # Create MinIO bucket on startup
-  minio-setup:
-    image: minio/mc:latest
-    container_name: plexspaces-minio-setup
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      sleep 5;
-      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb myminio/plexspaces || true;
-      /usr/bin/mc anonymous set download myminio/plexspaces;
-      exit 0;
-      "
     networks:
       - plexspaces-net
 
@@ -85,13 +66,13 @@ services:
       - NODE_ID=node1
       - NODE_LISTEN_ADDRESS=0.0.0.0:8000
       - GRPC_ADDRESS=0.0.0.0:8000
-      
+
       # Release configuration
       - PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
-      
+
       # Database configuration
       - DATABASE_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
-      
+
       # Backend configurations (all using PostgreSQL)
       - LOCKS_BACKEND=postgres
       - LOCKS_POSTGRES_URL=postgres://plexspaces:plexspaces@postgres:5432/plexspaces
@@ -99,33 +80,29 @@ services:
       - CHANNEL_SQLITE_PATH=:memory:
       - KEYVALUE_BACKEND=sql
       - TUPLESPACE_BACKEND=sql
-      
-      # Blob storage configuration
-      - BLOB_BACKEND=minio
+
+      # Blob storage configuration (external object-store container)
+      - BLOB_BACKEND=embedded
       - BLOB_BUCKET=plexspaces
-      - BLOB_ENDPOINT=http://minio:9000
-      - BLOB_ACCESS_KEY_ID=minioadmin
-      - BLOB_SECRET_ACCESS_KEY=minioadmin
-      
+      - BLOB_ENDPOINT=http://object-store:9000
+
       # Security configuration
       # Auth is ENABLED by default (production-ready)
       # To disable auth for testing, uncomment the line below or override via:
       # docker-compose run -e PLEXSPACES_DISABLE_AUTH=1 plexspaces-node
       # - PLEXSPACES_DISABLE_AUTH=1
-      
+
       # JWT configuration (required when auth is enabled)
       # Set JWT secret for production, or disable auth for testing
       - PLEXSPACES_JWT_SECRET=${PLEXSPACES_JWT_SECRET:-test-secret}
-      
+
       # mTLS configuration (optional, can use auto-generation)
       # Uncomment and mount certs volume for production:
       # - PLEXSPACES_MTLS_CA_CERT=/app/certs/ca.crt
       # - PLEXSPACES_MTLS_SERVER_CERT=/app/certs/server.crt
       # - PLEXSPACES_MTLS_SERVER_KEY=/app/certs/server.key
-      
+
       # Logging (default: info)
-      # For debug logs similar to scripts/server.sh, set:
-      # RUST_LOG=warn,plexspaces_actor=debug,plexspaces_node=debug,plexspaces_services=debug,plexspaces_wasm_runtime=debug,plexspaces_core=debug,plexspaces_application=debug,plexspaces_facet=debug,plexspaces_mailbox=debug
       - RUST_LOG=${RUST_LOG:-info}
     volumes:
       - ./config:/app/config:ro
@@ -140,12 +117,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      object-store:
         condition: service_healthy
 
 volumes:
   postgres-data:
-  minio-data:
+  object-store-data:
 
 networks:
   plexspaces-net:

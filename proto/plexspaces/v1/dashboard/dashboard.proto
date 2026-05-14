@@ -132,7 +132,7 @@ service DashboardService {
     option (google.api.http) = {get: "/api/v1/dashboard/dependencies"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Dependency Health"
-      description: "Returns health status of external dependencies (database, redis, minio, etc.)"
+      description: "Returns health status of external dependencies (database, redis, object-store, etc.)"
       tags: "Dashboard"
     };
   }

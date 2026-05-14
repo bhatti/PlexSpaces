@@ -549,6 +549,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             metadata: std::collections::HashMap::new(), // Default
             node_registry: None,
             grpc_address: String::new(),
+            blob_http_port: 0,
         }),
         runtime: Some(RuntimeConfig {
             save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1202,6 +1203,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1353,6 +1355,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1474,6 +1477,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1618,6 +1622,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1718,6 +1723,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)
@@ -1800,6 +1806,7 @@ mod tests {
                 metadata: std::collections::HashMap::new(),
                 node_registry: None,
                 grpc_address: String::new(),
+                blob_http_port: 0,
             }),
             runtime: Some(RuntimeConfig {
                 save_wasm_apps: false, // Default: disabled (only for testing)

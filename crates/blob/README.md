@@ -2,7 +2,7 @@
 
 ## Overview
 
-S3-compatible blob storage service with metadata management for PlexSpaces. Supports multiple backends: S3, MinIO, GCP Cloud Storage, Azure Blob Storage.
+S3-compatible blob storage service with metadata management for PlexSpaces. Supports multiple backends: embedded object store (rustfs), S3, GCP Cloud Storage, Azure Blob Storage.
 
 ## Proto-First Design
 
@@ -19,7 +19,7 @@ This crate follows **proto-first design** as per CLAUDE.md:
 - **Multi-tenancy**: Isolation via tenant_id and namespace
 - **Path Structure**: `/plexspaces/{tenant_id}/{namespace}/{blob_id}`
 - **Content Deduplication**: SHA256-based deduplication with stale metadata detection
-- **Auto Bucket Creation**: Automatically creates S3/MinIO bucket if it doesn't exist (s3-backend feature)
+- **Auto Bucket Creation**: Automatically creates S3-compatible bucket if it doesn't exist (s3-backend feature)
 
 ## Key Features
 
@@ -27,7 +27,7 @@ This crate follows **proto-first design** as per CLAUDE.md:
 
 When uploading content that matches an existing SHA256 hash (deduplication), the service verifies that the blob still exists in the object store before returning the cached metadata. This handles scenarios where:
 
-1. The object store was cleared (e.g., MinIO restart) but the database metadata remains
+1. The object store was cleared (e.g., embedded store restart) but the database metadata remains
 2. The blob was deleted from the object store but not from the database
 3. Storage backend was switched or migrated
 
@@ -35,7 +35,7 @@ If stale metadata is detected, it's automatically cleaned up and a fresh upload 
 
 ### Auto Bucket Creation
 
-When using S3 or MinIO backends with the `s3-backend` feature enabled, the service automatically creates the configured bucket if it doesn't exist during initialization.
+When using S3-compatible backends with the `s3-backend` feature enabled, the service automatically creates the configured bucket if it doesn't exist during initialization.
 
 ## Setup
 
@@ -57,7 +57,7 @@ use plexspaces_proto::storage::v1::{BlobMetadata, BlobConfig};
 
 // Create config from proto
 let config = BlobConfig {
-    backend: "minio".to_string(),
+    backend: "embedded".to_string(),
     bucket: "plexspaces".to_string(),
     endpoint: Some("http://localhost:9000".to_string()),
     // ... other fields
@@ -96,7 +96,7 @@ let presigned_url = blob_service
 
 ## Presigned URLs
 
-Presigned URLs allow clients to access blobs directly from the storage backend (S3/MinIO) without going through the PlexSpaces server. This is useful for:
+Presigned URLs allow clients to access blobs directly from the storage backend (embedded object store, S3, GCP, Azure) without going through the PlexSpaces server. This is useful for:
 
 - **Direct Downloads**: Clients can download large files directly from storage
 - **Direct Uploads**: Clients can upload files directly to storage
@@ -108,7 +108,7 @@ Presigned URLs allow clients to access blobs directly from the storage backend (
 - ✅ **GET Operations**: Generate presigned URLs for downloading blobs
 - ✅ **PUT Operations**: Generate presigned URLs for uploading/updating blobs
 - ✅ **Configurable Expiration**: Set expiration from 1 second to 7 days (AWS S3 limit)
-- ✅ **MinIO Support**: Works with MinIO and custom S3-compatible endpoints
+- ✅ **Embedded Store Support**: Works with the embedded object store (rustfs) and custom S3-compatible endpoints
 - ✅ **AWS S3 Support**: Works with AWS S3
 
 ### Usage
@@ -154,30 +154,29 @@ Response:
 ### Requirements
 
 - The `presigned-urls` feature must be enabled (enabled by default in `plexspaces-node`)
-- Access key ID and secret access key must be configured
-- For MinIO: endpoint must be configured
+- Access key ID and secret access key are optional for the embedded store; required for AWS S3 / GCP / Azure
+- For non-embedded backends: endpoint must be configured
 
 ## Configuration
 
 Configuration can be provided via:
 1. **Proto config** (from node config)
 2. **Environment variables**:
-   - `BLOB_BACKEND` (default: "minio")
+   - `BLOB_BACKEND` (default: "embedded"; set to "s3", "gcp", or "azure" for cloud backends)
    - `BLOB_BUCKET` (default: "plexspaces")
-   - `BLOB_ENDPOINT` (required for MinIO)
-   - `BLOB_ACCESS_KEY_ID` or `AWS_ACCESS_KEY_ID`
-   - `BLOB_SECRET_ACCESS_KEY` or `AWS_SECRET_ACCESS_KEY`
+   - `BLOB_ENDPOINT` (optional; for the embedded store the node auto-starts `rustfs` — override via `EMBEDDED_OBJECT_STORE_BIN`)
+   - `BLOB_ACCESS_KEY_ID` or `AWS_ACCESS_KEY_ID` (optional for embedded store)
+   - `BLOB_SECRET_ACCESS_KEY` or `AWS_SECRET_ACCESS_KEY` (optional for embedded store)
    - `BLOB_PREFIX` (default: "/plexspaces")
 
 ## Testing
 
 ### Integration Tests
 
-Integration tests require MinIO running at:
+Integration tests require the embedded object store (or any S3-compatible endpoint) running at:
 - Endpoint: `http://localhost:8000` (or `8001` as fallback)
-- Console: `http://localhost:9001` (MinIO console, not PlexSpaces)
-- Access Key: `minioadmin_user`
-- Secret Key: `minioadmin_pass`
+
+When no external endpoint is configured the node auto-starts the embedded store (`rustfs` binary, configurable via `EMBEDDED_OBJECT_STORE_BIN`). The embedded store requires no credentials by default.
 
 Run integration tests:
 ```bash
@@ -191,7 +190,7 @@ Or use the test script:
 ./scripts/test-blob-integration.sh
 ```
 
-Tests will print a warning and skip if MinIO is unavailable.
+Tests will print a warning and skip if the object store is unavailable.
 
 ### API Testing
 

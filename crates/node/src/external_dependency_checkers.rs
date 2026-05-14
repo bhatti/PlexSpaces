@@ -2,24 +2,11 @@
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 //
 // This file is part of PlexSpaces.
-//
-// PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
-// (at your option) any later version.
-//
-// PlexSpaces is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # External Dependency Health Checkers
 //!
 //! ## Purpose
-//! Health checkers for external dependencies: MinIO, DynamoDB, SQS.
+//! Health checkers for external dependencies: embedded object store, DynamoDB, SQS.
 //! These checkers verify liveness and readiness of external services.
 //!
 //! ## Architecture Context
@@ -30,50 +17,38 @@ use plexspaces_actor::{HealthCheckContext, HealthCheckError, HealthCheckResult, 
 use std::time::Duration;
 use tokio::time::timeout;
 
-/// MinIO health checker
+/// S3-compatible object store health checker.
 ///
 /// ## Purpose
-/// Checks if MinIO (S3-compatible object storage) is accessible and healthy.
+/// Checks if the embedded or external S3-compatible object store endpoint is accessible.
 ///
 /// ## Design Notes
-/// - Checks MinIO health endpoint: `{endpoint}/minio/health/live`
-/// - Uses HTTP GET request with timeout
-/// - Critical if blob backend is MinIO
+/// - Sends GET / to the S3 API endpoint; any HTTP response (including 403) indicates the server is up.
+/// - Works for both the auto-started embedded subprocess and external S3-compatible endpoints.
 #[derive(Clone)]
-pub struct MinIOHealthChecker {
+pub struct EmbeddedObjectStoreHealthChecker {
     endpoint: String,
-    access_key_id: Option<String>,
-    secret_access_key: Option<String>,
     is_critical: bool,
 }
 
-impl MinIOHealthChecker {
-    /// Create a new MinIO health checker
+impl EmbeddedObjectStoreHealthChecker {
+    /// Create a new object store health checker.
     ///
     /// ## Arguments
-    /// * `endpoint` - MinIO endpoint URL (e.g., "http://localhost:9000")
-    /// * `access_key_id` - Optional access key for authentication
-    /// * `secret_access_key` - Optional secret key for authentication
-    /// * `is_critical` - Whether MinIO is critical for node readiness
-    pub fn new(
-        endpoint: String,
-        access_key_id: Option<String>,
-        secret_access_key: Option<String>,
-        is_critical: bool,
-    ) -> Self {
+    /// * `endpoint` - S3-compatible endpoint URL (e.g., "http://127.0.0.1:9100")
+    /// * `is_critical` - Whether the object store is critical for node readiness
+    pub fn new(endpoint: String, is_critical: bool) -> Self {
         Self {
             endpoint,
-            access_key_id,
-            secret_access_key,
             is_critical,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl HealthChecker for MinIOHealthChecker {
+impl HealthChecker for EmbeddedObjectStoreHealthChecker {
     fn name(&self) -> &str {
-        "minio"
+        "embedded-object-store"
     }
 
     fn is_critical(&self) -> bool {
@@ -83,47 +58,24 @@ impl HealthChecker for MinIOHealthChecker {
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
 
-        // MinIO health endpoint
-        let health_url = format!("{}/minio/health/live", self.endpoint.trim_end_matches('/'));
+        let health_url = format!("{}/", self.endpoint.trim_end_matches('/'));
 
-        // Create HTTP client
         let client = reqwest::Client::builder()
             .timeout(timeout_duration)
-            // Keep health checks deterministic in tests and avoid platform-specific
-            // proxy autodiscovery panics from system configuration lookups.
             .no_proxy()
             .build()
             .map_err(|e| {
                 HealthCheckError::CheckFailed(format!("Failed to create HTTP client: {}", e))
             })?;
 
-        // Build request
-        let mut request = client.get(&health_url);
-
-        // Add authentication if provided
-        if let (Some(access_key), Some(secret_key)) = (&self.access_key_id, &self.secret_access_key)
-        {
-            request = request.basic_auth(access_key, Some(secret_key));
-        }
-
-        // Perform health check
-        match timeout(timeout_duration, request.send()).await {
-            Ok(Ok(response)) => {
-                if response.status().is_success() {
-                    Ok(())
-                } else {
-                    Err(HealthCheckError::CheckFailed(format!(
-                        "MinIO health check returned status {}",
-                        response.status()
-                    )))
-                }
-            }
+        match timeout(timeout_duration, client.get(&health_url).send()).await {
+            Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(HealthCheckError::CheckFailed(format!(
-                "Failed to connect to MinIO at {}: {}",
+                "Failed to connect to object store at {}: {}",
                 self.endpoint, e
             ))),
             Err(_) => Err(HealthCheckError::Timeout(format!(
-                "MinIO health check timeout for {}",
+                "Object store health check timeout for {}",
                 self.endpoint
             ))),
         }
@@ -175,14 +127,8 @@ impl HealthChecker for DynamoDBHealthChecker {
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
 
-        // For now, we'll do a simple connectivity check
-        // In production, you might want to use AWS SDK to check table access
-        // This is a placeholder that checks if we can resolve the DynamoDB endpoint
-
-        // DynamoDB endpoint format: dynamodb.{region}.amazonaws.com
         let endpoint = format!("dynamodb.{}.amazonaws.com", self.region);
 
-        // Try to resolve DNS and connect (basic connectivity check)
         match timeout(
             timeout_duration,
             tokio::net::TcpStream::connect(format!("{}:443", endpoint)),
@@ -247,10 +193,8 @@ impl HealthChecker for SQSHealthChecker {
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
 
-        // SQS endpoint format: sqs.{region}.amazonaws.com
         let endpoint = format!("sqs.{}.amazonaws.com", self.region);
 
-        // Try to resolve DNS and connect (basic connectivity check)
         match timeout(
             timeout_duration,
             tokio::net::TcpStream::connect(format!("{}:443", endpoint)),
@@ -275,14 +219,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_minio_health_checker() {
-        let checker =
-            MinIOHealthChecker::new("http://localhost:9000".to_string(), None, None, true);
+    async fn test_embedded_object_store_health_checker() {
+        let checker = EmbeddedObjectStoreHealthChecker::new("http://localhost:9000".to_string(), true);
 
-        assert_eq!(checker.name(), "minio");
+        assert_eq!(checker.name(), "embedded-object-store");
         assert!(checker.is_critical());
 
-        // This will fail if MinIO is not running, but that's OK for the test
+        // Will fail if the object store is not running, which is expected in unit tests
         let ctx = HealthCheckContext::default();
         let _result = checker.check(&ctx).await;
     }
@@ -295,8 +238,6 @@ mod tests {
         assert!(checker.is_critical());
 
         let ctx = HealthCheckContext::default();
-        // This will try to connect to AWS DynamoDB endpoint
-        // It may fail if not on AWS network, but that's OK for the test
         let _result = checker.check(&ctx).await;
     }
 
@@ -308,8 +249,6 @@ mod tests {
         assert!(checker.is_critical());
 
         let ctx = HealthCheckContext::default();
-        // This will try to connect to AWS SQS endpoint
-        // It may fail if not on AWS network, but that's OK for the test
         let _result = checker.check(&ctx).await;
     }
 }

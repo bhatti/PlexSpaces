@@ -280,7 +280,7 @@ Periodic cleanup (not on-demand) because:
 | **HTTP Client** | ✅ `wasi:http` | ⚠️ Simulated via `host.ask()` | Partial | Use `host.ask()` to call HTTP gateway actors |
 | **HTTP Server** | ✅ `wasi:http` | ❌ Not available | Missing | Not implemented |
 | **KeyValue Storage** | ✅ `wasi:keyvalue` | ✅ `host.kv_*` + `KeyValue` helper | ✅ Complete | Redis, SQLite, DynamoDB, PostgreSQL |
-| **Blob Storage** | ✅ `wasi:blobstore` | ✅ `host.blob_*` | ✅ Complete | S3, Azure, GCP, MinIO, Filesystem |
+| **Blob Storage** | ✅ `wasi:blobstore` | ✅ `host.blob_*` | ✅ Complete | S3, Azure, GCP, embedded object store, Filesystem |
 | **Messaging** | ✅ `wasmcloud:messaging` | ✅ `host.send/ask` | ✅ Complete | Inter-actor messaging (Kafka/NATS via actors) |
 | **Logging** | ✅ `wasi:logging` | ✅ `host.log` | ✅ Complete | Built-in logging |
 | **Process Groups** | ❌ Not available | ✅ `host.pg_*` | ✅ Extra | Pub/sub coordination (Erlang pg2-style) |

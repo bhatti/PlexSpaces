@@ -272,7 +272,7 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | `host.blob_delete(blob_id)` | Delete blob | `host.blob_delete("file-1")` |
 | `host.blob_list(prefix)` | List blobs with prefix (returns JSON array) | `blobs = json.loads(host.blob_list("files/"))` |
 
-**Backends:** S3, Azure Blob, GCP Storage, MinIO, Filesystem
+**Backends:** S3, Azure Blob, GCP Storage, embedded object store (rustfs), Filesystem
 
 #### ShardGroup / Application Metrics
 

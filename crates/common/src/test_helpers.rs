@@ -40,7 +40,7 @@
 //! - `kafka_available()` - Kafka (localhost:9092)
 //! - `postgres_available()` - PostgreSQL (localhost:5432)
 //! - `firecracker_available()` - Firecracker binary + kernel + rootfs
-//! - `minio_available()` - MinIO/S3 (localhost:9000)
+//! - `object_store_available()` - S3-compatible object store (BLOB_ENDPOINT or localhost:9000)
 
 use std::path::Path;
 use std::process::Command;
@@ -101,16 +101,16 @@ static REDIS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::n
 static NATS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static KAFKA_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static POSTGRES_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
-static MINIO_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+static OBJECT_STORE_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 
-/// Check if the configured DynamoDB endpoint accepts TCP connections (DynamoDB Local or compatible).
+/// Check if DynamoDB Local (or compatible) is running at the configured endpoint.
 ///
-/// Uses the same URL resolution as [`get_dynamodb_endpoint`], caches per endpoint string, and
-/// uses a short TCP connect so tests skip quickly when nothing is listening. Does not use HTTP
-/// `GET /` because DynamoDB Local often responds with non-success statuses on arbitrary paths.
+/// Sends a raw HTTP `POST` with the `X-Amz-Target: DynamoDB_20120810.ListTables` header and
+/// checks that the response body contains DynamoDB-specific JSON (e.g. `"TableNames"` or
+/// `"__type"`). A plain TCP probe is insufficient because other services (e.g. the node's HTTP
+/// server) may be listening on the same port and produce false positives.
 pub async fn dynamodb_local_available() -> bool {
     let endpoint = get_dynamodb_endpoint();
-    let tcp_addr = http_endpoint_to_tcp_addr(&endpoint);
     let cache = DDB_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut guard = cache.lock().await;
 
@@ -120,9 +120,55 @@ pub async fn dynamodb_local_available() -> bool {
         }
     }
 
-    let available = check_tcp_port(&tcp_addr, Duration::from_millis(500)).await;
+    let available = check_dynamodb_endpoint(&endpoint).await;
     *guard = Some((endpoint, available));
     available
+}
+
+/// Send a minimal DynamoDB `ListTables` HTTP request and verify the response looks like DynamoDB.
+async fn check_dynamodb_endpoint(endpoint: &str) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    let tcp_addr = http_endpoint_to_tcp_addr(endpoint);
+    let body = b"{\"Limit\":1}";
+    let request = format!(
+        "POST / HTTP/1.1\r\n\
+         Host: {}\r\n\
+         X-Amz-Target: DynamoDB_20120810.ListTables\r\n\
+         Content-Type: application/x-amz-json-1.0\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        tcp_addr,
+        body.len()
+    );
+
+    let mut stream = match timeout(Duration::from_millis(500), TcpStream::connect(&tcp_addr)).await
+    {
+        Ok(Ok(s)) => s,
+        _ => return false,
+    };
+
+    if stream
+        .write_all(request.as_bytes())
+        .await
+        .is_err()
+        || stream.write_all(body).await.is_err()
+    {
+        return false;
+    }
+
+    let mut buf = vec![0u8; 512];
+    let n = match timeout(Duration::from_millis(500), stream.read(&mut buf)).await {
+        Ok(Ok(n)) => n,
+        _ => return false,
+    };
+
+    // DynamoDB Local responds with JSON containing "TableNames" (success) or "__type" (auth error).
+    // Any non-DynamoDB service (HTML, gRPC, etc.) will not contain these strings.
+    let response = std::str::from_utf8(&buf[..n]).unwrap_or("");
+    response.contains("TableNames") || response.contains("__type") || response.contains("DynamoDB")
 }
 
 /// Check if the configured LocalStack / SQS endpoint accepts TCP connections.
@@ -381,38 +427,38 @@ pub fn get_postgres_url() -> String {
 }
 
 // ============================================================================
-// MinIO/S3 Service Guard
+// Object Store Service Guard
 // ============================================================================
 
-/// Check if MinIO/S3 is running on the default port (9000)
-/// Uses a static cache to avoid checking for every test
-/// Fast timeout (500ms) for quick failure when service is not available
+/// Check if the configured S3-compatible object store is reachable at BLOB_ENDPOINT.
+/// Uses a static cache to avoid checking for every test.
 ///
 /// ## Environment Variables
-/// - `MINIO_ENDPOINT`: Override default endpoint (default: http://localhost:9000)
-pub async fn minio_available() -> bool {
-    let cache = MINIO_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
+/// - `BLOB_ENDPOINT`: Object store endpoint URL (default: http://localhost:9000)
+pub async fn object_store_available() -> bool {
+    let cache = OBJECT_STORE_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
 
     if let Some(available) = *cached {
         return available;
     }
 
-    // Check MinIO by attempting TCP connection to default port
-    let minio_addr = std::env::var("MINIO_ENDPOINT")
-        .unwrap_or_else(|_| "localhost:9000".to_string())
+    let addr = std::env::var("BLOB_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
         .replace("http://", "")
         .replace("https://", "");
-    let available = check_tcp_port(&minio_addr, Duration::from_millis(500)).await;
+    let available = check_tcp_port(&addr, Duration::from_millis(500)).await;
     *cached = Some(available);
     available
 }
 
-/// Get MinIO endpoint URL (from env or default)
-pub fn get_minio_endpoint() -> String {
-    std::env::var("MINIO_ENDPOINT")
-        .or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
-        .unwrap_or_else(|_| "http://localhost:9000".to_string())
+/// Get object store endpoint URL.
+///
+/// Returns `BLOB_ENDPOINT` if set, otherwise the default port used by the embedded object
+/// store auto-started by the node (`http://127.0.0.1:9000`).
+pub fn get_object_store_endpoint() -> String {
+    std::env::var("BLOB_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
 }
 
 // ============================================================================

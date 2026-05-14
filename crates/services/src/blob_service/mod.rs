@@ -97,17 +97,18 @@ impl BlobService {
                     BlobError::ConfigError(format!("Failed to build S3 store: {}", e))
                 })?)
             }
-            "minio" => {
+            "embedded" => {
                 if config.endpoint.is_empty() {
                     return Err(BlobError::ConfigError(
-                        "endpoint required for MinIO".to_string(),
+                        "embedded backend endpoint must be set (use EmbeddedObjectStore or BLOB_ENDPOINT)".to_string(),
                     ));
                 }
 
                 let mut builder = AmazonS3Builder::new()
                     .with_bucket_name(&config.bucket)
                     .with_endpoint(&config.endpoint)
-                    .with_allow_http(!config.use_ssl);
+                    .with_allow_http(true)
+                    .with_virtual_hosted_style_request(false);
 
                 if let Some(access_key_id) = config.get_access_key_id() {
                     builder = builder.with_access_key_id(&access_key_id);
@@ -118,7 +119,7 @@ impl BlobService {
                 }
 
                 Arc::new(builder.build().map_err(|e| {
-                    BlobError::ConfigError(format!("Failed to build MinIO store: {}", e))
+                    BlobError::ConfigError(format!("Failed to build embedded object store: {}", e))
                 })?)
             }
             "gcp" => {

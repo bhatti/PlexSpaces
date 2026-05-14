@@ -35,6 +35,7 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             metadata: HashMap::new(),
             node_registry: None,
             grpc_address: String::new(),
+            blob_http_port: yaml.node.blob_http_port,
         }),
         runtime: Some(RuntimeConfig {
             grpc: Some(convert_grpc_config(yaml.runtime.grpc)),
@@ -459,6 +460,7 @@ mod tests {
                 id: "node-1".to_string(),
                 listen_addr: "0.0.0.0:8091".to_string(),
                 cluster_seed_nodes: vec![],
+                blob_http_port: 0,
             },
             runtime: RuntimeConfigYaml {
                 grpc: GrpcConfigYaml::default(),
@@ -536,6 +538,7 @@ mod tests {
                 id: "node-1".to_string(),
                 listen_addr: "0.0.0.0:8091".to_string(),
                 cluster_seed_nodes: vec![],
+                blob_http_port: 0,
             },
             runtime: RuntimeConfigYaml {
                 grpc: GrpcConfigYaml::default(),

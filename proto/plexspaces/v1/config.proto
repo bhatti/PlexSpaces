@@ -81,7 +81,7 @@ message S3Config {
   // Optional endpoint URL for local/test overrides (e.g., "http://localhost:9000")
   string endpoint_url = 3 [(buf.validate.field).string.max_len = 512];
 
-  // Use path-style URLs (required for MinIO and some S3-compatible stores)
+  // Use path-style URLs (required for embedded and some S3-compatible stores)
   bool use_path_style = 4;
 }
 

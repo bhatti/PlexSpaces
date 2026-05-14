@@ -464,7 +464,7 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
             use crate::blob::BlobKVStore;
             // Create blob keyvalue store directly from config
             // Uses object_store directly - no SQL database needed
-            // Simple, reliable design: just uses MinIO/S3 directly
+            // Simple, reliable design: uses S3-compatible object store directly
             let kv = BlobKVStore::new(config).await.map_err(|e| {
                 KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e))
             })?;

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: plexspaces
-Version: 0.1.0
+Version: 0.1.2
 Summary: PlexSpaces Python SDK - Build actors with minimal boilerplate
 Author: PlexSpaces Contributors
 License: AGPL-3.0-or-later
@@ -9,7 +9,7 @@ Project-URL: Documentation, https://docs.plexspaces.io
 Project-URL: Repository, https://github.com/plexspaces/plexspaces
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
-Classifier: License :: OSI Approved :: GNU AFFERO GENERAL PUBLIC LICENSE
+Classifier: License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
@@ -299,7 +299,7 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | `host.blob_delete(blob_id)` | Delete blob | `host.blob_delete("file-1")` |
 | `host.blob_list(prefix)` | List blobs with prefix (returns JSON array) | `blobs = json.loads(host.blob_list("files/"))` |
 
-**Backends:** S3, Azure Blob, GCP Storage, MinIO, Filesystem
+**Backends:** S3, Azure Blob, GCP Storage, embedded object store (rustfs), Filesystem
 
 #### ShardGroup / Application Metrics
 

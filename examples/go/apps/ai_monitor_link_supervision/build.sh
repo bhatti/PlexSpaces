@@ -33,6 +33,7 @@ if [ -z "$ADAPTER" ]; then
   exit 1
 fi
 
+go mod tidy
 tinygo build -target=wasi -o ai_monitor_link_actor_core.wasm .
 wasm-tools component embed "$WIT_DIR" -w actor-world ai_monitor_link_actor_core.wasm -o ai_monitor_link_actor_embedded.wasm
 wasm-tools component new ai_monitor_link_actor_embedded.wasm --adapt "wasi_snapshot_preview1=$ADAPTER" -o "$OUTPUT_WASM"

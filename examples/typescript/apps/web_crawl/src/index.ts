@@ -87,12 +87,17 @@ class PageFetcher extends PlexSpacesActor<FetcherState> {
     this.state.role = String(args.role ?? "fetcher");
   }
 
-  fetch(url: string): Record<string, unknown> {
+  onFetch(payload: Record<string, unknown>): Record<string, unknown> {
+    const url = String(payload.url ?? "");
     if (!url) return { error: "missing url" };
     const links = simulateLinks(url);
     const word_counts = simulateWordCounts(url);
     this.state.fetch_count += 1;
     return { status: "ok", url, links, word_counts };
+  }
+
+  onStatus(): Record<string, unknown> {
+    return { ...this.state };
   }
 }
 
@@ -112,8 +117,9 @@ class LinkAnalyzer extends PlexSpacesActor<AnalyzerState> {
     this.state.index = {};
   }
 
-  analyze(results: Record<string, unknown>[]): Record<string, unknown> {
-    for (const result of results ?? []) {
+  onAnalyze(payload: Record<string, unknown>): Record<string, unknown> {
+    const results = (payload.results as Record<string, unknown>[] | undefined) ?? [];
+    for (const result of results) {
       const wc = result.word_counts as Record<string, number> | undefined;
       if (wc) {
         for (const [word, count] of Object.entries(wc)) {
@@ -125,9 +131,14 @@ class LinkAnalyzer extends PlexSpacesActor<AnalyzerState> {
     return { status: "ok", urls_analyzed: this.state.urls_analyzed };
   }
 
-  top_words(n: number = 10): Record<string, unknown> {
+  onTop_words(payload: Record<string, unknown>): Record<string, unknown> {
+    const n = Number(payload.n ?? 10);
     const sorted = Object.entries(this.state.index).sort((a, b) => b[1] - a[1]).slice(0, n);
     return { top_words: sorted };
+  }
+
+  onStatus(): Record<string, unknown> {
+    return { ...this.state };
   }
 }
 
@@ -158,17 +169,16 @@ class WebCrawlOrchestrator extends PlexSpacesActor<OrchestratorState> {
     this.state.top_words = [];
   }
 
-  async crawl(
-    seed_urls: string[] = ["https://example.com"],
-    max_pages: number = 20,
-    max_depth: number = 2,
-  ): Promise<Record<string, unknown>> {
+  onCrawl(payload: Record<string, unknown>): Record<string, unknown> {
+    const seedUrls = (payload.seed_urls as string[] | undefined) ?? ["https://example.com"];
+    const maxPages = Number(payload.max_pages ?? 20);
+    const maxDepth = Number(payload.max_depth ?? 2);
     const appId = this.state.application_id;
     const visited = new Set<string>();
-    const queue: Array<{ url: string; depth: number }> = seed_urls.map((url) => ({ url, depth: 0 }));
+    const queue: Array<{ url: string; depth: number }> = seedUrls.map((url) => ({ url, depth: 0 }));
 
     // Seed TupleSpace url_queue (pending URLs)
-    for (const url of seed_urls) {
+    for (const url of seedUrls) {
       host.ts.write(["url_queue", url, "pending"]);
     }
 
@@ -176,9 +186,9 @@ class WebCrawlOrchestrator extends PlexSpacesActor<OrchestratorState> {
     let fetcherIdx = 0;
     const poolSize = 4;
 
-    while (queue.length > 0 && visited.size < max_pages) {
+    while (queue.length > 0 && visited.size < maxPages) {
       const item = queue.shift()!;
-      if (visited.has(item.url) || item.depth > max_depth) continue;
+      if (visited.has(item.url) || item.depth > maxDepth) continue;
       visited.add(item.url);
 
       // Checkout fetcher from pool (round-robin ElasticPool pattern)
@@ -187,7 +197,7 @@ class WebCrawlOrchestrator extends PlexSpacesActor<OrchestratorState> {
 
       let result: Record<string, unknown>;
       try {
-        result = await host.ask(fetcherId, "fetch", { url: item.url }, 10_000) as Record<string, unknown>;
+        result = host.ask(fetcherId, "fetch", { url: item.url }, 10_000) as Record<string, unknown>;
       } catch {
         result = {
           status: "ok",
@@ -221,8 +231,8 @@ class WebCrawlOrchestrator extends PlexSpacesActor<OrchestratorState> {
       if (chunk.length === 0) break;
       const analyzerId = `${appId}/analyzer-${shardIdx}@`;
       try {
-        await host.ask(analyzerId, "analyze", { results: chunk }, 10_000);
-        const top = await host.ask(analyzerId, "top_words", { n: 20 }, 10_000) as { top_words: [string, number][] };
+        host.ask(analyzerId, "analyze", { results: chunk }, 10_000);
+        const top = host.ask(analyzerId, "top_words", { n: 20 }, 10_000) as { top_words: [string, number][] };
         for (const [word, count] of top.top_words ?? []) {
           globalCounts[word] = (globalCounts[word] ?? 0) + Number(count);
         }
@@ -251,7 +261,7 @@ class WebCrawlOrchestrator extends PlexSpacesActor<OrchestratorState> {
     };
   }
 
-  status(): Record<string, unknown> {
+  onStatus(): Record<string, unknown> {
     return { ...this.state };
   }
 }

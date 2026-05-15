@@ -34,6 +34,7 @@ if [ -z "$ADAPTER" ]; then
     exit 1
 fi
 
+go mod tidy
 tinygo build -target=wasi -o payment_workflow_core.wasm .
 wasm-tools component embed "$WIT_DIR" -w actor-world payment_workflow_core.wasm -o payment_workflow_embedded.wasm
 wasm-tools component new payment_workflow_embedded.wasm --adapt "wasi_snapshot_preview1=$ADAPTER" -o "$OUTPUT_WASM"

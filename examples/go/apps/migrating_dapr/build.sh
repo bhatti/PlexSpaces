@@ -34,6 +34,7 @@ if [ -z "$ADAPTER" ]; then
     exit 1
 fi
 
+go mod tidy
 tinygo build -target=wasi -o job_processor_core.wasm .
 wasm-tools component embed "$WIT_DIR" -w actor-world job_processor_core.wasm -o job_processor_embedded.wasm
 wasm-tools component new job_processor_embedded.wasm --adapt "wasi_snapshot_preview1=$ADAPTER" -o "$OUTPUT_WASM"

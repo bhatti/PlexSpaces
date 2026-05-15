@@ -30,14 +30,9 @@ run_python() {
 
 # Install SDK from PyPI (published package — no local path needed)
 if ! run_python -c "import plexspaces" 2>/dev/null; then
-  run_python -m pip install plexspaces==0.1.0 --quiet
+  run_python -m pip install "plexspaces~=0.1" --quiet
 fi
 
-# Fallback: if PyPI package not yet available, install from local path
-if ! run_python -c "import plexspaces" 2>/dev/null; then
-  SDK_DIR="$REPO_ROOT/sdks/python"
-  run_python -m pip install -e "$SDK_DIR" --quiet
-fi
 
 if ! run_python -c "import componentize_py" 2>/dev/null; then
   run_python -m pip install "componentize-py>=0.12" --quiet

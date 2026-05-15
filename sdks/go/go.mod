@@ -1,4 +1,4 @@
-module github.com/plexobject/plexspaces/sdks/go
+module github.com/bhatti/plexspaces/sdks/go
 
 go 1.25.0
 

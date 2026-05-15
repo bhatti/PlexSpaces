@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-SDK_DIR="$REPO_ROOT/sdks/python"
 TARGET_DIR="$REPO_ROOT/target/examples/python/abstractions"
 OUTPUT_WASM="$TARGET_DIR/abstractions_actor.wasm"
 
@@ -31,7 +30,7 @@ run_python() {
 }
 
 if ! run_python -c "import plexspaces" 2>/dev/null; then
-  run_python -m pip install -e "$SDK_DIR" --quiet
+  run_python -m pip install "plexspaces~=0.1" --quiet
 fi
 
 if ! run_python -c "import componentize_py" 2>/dev/null; then

@@ -56,9 +56,9 @@ package applicationv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
-	v1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
-	supervision "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
-	wasm "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
+	v1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	supervision "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
+	wasm "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1987,7 +1987,7 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\x13UndeployApplication\x125.plexspaces.application.v1.UndeployApplicationRequest\x1a6.plexspaces.application.v1.UndeployApplicationResponse\"-\x82\xd3\xe4\x93\x02'*%/api/v1/applications/{application_id}\x12\x99\x01\n" +
 	"\x10ListApplications\x122.plexspaces.application.v1.ListApplicationsRequest\x1a3.plexspaces.application.v1.ListApplicationsResponse\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/api/v1/applications\x12\xbd\x01\n" +
 	"\x14GetApplicationStatus\x126.plexspaces.application.v1.GetApplicationStatusRequest\x1a7.plexspaces.application.v1.GetApplicationStatusResponse\"4\x82\xd3\xe4\x93\x02.\x12,/api/v1/applications/{application_id}/statusB\x9a\x02\n" +
-	"\x1dcom.plexspaces.application.v1B\x10ApplicationProtoP\x01Zagithub.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/application;applicationv1\xa2\x02\x03PAX\xaa\x02\x19Plexspaces.Application.V1\xca\x02\x19Plexspaces\\Application\\V1\xe2\x02%Plexspaces\\Application\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Application::V1b\x06proto3"
+	"\x1dcom.plexspaces.application.v1B\x10ApplicationProtoP\x01Zagithub.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/application;applicationv1\xa2\x02\x03PAX\xaa\x02\x19Plexspaces.Application.V1\xca\x02\x19Plexspaces\\Application\\V1\xe2\x02%Plexspaces\\Application\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Application::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_application_application_proto_rawDescOnce sync.Once

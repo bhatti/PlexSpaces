@@ -4,7 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-SDK_DIR="$PROJECT_ROOT/sdks/python"
 ACTOR_NAME="task_queue_actor"
 
 # Activate virtual environment if available
@@ -20,7 +19,7 @@ echo "Building $ACTOR_NAME using PlexSpaces SDK..."
 # Install SDK if not already installed
 if ! python3 -c "import plexspaces" 2>/dev/null; then
     echo "Installing PlexSpaces SDK..."
-    pip install -e "$SDK_DIR" --quiet
+    pip install "plexspaces~=0.1" --quiet
 fi
 
 # Build using SDK CLI

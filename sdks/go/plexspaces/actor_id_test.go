@@ -4,7 +4,7 @@ package plexspaces_test
 import (
 	"testing"
 
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 func TestParseActorID_Full(t *testing.T) {

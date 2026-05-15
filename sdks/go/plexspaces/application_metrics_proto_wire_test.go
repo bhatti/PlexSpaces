@@ -8,7 +8,7 @@ package plexspaces
 import (
 	"testing"
 
-	applicationv1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/application"
+	applicationv1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/application"
 	"google.golang.org/protobuf/proto"
 )
 

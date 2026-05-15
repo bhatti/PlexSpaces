@@ -41,7 +41,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 // ========================================================================

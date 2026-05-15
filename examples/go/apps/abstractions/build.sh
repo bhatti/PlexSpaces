@@ -42,6 +42,7 @@ if [ -z "$ADAPTER" ]; then
 fi
 
 echo "Building $ACTOR_NAME using TinyGo..."
+go mod tidy
 tinygo build -target=wasi -o "$CORE_WASM" .
 wasm-tools component embed "$WIT_DIR" -w actor-world "$CORE_WASM" -o "$EMBEDDED_WASM"
 wasm-tools component new "$EMBEDDED_WASM" --adapt "wasi_snapshot_preview1=$ADAPTER" -o "$OUTPUT_WASM"

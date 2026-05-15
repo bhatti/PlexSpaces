@@ -6,7 +6,7 @@ package plexspaces
 import (
 	"testing"
 
-	wasmv1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
+	wasmv1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
 	"google.golang.org/protobuf/proto"
 )
 

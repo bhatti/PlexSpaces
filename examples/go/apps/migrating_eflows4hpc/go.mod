@@ -1,7 +1,6 @@
-module github.com/plexobject/plexspaces/examples/go/apps/migrating_eflows4hpc
+module github.com/bhatti/plexspaces/examples/go/apps/migrating_eflows4hpc
 
 go 1.25.0
 
-require github.com/plexobject/plexspaces/sdks/go v0.0.0
+require github.com/bhatti/plexspaces/sdks/go v0.1.2
 
-replace github.com/plexobject/plexspaces/sdks/go => ../../../../sdks/go

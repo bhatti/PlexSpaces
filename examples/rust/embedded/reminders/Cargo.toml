@@ -13,13 +13,13 @@ path = "src/main.rs"
 
 [dependencies]
 # PlexSpaces SDK (includes core, actor, macros)
-plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-sdk = { git = "https://github.com/bhatti/plexspaces", tag = "v0.1.1" }
 plexspaces-actor = { path = "../../../../crates/actor" }  # Required for macro-generated code
 plexspaces-behavior = { path = "../../../../crates/behavior" }  # Required for macro-generated code
 plexspaces-facet = { path = "../../../../crates/facet" }  # Required for Facet trait
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-journaling = { path = "../../../../crates/journaling" }
-plexspaces-proto = { path = "../../../../crates/proto" }
+plexspaces-proto = { git = "https://github.com/bhatti/plexspaces", tag = "v0.1.1" }
 
 # Async
 tokio = { version = "1", features = ["full"] }

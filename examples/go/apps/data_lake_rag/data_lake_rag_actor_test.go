@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 func TestActorIDHelpers(t *testing.T) {

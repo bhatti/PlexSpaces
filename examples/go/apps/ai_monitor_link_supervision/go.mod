@@ -1,8 +1,8 @@
-module github.com/plexobject/plexspaces/examples/go/apps/ai_monitor_link_supervision
+module github.com/bhatti/plexspaces/examples/go/apps/ai_monitor_link_supervision
 
 go 1.25.0
 
-require github.com/plexobject/plexspaces/sdks/go v0.0.0
+require github.com/bhatti/plexspaces/sdks/go v0.1.2
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1 // indirect
@@ -11,4 +11,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/plexobject/plexspaces/sdks/go => ../../../../sdks/go

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 var host = plexspaces.NewHost()

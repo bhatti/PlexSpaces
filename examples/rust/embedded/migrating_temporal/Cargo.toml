@@ -14,7 +14,7 @@ plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-journaling = { path = "../../../../crates/journaling", features = ["sqlite-backend"] }
-plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-sdk = { git = "https://github.com/bhatti/plexspaces", tag = "v0.1.1" }
 plexspaces-node = { path = "../../../../crates/node" }
 tokio = { version = "1.44", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

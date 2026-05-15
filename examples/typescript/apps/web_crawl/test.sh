@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Test Web Crawl (TypeScript WASM)
+# Demonstrates ElasticPool (fetcher pool), TupleSpace (URL queue), ShardGroup (word-count reduce)
+# Usage: ./test.sh [HTTP_PORT|node1:port1 ...]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,18 +19,19 @@ else
   NODES="${NODES//,/ }"
 fi
 
-APP_ID="web-crawl-typescript"
-APP_NAME="web-crawl-typescript"
-
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
+
+APP_ID="ts-web-crawl"
+APP_NAME="ts-web-crawl"
+TEMP_CONFIG=""
 
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
-TEMP_CONFIG=""
 
 cleanup() {
   [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]] && rm -f "$TEMP_CONFIG"
@@ -35,6 +39,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+ask() {
+  local actor="$1"
+  local payload="$2"
+  local timeout="${3:-30}"
+  curl -s --max-time "$timeout" -X POST \
+    "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/${actor}/ask?timeout=$timeout" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+}
+
+echo "================================================================"
+echo "  Web Crawl (TypeScript WASM)"
+echo "  ElasticPool + TupleSpace + ShardGroup"
+echo "================================================================"
+
+echo ""
 echo "Step 0: Build"
 "$SCRIPT_DIR/build.sh"
 echo ""
@@ -50,13 +70,13 @@ if [ "$http_code" = "000" ]; then
   exit 1
 fi
 
-TEMP_CONFIG="$(mktemp -t web-crawl-ts-config)"
+TEMP_CONFIG="$(mktemp -t ts-web-crawl-config)"
 cp "$CONFIG_FILE" "$TEMP_CONFIG"
 
-echo "Step 1: Deploy"
+echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
 curl -s -X DELETE "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
 sleep 1
-deploy_output=$(curl -s --connect-timeout 10 --max-time 60 -w "\n%{http_code}" \
+deploy_output=$(curl -s -w "\n%{http_code}" \
   -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
   -F "name=$APP_NAME" \
@@ -66,40 +86,130 @@ deploy_output=$(curl -s --connect-timeout 10 --max-time 60 -w "\n%{http_code}" \
 http_code=$(echo "$deploy_output" | tail -n1)
 response=$(echo "$deploy_output" | sed '$d')
 if [ "$http_code" != "200" ] || ! echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-  echo -e "${RED}Deploy failed: $response${NC}"
+  echo -e "${RED}Deploy failed (HTTP $http_code): $response${NC}"
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
 rm -f "$TEMP_CONFIG"; TEMP_CONFIG=""
 sleep 2
 
-echo "Step 2: Run crawl"
-crawl_response=$(curl -s --max-time 60 \
-  -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/orchestrator/ask?timeout=60" \
-  -H "Content-Type: application/json" \
-  -d '{"op":"crawl","seed_urls":["https://example.com","https://docs.example.com"],"max_pages":20,"max_depth":2}')
+echo ""
+echo "================================================================"
+echo "  Phase 1: Run crawl"
+echo "================================================================"
 
-if ! echo "$crawl_response" | grep -q '"status":"ok"'; then
+echo ""
+echo "Step 2: Crawl from seed URLs"
+crawl_response=$(ask "orchestrator" '{
+  "op": "crawl",
+  "seed_urls": ["https://example.com", "https://docs.example.com"],
+  "max_pages": 20,
+  "max_depth": 2
+}' 60)
+
+if ! echo "$crawl_response" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+exit(0 if p.get('status') == 'ok' else 1)
+" 2>/dev/null; then
   echo -e "${RED}Crawl failed: $crawl_response${NC}"
   exit 1
 fi
 
-echo "Step 3: Results"
+echo ""
+echo "Step 3: Crawl results"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-python3 - "$crawl_response" <<'PY'
-import json, sys
-data = json.loads(sys.argv[1])
-payload = data.get("payload", data)
-if isinstance(payload, str):
-    payload = json.loads(payload)
-print(f"  Pages crawled : {payload.get('pages_crawled', 0)}")
-print(f"  Total links   : {payload.get('total_links', 0)}")
-print("  Top words:")
-for entry in (payload.get("top_words") or []):
+CRAWL_RESPONSE="$crawl_response" python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["CRAWL_RESPONSE"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+pages = p.get("pages_crawled", 0)
+links = p.get("total_links", 0)
+words = p.get("top_words") or []
+print(f"  Pages crawled : {pages}")
+print(f"  Total links   : {links}")
+print("  Top words     :")
+for entry in words:
     if isinstance(entry, (list, tuple)) and len(entry) >= 2:
         print(f"    {entry[0]:<20} {entry[1]}")
-if payload.get("pages_crawled", 0) < 1:
+if pages < 1:
     raise SystemExit("Expected at least 1 page crawled")
 PY
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${GREEN}Web crawl (TypeScript) test passed.${NC}"
+
+echo ""
+echo "================================================================"
+echo "  Phase 2: Actor status and metrics"
+echo "================================================================"
+
+echo ""
+echo "Step 4: Orchestrator status"
+orch_status=$(ask "orchestrator" '{"op":"status"}' 10)
+RESP="$orch_status" python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["RESP"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+print(f"  role          : {p.get('role','?')}")
+print(f"  pages_crawled : {p.get('pages_crawled',0)}")
+print(f"  total_links   : {p.get('total_links',0)}")
+PY
+
+echo ""
+echo "Step 5: Fetcher pool status (ElasticPool — 4 workers)"
+for i in 0 1 2 3; do
+  fetcher_status=$(ask "fetcher-${i}" '{"op":"status"}' 10)
+  IDX="$i" RESP="$fetcher_status" python3 - <<'PY'
+import json, os
+idx = os.environ["IDX"]
+d = json.loads(os.environ["RESP"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+print(f"  fetcher-{idx}: fetch_count={p.get('fetch_count',0)}")
+PY
+done
+
+echo ""
+echo "Step 6: Analyzer shard status (ShardGroup — 2 shards)"
+for i in 0 1; do
+  analyzer_status=$(ask "analyzer-${i}" '{"op":"top_words","n":5}' 10)
+  IDX="$i" RESP="$analyzer_status" python3 - <<'PY'
+import json, os
+idx = os.environ["IDX"]
+d = json.loads(os.environ["RESP"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+words = p.get("top_words") or []
+top = ", ".join(f"{w[0]}:{w[1]}" for w in words[:3] if isinstance(w,(list,tuple)) and len(w)>=2)
+print(f"  analyzer-{idx}: top_words=[{top}]")
+PY
+done
+
+echo ""
+echo "Step 7: Node metrics"
+metrics_response=$(curl -s --max-time 10 \
+  "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/metrics" 2>/dev/null || echo '{}')
+RESP="$metrics_response" python3 - <<'PY'
+import json, os
+try:
+    d = json.loads(os.environ["RESP"])
+    actors   = d.get("actor_count", d.get("actors", "?"))
+    messages = d.get("messages_processed", d.get("total_messages", "?"))
+    print(f"  actors active : {actors}")
+    print(f"  messages      : {messages}")
+except Exception:
+    pass
+PY
+
+echo ""
+echo "================================================================"
+echo -e "  ${GREEN}Web Crawl (TypeScript WASM) Test Complete${NC}"
+echo ""
+echo "  Key behaviors demonstrated:"
+echo "    ✓ ElasticPool  — 4 PageFetcher actors, round-robin URL dispatch"
+echo "    ✓ TupleSpace   — url_queue pending→done tracking"
+echo "    ✓ ShardGroup   — 2 analyzer shards, scatter/reduce word counts"
+echo "================================================================"

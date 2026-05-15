@@ -135,7 +135,7 @@ package supervisionv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
-	v1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	v1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1794,7 +1794,7 @@ const file_plexspaces_v1_supervision_supervision_proto_rawDesc = "" +
 	"\x03500\x128\n" +
 	"\x15Internal server error\x12\x1f\n" +
 	"\x1d\x1a\x1b.plexspaces.common.v1.Error\n" +
-	"\x1dcom.plexspaces.supervision.v1B\x10SupervisionProtoP\x01Zagithub.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision;supervisionv1\xa2\x02\x03PSX\xaa\x02\x19Plexspaces.Supervision.V1\xca\x02\x19Plexspaces\\Supervision\\V1\xe2\x02%Plexspaces\\Supervision\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Supervision::V1b\x06proto3"
+	"\x1dcom.plexspaces.supervision.v1B\x10SupervisionProtoP\x01Zagithub.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision;supervisionv1\xa2\x02\x03PSX\xaa\x02\x19Plexspaces.Supervision.V1\xca\x02\x19Plexspaces\\Supervision\\V1\xe2\x02%Plexspaces\\Supervision\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Supervision::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_supervision_supervision_proto_rawDescOnce sync.Once

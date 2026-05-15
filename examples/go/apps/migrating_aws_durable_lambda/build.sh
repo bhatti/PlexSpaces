@@ -34,6 +34,7 @@ if [ -z "$ADAPTER" ]; then
     exit 1
 fi
 
+go mod tidy
 tinygo build -target=wasi -o webhook_core.wasm .
 wasm-tools component embed "$WIT_DIR" -w actor-world webhook_core.wasm -o webhook_embedded.wasm
 wasm-tools component new webhook_embedded.wasm --adapt "wasi_snapshot_preview1=$ADAPTER" -o "$OUTPUT_WASM"

@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 var host = plexspaces.NewHost()

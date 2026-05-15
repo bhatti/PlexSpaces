@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
 )
 
 // taskQueueChannel is the channel name used for task delivery.

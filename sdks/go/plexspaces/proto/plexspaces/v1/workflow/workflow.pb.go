@@ -52,7 +52,7 @@ package workflowv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
-	v1 "github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	v1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -2289,7 +2289,7 @@ const file_plexspaces_v1_workflow_workflow_proto_rawDesc = "" +
 	"\x03500\x128\n" +
 	"\x15Internal server error\x12\x1f\n" +
 	"\x1d\x1a\x1b.plexspaces.common.v1.Error\n" +
-	"\x1acom.plexspaces.workflow.v1B\rWorkflowProtoP\x01Z[github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/workflow;workflowv1\xa2\x02\x03PWX\xaa\x02\x16Plexspaces.Workflow.V1\xca\x02\x16Plexspaces\\Workflow\\V1\xe2\x02\"Plexspaces\\Workflow\\V1\\GPBMetadata\xea\x02\x18Plexspaces::Workflow::V1b\x06proto3"
+	"\x1acom.plexspaces.workflow.v1B\rWorkflowProtoP\x01Z[github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/workflow;workflowv1\xa2\x02\x03PWX\xaa\x02\x16Plexspaces.Workflow.V1\xca\x02\x16Plexspaces\\Workflow\\V1\xe2\x02\"Plexspaces\\Workflow\\V1\\GPBMetadata\xea\x02\x18Plexspaces::Workflow::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_workflow_workflow_proto_rawDescOnce sync.Once

@@ -71,7 +71,7 @@ Web crawl (Go) test passed.
 // go.mod — no replace directive needed once tag is pushed
 module your/module
 
-require github.com/plexobject/plexspaces/sdks/go v0.1.0
+require github.com/bhatti/plexspaces/sdks/go v0.1.1
 ```
 
 ## References

@@ -53,6 +53,7 @@ fi
 
 # Step 1: Build core WASM module with TinyGo
 echo "  Step 1: TinyGo → core WASM module"
+go mod tidy
 tinygo build -target=wasi -o "${ACTOR_NAME}_core.wasm" .
 echo "    core module: $(ls -lh ${ACTOR_NAME}_core.wasm | awk '{print $5}')"
 

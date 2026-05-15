@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plexspaces"
-version = "0.1.1"
+version = "0.1.2"
 description = "PlexSpaces Python SDK - Build actors with minimal boilerplate"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -17,7 +17,7 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU AFFERO GENERAL PUBLIC LICENSE",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

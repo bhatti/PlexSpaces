@@ -384,8 +384,8 @@ package actorv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
-	v1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
-	supervision "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
+	v1 "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	supervision "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -8977,7 +8977,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x15PublishLifecycleEvent\x12(.plexspaces.actor.v1.ActorLifecycleEvent\x1a\x1b.plexspaces.common.v1.Empty\"a\x92A^\n" +
 	"\rObservability\x12\x17Publish Lifecycle Event\x1a4Internal: Publish lifecycle event to all subscribers\x1a6\x92A3\x121Event streaming for actor lifecycle observabilityB\xf6\x02\x92A\x80\x01\x12W\n" +
 	"\x1bPlexSpace Actor Runtime API\x123API for managing durable actors and their lifecycle2\x031.0*\x01\x022\x10application/json:\x10application/json\n" +
-	"\x17com.plexspaces.actor.v1B\x11ActorRuntimeProtoP\x01ZVgithub.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/actors;actorv1\xa2\x02\x03PAX\xaa\x02\x13Plexspaces.Actor.V1\xca\x02\x13Plexspaces\\Actor\\V1\xe2\x02\x1fPlexspaces\\Actor\\V1\\GPBMetadata\xea\x02\x15Plexspaces::Actor::V1b\x06proto3"
+	"\x17com.plexspaces.actor.v1B\x11ActorRuntimeProtoP\x01ZVgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/actors;actorv1\xa2\x02\x03PAX\xaa\x02\x13Plexspaces.Actor.V1\xca\x02\x13Plexspaces\\Actor\\V1\xe2\x02\x1fPlexspaces\\Actor\\V1\\GPBMetadata\xea\x02\x15Plexspaces::Actor::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_actors_actor_runtime_proto_rawDescOnce sync.Once

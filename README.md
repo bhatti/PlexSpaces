@@ -461,12 +461,3 @@ PlexSpaces incorporates patterns from:
 - **Discussions**: [Ask questions and share ideas](https://github.com/plexobject/plexspaces/discussions)
 - **Documentation**: [Full documentation](https://plexspaces.readthedocs.io/)
 
----
-
-<div align="center">
-
-**Built with ❤️ by the PlexSpaces team**
-
-[Website](https://plexspaces.io) • [Documentation](docs/) • [Examples](examples/) • [GitHub](https://github.com/plexobject/plexspaces)
-
-</div>

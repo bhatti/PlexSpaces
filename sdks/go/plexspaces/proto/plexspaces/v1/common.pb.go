@@ -2366,7 +2366,7 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x0e\n" +
 	"\n" +
 	"BearerAuth\x12\x00\n" +
-	"\x18com.plexspaces.common.v1B\vCommonProtoP\x01ZPgithub.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1;commonv1\xa2\x02\x03PCX\xaa\x02\x14Plexspaces.Common.V1\xca\x02\x14Plexspaces\\Common\\V1\xe2\x02 Plexspaces\\Common\\V1\\GPBMetadata\xea\x02\x16Plexspaces::Common::V1b\x06proto3"
+	"\x18com.plexspaces.common.v1B\vCommonProtoP\x01ZPgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1;commonv1\xa2\x02\x03PCX\xaa\x02\x14Plexspaces.Common.V1\xca\x02\x14Plexspaces\\Common\\V1\xe2\x02 Plexspaces\\Common\\V1\\GPBMetadata\xea\x02\x16Plexspaces::Common::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_common_proto_rawDescOnce sync.Once

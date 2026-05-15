@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/PlexSpaces/sdks/go/plexspaces"
 )
 
 // ========================================================================

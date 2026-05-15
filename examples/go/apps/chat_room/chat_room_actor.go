@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/bhatti/plexspaces/sdks/go/plexspaces"
+	"github.com/bhatti/PlexSpaces/sdks/go/plexspaces"
 )
 
 var host = plexspaces.NewHost()

@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 # PlexSpaces SDK
-plexspaces-sdk = { git = "https://github.com/bhatti/plexspaces", tag = "v0.1.1" }
+plexspaces-sdk = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
 plexspaces-journaling = { path = "../../../../crates/journaling" }
 
 # Node and core

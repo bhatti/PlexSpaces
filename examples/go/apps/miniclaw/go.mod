@@ -1,8 +1,8 @@
-module github.com/bhatti/plexspaces/examples/go/apps/miniclaw
+module github.com/bhatti/PlexSpaces/examples/go/apps/miniclaw
 
 go 1.25.0
 
-require github.com/bhatti/plexspaces/sdks/go v0.1.2
+require github.com/bhatti/PlexSpaces/sdks/go v0.1.3
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1 // indirect

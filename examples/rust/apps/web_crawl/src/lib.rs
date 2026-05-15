@@ -116,7 +116,7 @@ fn simulate_word_counts(url: &str) -> HashMap<String, u64> {
 
 fn proto_string_field(s: &str) -> TupleField {
     TupleField {
-        value: Some(ProtoTupleValue::StringValue(s.to_string())),
+        value: Some(ProtoTupleValue::String(s.to_string())),
     }
 }
 
@@ -379,20 +379,35 @@ fn handle_status(_payload: &[u8]) -> Vec<u8> {
 struct Component;
 
 impl Guest for Component {
-    fn init(config: String) -> String {
-        let result = handle_init(config.as_bytes());
-        String::from_utf8(result).unwrap_or_default()
+    fn init(config: Vec<u8>) -> Result<(), String> {
+        handle_init(&config);
+        Ok(())
     }
 
-    fn handle(msg_type: String, from_actor: String, payload: Vec<u8>) -> Vec<u8> {
+    fn handle(from_actor: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
         let _ = from_actor;
-        match msg_type.as_str() {
+        let result = match msg_type.as_str() {
             "fetch" => handle_fetch(&payload),
             "analyze" => handle_analyze(&payload),
             "top_words" => handle_top_words(&payload),
             "crawl" => handle_crawl(&payload),
             "status" => handle_status(&payload),
             _ => json_error(format!("unknown message type: {msg_type}")),
+        };
+        Ok(result)
+    }
+
+    fn get_state() -> Result<Vec<u8>, String> {
+        Ok(with_state(|s| serde_json::to_vec(s).unwrap_or_else(|_| b"{}".to_vec())))
+    }
+
+    fn set_state(state: Vec<u8>) -> Result<(), String> {
+        match serde_json::from_slice::<AppState>(&state) {
+            Ok(new_state) => {
+                with_state(|s| *s = new_state);
+                Ok(())
+            }
+            Err(e) => Err(format!("invalid state: {e}")),
         }
     }
 }

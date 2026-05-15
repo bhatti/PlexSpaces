@@ -74,7 +74,7 @@ package wasmv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
-	v1 "github.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	v1 "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1797,7 +1797,7 @@ const file_plexspaces_v1_wasm_wasm_proto_rawDesc = "" +
 	"\x12WasmRuntimeService\x12\x1bMigrate a WebAssembly actor\x1aDMoves an actor to another node using the runtime migration workflow.\x82\xd3\xe4\x93\x02+:\x01*\"&/api/v1/wasm/actors/{actor_id}:migrateB\xb5\x03\x92A\xcf\x01\x12h\n" +
 	"\x1bPlexSpaces WASM Runtime API\x12EDeployment and lifecycle APIs for the PlexSpaces WebAssembly runtime.2\x02v1jc\n" +
 	"\x12WasmRuntimeService\x12MModule deployment, actor instantiation, and migration for WebAssembly actors.\n" +
-	"\x16com.plexspaces.wasm.v1B\tWasmProtoP\x01ZSgithub.com/bhatti/plexspaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm;wasmv1\xa2\x02\x03PWX\xaa\x02\x12Plexspaces.Wasm.V1\xca\x02\x12Plexspaces\\Wasm\\V1\xe2\x02\x1ePlexspaces\\Wasm\\V1\\GPBMetadata\xea\x02\x14Plexspaces::Wasm::V1b\x06proto3"
+	"\x16com.plexspaces.wasm.v1B\tWasmProtoP\x01ZSgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm;wasmv1\xa2\x02\x03PWX\xaa\x02\x12Plexspaces.Wasm.V1\xca\x02\x12Plexspaces\\Wasm\\V1\xe2\x02\x1ePlexspaces\\Wasm\\V1\\GPBMetadata\xea\x02\x14Plexspaces::Wasm::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_wasm_wasm_proto_rawDescOnce sync.Once

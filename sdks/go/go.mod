@@ -1,4 +1,4 @@
-module github.com/bhatti/plexspaces/sdks/go
+module github.com/bhatti/PlexSpaces/sdks/go
 
 go 1.25.0
 
@@ -9,7 +9,7 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
-// Generated proto files (make proto-go) use go_package = "github.com/bhatti/plexspaces/gen/go/..."
+// Generated proto files (make proto-go) use go_package = "github.com/bhatti/PlexSpaces/gen/go/..."
 // but live locally under ./plexspaces/proto/. This replace maps the declared import path to
 // the local directory so they resolve without a separate Go module or registry.
-replace github.com/bhatti/plexspaces/gen/go => ./plexspaces/proto
+replace github.com/bhatti/PlexSpaces/gen/go => ./plexspaces/proto

@@ -1,6 +1,6 @@
 name = "go-chat-room-large-scale"
 version = "1.0.0"
-namespace = "go-chat-room-large-scale"
+tenant_id = "default"
 seed_nodes = []
 
 [supervisor]
@@ -113,3 +113,4 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 2 } }
 ]
+tenant_id = "default"

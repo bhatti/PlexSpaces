@@ -1,5 +1,7 @@
 # Calculator (Rust WASM): add / subtract / multiply / divide
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -7,6 +9,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "calculator"
+tenant_id = "default"
 actor_type = "calculator_wasm"
 role = "worker"
 restart = "permanent"

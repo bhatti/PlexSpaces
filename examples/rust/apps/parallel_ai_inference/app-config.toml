@@ -1,7 +1,7 @@
 name = "rust-parallel-ai-inference"
 version = "1.0.0"
-namespace = "rust-parallel-ai-inference"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -47,3 +47,4 @@ role = "circuit_breaker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 args = { role = "circuit_breaker", threshold = "3" }
+tenant_id = "default"

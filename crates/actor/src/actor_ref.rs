@@ -270,7 +270,7 @@ use async_trait::async_trait;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
 use ulid::Ulid;
 
@@ -391,6 +391,8 @@ pub struct ActorRef {
     /// - This Option is only used for cleanup - ActorRegistry tracks everything else
     /// - Since we clean up immediately after ask() completes, we only need to track one at a time
     temporary_sender: Arc<RwLock<Option<String>>>,
+    /// Timestamp recorded when this ActorRef was first created (actor spawn time).
+    created_at: Option<prost_types::Timestamp>,
 }
 
 /// Internal representation of local vs remote actors
@@ -455,6 +457,7 @@ impl ActorRef {
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
+            created_at: None,
         })
     }
 
@@ -469,6 +472,13 @@ impl ActorRef {
         service_locator: Arc<dyn ServiceLocatorTrait>,
         visibility: ActorVisibility,
     ) -> Self {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let created_at = Some(prost_types::Timestamp {
+            seconds: now.as_secs() as i64,
+            nanos: now.subsec_nanos() as i32,
+        });
         Self {
             id: id.into(),
             tenant_id: tenant_id.into(),
@@ -482,6 +492,7 @@ impl ActorRef {
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
+            created_at,
         }
     }
 
@@ -533,6 +544,7 @@ impl ActorRef {
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
+            created_at: None,
         }
     }
 
@@ -692,6 +704,11 @@ impl ActorRef {
     /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
+    }
+
+    /// Returns the creation timestamp recorded when this actor was spawned.
+    pub fn created_at(&self) -> Option<prost_types::Timestamp> {
+        self.created_at.clone()
     }
 
     /// Returns the registered actor type when known.
@@ -1491,6 +1508,10 @@ impl MessageSender for ActorRef {
 
     async fn set_local_state_handle(&self, handle: Option<Arc<dyn ActorStateHandle>>) {
         ActorRef::set_local_state_handle(self, handle).await;
+    }
+
+    fn created_at(&self) -> Option<prost_types::Timestamp> {
+        self.created_at.clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -8,6 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$EXAMPLE_DIR"
 
+# Shared target: use workspace target directory
+WORKSPACE_TARGET="${SCRIPT_DIR}/../../../../target"
+export CARGO_TARGET_DIR="${WORKSPACE_TARGET}"
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║  Temporal Comparison Example - Test Suite                     ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
@@ -23,22 +27,11 @@ NC='\033[0m'
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 1: Building example..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-BUILD_OUTPUT=$(cargo build --features sqlite-backend 2>&1 | tee /tmp/temporal_build.log) || BUILD_EXIT=$?
-if echo "$BUILD_OUTPUT" | grep -q "Finished.*dev.*target(s)" && ([ -z "${BUILD_EXIT:-}" ] || [ "$BUILD_EXIT" -eq 0 ]); then
-    if echo "$BUILD_OUTPUT" | grep -q "error\["; then
-        echo -e "${RED}❌ Build failed (compilation errors)${NC}"
-        exit 1
-    else
-        echo -e "${GREEN}✅ Build successful${NC}"
-    fi
-else
-    if echo "$BUILD_OUTPUT" | grep -q "error\["; then
-        echo -e "${RED}❌ Build failed (compilation errors)${NC}"
-        exit 1
-    else
-        echo -e "${GREEN}✅ Build successful${NC}"
-    fi
+if ! cargo build --features sqlite-backend 2>&1; then
+    echo -e "${RED}❌ Build failed${NC}"
+    exit 1
 fi
+echo -e "${GREEN}✅ Build successful${NC}"
 echo ""
 
 # Step 2: Run unit tests
@@ -69,11 +62,11 @@ else
 fi
 echo ""
 
-# Step 4: Run example
+# Step 4: Run example using pre-built binary
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Step 4: Running example..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if timeout 60 cargo run --features sqlite-backend 2>&1 | tee /tmp/temporal_output.log; then
+if timeout 60 "${WORKSPACE_TARGET}/debug/temporal-comparison" 2>&1 | tee /tmp/temporal_output.log; then
     echo -e "${GREEN}✅ Example executed successfully${NC}"
 else
     echo -e "${RED}❌ Example execution failed${NC}"
@@ -87,7 +80,6 @@ echo "Step 5: Validating output..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 VALIDATION_PASSED=true
 
-# Check for temporal/workflow output
 if grep -qi "temporal\|workflow\|order\|comparison" /tmp/temporal_output.log; then
     echo -e "${GREEN}✅ Found workflow execution output${NC}"
 else
@@ -95,14 +87,13 @@ else
     VALIDATION_PASSED=false
 fi
 
-# Check for completion
 if grep -qi "completed\|successful\|execution summary" /tmp/temporal_output.log; then
     echo -e "${GREEN}✅ Found completion message${NC}"
 else
     echo -e "${YELLOW}⚠️  Completion message not found${NC}"
 fi
 
-# Step 6: Metrics / stats (same format as Go/Python/TS examples)
+# Step 6: Metrics / stats
 echo ""
 echo "Step 6: Metrics from workflow execution"
 echo "================================================================"
@@ -116,15 +107,9 @@ if [ -f /tmp/temporal_output.log ]; then
     echo "  Benchmarks"
     echo "  ────────────────────────────────────────────"
     grep "Execution Time:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
-    if grep -q "Validation:" /tmp/temporal_output.log; then
-        grep "Validation:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
-    fi
-    if grep -q "Payment:" /tmp/temporal_output.log; then
-        grep "Payment:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
-    fi
-    if grep -q "Shipping:" /tmp/temporal_output.log; then
-        grep "Shipping:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
-    fi
+    grep "Validation:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /' || true
+    grep "Payment:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /' || true
+    grep "Shipping:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /' || true
     echo ""
 fi
 echo "================================================================"

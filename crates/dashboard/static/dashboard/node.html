@@ -13,6 +13,7 @@
         <header class="dashboard-header">
             <h1>Node Dashboard</h1>
             <a class="back-link" href="/dashboard">Back to Home</a>
+            <a class="back-link" href="/dashboard/metrics/:node_id" style="margin-left:1rem">Metrics</a>
         </header>
 
         <section class="widgets-section">
@@ -39,6 +40,14 @@
             <div class="widget">
                 <div class="widget-header">Actor Messages</div>
                 <div class="widget-value" id="message-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Uptime</div>
+                <div class="widget-value" id="node-uptime">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Peer Nodes</div>
+                <div class="widget-value" id="peer-count">-</div>
             </div>
         </section>
 
@@ -89,71 +98,149 @@
         </section>
 
         <section class="table-section">
-            <h2>Actors</h2>
+            <h2>Object Registry</h2>
             <div class="search-filters">
-                <input id="actor-pattern" type="text" placeholder="Actor ID">
-                <select id="behavior-filter">
-                    <option value="">All behaviors</option>
-                    <option value="builtin">Built-in behaviors</option>
-                    <option value="custom">Custom behaviors</option>
-                    <option value="gen_server">GenServer</option>
-                    <option value="gen_event">GenEvent</option>
-                    <option value="gen_state_machine">GenStateMachine</option>
-                    <option value="workflow">Workflow</option>
+                <select id="object-type-filter">
+                    <option value="">All types</option>
+                    <option value="ACTOR">Actor</option>
+                    <option value="TUPLESPACE">TupleSpace</option>
+                    <option value="SERVICE">Service</option>
+                    <option value="VIRTUAL_MACHINE">VM</option>
+                    <option value="APPLICATION">Application</option>
+                    <option value="WORKFLOW">Workflow</option>
+                    <option value="NODE">Node</option>
                 </select>
-                <input id="actor-type-filter" type="text" placeholder="Actor type">
-                <select id="current-status-filter">
-                    <option value="">All current statuses</option>
-                    <option value="creating">Creating</option>
-                    <option value="activating">Activating</option>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="deactivating">Deactivating</option>
-                    <option value="stopping">Stopping</option>
-                    <option value="failed">Failed</option>
-                    <option value="terminated">Terminated</option>
+                <input id="object-namespace-filter" type="text" placeholder="Namespace">
+                <select id="object-health-filter">
+                    <option value="">All health statuses</option>
+                    <option value="HEALTHY">Healthy</option>
+                    <option value="DEGRADED">Degraded</option>
+                    <option value="DEAD">Dead</option>
                 </select>
-                <select id="exit-status-filter">
-                    <option value="">All exit statuses</option>
-                    <option value="failed">Failed</option>
-                    <option value="terminated">Terminated</option>
-                </select>
+                <input id="object-id-pattern" type="text" placeholder="ID pattern">
             </div>
             <div class="table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Actor ID</th>
-                            <th>Behavior</th>
+                            <th>Object ID</th>
                             <th>Type</th>
-                            <th>Namespace</th>
+                            <th>Category</th>
+                            <th>Health</th>
                             <th>Tenant</th>
-                            <th>Current Status</th>
-                            <th>Exit Status</th>
-                            <th>Messages</th>
-                            <th>Errors</th>
-                            <th>Actions</th>
+                            <th>Namespace</th>
+                            <th>Labels</th>
+                            <th>Last Heartbeat</th>
                         </tr>
                     </thead>
-                    <tbody id="actors-table-body">
-                        <tr><td colspan="10">Loading...</td></tr>
+                    <tbody id="objects-table-body">
+                        <tr><td colspan="8">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
-            <div class="table-pagination" id="actors-pagination"></div>
+            <div class="table-pagination" id="objects-pagination"></div>
         </section>
-    </div>
 
-    <div class="modal" id="actor-detail-modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="actor-detail-title">Actor Detail</h2>
-                <button type="button" class="modal-close" id="actor-detail-close" aria-label="Close">×</button>
+        <section class="table-section">
+            <h2>Key / Value Store</h2>
+            <div class="search-filters">
+                <input id="kv-prefix-filter" type="text" placeholder="Key prefix">
+                <input id="kv-namespace-filter" type="text" placeholder="Namespace">
             </div>
-            <div class="modal-body" id="actor-detail-body">
-                <p>Loading...</p>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Key</th>
+                            <th>Value (preview)</th>
+                            <th>Size (bytes)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="keyvalue-table-body">
+                        <tr><td colspan="3">Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
+            <div class="table-pagination" id="keyvalue-pagination"></div>
+        </section>
+
+        <section class="table-section">
+            <h2>Tuple Space</h2>
+            <div class="search-filters">
+                <input id="ts-pattern-filter" type="text" placeholder="Pattern (e.g. [*, *])">
+                <input id="ts-namespace-filter" type="text" placeholder="Namespace">
+            </div>
+            <div class="table-container table-container-scroll">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Namespace</th>
+                            <th>Pattern</th>
+                            <th>Tuple Count</th>
+                            <th>Sample Tuples</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tuplespace-table-body">
+                        <tr><td colspan="4">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <h2>Blobs</h2>
+            <div class="search-filters">
+                <input id="blob-kind-filter" type="text" placeholder="Kind (e.g. LOGS)">
+                <input id="blob-namespace-filter" type="text" placeholder="Namespace">
+                <input id="blob-prefix-filter" type="text" placeholder="Name prefix">
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Blob ID</th>
+                            <th>Name</th>
+                            <th>Kind</th>
+                            <th>Size</th>
+                            <th>Content-Type</th>
+                            <th>Tenant</th>
+                            <th>Namespace</th>
+                            <th>Created</th>
+                            <th>Download</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blobs-table-body">
+                        <tr><td colspan="9">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-pagination" id="blobs-pagination"></div>
+        </section>
+
+        <section class="table-section">
+            <h2>Service Links</h2>
+            <div class="table-container table-container-scroll">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Transport</th>
+                            <th>Base URL</th>
+                            <th>Policy Template</th>
+                            <th>API Key Header</th>
+                        </tr>
+                    </thead>
+                    <tbody id="servicelinks-table-body">
+                        <tr><td colspan="5">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <h2>Metrics</h2>
+            <p>View detailed metrics, graphs, and counters on the <a href="/dashboard/metrics/:node_id">Metrics page</a>.</p>
+        </section>
     </div>
 
     <footer class="dashboard-footer">
@@ -183,7 +270,9 @@
         };
         const tableState = {
             applications: { offset: 0, limit: 10 },
-            actors: { offset: 0, limit: 10 },
+            objects:       { offset: 0, limit: 20 },
+            keyvalue:      { offset: 0, limit: 20 },
+            blobs:         { offset: 0, limit: 10 },
         };
         let latestNodeMetrics = null;
 
@@ -226,15 +315,6 @@
             container.querySelector('[data-direction="next"]')?.addEventListener('click', () => onPageChange('next'));
         }
 
-        function actorStatusRequestValue() {
-            const currentStatus = document.getElementById('current-status-filter').value || '';
-            const exitStatusValue = document.getElementById('exit-status-filter').value || '';
-            if (currentStatus && exitStatusValue && currentStatus !== exitStatusValue) {
-                return '__none__';
-            }
-            return currentStatus || exitStatusValue;
-        }
-
         function updateFooter(systemInfo) {
             const version = systemInfo.git_commit && systemInfo.git_commit !== 'unknown'
                 ? `${systemInfo.version} (${systemInfo.git_commit})`
@@ -256,6 +336,14 @@
             document.getElementById('application-count').textContent = summary.total_applications ?? 0;
             document.getElementById('actor-count').textContent = actorCount;
             document.getElementById('message-count').textContent = Number(metrics.messages_routed || 0);
+            const sec = Number(metrics.uptime_seconds || 0);
+            if (sec > 0) {
+                const d = Math.floor(sec / 86400);
+                const h = Math.floor((sec % 86400) / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                document.getElementById('node-uptime').textContent = d > 0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
+            }
+            document.getElementById('peer-count').textContent = Number(metrics.connected_nodes || 0);
         }
 
         function appendNodeMetrics(metrics, recorderSummary) {
@@ -328,12 +416,12 @@
                 { label: 'Actors', stroke: '#5B8C5A', width: 2 },
             ]);
             renderSingleChart('node-messages-chart', 'messages', 'Count', ['messages', 'errors'], [
-                { label: 'Messages', stroke: '#A23B72', width: 2 },
-                { label: 'Failed Deliveries', stroke: '#C0392B', width: 2 },
+                { label: 'Messages', stroke: '#0097A7', width: 2 },
+                { label: 'Failed Deliveries', stroke: '#E65100', width: 2 },
             ]);
             renderSingleChart('node-latency-chart', 'latency', 'ms', ['avgLatency', 'maxLatency'], [
-                { label: 'Average', stroke: '#7D6608', width: 2 },
-                { label: 'Max', stroke: '#922B21', width: 2 },
+                { label: 'Average', stroke: '#2E86AB', width: 2 },
+                { label: 'Max', stroke: '#E63946', width: 2 },
             ]);
             renderSingleChart('node-supervisors-chart', 'supervisors', 'Count', ['supervisors'], [
                 { label: 'Supervisors', stroke: '#F18F01', width: 2 },
@@ -364,129 +452,131 @@
             }).join('');
         }
 
-        function actorStatusLabel(actor) {
-            return actor.current_status || actor.status || '-';
-        }
+        const HEALTH_STATUS_LABELS = { 0: '-', 1: 'Healthy', 2: 'Degraded', 3: 'Dead' };
+        const OBJECT_TYPE_LABELS = { 0: '-', 1: 'Actor', 2: 'TupleSpace', 3: 'Service', 4: 'VM', 5: 'Application', 6: 'Workflow', 7: 'Node' };
 
-        function renderActors(actors) {
-            const body = document.getElementById('actors-table-body');
-            if (!actors.length) {
-                body.innerHTML = '<tr><td colspan="10">No actors found.</td></tr>';
+        function renderObjects(objects) {
+            const body = document.getElementById('objects-table-body');
+            if (!objects.length) {
+                body.innerHTML = '<tr><td colspan="8">No objects found.</td></tr>';
                 return;
             }
-            body.innerHTML = actors.map(actor => `
-                <tr>
-                    <td>${escapeHtml(actor.actor_id)}</td>
-                    <td>${escapeHtml(actor.behavior_kind || '-')}</td>
-                    <td>${escapeHtml(actor.actor_type || '-')}</td>
-                    <td>${escapeHtml(actor.namespace || '-')}</td>
-                    <td>${escapeHtml(actor.tenant_id || '-')}</td>
-                    <td>${escapeHtml(actorStatusLabel(actor))}</td>
-                    <td>${escapeHtml(actor.exit_status || '-')}</td>
-                    <td>${Number((actor.metrics || {}).messages_routed || 0)}</td>
-                    <td>${Number((actor.metrics || {}).error_total || 0)}</td>
-                    <td class="action-group">
-                        <button type="button" class="action-button secondary" data-view-actor="${escapeHtml(actor.actor_id)}">View</button>
-                        <button type="button" class="action-button danger" data-stop-actor="${escapeHtml(actor.actor_id)}">Stop</button>
-                    </td>
-                </tr>
-            `).join('');
+            body.innerHTML = objects.map(obj => {
+                const labels = Array.isArray(obj.labels) ? obj.labels.join(', ') : '';
+                const healthLabel = HEALTH_STATUS_LABELS[obj.health_status] || String(obj.health_status);
+                const typeLabel = OBJECT_TYPE_LABELS[obj.object_type] || String(obj.object_type);
+                return `<tr>
+                    <td>${escapeHtml(obj.object_id)}</td>
+                    <td>${escapeHtml(typeLabel)}</td>
+                    <td>${escapeHtml(obj.object_category || '-')}</td>
+                    <td>${escapeHtml(healthLabel)}</td>
+                    <td>${escapeHtml(obj.tenant_id || '-')}</td>
+                    <td>${escapeHtml(obj.namespace || '-')}</td>
+                    <td>${escapeHtml(labels || '-')}</td>
+                    <td>${formatTimestamp(obj.last_heartbeat)}</td>
+                </tr>`;
+            }).join('');
+        }
 
-            body.querySelectorAll('[data-view-actor]').forEach(button => {
-                button.addEventListener('click', () => showActorDetail(button.getAttribute('data-view-actor')));
+        function renderKeyValues(entries) {
+            const body = document.getElementById('keyvalue-table-body');
+            if (!entries.length) {
+                body.innerHTML = '<tr><td colspan="3">No entries found.</td></tr>';
+                return;
+            }
+            body.innerHTML = entries.map(e => `<tr>
+                <td>${escapeHtml(e.key)}</td>
+                <td><code>${escapeHtml(e.value_preview || '')}</code></td>
+                <td>${Number(e.size_bytes || 0)}</td>
+            </tr>`).join('');
+        }
+
+        function renderTupleSpaces(spaces) {
+            const body = document.getElementById('tuplespace-table-body');
+            if (!spaces.length) {
+                body.innerHTML = '<tr><td colspan="4">No tuple spaces found.</td></tr>';
+                return;
+            }
+            body.innerHTML = spaces.map(s => {
+                const samples = (s.sample_tuples || []).map(t => {
+                    const fields = (t.fields || []).map(f => escapeHtml(String(f ?? ''))).join(', ');
+                    return `[${fields}]`;
+                }).join('; ');
+                return `<tr>
+                    <td>${escapeHtml(s.namespace || '-')}</td>
+                    <td><code>${escapeHtml(s.pattern || '*')}</code></td>
+                    <td>${Number(s.tuple_count || 0)}</td>
+                    <td><small>${escapeHtml(samples || '-')}</small></td>
+                </tr>`;
+            }).join('');
+        }
+
+        function formatBytes(n) {
+            const num = Number(n || 0);
+            if (num < 1024) return `${num} B`;
+            if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+            return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        function renderBlobs(blobs) {
+            const body = document.getElementById('blobs-table-body');
+            if (!blobs.length) {
+                body.innerHTML = '<tr><td colspan="9">No blobs found.</td></tr>';
+                return;
+            }
+            body.innerHTML = blobs.map(b => `<tr>
+                <td><small>${escapeHtml(b.blob_id)}</small></td>
+                <td>${escapeHtml(b.name || '-')}</td>
+                <td>${escapeHtml(b.kind || '-')}</td>
+                <td>${formatBytes(b.size_bytes)}</td>
+                <td>${escapeHtml(b.content_type || '-')}</td>
+                <td>${escapeHtml(b.tenant_id || '-')}</td>
+                <td>${escapeHtml(b.namespace || '-')}</td>
+                <td>${formatTimestamp(b.created_at)}</td>
+                <td><button type="button" class="action-button secondary" data-download-blob="${escapeHtml(b.blob_id)}">⬇</button></td>
+            </tr>`).join('');
+
+            body.querySelectorAll('[data-download-blob]').forEach(btn => {
+                btn.addEventListener('click', () => downloadBlob(btn.getAttribute('data-download-blob')));
             });
-            body.querySelectorAll('[data-stop-actor]').forEach(button => {
-                button.addEventListener('click', () => stopActor(button.getAttribute('data-stop-actor')));
-            });
+        }
+
+        function renderServiceLinks(links) {
+            const body = document.getElementById('servicelinks-table-body');
+            if (!links.length) {
+                body.innerHTML = '<tr><td colspan="5">No service links configured.</td></tr>';
+                return;
+            }
+            body.innerHTML = links.map(l => `<tr>
+                <td>${escapeHtml(l.name)}</td>
+                <td>${escapeHtml(String(l.transport || '-'))}</td>
+                <td><a href="${escapeHtml(l.base_url || '')}" target="_blank" rel="noopener">${escapeHtml(l.base_url || '-')}</a></td>
+                <td>${escapeHtml(l.policy_template || '-')}</td>
+                <td>${escapeHtml(l.api_key_header_name || '-')}</td>
+            </tr>`).join('');
         }
 
         function formatTimestamp(timestamp) {
             if (!timestamp || typeof timestamp.seconds === 'undefined') {
-                return 'Not yet recorded';
+                return '-';
             }
             return new Date((Number(timestamp.seconds) * 1000) + Math.floor(Number(timestamp.nanos || 0) / 1_000_000)).toLocaleString();
         }
 
-        function metricTable(rows) {
-            return `
-                <table class="modal-metrics-table">
-                    <tbody>
-                        ${rows.map(([label, value]) => `
-                            <tr>
-                                <th>${escapeHtml(label)}</th>
-                                <td>${escapeHtml(value)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-        }
-
-        async function showActorDetail(actorId) {
-            const modal = document.getElementById('actor-detail-modal');
-            const title = document.getElementById('actor-detail-title');
-            const body = document.getElementById('actor-detail-body');
-            title.textContent = actorId;
-            body.innerHTML = '<p>Loading...</p>';
-            modal.style.display = 'block';
+        async function downloadBlob(blobId) {
             try {
-                const data = await fetchJson(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}`);
-                const actor = data.actor || {};
-                const metrics = actor.metrics || {};
-                const identityRows = [
-                    ['Actor ID', actor.actor_id || '-'],
-                    ['Behavior', actor.behavior_kind || '-'],
-                    ['Type', actor.actor_type || '-'],
-                    ['Namespace', actor.namespace || '-'],
-                    ['Tenant', actor.tenant_id || '-'],
-                    ['Node', actor.node_id || '-'],
-                    ['Status', actor.status || '-'],
-                ];
-                const messageRows = [
-                    ['Messages routed', String(Number(metrics.messages_routed || 0))],
-                    ['Local deliveries', String(Number(metrics.local_deliveries || 0))],
-                    ['Remote deliveries', String(Number(metrics.remote_deliveries || 0))],
-                    ['Failed deliveries', String(Number(metrics.failed_deliveries || 0))],
-                    ['Errors', String(Number(metrics.error_total || 0))],
-                ];
-                const lifecycleRows = [
-                    ['Spawn total', String(Number(metrics.spawn_total || 0))],
-                    ['Active flag', String(Number(metrics.active || 0))],
-                    ['Created at', formatTimestamp(actor.created_at)],
-                    ['Last checkpoint', formatTimestamp(actor.last_checkpoint)],
-                    ['Journal size bytes', String(Number(actor.journal_size_bytes || 0))],
-                ];
-                body.innerHTML = `
-                    <div class="modal-section">
-                        <h3>Identity</h3>
-                        ${metricTable(identityRows)}
-                    </div>
-                    <div class="modal-section">
-                        <h3>Message Metrics</h3>
-                        ${metricTable(messageRows)}
-                    </div>
-                    <div class="modal-section">
-                        <h3>Lifecycle</h3>
-                        ${metricTable(lifecycleRows)}
-                    </div>
-                `;
-            } catch (error) {
-                body.innerHTML = `<p>Failed to load actor detail: ${escapeHtml(error.message)}</p>`;
-            }
-        }
-
-        async function stopActor(actorId) {
-            if (!actorId || !window.confirm(`Stop actor ${actorId}?`)) {
-                return;
-            }
-            try {
-                await fetchJson(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}/stop`, {
-                    method: 'POST',
-                });
-                await loadActors();
-                await loadNodeSummary();
-            } catch (error) {
-                window.alert(`Failed to stop actor ${actorId}: ${error.message}`);
+                const params = new URLSearchParams({ node_id: nodeId });
+                const data = await fetchJson(
+                    `/api/v1/dashboard/blob/${encodeURIComponent(blobId)}/presigned-url?${params}`,
+                    { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: '{}' }
+                );
+                if (data.url) {
+                    window.open(data.url, '_blank');
+                } else {
+                    window.alert('Download unavailable: ' + (data.error || 'presigned URLs not configured'));
+                }
+            } catch (e) {
+                window.alert('Failed to get download URL: ' + e.message);
             }
         }
 
@@ -516,36 +606,91 @@
             });
         }
 
-        async function loadActors() {
-            const status = actorStatusRequestValue();
-            if (status === '__none__') {
-                renderActors([]);
-                renderPagination('actors-pagination', { offset: 0, limit: tableState.actors.limit, total_size: 0, has_next: false }, () => {});
-                return;
-            }
+        async function loadObjects() {
             const params = new URLSearchParams({
                 node_id: nodeId,
-                actor_id_pattern: document.getElementById('actor-pattern').value || '',
-                behavior_kind: document.getElementById('behavior-filter').value || '',
-                actor_type: document.getElementById('actor-type-filter').value || '',
-                status,
-                offset: String(tableState.actors.offset),
-                limit: String(tableState.actors.limit),
+                object_type: document.getElementById('object-type-filter').value || '',
+                namespace: document.getElementById('object-namespace-filter').value || '',
+                health_status: document.getElementById('object-health-filter').value || '',
+                id_pattern: document.getElementById('object-id-pattern').value || '',
+                offset: String(tableState.objects.offset),
+                limit: String(tableState.objects.limit),
             });
-            const data = await fetchJson(`/api/v1/dashboard/actors?${params.toString()}`);
-            renderActors(data.actors || []);
-            renderPagination('actors-pagination', data.page, direction => {
-                tableState.actors.offset = direction === 'next'
-                    ? tableState.actors.offset + tableState.actors.limit
-                    : Math.max(0, tableState.actors.offset - tableState.actors.limit);
-                loadActors();
+            const data = await fetchJson(`/api/v1/dashboard/objects?${params.toString()}`);
+            renderObjects(data.objects || []);
+            renderPagination('objects-pagination', data.page, direction => {
+                tableState.objects.offset = direction === 'next'
+                    ? tableState.objects.offset + tableState.objects.limit
+                    : Math.max(0, tableState.objects.offset - tableState.objects.limit);
+                loadObjects();
             });
+        }
+
+        async function loadKeyValues() {
+            const params = new URLSearchParams({
+                node_id: nodeId,
+                prefix: document.getElementById('kv-prefix-filter').value || '',
+                namespace: document.getElementById('kv-namespace-filter').value || '',
+                offset: String(tableState.keyvalue.offset),
+                limit: String(tableState.keyvalue.limit),
+            });
+            const data = await fetchJson(`/api/v1/dashboard/keyvalue?${params.toString()}`);
+            renderKeyValues(data.entries || []);
+            renderPagination('keyvalue-pagination', data.page, direction => {
+                tableState.keyvalue.offset = direction === 'next'
+                    ? tableState.keyvalue.offset + tableState.keyvalue.limit
+                    : Math.max(0, tableState.keyvalue.offset - tableState.keyvalue.limit);
+                loadKeyValues();
+            });
+        }
+
+        async function loadTupleSpaces() {
+            const params = new URLSearchParams({
+                node_id: nodeId,
+                pattern: document.getElementById('ts-pattern-filter').value || '',
+                namespace: document.getElementById('ts-namespace-filter').value || '',
+            });
+            const data = await fetchJson(`/api/v1/dashboard/tuplespace?${params.toString()}`);
+            renderTupleSpaces(data.spaces || []);
+        }
+
+        async function loadBlobs() {
+            const params = new URLSearchParams({
+                node_id: nodeId,
+                kind: document.getElementById('blob-kind-filter').value || '',
+                namespace: document.getElementById('blob-namespace-filter').value || '',
+                prefix: document.getElementById('blob-prefix-filter').value || '',
+                offset: String(tableState.blobs.offset),
+                limit: String(tableState.blobs.limit),
+            });
+            const data = await fetchJson(`/api/v1/dashboard/blobs?${params.toString()}`);
+            renderBlobs(data.blobs || []);
+            renderPagination('blobs-pagination', data.page, direction => {
+                tableState.blobs.offset = direction === 'next'
+                    ? tableState.blobs.offset + tableState.blobs.limit
+                    : Math.max(0, tableState.blobs.offset - tableState.blobs.limit);
+                loadBlobs();
+            });
+        }
+
+        async function loadServiceLinks() {
+            const params = new URLSearchParams({ node_id: nodeId });
+            const data = await fetchJson(`/api/v1/dashboard/service-links?${params.toString()}`);
+            renderServiceLinks(data.service_links || []);
         }
 
         async function refreshPage() {
             try {
                 const systemInfoPromise = fetchJson('/api/v1/dashboard/system-info');
-                await Promise.all([loadNodeSummary(), loadApplications(), loadActors()]);
+                await Promise.all([
+                    loadNodeSummary(),
+                    loadApplications(),
+                    loadObjects(),
+                    loadKeyValues(),
+                    loadTupleSpaces(),
+                    loadBlobs(),
+                    loadServiceLinks(),
+                ]);
                 updateFooter(await systemInfoPromise);
             } catch (error) {
                 console.error('Failed to refresh node dashboard', error);
@@ -553,24 +698,27 @@
         }
 
         window.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('actor-detail-close').addEventListener('click', () => {
-                document.getElementById('actor-detail-modal').style.display = 'none';
+            // Object registry filters
+            document.querySelectorAll('#object-type-filter, #object-namespace-filter, #object-health-filter, #object-id-pattern').forEach(element => {
+                element.addEventListener('input', () => { tableState.objects.offset = 0; loadObjects(); });
+                element.addEventListener('change', () => { tableState.objects.offset = 0; loadObjects(); });
             });
-            document.getElementById('actor-detail-modal').addEventListener('click', event => {
-                if (event.target.id === 'actor-detail-modal') {
-                    event.currentTarget.style.display = 'none';
-                }
+
+            // KV filters
+            document.querySelectorAll('#kv-prefix-filter, #kv-namespace-filter').forEach(element => {
+                element.addEventListener('input', () => { tableState.keyvalue.offset = 0; loadKeyValues(); });
             });
-            document.querySelectorAll('.search-filters input, .search-filters select').forEach(element => {
-                element.addEventListener('input', () => {
-                    tableState.actors.offset = 0;
-                    loadActors();
-                });
-                element.addEventListener('change', () => {
-                    tableState.actors.offset = 0;
-                    loadActors();
-                });
+
+            // TupleSpace filters
+            document.querySelectorAll('#ts-pattern-filter, #ts-namespace-filter').forEach(element => {
+                element.addEventListener('input', () => loadTupleSpaces());
             });
+
+            // Blob filters
+            document.querySelectorAll('#blob-kind-filter, #blob-namespace-filter, #blob-prefix-filter').forEach(element => {
+                element.addEventListener('input', () => { tableState.blobs.offset = 0; loadBlobs(); });
+            });
+
             refreshPage();
             setInterval(refreshPage, 5000);
             window.addEventListener('resize', renderCharts);

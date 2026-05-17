@@ -111,7 +111,6 @@ async fn test_wasm_ask_single_message_id_flow() {
     let app_spec = ApplicationSpec {
         name: "calc-ask-test".to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Ask pattern test".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),

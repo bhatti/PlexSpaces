@@ -54,7 +54,7 @@ struct ApplicationInstance {
     /// Current state
     state: ApplicationState,
     /// When the application was deployed (registered)
-    deployed_at: std::time::Instant,
+    deployed_at: std::time::SystemTime,
     /// When the application started
     started_at: Option<std::time::Instant>,
     /// When the application stopped (if stopped)
@@ -65,8 +65,6 @@ struct ApplicationInstance {
     tracked_actor_count: u32,
     /// Tracked supervisor count (updated when supervisors are created)
     tracked_supervisor_count: u32,
-    /// Namespace from ApplicationSpec (if available)
-    namespace: String,
     /// Tenant ID from ApplicationSpec (if available)
     tenant_id: String,
 }
@@ -358,8 +356,9 @@ impl ApplicationManagerImpl {
         let name = app.name().to_string();
         let version = app.version().to_string();
         let tracked_supervisor_count = Self::tracked_supervisor_count_for_app(app.as_ref());
-        let registration_ctx = ctx.clone().with_namespace(name.clone());
-        let namespace = registration_ctx.namespace().to_string();
+        // Namespace is always the application name.
+        let namespace = name.clone();
+        let registration_ctx = ctx.clone().with_namespace(namespace.clone());
         let tenant_id = registration_ctx.tenant_id().to_string();
 
         if let Some(wasm_app) = app
@@ -428,13 +427,12 @@ impl ApplicationManagerImpl {
             ApplicationInstance {
                 app,
                 state: ApplicationState::ApplicationStateCreated,
-                deployed_at: std::time::Instant::now(),
+                deployed_at: std::time::SystemTime::now(),
                 started_at: None,
                 stopped_at: None,
                 metrics: None,
                 tracked_actor_count: 0,
                 tracked_supervisor_count,
-                namespace: namespace.clone(),
                 tenant_id: tenant_id.clone(),
             },
         );
@@ -484,9 +482,9 @@ impl ApplicationManagerImpl {
         // Transition to Starting
         instance.state = ApplicationState::ApplicationStateStarting;
 
-        // Get tenant_id/namespace from ApplicationInstance (stored during registration)
+        // Get tenant_id and namespace (namespace is always the application name)
         let tenant_id = instance.tenant_id.clone();
-        let namespace = instance.namespace.clone();
+        let namespace = instance.app.name().to_string();
 
         tracing::info!(
             application = %name,
@@ -870,7 +868,7 @@ impl ApplicationManagerImpl {
             (
                 instance.app.module_hash_for_cleanup(),
                 instance.tenant_id.clone(),
-                instance.namespace.clone(),
+                instance.app.name().to_string(),
             )
         };
 
@@ -993,7 +991,7 @@ impl ApplicationManagerImpl {
         let uptime_seconds = if let Some(started_at) = instance.started_at {
             started_at.elapsed().as_secs()
         } else {
-            instance.deployed_at.elapsed().as_secs()
+            instance.deployed_at.elapsed().unwrap_or_default().as_secs()
         };
         let mut stored_metrics = instance.metrics.clone().unwrap_or_else(|| {
             Self::default_application_metrics(
@@ -1195,7 +1193,7 @@ impl ApplicationManagerImpl {
     pub async fn get_application_namespace_tenant(&self, name: &str) -> Option<(String, String)> {
         let apps = self.applications.read().await;
         let instance = apps.get(name)?;
-        Some((instance.namespace.clone(), instance.tenant_id.clone()))
+        Some((instance.app.name().to_string(), instance.tenant_id.clone()))
     }
 
     /// Get application information (internal implementation)
@@ -1237,11 +1235,15 @@ impl ApplicationManagerImpl {
             }
         };
 
-        // Calculate deployed_at timestamp
-        let deployed_at = Some(Timestamp {
-            seconds: instance.deployed_at.elapsed().as_secs() as i64,
-            nanos: 0,
-        });
+        // Calculate deployed_at timestamp from wall-clock time
+        let deployed_at = instance
+            .deployed_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| Timestamp {
+                seconds: d.as_secs() as i64,
+                nanos: d.subsec_nanos() as i32,
+            });
 
         // Calculate uptime if running
         let _uptime_seconds = if let Some(started_at) = instance.started_at {
@@ -1250,17 +1252,20 @@ impl ApplicationManagerImpl {
             0
         };
 
-        // Build metrics if available or create basic metrics
-        let metrics = instance.metrics.clone().or_else(|| {
-            let uptime_seconds = if let Some(started_at) = instance.started_at {
-                started_at.elapsed().as_secs()
-            } else {
-                instance.deployed_at.elapsed().as_secs()
-            };
+        // Build metrics — always recompute uptime_seconds from monotonic clock
+        let current_uptime = if let Some(started_at) = instance.started_at {
+            started_at.elapsed().as_secs()
+        } else {
+            instance.deployed_at.elapsed().unwrap_or_default().as_secs()
+        };
+        let metrics = instance.metrics.clone().map(|mut m| {
+            m.uptime_seconds = current_uptime;
+            m
+        }).or_else(|| {
             Some(Self::default_application_metrics(
                 instance.tracked_actor_count,
                 instance.tracked_supervisor_count,
-                uptime_seconds,
+                current_uptime,
             ))
         });
 
@@ -1282,7 +1287,6 @@ impl ApplicationManagerImpl {
             application_id,
             name: name.to_string(),
             tenant_id: instance.tenant_id.clone(),
-            namespace: instance.namespace.clone(),
             version: instance.app.version().to_string(),
             status: status.into(),
             deployed_at,
@@ -1423,7 +1427,6 @@ mod tests {
         ApplicationSpec {
             name: name.to_string(),
             tenant_id: String::new(),
-            namespace: name.to_string(),
             version: "0.1.0".to_string(),
             description: "test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),

@@ -4,6 +4,8 @@
 # actor_type matches the Python class name; the SDK selects the correct class
 # via select_actor_class (priority: actor_type exact match).
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -12,6 +14,7 @@ max_restart_window_seconds = 60
 # Parameter server (centralized model weights)
 [[supervisor.children]]
 name = "parameter-server"
+tenant_id = "default"
 actor_type = "ParameterServer"
 restart = "permanent"
 shutdown_timeout_seconds = 10
@@ -34,3 +37,4 @@ name = "data-worker-1"
 actor_type = "DataWorker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
+tenant_id = "default"

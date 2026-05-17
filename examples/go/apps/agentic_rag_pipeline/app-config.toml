@@ -1,7 +1,7 @@
 name = "go-agentic-rag-pipeline"
 version = "1.0.0"
-namespace = "go-agentic-rag-pipeline"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -100,3 +100,4 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
   { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
 ]
+tenant_id = "default"

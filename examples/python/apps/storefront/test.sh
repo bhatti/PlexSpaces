@@ -8,8 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/storefront_actor.wasm"
-NODE_ADDR="${1:-localhost:8090}"
-HTTP_PORT="${2:-8091}"
+HTTP_PORT="${1:-8091}"
 
 export CARGO_TARGET_DIR="$WORKSPACE_DIR/target"
 GREEN='\033[0;32m'
@@ -79,16 +78,6 @@ check_ok() {
     return 1
 }
 
-cleanup() {
-    echo ""
-    echo "Cleanup: Undeploying $APP_ID"
-    cd "$WORKSPACE_DIR"
-    if [ -x "$WORKSPACE_DIR/target/debug/plexspaces" ]; then
-        "$WORKSPACE_DIR/target/debug/plexspaces" undeploy --node "$NODE_ADDR" --app-id "$APP_ID" 2>/dev/null || true
-    else
-        cargo run -q -p plexspaces-cli -- undeploy --node "$NODE_ADDR" --app-id "$APP_ID" 2>/dev/null || true
-    fi
-}
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║     Storefront API Test (config + cart + checkout limit)      ║"
@@ -115,18 +104,28 @@ echo ""
 
 echo "Step 2: Undeploy if present, then deploy"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
 sleep 1
-trap cleanup EXIT
 
-RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+_deployed=0
+for _attempt in 1 2 3; do
+DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
-if ! echo "$RESPONSE" | grep -qi '"success":\s*true'; then
-    echo -e "${RED}✗ Deploy failed: $RESPONSE${NC}"
-    exit 1
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $RESPONSE${NC}"
+  exit 1
 fi
 echo -e "${GREEN}✓ Deployed $APP_ID (actor type: $ACTOR_TYPE)${NC}"
 sleep 1

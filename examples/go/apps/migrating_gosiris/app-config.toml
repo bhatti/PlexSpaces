@@ -6,6 +6,8 @@
 # Architecture:
 #   sensor-* actors -> join "sensors" process group -> aggregator polls via PG
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -14,6 +16,7 @@ max_restart_window_seconds = 60
 # Aggregator actor - collects and analyzes sensor data
 [[supervisor.children]]
 name = "aggregator"
+tenant_id = "default"
 actor_type = "migrating_gosiris_wasm"
 role = "aggregator"
 restart = "permanent"
@@ -79,3 +82,4 @@ location = "outdoor"
 sensor_type = "temp_humidity"
 base_temp_c = "15.0"
 base_humidity = "65.0"
+tenant_id = "default"

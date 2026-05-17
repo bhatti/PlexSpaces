@@ -1417,8 +1417,8 @@ PlexSpaces SDKs are designed so external projects can import them without a loca
 
 | Language | Import Method | Example |
 |---|---|---|
-| Rust | Git-tag Cargo dependency | `plexspaces-sdk = { git = "https://github.com/plexobject/plexspaces", tag = "v0.1.0" }` |
-| Go | Go module proxy | `require github.com/plexobject/plexspaces/sdks/go v0.1.0` |
+| Rust | Git-tag Cargo dependency | `plexspaces-sdk = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }` |
+| Go | Go module proxy | `require github.com/bhatti/PlexSpaces/sdks/go v0.1.3` |
 | Python | PyPI | `pip install plexspaces==0.1.0` |
 | TypeScript | npm | `npm install @plexspaces/sdk@0.1.0` |
 
@@ -1431,7 +1431,7 @@ PlexSpaces SDKs are designed so external projects can import them without a loca
 ### Notes
 
 - **Rust**: Git-tag import lets Cargo resolve the entire workspace from a single reference — no individual crate publishing to crates.io needed for the ~15 internal workspace crates.
-- **Go**: Tag named `sdks/go/v0.1.0` makes the module importable via Go module proxy — no separate repo needed.
+- **Go**: Tag named `sdks/go/v0.1.3` makes the module importable via Go module proxy — no separate repo needed.
 
 ## See Also
 

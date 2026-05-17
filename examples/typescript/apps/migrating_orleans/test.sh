@@ -123,34 +123,43 @@ fi
 
 # Step 2: Undeploy existing app (if any)
 echo "🧹 Cleaning up existing deployment..."
-curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
 sleep 1
 
 # Step 3: Deploy WASM app via HTTP API
 echo ""
 echo "📦 Deploying WASM application..."
 DEPLOY_START=$(get_time_ms)
-if [ -f "$CONFIG_FILE" ]; then
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+_deployed=0
+for _attempt in 1 2 3; do
+  if [ -f "$CONFIG_FILE" ]; then
+    DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         -F "application_id=$APP_ID" \
         -F "name=$APP_ID" \
         -F "version=1.0.0" \
         -F "wasm_file=@$WASM_FILE" \
         -F "config=@$CONFIG_FILE" 2>&1)
-else
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+  else
+    DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         -F "application_id=$APP_ID" \
         -F "name=$APP_ID" \
         -F "version=1.0.0" \
         -F "wasm_file=@$WASM_FILE" 2>&1)
+  fi
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $RESPONSE${NC}"
+  exit 1
 fi
-
-if echo "$RESPONSE" | grep -qE '"success":true|"application_id"|"name"'; then
-    echo -e "  ${GREEN}✓${NC} Application deployed successfully"
-else
-    echo -e "  ${RED}❌${NC} Deployment failed: $RESPONSE"
-    exit 1
-fi
+echo -e "  ${GREEN}✓${NC} Application deployed successfully"
 
 # Wait for application to start
 echo "  Waiting for application to initialize..."

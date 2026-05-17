@@ -1,7 +1,7 @@
 name = "heat-diffusion-rust"
 version = "1.0.0"
-namespace = "heat-diffusion-rust"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -23,3 +23,4 @@ role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 args = { role = "worker" }
+tenant_id = "default"

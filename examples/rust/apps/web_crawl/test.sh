@@ -34,11 +34,6 @@ ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
 
-cleanup() {
-  [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]] && rm -f "$TEMP_CONFIG"
-  curl -s -X DELETE "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 ask() {
   local actor="$1"
@@ -77,17 +72,26 @@ cp "$CONFIG_FILE" "$TEMP_CONFIG"
 echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
 curl -s -X DELETE "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
 sleep 1
-deploy_output=$(curl -s -w "\n%{http_code}" \
-  -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
-  -F "application_id=$APP_ID" \
-  -F "name=$APP_NAME" \
-  -F "version=1.0.0" \
-  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$TEMP_CONFIG" 2>&1)
-http_code=$(echo "$deploy_output" | tail -n1)
-response=$(echo "$deploy_output" | sed '$d')
-if [ "$http_code" != "200" ] || ! echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-  echo -e "${RED}Deploy failed (HTTP $http_code): $response${NC}"
+_deployed=0
+for _attempt in 1 2 3; do
+  deploy_output=$(curl -s -w "\n%{http_code}" \
+    -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    -F "application_id=$APP_ID" \
+    -F "name=$APP_NAME" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$TEMP_CONFIG" 2>&1)
+  http_code=$(echo "$deploy_output" | tail -n1)
+  response=$(echo "$deploy_output" | sed '$d')
+  if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $response${NC}"
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"

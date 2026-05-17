@@ -27,8 +27,8 @@ if ! command -v cargo &> /dev/null; then
     exit 1
 fi
 
-echo -e "${YELLOW}📦 Building webhook_handler (using shared target)...${NC}"
-if ! cargo build 2>&1 | grep -q "Finished"; then
+echo -e "${YELLOW}📦 Building webhook_handler (using shared target, debug)...${NC}"
+if ! cargo build 2>&1; then
     echo -e "${RED}❌ Build failed${NC}"
     exit 1
 fi
@@ -39,7 +39,7 @@ echo -e "${YELLOW}🚀 Running webhook_handler example...${NC}"
 echo ""
 
 OUTPUT_FILE=$(mktemp)
-timeout 25s cargo run 2>&1 | tee "$OUTPUT_FILE" || {
+timeout 25s "${WORKSPACE_TARGET}/debug/webhook_handler" 2>&1 | tee "$OUTPUT_FILE" || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}⏱️  Test completed (timeout)${NC}"
@@ -54,13 +54,14 @@ echo -e "${BLUE}📊 Validation${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-NODE_STARTED=$(grep -c "Node listening\|Startup complete\|SERVING" "$OUTPUT_FILE" 2>/dev/null || echo "0")
-ACTOR_SPAWNED=$(grep -c "Webhook handler actor spawned" "$OUTPUT_FILE" 2>/dev/null || echo "0")
-SUCCESS=$(grep -c "Webhook Handler example completed\|✅" "$OUTPUT_FILE" 2>/dev/null || echo "0")
+NODE_STARTED=$(grep -c "Node listening\|Startup complete\|SERVING" "$OUTPUT_FILE" 2>/dev/null || true)
+ACTOR_SPAWNED=$(grep -c "Webhook handler actor spawned" "$OUTPUT_FILE" 2>/dev/null || true)
+SUCCESS=$(grep -c "Webhook Handler example completed" "$OUTPUT_FILE" 2>/dev/null || true)
 
-NODE_STARTED=${NODE_STARTED:-0}
-ACTOR_SPAWNED=${ACTOR_SPAWNED:-0}
-SUCCESS=${SUCCESS:-0}
+# Ensure integers
+NODE_STARTED=$((${NODE_STARTED:-0} + 0))
+ACTOR_SPAWNED=$((${ACTOR_SPAWNED:-0} + 0))
+SUCCESS=$((${SUCCESS:-0} + 0))
 
 echo "  • Node started: $([ "$NODE_STARTED" -gt 0 ] && echo -e "${GREEN}✅${NC}" || echo -e "${RED}❌${NC}")"
 echo "  • Actor spawned: $([ "$ACTOR_SPAWNED" -gt 0 ] && echo -e "${GREEN}✅${NC}" || echo -e "${RED}❌${NC}")"

@@ -1735,6 +1735,19 @@ impl NodeRegistryTrait for NodeRegistry {
                     .entry(entry.registration.node_id.clone())
                     .or_insert_with(|| entry.registration.clone());
             }
+            drop(cache);
+
+            // ObjectRegistry is the authoritative membership record: every node writes itself
+            // there at startup. Merge those registrations so nodes that are not yet reachable
+            // via SWIM gossip (e.g. during bootstrap or network partition recovery) still appear
+            // in the dashboard. Cache entries take precedence; ObjectRegistry fills the gaps.
+            if let Ok(registry_nodes) = self.recent_node_registrations_from_registry(cluster_filter).await {
+                for registration in registry_nodes {
+                    nodes_by_id
+                        .entry(registration.node_id.clone())
+                        .or_insert(registration);
+                }
+            }
         }
 
         let mut nodes_by_address: HashMap<String, NodeRegistration> = HashMap::new();
@@ -3043,5 +3056,83 @@ mod tests {
             Duration::from_millis(1500)
         );
         assert_eq!(registry.config.swim_config.indirect_ping_nodes, 4);
+    }
+
+    /// Reproduces the dashboard bug: home page nodes table shows only 1 node even when multiple
+    /// nodes are registered in ObjectRegistry.
+    ///
+    /// In non-shared-db mode, `list_nodes` used only SWIM active members + local cache.
+    /// A remote node that registered itself in ObjectRegistry (the canonical membership record)
+    /// was invisible unless SWIM gossip had already propagated — causing the dashboard to show
+    /// fewer nodes than the Object Registry page.
+    #[tokio::test]
+    async fn test_list_nodes_includes_object_registry_nodes_in_non_shared_db_mode() {
+        let object_repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
+        let mut config = NodeRegistryConfig::default();
+        config.gossip_enabled = false;
+        config.use_shared_db = false; // default production mode
+
+        let registry = NodeRegistry::new(
+            object_registry.clone(),
+            "local-node".to_string(),
+            "localhost:8000".to_string(),
+            config,
+            None,
+        );
+
+        let ctx = RequestContext::new_without_auth(String::new(), "default".to_string())
+            .with_admin(true);
+
+        // Register the local node (simulates node startup)
+        let local_reg = NodeRegistration {
+            node_id: "local-node".to_string(),
+            node_address: "http://localhost:8000".to_string(),
+            ..Default::default()
+        };
+        registry.register_node(&ctx, local_reg).await.unwrap();
+
+        // Simulate a remote node registering itself in ObjectRegistry (as happens during its startup).
+        // This node has NOT been seen by SWIM — it is only in ObjectRegistry.
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let now_ts = Timestamp { seconds: now_secs, nanos: 0 };
+        object_registry
+            .register(
+                &ctx,
+                ObjectRegistration {
+                    object_type: ObjectType::ObjectTypeNode as i32,
+                    object_id: "remote-node".to_string(),
+                    node_id: "remote-node".to_string(),
+                    grpc_address: "http://localhost:8001".to_string(),
+                    object_category: "Node".to_string(),
+                    last_heartbeat: Some(now_ts.clone()),
+                    updated_at: Some(now_ts),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        // Both nodes must appear in list_nodes — the remote node is in ObjectRegistry but not SWIM.
+        let (nodes, _) = registry.list_nodes(&ctx, None, 100, "").await.unwrap();
+        let node_ids: Vec<&str> = nodes.iter().map(|n| n.node_id.as_str()).collect();
+        assert!(
+            node_ids.contains(&"remote-node"),
+            "remote-node should appear in list_nodes (only in ObjectRegistry, not SWIM), got: {:?}",
+            node_ids
+        );
+        assert!(
+            node_ids.contains(&"local-node"),
+            "local-node should appear in list_nodes, got: {:?}",
+            node_ids
+        );
+        assert_eq!(nodes.len(), 2, "expected 2 nodes, got: {:?}", node_ids);
     }
 }

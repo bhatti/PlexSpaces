@@ -1,7 +1,7 @@
-name = "typescript-llm-workflow-orchestrator"
+name = "llm-workflow-orchestrator"
 version = "1.0.0"
-namespace = "typescript-llm-workflow-orchestrator"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"

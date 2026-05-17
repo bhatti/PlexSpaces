@@ -426,7 +426,7 @@ class BenchmarkActor:
             group = host.create_shard_group(
                 {
                     "group_id": group_id,
-                    "actor_type": "inference_worker",
+                    "actor_type": "InferenceWorkerActor",
                     "shard_count": num_shards,
                     "partition_strategy": "hash",
                     "rebalance_policy": "manual",
@@ -873,7 +873,7 @@ class BenchmarkActor:
         group = host.create_shard_group(
             {
                 "group_id": group_id,
-                "actor_type": "inference_worker",
+                "actor_type": "InferenceWorkerActor",
                 "shard_count": num_shards,
                 "partition_strategy": "hash",
                 "rebalance_policy": "manual",
@@ -1035,7 +1035,7 @@ class OrchestratorWorkflow:
         group = host.create_shard_group(
             {
                 "group_id": group_id,
-                "actor_type": "inference_worker",
+                "actor_type": "InferenceWorkerActor",
                 "shard_count": num_shards,
                 "partition_strategy": "hash",
                 "rebalance_policy": "manual",
@@ -1140,7 +1140,7 @@ class OrchestratorWorkflow:
         group = host.create_shard_group(
             {
                 "group_id": group_id,
-                "actor_type": "inference_worker",
+                "actor_type": "InferenceWorkerActor",
                 "shard_count": num_shards,
                 "partition_strategy": "hash",
                 "rebalance_policy": "manual",

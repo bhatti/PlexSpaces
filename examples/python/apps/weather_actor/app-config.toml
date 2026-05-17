@@ -3,6 +3,8 @@
 # Requires the "weather-api" service link to be declared in RuntimeConfig.
 # See: examples/runtime-service-links.fragment.toml
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -10,6 +12,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "weather"
+tenant_id = "default"
 actor_type = "weather_actor_wasm"
 role = "worker"
 restart = "permanent"
@@ -24,3 +27,4 @@ facets = [
 [[applications.required_service_links]]
 name = "weather-api"
 description = "Outbound HTTP link to weather forecast API"
+tenant_id = "default"

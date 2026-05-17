@@ -17,10 +17,6 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-cleanup() {
-  curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 echo "================================================================"
 echo "  Bank Account (TypeScript WASM)"
@@ -37,18 +33,29 @@ if [ "$HTTP_CHECK" = "000" ]; then
 fi
 
 echo "Step 2: Deploy"
-curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
 sleep 1
 # `name` becomes the default ApplicationSpec.namespace when TOML omits [namespace]; keep it equal to application_id for /actors/{namespace}/ routing.
-DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-  -F "application_id=$APP_ID" \
-  -F "name=$APP_ID" \
-  -F "version=1.0.0" \
-  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
-HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
-RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
-if [ "$HTTP_CODE" != "200" ] || ! echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+_deployed=0
+for _attempt in 1 2 3; do
+  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    -F "application_id=$APP_ID" \
+    -F "name=$APP_ID" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$CONFIG_FILE" 2>&1)
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
   exit 1
 fi

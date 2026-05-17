@@ -12,7 +12,7 @@
     "verify": "npm run build && echo 'Run ./test.sh 8091 with server (./scripts/server.sh) for e2e'"
   },
   "dependencies": {
-    "@plexspaces/sdk": "^0.1"
+    "@plexspaces/sdk": "file:../../../../sdks/typescript"
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.14.0",

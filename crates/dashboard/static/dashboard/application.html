@@ -41,6 +41,22 @@
                 <div class="widget-header">Errors</div>
                 <div class="widget-value" id="error-count">-</div>
             </div>
+            <div class="widget">
+                <div class="widget-header">Version</div>
+                <div class="widget-value" id="app-version">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Status</div>
+                <div class="widget-value" id="app-status">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Deployed At</div>
+                <div class="widget-value" id="app-deployed-at">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Uptime</div>
+                <div class="widget-value" id="app-uptime">-</div>
+            </div>
         </section>
 
         <section class="widgets-section">
@@ -113,6 +129,11 @@
                 </table>
             </div>
             <div class="table-pagination" id="actors-pagination"></div>
+        </section>
+
+        <section class="table-section">
+            <h2>Metrics</h2>
+            <p>View actor and application metrics for this application on the <span id="metrics-link-container"></span>.</p>
         </section>
     </div>
 
@@ -242,12 +263,12 @@
                 { label: 'Actors', stroke: '#5B8C5A', width: 2 },
             ]);
             renderSingleChart('application-messages-chart', 'messages', 'Count', ['messages', 'errors'], [
-                { label: 'Messages', stroke: '#2E86AB', width: 2 },
-                { label: 'Errors', stroke: '#A23B72', width: 2 },
+                { label: 'Messages', stroke: '#0097A7', width: 2 },
+                { label: 'Errors', stroke: '#E65100', width: 2 },
             ]);
             renderSingleChart('application-latency-chart', 'latency', 'ms', ['avgLatency', 'maxLatency'], [
-                { label: 'Average', stroke: '#7D6608', width: 2 },
-                { label: 'Max', stroke: '#C0392B', width: 2 },
+                { label: 'Average', stroke: '#2E86AB', width: 2 },
+                { label: 'Max', stroke: '#E63946', width: 2 },
             ]);
             renderSingleChart('application-supervisors-chart', 'supervisors', 'Supervisors', ['supervisors'], [
                 { label: 'Supervisors', stroke: '#F18F01', width: 2 },
@@ -358,11 +379,14 @@
                     ['Failed deliveries', String(Number(metrics.failed_deliveries || 0))],
                     ['Errors', String(Number(metrics.error_total || 0))],
                 ];
+                const isDurable = Number(actor.journal_size_bytes || 0) > 0 || actor.last_checkpoint;
                 const lifecycleRows = [
                     ['Spawn total', String(Number(metrics.spawn_total || 0))],
                     ['Created at', formatTimestamp(actor.created_at)],
-                    ['Last checkpoint', formatTimestamp(actor.last_checkpoint)],
-                    ['Journal size bytes', String(Number(actor.journal_size_bytes || 0))],
+                    ...(isDurable ? [
+                        ['Last checkpoint', formatTimestamp(actor.last_checkpoint)],
+                        ['Journal size bytes', String(Number(actor.journal_size_bytes || 0))],
+                    ] : []),
                 ];
                 body.innerHTML = `
                     <div class="modal-section">
@@ -412,7 +436,23 @@
                 : 0;
             document.getElementById('message-count').textContent = Number(metrics.message_count || 0);
             document.getElementById('error-count').textContent = Number(metrics.error_count || 0);
+            document.getElementById('app-version').textContent = applicationDetails.version || '-';
+            const statusMap = { 0: '-', 1: 'Loading', 2: 'Starting', 3: 'Running', 4: 'Stopping', 5: 'Stopped', 6: 'Failed' };
+            document.getElementById('app-status').textContent = statusMap[applicationDetails.status] || applicationDetails.status || '-';
+            document.getElementById('app-deployed-at').textContent = formatTimestamp(applicationDetails.deployed_at);
+            const uptimeSec = Number(metrics.uptime_seconds || 0);
+            if (uptimeSec > 0) {
+                const d = Math.floor(uptimeSec/86400), h = Math.floor((uptimeSec%86400)/3600), m = Math.floor((uptimeSec%3600)/60);
+                document.getElementById('app-uptime').textContent = `${d}d ${h}h ${m}m`;
+            }
             trackAppMetrics(metrics);
+
+            const metricsLinkContainer = document.getElementById('metrics-link-container');
+            if (metricsLinkContainer) {
+                const ns = applicationDetails.namespace || applicationDetails.application_id || applicationId;
+                metricsLinkContainer.innerHTML =
+                    `<a href="/dashboard/metrics/${encodeURIComponent(applicationId)}?scope=app&namespace=${encodeURIComponent(ns)}">Metrics page</a>`;
+            }
         }
 
         async function loadActors() {

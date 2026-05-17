@@ -400,7 +400,6 @@ impl FacetContainer {
     ) -> Result<String, FacetError> {
         let facet_type = facet.facet_type().to_string();
         metrics::counter!("plexspaces_facet_attach_attempts_total", "facet_type" => facet_type.clone()).increment(1);
-        let start = std::time::Instant::now();
 
         // Check if already attached
         if self.metadata.contains_key(&facet_type) {
@@ -508,8 +507,6 @@ impl FacetContainer {
             },
         );
 
-        let duration = start.elapsed();
-        metrics::histogram!("plexspaces_facet_attach_duration_seconds", "facet_type" => facet_type.clone()).record(duration.as_secs_f64());
         metrics::counter!("plexspaces_facet_attached_total", "facet_type" => facet_type.clone())
             .increment(1);
         metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.clone())

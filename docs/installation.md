@@ -390,7 +390,7 @@ If you see SSL certificate errors, try Option 2 (copy) instead of Option 1 (syml
 
 ```bash
 # Clone repository
-git clone https://github.com/plexobject/plexspaces.git
+git clone https://github.com/bhatti/PlexSpaces.git
 cd plexspaces
 
 # Install dependencies (if using buf)

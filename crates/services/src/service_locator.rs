@@ -361,6 +361,10 @@ pub struct ServiceLocatorImpl {
     /// This allows components to retrieve BlobService for blob storage operations
     blob_service: Arc<RwLock<Option<Arc<dyn plexspaces_actor::BlobServiceTrait>>>>,
 
+    /// Registered ServiceLinkService for live service link catalog access by dashboard
+    service_link_service:
+        Arc<RwLock<Option<Arc<dyn plexspaces_service_traits::ServiceLinkAccess>>>>,
+
     /// Registered NodeRegistry (stored separately for type-safe access)
     /// This allows components to retrieve NodeRegistry for node discovery with caching
     node_registry: Arc<RwLock<Option<Arc<dyn plexspaces_actor::NodeRegistryTrait>>>>,
@@ -475,6 +479,7 @@ impl ServiceLocatorImpl {
             process_group_service: Arc::new(RwLock::new(None)),
             elastic_pool_service: Arc::new(RwLock::new(None)),
             blob_service: Arc::new(RwLock::new(None)),
+            service_link_service: Arc::new(RwLock::new(None)),
             node_registry: Arc::new(RwLock::new(None)),
             keyvalue_store: Arc::new(RwLock::new(None)),
             process_group_registry: Arc::new(RwLock::new(None)),
@@ -1691,6 +1696,13 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
         service.clone()
     }
 
+    async fn get_service_link_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ServiceLinkAccess>> {
+        let service = self.service_link_service.read().await;
+        service.clone()
+    }
+
     async fn get_node_registry(
         &self,
     ) -> Option<std::sync::Arc<dyn plexspaces_actor::NodeRegistryTrait>> {
@@ -1872,6 +1884,14 @@ impl plexspaces_actor::InitializableServiceLocator for ServiceLocatorImpl {
     ) {
         let mut blob_service = self.blob_service.write().await;
         *blob_service = Some(service);
+    }
+
+    async fn register_service_link_service(
+        &self,
+        service: std::sync::Arc<dyn plexspaces_service_traits::ServiceLinkAccess>,
+    ) {
+        let mut sls = self.service_link_service.write().await;
+        *sls = Some(service);
     }
 
     async fn register_node_registry(

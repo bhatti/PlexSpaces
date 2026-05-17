@@ -2,6 +2,8 @@
 # Batch processing of log lines; parse level, aggregate; status for throughput.
 # virtual_actor: required so first invoke (log-processor:default) activates the actor.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -9,6 +11,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "log-processor"
+tenant_id = "default"
 actor_type = "migrating_v8_isolates_wasm"
 role = "worker"
 restart = "permanent"

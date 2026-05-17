@@ -339,7 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start workflow
     let input = new_message("workflow_run", serde_json::to_value(&order)?);
-    let result = workflow_actor.ask(input, Duration::from_secs(30)).await?;
+    let result = workflow_actor.ask(&ctx, input, Duration::from_secs(30)).await?;
 
     let elapsed = start_time.elapsed();
     let final_state: OrderWorkflowState = serde_json::from_slice(&result.payload)?;
@@ -434,7 +434,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let input = new_message("workflow_run", serde_json::to_value(&order).unwrap());
-        let result = workflow.ask(input, Duration::from_secs(10)).await.unwrap();
+        let result = workflow.ask(&ctx, input, Duration::from_secs(10)).await.unwrap();
 
         let state: OrderWorkflowState = serde_json::from_slice(&result.payload).unwrap();
         assert!(matches!(state.status, WorkflowStatus::Completed));

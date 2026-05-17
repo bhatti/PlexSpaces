@@ -324,6 +324,216 @@ pub mod dashboard_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_objects(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetObjectsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetObjectsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetObjects",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetObjects",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_key_values(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetKeyValuesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetKeyValuesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetKeyValues",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetKeyValues",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_tuple_spaces(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetTupleSpacesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetTupleSpacesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetTupleSpaces",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetTupleSpaces",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_blobs(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetBlobsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetBlobsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetBlobs",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetBlobs",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_blob_presigned_url(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetBlobPresignedUrlRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetBlobPresignedUrlResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetBlobPresignedUrl",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetBlobPresignedUrl",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_service_links(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetServiceLinksRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetServiceLinksResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetServiceLinks",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetServiceLinks",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_metrics_table(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetMetricsTableRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetMetricsTableResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.dashboard.v1.DashboardService/GetMetricsTable",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.dashboard.v1.DashboardService",
+                        "GetMetricsTable",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -387,6 +597,55 @@ pub mod dashboard_service_server {
             request: tonic::Request<super::GetDashboardMetricsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetDashboardMetricsResponse>,
+            tonic::Status,
+        >;
+        async fn get_objects(
+            &self,
+            request: tonic::Request<super::GetObjectsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetObjectsResponse>,
+            tonic::Status,
+        >;
+        async fn get_key_values(
+            &self,
+            request: tonic::Request<super::GetKeyValuesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetKeyValuesResponse>,
+            tonic::Status,
+        >;
+        async fn get_tuple_spaces(
+            &self,
+            request: tonic::Request<super::GetTupleSpacesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetTupleSpacesResponse>,
+            tonic::Status,
+        >;
+        async fn get_blobs(
+            &self,
+            request: tonic::Request<super::GetBlobsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetBlobsResponse>,
+            tonic::Status,
+        >;
+        async fn get_blob_presigned_url(
+            &self,
+            request: tonic::Request<super::GetBlobPresignedUrlRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetBlobPresignedUrlResponse>,
+            tonic::Status,
+        >;
+        async fn get_service_links(
+            &self,
+            request: tonic::Request<super::GetServiceLinksRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetServiceLinksResponse>,
+            tonic::Status,
+        >;
+        async fn get_metrics_table(
+            &self,
+            request: tonic::Request<super::GetMetricsTableRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetMetricsTableResponse>,
             tonic::Status,
         >;
     }
@@ -833,6 +1092,336 @@ pub mod dashboard_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = GetDashboardMetricsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetObjects" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetObjectsSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetObjectsRequest>
+                    for GetObjectsSvc<T> {
+                        type Response = super::GetObjectsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetObjectsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_objects(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetObjectsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetKeyValues" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetKeyValuesSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetKeyValuesRequest>
+                    for GetKeyValuesSvc<T> {
+                        type Response = super::GetKeyValuesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetKeyValuesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_key_values(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetKeyValuesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetTupleSpaces" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetTupleSpacesSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetTupleSpacesRequest>
+                    for GetTupleSpacesSvc<T> {
+                        type Response = super::GetTupleSpacesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetTupleSpacesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_tuple_spaces(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetTupleSpacesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetBlobs" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetBlobsSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetBlobsRequest>
+                    for GetBlobsSvc<T> {
+                        type Response = super::GetBlobsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetBlobsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_blobs(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetBlobsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetBlobPresignedUrl" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetBlobPresignedUrlSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetBlobPresignedUrlRequest>
+                    for GetBlobPresignedUrlSvc<T> {
+                        type Response = super::GetBlobPresignedUrlResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetBlobPresignedUrlRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_blob_presigned_url(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetBlobPresignedUrlSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetServiceLinks" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetServiceLinksSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetServiceLinksRequest>
+                    for GetServiceLinksSvc<T> {
+                        type Response = super::GetServiceLinksResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetServiceLinksRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_service_links(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetServiceLinksSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.dashboard.v1.DashboardService/GetMetricsTable" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetMetricsTableSvc<T: DashboardService>(pub Arc<T>);
+                    impl<
+                        T: DashboardService,
+                    > tonic::server::UnaryService<super::GetMetricsTableRequest>
+                    for GetMetricsTableSvc<T> {
+                        type Response = super::GetMetricsTableResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetMetricsTableRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as DashboardService>::get_metrics_table(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetMetricsTableSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

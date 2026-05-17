@@ -6,9 +6,9 @@
 
 # Application version (used by ApplicationSpec)
 version = "1.0.0"
+tenant_id = "default"
 
 # Namespace for multi-tenancy (if not specified, defaults to application_id)
-namespace = "orleans-batch-predictor"
 
 [supervisor]
 strategy = "one_for_one"
@@ -44,3 +44,4 @@ shutdown_timeout_seconds = 5
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
 ]
+tenant_id = "default"

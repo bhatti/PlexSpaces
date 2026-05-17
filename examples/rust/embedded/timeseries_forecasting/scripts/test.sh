@@ -11,6 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$EXAMPLE_DIR"
 
+# Shared target: use workspace target directory
+WORKSPACE_TARGET="${SCRIPT_DIR}/../../../../target"
+export CARGO_TARGET_DIR="${WORKSPACE_TARGET}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,8 +34,8 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Build the example
-echo -e "${YELLOW}📦 Building timeseries_forecasting...${NC}"
-if ! cargo build 2>&1 | grep -q "Finished"; then
+echo -e "${YELLOW}📦 Building timeseries_forecasting (shared target, debug)...${NC}"
+if ! cargo build 2>&1; then
     echo -e "${RED}❌ Build failed${NC}"
     exit 1
 fi
@@ -44,8 +48,8 @@ echo ""
 
 OUTPUT_FILE=$(mktemp)
 
-# Run with timeout and capture output
-timeout 15s cargo run --bin timeseries_forecasting 2>&1 | tee "$OUTPUT_FILE" || {
+# Run pre-built binary directly to avoid recompilation inside timeout
+timeout 15s "${WORKSPACE_TARGET}/debug/timeseries_forecasting" 2>&1 | tee "$OUTPUT_FILE" || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}⏱️  Test completed (timeout after 15s)${NC}"
@@ -137,4 +141,3 @@ else
     rm -f "$OUTPUT_FILE"
     exit 1
 fi
-

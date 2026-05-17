@@ -127,7 +127,10 @@ class BlobConfig(betterproto.Message):
     """Bucket name"""
 
     endpoint: str = betterproto.string_field(3)
-    """Endpoint URL (for SeaweedFS or custom S3-compatible)"""
+    """
+    Endpoint URL for embedded or custom S3-compatible store (e.g., "http://127.0.0.1:9100").
+     Leave empty when using embedded backend — endpoint is set automatically after process start.
+    """
 
     region: str = betterproto.string_field(4)
     """Region (for S3/GCP/Azure)"""

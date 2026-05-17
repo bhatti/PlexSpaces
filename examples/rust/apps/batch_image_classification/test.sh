@@ -42,28 +42,12 @@ ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
 TEMP_CONFIG=""
 
-cleanup() {
-  if [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]]; then
-    rm -f "$TEMP_CONFIG"
-  fi
-  for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  done
-}
-trap cleanup EXIT
 
 grpc_seed_nodes() {
   local seed_list=()
-  for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    seed_list+=("\"${host}:$((port - 1))\"")
-  done
   local joined=""
   local sep=""
-  for entry in "${seed_list[@]}"; do
+  for entry in ${seed_list[@]+"${seed_list[@]}"}; do
     joined="${joined}${sep}${entry}"
     sep=", "
   done
@@ -116,27 +100,31 @@ done
 TEMP_CONFIG="$(mktemp -t batch-image-classification-app-config)"
 render_config "$TEMP_CONFIG"
 
-for node in "${NODE_LIST[@]}"; do
-  host="${node%%:*}"
-  port="${node##*:}"
-  echo "Step 1: Deploy to ${host}:${port}"
-  curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  sleep 1
-  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
-    -F "application_id=$APP_ID" \
-    -F "name=$APP_NAME" \
-    -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+echo "Step 1: Undeploy from all nodes, then deploy to entry node"
+"$SCRIPT_DIR/undeploy.sh" $NODES
+sleep 2
+_deployed=0
+for _attempt in 1 2 3; do
+    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1)
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
-  if [ "$http_code" != "200" ] || ! echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo -e "${RED}Deploy failed on ${host}:${port}: $response${NC}"
-    rm -f "$TEMP_CONFIG"
-    exit 1
+  if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
   fi
-  echo -e "  ${GREEN}Deployed${NC}"
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
 done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $response${NC}"
+  exit 1
+fi
+echo -e "  ${GREEN}Deployed${NC}"
 sleep 2
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""

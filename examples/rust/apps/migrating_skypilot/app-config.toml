@@ -1,6 +1,8 @@
 # SkyPilot → PlexSpaces: Multi-cloud ML orchestration (Rust WASM)
 # GenServer: submit_task, get_best_resources, get_status. Virtual actor + durability.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "scheduler"
+tenant_id = "default"
 actor_type = "migrating_skypilot_wasm"
 role = "worker"
 restart = "permanent"

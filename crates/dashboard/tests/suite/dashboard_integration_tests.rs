@@ -694,7 +694,8 @@ async fn test_get_applications_exposes_tenant_and_namespace_metadata() {
         .find(|app| app.name == "tenant-aware-app")
         .expect("application should be listed");
     assert_eq!(app.tenant_id, "tenant-a");
-    assert_eq!(app.namespace, "analytics");
+    // namespace is derived from app name (no separate namespace field)
+    assert_eq!(app.name, "tenant-aware-app");
 }
 
 #[tokio::test]

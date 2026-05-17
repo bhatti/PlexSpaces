@@ -1,227 +1,71 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Test Leader Election - Distributed lock for leader election
+# Test Leader Election - acquire lock, hold it, renew once, then release.
+# Usage: ./test.sh [HTTP_PORT] [ACTOR_NAME]
+#   HTTP_PORT   - port of the PlexSpaces node (default: 8091)
+#   ACTOR_NAME  - actor instance name (default: actor1); use actor2 to compete from a second terminal
 #
-# Two-terminal test:
-# - Terminal 1: Run ./test.sh (or LEADER_ELECTION_OWNER_ID=term1 ./test.sh). Deploys if needed,
-#   acquires lock, renews lease every 15s for 60s, then releases and exits.
-# - Terminal 2: Run LEADER_ELECTION_OWNER_ID=term2 ./test.sh. Deploys if needed, then keeps
-#   trying to acquire the lock for up to 120s (shows "Acquiring lock..."). Kill Terminal 1;
-#   after lease expiry (~30s) Terminal 2 acquires, renews for 60s, then exits.
-
+# Two-terminal competition: run ./test.sh 8091 actor1 in one terminal and
+# ./test.sh 8091 actor2 in another — both contend for the same distributed lock.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/leader_election_actor.wasm"
+CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8091}"
+ACTOR_NAME="${2:-actor1}"
 
-# Leader holds lock and renews for this long (seconds)
-RENEW_DURATION=60
-# Renew lease every this many seconds while leader
-RENEW_INTERVAL=15
-# Non-leader keeps trying to acquire for up to this long (seconds)
-ACQUIRE_TIMEOUT=120
-# Poll interval when waiting for lock (seconds)
-ACQUIRE_POLL=5
+APP_ID="leader-election"
+ACTOR_TYPE="leader_election"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Use env so two terminals can set term1/term2; otherwise unique per run
-OWNER_ID="${LEADER_ELECTION_OWNER_ID:-owner-$$-${RANDOM}}"
-APP_ID="leader-election-${OWNER_ID}"
-ACTOR_TYPE="$APP_ID"
-
-cleanup() {
-    echo ""
-    echo "Cleanup: Undeploying $APP_ID"
-    curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
-}
-
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║        Leader Election - Distributed Lock Example            ║"
+echo "║        Leader Election Test (Python WASM)                      ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
-echo ""
-echo -e "  ${GREEN}Owner ID: ${OWNER_ID}${NC}"
-echo -e "${YELLOW}💡 Two-terminal: Terminal 1 = leader (renews 60s then exits). Terminal 2 = acquires lock for up to 120s until you kill Terminal 1.${NC}"
+echo -e "  Actor: ${GREEN}${APP_ID}/${ACTOR_NAME}:${ACTOR_TYPE}${NC}"
 echo ""
 
-source ~/venv/bin/activate 2>/dev/null || true
+echo "Step 0: Build WASM"
+"$SCRIPT_DIR/build.sh"
+echo ""
 
-# Build if needed
-if [ ! -f "$WASM_FILE" ]; then
-    echo "📦 Building WASM actor..."
-    chmod +x "$SCRIPT_DIR/build.sh"
-    "$SCRIPT_DIR/build.sh" || { echo -e "${RED}❌ Build failed${NC}"; exit 1; }
-    echo ""
-fi
-
-# Step 1: Check node
-echo "Step 1: Check node status"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
-    echo -e "${RED}❌ Cannot connect to node at localhost:$HTTP_PORT${NC}"
-    exit 1
+  echo -e "${RED}Start node: ./scripts/server.sh (from repo root)${NC}"
+  exit 1
 fi
-echo -e "${GREEN}✓ Node is running${NC}"
-echo ""
 
-# Payload with owner id for display
-PAYLOAD_BASE="{\"msg_type\":\"%s\",\"payload\":{\"candidate_id\":\"$OWNER_ID\"}}"
-
-# Invoke actor and return 0 if app is deployed and responding (HTTP 200 and body contains leader key)
-# Response may be {"success":true,"payload":{"leader":true,...}} or payload as string
-check_app_deployed() {
-    local payload
-    payload=$(printf "$PAYLOAD_BASE" "status")
-    local code
-    code=$(curl -s -o /tmp/leader_election_status.$$ -w "%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
-        -H "Content-Type: application/json" -d "$payload" --max-time 10 2>/dev/null) || code="000"
-    if [ "$code" = "200" ] && grep -q 'leader' /tmp/leader_election_status.$$ 2>/dev/null; then
-        rm -f /tmp/leader_election_status.$$
-        return 0
-    fi
-    rm -f /tmp/leader_election_status.$$
-    return 1
-}
-
-# Step 2: Deploy only if app not already deployed
-echo "Step 2: Deploy leader election actor (skip if already deployed)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-trap cleanup EXIT
-
-if check_app_deployed; then
-    echo -e "${GREEN}✓ App already deployed ($APP_ID), skipping deploy${NC}"
-else
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-        -F "application_id=$APP_ID" \
-        -F "name=$APP_ID" \
-        -F "version=1.0.0" \
-        -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
-    if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
-        echo -e "${GREEN}✓ Deployed leader election actor${NC}"
-    else
-        echo -e "${RED}✗ Deploy failed: $RESPONSE${NC}"
-        exit 1
-    fi
-    sleep 2
-fi
-echo ""
-
-# Try to become leader. Response may have "leader":true or \"leader\":true (nested payload).
-try_acquire() {
-    local payload
-    payload=$(printf "$PAYLOAD_BASE" "try_lead")
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
-        -H "Content-Type: application/json" -d "$payload" 2>/dev/null) || RESPONSE=""
-    if echo "$RESPONSE" | grep -qE '"leader"\s*:\s*true|\\"leader\\":\s*true'; then
-        return 0
-    fi
-    return 1
-}
-
-# Renew lease once. Response may have "renewed":true in payload.
-do_renew() {
-    local payload
-    payload=$(printf "$PAYLOAD_BASE" "renew_lead")
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
-        -H "Content-Type: application/json" -d "$payload" 2>/dev/null) || RESPONSE=""
-    if echo "$RESPONSE" | grep -qE '"renewed"\s*:\s*true|\\"renewed\\":\s*true'; then
-        return 0
-    fi
-    return 1
-}
-
-# Release leadership
-do_release() {
-    local payload
-    payload=$(printf "$PAYLOAD_BASE" "release_lead")
-    curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
-        -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
-}
-
-echo "Step 3: Try to acquire leader lock"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# After deploy the actor may not be ready immediately; retry a few times so first terminal becomes leader
-ACQUIRE_RETRIES=6
-ACQUIRE_RETRY_SLEEP=3
-got_leader=false
-retry=1
-while [ $retry -le "$ACQUIRE_RETRIES" ]; do
-    if try_acquire; then
-        got_leader=true
-        break
-    fi
-    [ $retry -lt "$ACQUIRE_RETRIES" ] && sleep "$ACQUIRE_RETRY_SLEEP"
-    retry=$((retry + 1))
+echo "Step 1: Deploy"
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
+sleep 2
+_deployed=0
+for _attempt in 1 2 3; do
+  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+  -F "application_id=$APP_ID" \
+  -F "name=$APP_ID" \
+  -F "version=1.0.0" \
+  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+  -F "config=@$CONFIG_FILE" 2>&1)
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
 done
-
-if [ "$got_leader" = true ]; then
-    echo -e "  ${GREEN}✓ Acquired lock → leader ($OWNER_ID)${NC}"
-    echo ""
-    echo "Step 4: Renewing lease every ${RENEW_INTERVAL}s for ${RENEW_DURATION}s (leader holds lock)"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    elapsed=0
-    while [ $elapsed -lt "$RENEW_DURATION" ]; do
-        sleep "$RENEW_INTERVAL"
-        elapsed=$((elapsed + RENEW_INTERVAL))
-        if do_renew; then
-            echo -e "  ${GREEN}✓${NC} Renewed lease at ${elapsed}s"
-        else
-            echo -e "  ${YELLOW}⚠${NC} Renew failed at ${elapsed}s"
-        fi
-    done
-    echo -e "${GREEN}✓ Held lock for ${RENEW_DURATION}s${NC}"
-    echo ""
-    echo "Step 5: Release leadership"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    do_release
-    echo -e "  ${GREEN}✓ Released ($OWNER_ID)${NC}"
-    echo ""
-    echo -e "${GREEN}✅ Leader Election Test Complete (was leader)${NC}"
-    exit 0
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $RESPONSE${NC}"
+  exit 1
 fi
+echo -e "  ${GREEN}Lock released${NC}"
 
-# Not leader: keep trying to acquire for up to ACQUIRE_TIMEOUT seconds
-echo -e "  ${YELLOW}○${NC} Not leader ($OWNER_ID) — lock held by another. Will try to acquire for up to ${ACQUIRE_TIMEOUT}s."
 echo ""
-echo "Step 4: Acquiring lock (up to ${ACQUIRE_TIMEOUT}s — kill the other terminal to release)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-elapsed=0
-while [ $elapsed -lt "$ACQUIRE_TIMEOUT" ]; do
-    echo -e "  ${YELLOW}Acquiring lock...${NC} (${elapsed}s / ${ACQUIRE_TIMEOUT}s)"
-    sleep "$ACQUIRE_POLL"
-    elapsed=$((elapsed + ACQUIRE_POLL))
-    if try_acquire; then
-        echo -e "  ${GREEN}✓ Acquired lock → leader ($OWNER_ID)${NC}"
-        echo ""
-        echo "Step 5: Renewing lease every ${RENEW_INTERVAL}s for ${RENEW_DURATION}s"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        held=0
-        while [ $held -lt "$RENEW_DURATION" ]; do
-            sleep "$RENEW_INTERVAL"
-            held=$((held + RENEW_INTERVAL))
-            if do_renew; then
-                echo -e "  ${GREEN}✓${NC} Renewed lease at ${held}s"
-            else
-                echo -e "  ${YELLOW}⚠${NC} Renew failed at ${held}s"
-            fi
-        done
-        echo ""
-        echo "Step 6: Release leadership"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        do_release
-        echo -e "  ${GREEN}✓ Released ($OWNER_ID)${NC}"
-        echo ""
-        echo -e "${GREEN}✅ Leader Election Test Complete (acquired after ${elapsed}s)${NC}"
-        exit 0
-    fi
-done
-
-echo -e "${RED}✗ Timeout: could not acquire lock within ${ACQUIRE_TIMEOUT}s${NC}"
-echo ""
-exit 1
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo -e "║  ${GREEN}Leader Election (Python) example test complete${NC}               ║"
+echo "╚════════════════════════════════════════════════════════════════╝"

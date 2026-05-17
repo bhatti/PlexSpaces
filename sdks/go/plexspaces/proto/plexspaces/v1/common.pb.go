@@ -2354,7 +2354,7 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	" OUTBOUND_HTTP_ERROR_CIRCUIT_OPEN\x10\x02\x12#\n" +
 	"\x1fOUTBOUND_HTTP_ERROR_INVALID_URL\x10\x03\x12&\n" +
 	"\"OUTBOUND_HTTP_ERROR_REQUEST_FAILED\x10\x04\x12&\n" +
-	"\"OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE\x10\x05B\xa9\x06\x92A\xba\x04\x12Z\n" +
+	"\"OUTBOUND_HTTP_ERROR_BODY_TOO_LARGE\x10\x05B\xa5\x06\x92A\xba\x04\x12Z\n" +
 	"\x16PlexSpace Common Types\x12;Common data types and utilities for the PlexSpace framework2\x031.0*\x01\x022\x10application/json:\x10application/jsonZ\xa2\x03\n" +
 	"q\n" +
 	"\fApiKeyHeader\x12a\b\x02\x12PAPI key authentication via header. Service-scoped keys with configurable scopes.\x1a\tX-API-Key \x02\n" +
@@ -2366,7 +2366,7 @@ const file_plexspaces_v1_common_proto_rawDesc = "" +
 	"\x0e\n" +
 	"\n" +
 	"BearerAuth\x12\x00\n" +
-	"\x18com.plexspaces.common.v1B\vCommonProtoP\x01ZPgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1;commonv1\xa2\x02\x03PCX\xaa\x02\x14Plexspaces.Common.V1\xca\x02\x14Plexspaces\\Common\\V1\xe2\x02 Plexspaces\\Common\\V1\\GPBMetadata\xea\x02\x16Plexspaces::Common::V1b\x06proto3"
+	"\x18com.plexspaces.common.v1B\vCommonProtoP\x01ZLgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1;commonv1\xa2\x02\x03PCX\xaa\x02\x14Plexspaces.Common.V1\xca\x02\x14Plexspaces\\Common\\V1\xe2\x02 Plexspaces\\Common\\V1\\GPBMetadata\xea\x02\x16Plexspaces::Common::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_common_proto_rawDescOnce sync.Once

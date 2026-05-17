@@ -2,6 +2,8 @@
 #
 # Requires the "weather-api" service link in RuntimeConfig.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -9,7 +11,8 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "weather"
-actor_type = "weather_actor_wasm"
+tenant_id = "default"
+actor_type = "weather"
 role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
@@ -23,3 +26,4 @@ facets = [
 [[applications.required_service_links]]
 name = "weather-api"
 description = "Outbound HTTP link to weather forecast API"
+tenant_id = "default"

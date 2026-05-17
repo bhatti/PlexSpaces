@@ -53,8 +53,9 @@ fi
 
 echo -e "${YELLOW}Running heat_diffusion...${NC}"
 OUTPUT_FILE=$(mktemp)
-# Run with timeout; example typically completes in a few seconds.
-timeout 45s cargo run 2>&1 | tee "$OUTPUT_FILE" || true
+# Run the already-built binary directly to avoid triggering recompilation inside the timeout.
+BINARY="${WORKSPACE_TARGET}/debug/heat_diffusion"
+timeout 45s "$BINARY" 2>&1 | tee "$OUTPUT_FILE" || true
 echo ""
 
 echo "Validation: checking for benchmarks output..."

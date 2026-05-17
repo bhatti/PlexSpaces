@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metrics Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <h1>Metrics Dashboard</h1>
+            <a class="back-link" id="back-link" href="#">Back to Node</a>
+        </header>
+
+        <section class="widgets-section">
+            <div class="widget">
+                <div class="widget-header">Total Metrics</div>
+                <div class="widget-value" id="total-metrics">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Counters</div>
+                <div class="widget-value" id="counter-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Gauges</div>
+                <div class="widget-value" id="gauge-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Histograms</div>
+                <div class="widget-value" id="histogram-count">-</div>
+            </div>
+        </section>
+
+        <section class="widgets-section">
+            <div class="widget widget-chart">
+                <div class="widget-header">Top Counters</div>
+                <div id="counter-chart"></div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Top Gauges</div>
+                <div id="gauge-chart"></div>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <h2>Metrics</h2>
+            <div class="search-filters">
+                <input id="name-pattern" type="text" placeholder="Name pattern (e.g. actor_*)">
+                <input id="namespace-filter" type="text" placeholder="Namespace">
+                <select id="type-filter">
+                    <option value="">All types</option>
+                    <option value="counter">Counter</option>
+                    <option value="gauge">Gauge</option>
+                    <option value="histogram">Histogram</option>
+                    <option value="summary">Summary</option>
+                </select>
+                <button type="button" id="scope-node-btn" class="scope-btn">Node Metrics</button>
+                <button type="button" id="scope-app-btn" class="scope-btn">App Metrics</button>
+            </div>
+            <div class="table-container table-container-scroll">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Value</th>
+                            <th>Labels</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="metrics-table-body">
+                        <tr><td colspan="5">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <footer class="dashboard-footer">
+        <div id="build-version">PlexSpaces -</div>
+        <div id="last-updated">Last updated -</div>
+    </footer>
+
+    <style>
+        .scope-btn { padding: 0.3rem 0.8rem; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; background: #f5f5f5; }
+        .scope-btn.active { background: #5B8C5A; color: #fff; border-color: #5B8C5A; }
+        .metric-group-continuation td:first-child { color: #888; font-size: 0.85em; }
+    </style>
+    <script>
+        const nodeId = ':node_id';
+        const effectiveNodeId = nodeId.includes('@') ? nodeId.split('@').pop() : nodeId;
+        document.getElementById('back-link').href = `/dashboard/node/${effectiveNodeId}`;
+        let allMetrics = [];
+        let counterChart = null;
+        let gaugeChart = null;
+        const scopeParam = new URLSearchParams(window.location.search).get('scope') || 'node';
+        const appNamespace = new URLSearchParams(window.location.search).get('namespace') || '';
+
+        async function fetchJson(url, options = {}) {
+            const response = await fetch(url, {
+                headers: { 'Accept': 'application/json' },
+                ...options,
+            });
+            if (!response.ok) {
+                throw new Error(`Request failed: ${response.status}`);
+            }
+            return response.json();
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp || typeof timestamp.seconds === 'undefined') {
+                return '-';
+            }
+            return new Date((Number(timestamp.seconds) * 1000) + Math.floor(Number(timestamp.nanos || 0) / 1_000_000)).toLocaleString();
+        }
+
+        function getNumericValue(m) {
+            if (!m.value) return null;
+            if (typeof m.value === 'number') return m.value;
+            if (typeof m.value === 'object') {
+                if ('count' in m.value) return Number(m.value.count);
+                return null;
+            }
+            const n = Number(m.value);
+            return isNaN(n) ? null : n;
+        }
+
+        function isAppMetric(m) {
+            const labels = m.labels || {};
+            return !!(labels.actor_id || labels.application_id || labels.application_name || labels.application);
+        }
+
+        function belongsToApp(m, ns) {
+            if (!ns) return isAppMetric(m);
+            const labels = m.labels || {};
+            return (labels.actor_id || '').includes(ns) ||
+                   (labels.application_id || '').includes(ns) ||
+                   (labels.application_name || '').includes(ns) ||
+                   (labels.application || '').includes(ns);
+        }
+
+        function applyScopeFilter(metrics) {
+            if (scopeParam === 'app') {
+                return metrics.filter(m => belongsToApp(m, appNamespace));
+            }
+            // default: node scope - exclude app-level metrics
+            return metrics.filter(m => !isAppMetric(m));
+        }
+
+        function renderMetrics(metrics) {
+            const typeFilter = document.getElementById('type-filter').value;
+            let filtered = typeFilter ? metrics.filter(m => m.metric_type === typeFilter) : metrics;
+            filtered = applyScopeFilter(filtered);
+            const sorted = [...filtered].sort((a, b) =>
+                (a.name + JSON.stringify(a.labels)).localeCompare(b.name + JSON.stringify(b.labels))
+            );
+            const body = document.getElementById('metrics-table-body');
+            if (!sorted.length) {
+                body.innerHTML = '<tr><td colspan="5">No metrics found.</td></tr>';
+                return;
+            }
+            body.innerHTML = sorted.map((m, i) => {
+                const labelStr = Object.entries(m.labels || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+                const val = typeof m.value === 'object' && m.value !== null
+                    ? JSON.stringify(m.value)
+                    : String(m.value ?? '-');
+                const isContinuation = i > 0 && sorted[i - 1].name === m.name;
+                const rowClass = isContinuation ? ' class="metric-group-continuation"' : '';
+                return `<tr${rowClass}>
+                    <td>${escapeHtml(m.name)}</td>
+                    <td>${escapeHtml(m.metric_type || '-')}</td>
+                    <td>${escapeHtml(val)}</td>
+                    <td><small>${escapeHtml(labelStr || '-')}</small></td>
+                    <td>${formatTimestamp(m.timestamp)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderSummaryWidgets(metrics) {
+            const nodeMetrics = applyScopeFilter(metrics);
+            const counters = nodeMetrics.filter(m => m.metric_type === 'counter');
+            const gauges = nodeMetrics.filter(m => m.metric_type === 'gauge');
+            const histograms = nodeMetrics.filter(m => m.metric_type === 'histogram');
+            document.getElementById('total-metrics').textContent = nodeMetrics.length;
+            document.getElementById('counter-count').textContent = counters.length;
+            document.getElementById('gauge-count').textContent = gauges.length;
+            document.getElementById('histogram-count').textContent = histograms.length;
+        }
+
+        function renderBarChart(containerId, data, label, existingChart) {
+            const container = document.getElementById(containerId);
+            if (!container) return existingChart;
+            if (!data.length) {
+                container.innerHTML = '<p style="text-align:center;padding:1rem;color:#888">No data</p>';
+                return null;
+            }
+
+            // Use simple HTML bar chart for metrics since uPlot is for time series
+            const max = Math.max(...data.map(d => d.value));
+            container.innerHTML = data.slice(0, 10).map(d => {
+                const pct = max > 0 ? (d.value / max * 100).toFixed(1) : 0;
+                const shortName = d.name.length > 40 ? '...' + d.name.slice(-37) : d.name;
+                return `<div style="margin:4px 0;font-size:0.75rem">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                        <span title="${escapeHtml(d.name)}">${escapeHtml(shortName)}</span>
+                        <span style="font-weight:bold">${d.value}</span>
+                    </div>
+                    <div style="background:#eee;border-radius:2px;height:6px">
+                        <div style="background:#5B8C5A;width:${pct}%;height:6px;border-radius:2px"></div>
+                    </div>
+                </div>`;
+            }).join('');
+            return null;
+        }
+
+        function renderCharts(metrics) {
+            const nodeMetrics = applyScopeFilter(metrics);
+            const counters = nodeMetrics
+                .filter(m => m.metric_type === 'counter')
+                .map(m => ({ name: m.name, value: getNumericValue(m) ?? 0 }))
+                .sort((a, b) => b.value - a.value);
+            const gauges = nodeMetrics
+                .filter(m => m.metric_type === 'gauge')
+                .map(m => ({ name: m.name, value: getNumericValue(m) ?? 0 }))
+                .sort((a, b) => b.value - a.value);
+
+            renderBarChart('counter-chart', counters, 'Counter');
+            renderBarChart('gauge-chart', gauges, 'Gauge');
+        }
+
+        async function loadMetrics() {
+            const params = new URLSearchParams({
+                node_id: effectiveNodeId,
+                name_pattern: document.getElementById('name-pattern').value || '*',
+                // In app scope the namespace input is used for client-side belongsToApp() filtering only;
+                // pass empty to backend so it returns all metrics rather than filtering by namespace label.
+                namespace: scopeParam === 'app' ? '' : (document.getElementById('namespace-filter').value || ''),
+            });
+            try {
+                const data = await fetchJson(`/api/v1/dashboard/metrics-table?${params.toString()}`);
+                allMetrics = data.metrics || [];
+                renderSummaryWidgets(allMetrics);
+                renderCharts(allMetrics);
+                renderMetrics(allMetrics);
+            } catch (e) {
+                document.getElementById('metrics-table-body').innerHTML =
+                    `<tr><td colspan="5">Error: ${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function updateFooter(systemInfo) {
+            if (systemInfo) {
+                const version = systemInfo.git_commit
+                    ? `${systemInfo.version} (${systemInfo.git_commit})`
+                    : `${systemInfo.version}`;
+                document.getElementById('build-version').textContent = `PlexSpaces ${version}`;
+            }
+            document.getElementById('last-updated').textContent = `Last updated ${new Date().toLocaleString()}`;
+        }
+
+        async function refreshPage() {
+            try {
+                const [, systemInfo] = await Promise.all([
+                    loadMetrics(),
+                    fetchJson('/api/v1/dashboard/system-info'),
+                ]);
+                updateFooter(systemInfo);
+            } catch (e) {
+                console.error('Failed to refresh metrics', e);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Highlight active scope button
+            const nodeBtn = document.getElementById('scope-node-btn');
+            const appBtn = document.getElementById('scope-app-btn');
+            if (scopeParam === 'app') {
+                appBtn.classList.add('active');
+            } else {
+                nodeBtn.classList.add('active');
+            }
+            nodeBtn.addEventListener('click', () => {
+                const url = new URL(window.location.href);
+                url.searchParams.set('scope', 'node');
+                window.location.href = url.toString();
+            });
+            appBtn.addEventListener('click', () => {
+                const url = new URL(window.location.href);
+                url.searchParams.set('scope', 'app');
+                window.location.href = url.toString();
+            });
+
+            // Pre-populate namespace filter from URL when viewing app metrics
+            if (appNamespace) {
+                document.getElementById('namespace-filter').value = appNamespace;
+            }
+            document.querySelectorAll('#name-pattern, #namespace-filter').forEach(el => {
+                el.addEventListener('input', () => loadMetrics());
+            });
+            document.getElementById('type-filter').addEventListener('change', () => {
+                renderMetrics(allMetrics);
+            });
+            refreshPage();
+            setInterval(refreshPage, 10000);
+        });
+    </script>
+</body>
+</html>

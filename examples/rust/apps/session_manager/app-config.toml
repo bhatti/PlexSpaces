@@ -1,5 +1,7 @@
 # Session manager (Rust WASM): idle + heartbeat via host send_after
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -7,6 +9,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "session"
+tenant_id = "default"
 actor_type = "session_manager_wasm"
 role = "worker"
 restart = "permanent"

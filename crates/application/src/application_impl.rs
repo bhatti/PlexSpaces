@@ -176,12 +176,8 @@ impl SpecApplication {
             );
 
             let actor_type = identity.actor_type.clone();
-            // Namespace: use spec.namespace if set; fall back to app name (matches ApplicationManager.register convention).
-            let effective_namespace = if self.spec.namespace.is_empty() {
-                self.spec.name.clone()
-            } else {
-                self.spec.namespace.clone()
-            };
+            // Namespace is always the application name.
+            let effective_namespace = self.spec.name.clone();
 
             use plexspaces_actor::{RequestContext, RequestContextExt};
             let tenant_id = String::new();
@@ -611,11 +607,11 @@ impl Application for SpecApplication {
                     )
                 })?;
 
-                // Create RequestContext for shutdown using application's tenant_id and namespace
-                // Both are set during deployment from JWT token
+                // Create RequestContext for shutdown using application's tenant_id.
+                // Namespace is always the application name.
                 let ctx = RequestContext::new_without_auth(
                     self.spec.tenant_id.clone(),
-                    self.spec.namespace.clone(),
+                    self.spec.name.clone(),
                 );
 
                 for actor_id in actor_ids.iter().rev() {
@@ -851,7 +847,6 @@ mod tests {
     fn create_test_spec_with_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
-            namespace: "test".to_string(),
             version: "0.1.0".to_string(),
             tenant_id: "test-tenant".to_string(),
             description: "Test application".to_string(),
@@ -912,7 +907,6 @@ mod tests {
     fn create_test_spec_no_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
-            namespace: "test".to_string(),
             version: "0.1.0".to_string(),
             tenant_id: "test-tenant".to_string(),
             description: "Test application".to_string(),

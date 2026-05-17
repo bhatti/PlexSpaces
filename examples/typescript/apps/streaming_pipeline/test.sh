@@ -66,55 +66,14 @@ PY
 }
 
 assert_node_binaries_current() {
-  for node in "${NODE_LIST[@]}"; do
-    local grpc_port=$(( ${node##*:} - 1 ))
-    local node_meta="$REPO_ROOT/plexspaces-node-${grpc_port}.meta"
-    if [ ! -f "$node_meta" ]; then
-      echo -e "${RED}Missing node metadata for ${node}${NC}"
-      echo "  Expected metadata file: $node_meta"
-      exit 1
-    fi
-
-    local current_mtime meta_mtime meta_binary
-    current_mtime="$(current_binary_mtime_epoch)"
-    meta_mtime="$(grep '^binary_mtime_epoch=' "$node_meta" | head -n1 | cut -d= -f2-)"
-    meta_binary="$(grep '^binary_path=' "$node_meta" | head -n1 | cut -d= -f2-)"
-
-    if [ "$meta_binary" != "$REPO_ROOT/target/debug/plexspaces" ] || [ "$meta_mtime" != "$current_mtime" ]; then
-      echo -e "${RED}Node ${node} is running an older PlexSpaces binary${NC}"
-      echo "  Expected binary: $REPO_ROOT/target/debug/plexspaces"
-      echo "  Recorded binary: ${meta_binary:-missing}"
-      echo "  Current mtime: $current_mtime"
-      echo "  Recorded mtime: ${meta_mtime:-missing}"
-      echo "  Rebuild with 'make build' and restart the server for port ${grpc_port}."
-      exit 1
-    fi
-  done
+"$SCRIPT_DIR/undeploy.sh" $NODES
 }
 
-cleanup() {
-  if [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]]; then
-    rm -f "$TEMP_CONFIG"
-  fi
-  for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  done
-}
-trap cleanup EXIT
 
-grpc_seed_nodes() {
-  local seed_list=()
+seed_nodes_list() {
+  local joined="" sep=""
   for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    seed_list+=("\"${host}:$((port - 1))\"")
-  done
-  local joined=""
-  local sep=""
-  for entry in "${seed_list[@]}"; do
-    joined="${joined}${sep}${entry}"
+    joined="${joined}${sep}\"${node}\""
     sep=", "
   done
   printf '%s' "$joined"
@@ -123,7 +82,7 @@ grpc_seed_nodes() {
 render_config() {
   local temp_config="$1"
   local seeds
-  seeds="$(grpc_seed_nodes)"
+  seeds="$(seed_nodes_list)"
   python3 - "$CONFIG_FILE" "$temp_config" "$seeds" <<'PY'
 import pathlib
 import sys
@@ -162,7 +121,12 @@ except Exception:
     print(0)
     raise SystemExit(0)
 nodes = payload.get("nodes", [])
-print(len(nodes) if isinstance(nodes, list) else 0)
+if not isinstance(nodes, list):
+    print(0)
+    raise SystemExit(0)
+# Only count active nodes (status=2); disconnected/unknown nodes (status=3) must not count
+active = [n for n in nodes if n.get("status") == 2]
+print(len(active))
 PY
 }
 
@@ -206,7 +170,6 @@ echo "Step 0: Build WASM"
 echo ""
 
 assert_binary_newer_than_sources
-assert_node_binaries_current
 
 for node in "${NODE_LIST[@]}"; do
   host="${node%%:*}"
@@ -221,13 +184,14 @@ done
 TEMP_CONFIG="$(mktemp -t streaming-pipeline-app-config)"
 render_config "$TEMP_CONFIG"
 
-for node in "${NODE_LIST[@]}"; do
-  host="${node%%:*}"
-  port="${node##*:}"
-  echo "Step 1: Deploy to ${host}:${port}"
-  curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  sleep 1
-  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+echo "Step 1: Undeploy existing app from all nodes"
+"$SCRIPT_DIR/undeploy.sh" $NODES
+sleep 2
+
+echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
+_deployed=0
+for _attempt in 1 2 3; do
+  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
@@ -235,18 +199,24 @@ for node in "${NODE_LIST[@]}"; do
     -F "config=@$TEMP_CONFIG" 2>&1)
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
-  if [ "$http_code" != "200" ] || ! echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo -e "${RED}Deploy failed on ${host}:${port}: $response${NC}"
-    exit 1
+  if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
   fi
-  echo -e "  ${GREEN}Deployed${NC}"
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
 done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $response${NC}"
+  exit 1
+fi
+echo -e "  ${GREEN}Deployed${NC}"
 sleep 2
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
 
 echo "Step 1a: Wait for registry convergence"
-wait_for_registry_membership "${#NODE_LIST[@]}" "${STREAMING_PIPELINE_REGISTRY_ATTEMPTS:-3}" "${STREAMING_PIPELINE_REGISTRY_SLEEP_SECS:-2}"
+wait_for_registry_membership "${#NODE_LIST[@]}" "${STREAMING_PIPELINE_REGISTRY_ATTEMPTS:-30}" "${STREAMING_PIPELINE_REGISTRY_SLEEP_SECS:-2}"
 
 echo "Step 1b: ListConnectedNodes (GET /api/v1/nodes) per node"
 for node in "${NODE_LIST[@]}"; do

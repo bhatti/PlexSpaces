@@ -1,6 +1,8 @@
 # AWS Durable Lambda → PlexSpaces: Serverless webhook processor (Go WASM)
 # Exactly-once with deduplication; GenServer + virtual_actor + durability.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "webhook"
+tenant_id = "default"
 actor_type = "migrating_aws_durable_lambda_wasm"
 role = "worker"
 restart = "permanent"

@@ -17,8 +17,8 @@ package actorv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1"
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	_ "google.golang.org/protobuf/types/known/timestamppb"
@@ -998,9 +998,9 @@ const file_plexspaces_v1_actors_types_proto_rawDesc = "" +
 	"\x1fPOOL_SERVICE_ERROR_CIRCUIT_OPEN\x10\x04\x12$\n" +
 	" POOL_SERVICE_ERROR_POOL_DRAINING\x10\x05\x12%\n" +
 	"!POOL_SERVICE_ERROR_INVALID_CONFIG\x10\x06\x12\"\n" +
-	"\x1ePOOL_SERVICE_ERROR_ACTOR_ERROR\x10\aB\xeb\x01\n" +
+	"\x1ePOOL_SERVICE_ERROR_ACTOR_ERROR\x10\aB\xe7\x01\n" +
 	"\x17com.plexspaces.actor.v1B\n" +
-	"TypesProtoP\x01ZVgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/actors;actorv1\xa2\x02\x03PAX\xaa\x02\x13Plexspaces.Actor.V1\xca\x02\x13Plexspaces\\Actor\\V1\xe2\x02\x1fPlexspaces\\Actor\\V1\\GPBMetadata\xea\x02\x15Plexspaces::Actor::V1b\x06proto3"
+	"TypesProtoP\x01ZRgithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/actors;actorv1\xa2\x02\x03PAX\xaa\x02\x13Plexspaces.Actor.V1\xca\x02\x13Plexspaces\\Actor\\V1\xe2\x02\x1fPlexspaces\\Actor\\V1\\GPBMetadata\xea\x02\x15Plexspaces::Actor::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_actors_types_proto_rawDescOnce sync.Once

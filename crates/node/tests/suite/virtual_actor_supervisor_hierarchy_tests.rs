@@ -493,7 +493,6 @@ async fn test_application_deployment_with_eager_virtual_actors() {
     let app_spec = ApplicationSpec {
         name: "eager-virtual-app".to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Test app with eager virtual actors".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),

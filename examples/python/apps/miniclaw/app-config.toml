@@ -1,7 +1,7 @@
 name = "py-miniclaw"
 version = "1.0.0"
-namespace = "py-miniclaw"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -135,3 +135,4 @@ args = { role = "health_monitor", poll_interval_ms = "5000" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "eager" } }
 ]
+tenant_id = "default"

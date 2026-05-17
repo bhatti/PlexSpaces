@@ -14,7 +14,7 @@ await esbuild.build({
   platform: "neutral",
   target: "es2020",
   packages: "bundle",
-  external: ["plexspaces:actor/host@0.1.0"],
+  external: ["plexspaces:*"],
 });
 
 console.log("  ✓ streaming_actor_bundle.mjs");

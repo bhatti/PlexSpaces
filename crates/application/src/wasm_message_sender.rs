@@ -253,15 +253,6 @@ impl MessageSender for ActorServiceMessageSender {
 
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
-        let msg = Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: message.to_vec(),
-            sender_id: from.to_string(),
-            receiver_id: to.to_string(),
-            message_type: message_type.to_string(),
-            ..Default::default()
-        };
-
         // Route through ActorRegistry so virtual actors are reactivated if passivated.
         // This is the canonical tell path — do NOT use actor_service.send() directly here,
         // as that bypasses virtual actor activation owned by the registry.
@@ -275,6 +266,14 @@ impl MessageSender for ActorServiceMessageSender {
             .await?;
         // resolve_actor_id handles canonical, "type:name", and bare-type addressing.
         let to_id = registry.resolve_actor_id(&ctx, to).await?;
+        let msg = Message {
+            id: ulid::Ulid::new().to_string(),
+            payload: message.to_vec(),
+            sender_id: from.to_string(),
+            receiver_id: to_id.to_string(),
+            message_type: message_type.to_string(),
+            ..Default::default()
+        };
         registry
             .tell(&ctx, &to_id, msg)
             .await
@@ -328,7 +327,7 @@ impl MessageSender for ActorServiceMessageSender {
             id: request_id.clone(),
             payload,
             sender_id: from.to_string(),
-            receiver_id: to.to_string(),
+            receiver_id: to_id.to_string(),
             message_type: message_type.to_string(),
             ..Default::default()
         };

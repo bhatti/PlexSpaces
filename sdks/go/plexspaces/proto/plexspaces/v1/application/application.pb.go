@@ -55,10 +55,10 @@ package applicationv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	v1 "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1"
 	supervision "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/supervision"
 	wasm "github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/wasm"
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -547,59 +547,40 @@ func (ApplicationErrorCode) EnumDescriptor() ([]byte, []int) {
 // ```
 type ApplicationSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Application name (unique identifier within node)
+	// Application name (unique identifier within node).
+	// Serves as the namespace for all actors spawned by this application.
 	// Examples: "byzantine-generals", "genomics-coordinator"
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Tenant ID for multi-tenancy isolation.
-	// Extracted from JWT token during deployment.
-	// All actors spawned by this application will be scoped to this tenant.
-	// This is the source of truth for tenant isolation - ActorFactory enforces it.
+	// Extracted from JWT token during deployment; fallback from app-config.toml.
 	TenantId string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Namespace for actor isolation within a tenant.
-	// All actors spawned by this application will be registered in this namespace.
-	// If empty, defaults to application_id during deployment.
-	// Examples: "bank-test", "genomics-prod", "dev-sandbox"
-	Namespace string `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Application version (semantic versioning)
 	// Examples: "0.1.0", "1.2.3"
-	Version string `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	// Human-readable description
-	Description string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Application type (library or active)
-	Type ApplicationType `protobuf:"varint,6,opt,name=type,proto3,enum=plexspaces.application.v1.ApplicationType" json:"type,omitempty"`
+	Type ApplicationType `protobuf:"varint,5,opt,name=type,proto3,enum=plexspaces.application.v1.ApplicationType" json:"type,omitempty"`
 	// Dependencies (other applications that must start first)
-	// e.g., ["plexspaces-core", "plexspaces-tuplespace"]
-	Dependencies []string `protobuf:"bytes,7,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	Dependencies []string `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	// Application-level environment variables
-	Env map[string]string `protobuf:"bytes,8,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Env map[string]string `protobuf:"bytes,7,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Supervision tree (only for active applications)
-	Supervisor *supervision.SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3,oneof" json:"supervisor,omitempty"`
-	// Whether application is enabled (false = skip loading)
-	// Default: true
-	Enabled bool `protobuf:"varint,10,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	// Whether to start application automatically on node boot
-	// Default: true
-	// Future: false allows manual start via ApplicationService API
-	AutoStart bool `protobuf:"varint,11,opt,name=auto_start,json=autoStart,proto3" json:"auto_start,omitempty"`
-	// Shutdown timeout (force kill if exceeded)
-	// Default: 60 seconds
-	ShutdownTimeout *durationpb.Duration `protobuf:"bytes,12,opt,name=shutdown_timeout,json=shutdownTimeout,proto3" json:"shutdown_timeout,omitempty"`
-	// Shutdown strategy (graceful or immediate)
-	// Default: GRACEFUL
-	ShutdownStrategy ShutdownStrategy `protobuf:"varint,13,opt,name=shutdown_strategy,json=shutdownStrategy,proto3,enum=plexspaces.application.v1.ShutdownStrategy" json:"shutdown_strategy,omitempty"`
+	Supervisor *supervision.SupervisorSpec `protobuf:"bytes,8,opt,name=supervisor,proto3,oneof" json:"supervisor,omitempty"`
+	// Whether application is enabled (false = skip loading). Default: true
+	Enabled bool `protobuf:"varint,9,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Whether to start application automatically on node boot. Default: true
+	AutoStart bool `protobuf:"varint,10,opt,name=auto_start,json=autoStart,proto3" json:"auto_start,omitempty"`
+	// Shutdown timeout (force kill if exceeded). Default: 60 seconds
+	ShutdownTimeout *durationpb.Duration `protobuf:"bytes,11,opt,name=shutdown_timeout,json=shutdownTimeout,proto3" json:"shutdown_timeout,omitempty"`
+	// Shutdown strategy (graceful or immediate). Default: GRACEFUL
+	ShutdownStrategy ShutdownStrategy `protobuf:"varint,12,opt,name=shutdown_strategy,json=shutdownStrategy,proto3,enum=plexspaces.application.v1.ShutdownStrategy" json:"shutdown_strategy,omitempty"`
 	// Application metadata (tags, labels, annotations)
-	// Examples:
-	// - environment: "production"
-	// - team: "genomics"
-	// - criticality: "high"
-	Metadata *v1.Metadata `protobuf:"bytes,14,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Metadata *v1.Metadata `protobuf:"bytes,13,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// Seed nodes (gRPC addresses) to connect to when this application is deployed.
-	// The node will connect to these addresses if not already connected, so
-	// leader-worker and scatter/gather can use workers on other nodes.
-	// Example: ["localhost:8091", "localhost:8093"]
-	SeedNodes []string `protobuf:"bytes,15,rep,name=seed_nodes,json=seedNodes,proto3" json:"seed_nodes,omitempty"`
-	// External service links this application expects at deploy time (validated against node catalog).
-	RequiredServiceLinks []*ApplicationServiceLinkRequirement `protobuf:"bytes,16,rep,name=required_service_links,json=requiredServiceLinks,proto3" json:"required_service_links,omitempty"`
+	SeedNodes []string `protobuf:"bytes,14,rep,name=seed_nodes,json=seedNodes,proto3" json:"seed_nodes,omitempty"`
+	// External service links this application expects at deploy time.
+	RequiredServiceLinks []*ApplicationServiceLinkRequirement `protobuf:"bytes,15,rep,name=required_service_links,json=requiredServiceLinks,proto3" json:"required_service_links,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -644,13 +625,6 @@ func (x *ApplicationSpec) GetName() string {
 func (x *ApplicationSpec) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
-	}
-	return ""
-}
-
-func (x *ApplicationSpec) GetNamespace() string {
-	if x != nil {
-		return x.Namespace
 	}
 	return ""
 }
@@ -1440,20 +1414,18 @@ type ApplicationInfo struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Application ID
 	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
-	// Application name
+	// Application name (also serves as the namespace for actors in this application)
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Tenant ID for visibility and isolation.
 	TenantId string `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// Namespace for application-scoped actors and filters.
-	Namespace string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Application version
-	Version string `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
+	Version string `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
 	// Current status
-	Status ApplicationStatus `protobuf:"varint,6,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
+	Status ApplicationStatus `protobuf:"varint,5,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
 	// When the application was deployed
-	DeployedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=deployed_at,json=deployedAt,proto3" json:"deployed_at,omitempty"`
+	DeployedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=deployed_at,json=deployedAt,proto3" json:"deployed_at,omitempty"`
 	// Application metrics (optional)
-	Metrics       *ApplicationMetrics `protobuf:"bytes,8,opt,name=metrics,proto3,oneof" json:"metrics,omitempty"`
+	Metrics       *ApplicationMetrics `protobuf:"bytes,7,opt,name=metrics,proto3,oneof" json:"metrics,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1505,13 +1477,6 @@ func (x *ApplicationInfo) GetName() string {
 func (x *ApplicationInfo) GetTenantId() string {
 	if x != nil {
 		return x.TenantId
-	}
-	return ""
-}
-
-func (x *ApplicationInfo) GetNamespace() string {
-	if x != nil {
-		return x.Namespace
 	}
 	return ""
 }
@@ -1807,29 +1772,28 @@ var File_plexspaces_v1_application_application_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\n" +
-	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xf4\a\n" +
+	"+plexspaces/v1/application/application.proto\x12\x19plexspaces.application.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a+plexspaces/v1/supervision/supervision.proto\x1a\x1dplexspaces/v1/wasm/wasm.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xd6\a\n" +
 	"\x0fApplicationSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
-	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1c\n" +
-	"\tnamespace\x18\x03 \x01(\tR\tnamespace\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\x12>\n" +
-	"\x04type\x18\x06 \x01(\x0e2*.plexspaces.application.v1.ApplicationTypeR\x04type\x12\"\n" +
-	"\fdependencies\x18\a \x03(\tR\fdependencies\x12E\n" +
-	"\x03env\x18\b \x03(\v23.plexspaces.application.v1.ApplicationSpec.EnvEntryR\x03env\x12N\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12>\n" +
+	"\x04type\x18\x05 \x01(\x0e2*.plexspaces.application.v1.ApplicationTypeR\x04type\x12\"\n" +
+	"\fdependencies\x18\x06 \x03(\tR\fdependencies\x12E\n" +
+	"\x03env\x18\a \x03(\v23.plexspaces.application.v1.ApplicationSpec.EnvEntryR\x03env\x12N\n" +
 	"\n" +
-	"supervisor\x18\t \x01(\v2).plexspaces.supervision.v1.SupervisorSpecH\x00R\n" +
+	"supervisor\x18\b \x01(\v2).plexspaces.supervision.v1.SupervisorSpecH\x00R\n" +
 	"supervisor\x88\x01\x01\x12\x18\n" +
-	"\aenabled\x18\n" +
-	" \x01(\bR\aenabled\x12\x1d\n" +
+	"\aenabled\x18\t \x01(\bR\aenabled\x12\x1d\n" +
 	"\n" +
-	"auto_start\x18\v \x01(\bR\tautoStart\x12D\n" +
-	"\x10shutdown_timeout\x18\f \x01(\v2\x19.google.protobuf.DurationR\x0fshutdownTimeout\x12X\n" +
-	"\x11shutdown_strategy\x18\r \x01(\x0e2+.plexspaces.application.v1.ShutdownStrategyR\x10shutdownStrategy\x12:\n" +
-	"\bmetadata\x18\x0e \x01(\v2\x1e.plexspaces.common.v1.MetadataR\bmetadata\x12\x1d\n" +
+	"auto_start\x18\n" +
+	" \x01(\bR\tautoStart\x12D\n" +
+	"\x10shutdown_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\x0fshutdownTimeout\x12X\n" +
+	"\x11shutdown_strategy\x18\f \x01(\x0e2+.plexspaces.application.v1.ShutdownStrategyR\x10shutdownStrategy\x12:\n" +
+	"\bmetadata\x18\r \x01(\v2\x1e.plexspaces.common.v1.MetadataR\bmetadata\x12\x1d\n" +
 	"\n" +
-	"seed_nodes\x18\x0f \x03(\tR\tseedNodes\x12\xdf\x01\n" +
-	"\x16required_service_links\x18\x10 \x03(\v2<.plexspaces.application.v1.ApplicationServiceLinkRequirementBk\x92A\\2ZLinks that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys.\xe0A\x01\xbaH\x06\x92\x01\x03\x10\x80\x01R\x14requiredServiceLinks\x1a6\n" +
+	"seed_nodes\x18\x0e \x03(\tR\tseedNodes\x12\xdf\x01\n" +
+	"\x16required_service_links\x18\x0f \x03(\v2<.plexspaces.application.v1.ApplicationServiceLinkRequirementBk\x92A\\2ZLinks that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys.\xe0A\x01\xbaH\x06\x92\x01\x03\x10\x80\x01R\x14requiredServiceLinks\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\r\n" +
@@ -1892,17 +1856,16 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\rstatus_filter\x18\x01 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusH\x00R\fstatusFilter\x88\x01\x01B\x10\n" +
 	"\x0e_status_filter\"j\n" +
 	"\x18ListApplicationsResponse\x12N\n" +
-	"\fapplications\x18\x01 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xfe\x02\n" +
+	"\fapplications\x18\x01 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xe0\x02\n" +
 	"\x0fApplicationInfo\x12%\n" +
 	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
-	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12\x1c\n" +
-	"\tnamespace\x18\x04 \x01(\tR\tnamespace\x12\x18\n" +
-	"\aversion\x18\x05 \x01(\tR\aversion\x12D\n" +
-	"\x06status\x18\x06 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12;\n" +
-	"\vdeployed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12D\n" +
+	"\x06status\x18\x05 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12;\n" +
+	"\vdeployed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"deployedAt\x12L\n" +
-	"\ametrics\x18\b \x01(\v2-.plexspaces.application.v1.ApplicationMetricsH\x00R\ametrics\x88\x01\x01B\n" +
+	"\ametrics\x18\a \x01(\v2-.plexspaces.application.v1.ApplicationMetricsH\x00R\ametrics\x88\x01\x01B\n" +
 	"\n" +
 	"\b_metrics\"\x89\b\n" +
 	"\x12ApplicationMetrics\x12a\n" +
@@ -1986,8 +1949,8 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\x11DeployApplication\x123.plexspaces.application.v1.DeployApplicationRequest\x1a4.plexspaces.application.v1.DeployApplicationResponse\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/api/v1/applications\x12\xb3\x01\n" +
 	"\x13UndeployApplication\x125.plexspaces.application.v1.UndeployApplicationRequest\x1a6.plexspaces.application.v1.UndeployApplicationResponse\"-\x82\xd3\xe4\x93\x02'*%/api/v1/applications/{application_id}\x12\x99\x01\n" +
 	"\x10ListApplications\x122.plexspaces.application.v1.ListApplicationsRequest\x1a3.plexspaces.application.v1.ListApplicationsResponse\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/api/v1/applications\x12\xbd\x01\n" +
-	"\x14GetApplicationStatus\x126.plexspaces.application.v1.GetApplicationStatusRequest\x1a7.plexspaces.application.v1.GetApplicationStatusResponse\"4\x82\xd3\xe4\x93\x02.\x12,/api/v1/applications/{application_id}/statusB\x9a\x02\n" +
-	"\x1dcom.plexspaces.application.v1B\x10ApplicationProtoP\x01Zagithub.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/application;applicationv1\xa2\x02\x03PAX\xaa\x02\x19Plexspaces.Application.V1\xca\x02\x19Plexspaces\\Application\\V1\xe2\x02%Plexspaces\\Application\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Application::V1b\x06proto3"
+	"\x14GetApplicationStatus\x126.plexspaces.application.v1.GetApplicationStatusRequest\x1a7.plexspaces.application.v1.GetApplicationStatusResponse\"4\x82\xd3\xe4\x93\x02.\x12,/api/v1/applications/{application_id}/statusB\x96\x02\n" +
+	"\x1dcom.plexspaces.application.v1B\x10ApplicationProtoP\x01Z]github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/plexspaces/v1/application;applicationv1\xa2\x02\x03PAX\xaa\x02\x19Plexspaces.Application.V1\xca\x02\x19Plexspaces\\Application\\V1\xe2\x02%Plexspaces\\Application\\V1\\GPBMetadata\xea\x02\x1bPlexspaces::Application::V1b\x06proto3"
 
 var (
 	file_plexspaces_v1_application_application_proto_rawDescOnce sync.Once

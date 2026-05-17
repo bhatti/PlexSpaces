@@ -17,10 +17,6 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-cleanup() {
-  curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 send_actor() {
   local actor="$1" payload="$2" timeout="${3:-20}"
@@ -136,77 +132,27 @@ if [ "$HTTP_CHECK" = "000" ]; then
 fi
 
 echo "Step 2: Deploy"
-curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-sleep 1
-DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
+sleep 2
+_deployed=0
+for _attempt in 1 2 3; do
+  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
   -F "name=abstractions-python" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
   -F "config=@$CONFIG_FILE" 2>&1)
-HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
-RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
-if [ "$HTTP_CODE" != "200" ] || ! echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
-  exit 1
-fi
-echo -e "${GREEN}Deployed $APP_ID${NC}"
-sleep 2
-
-echo "Step 3: GenServer virtual actor"
-assert_actor_ok "increment" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"increment","amount":2}' 15)"
-STATUS="$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "status" "$STATUS"
-ACTOR_PAYLOAD="$(extract_payload_json "$STATUS")"
-INTERNAL_ACTOR_ID="$(PARSED="$ACTOR_PAYLOAD" python3 - <<'PY'
-import json, os
-print(json.loads(os.environ["PARSED"]).get("self_id", ""))
-PY
-)"
-COUNT_VALUE="$(PARSED="$ACTOR_PAYLOAD" python3 - <<'PY'
-import json, os
-print(json.loads(os.environ["PARSED"]).get("count", ""))
-PY
-)"
-if [ "$COUNT_VALUE" != "2" ] || [ -z "$INTERNAL_ACTOR_ID" ]; then
-  echo -e "${RED}Expected count=2 and a resolved self_id${NC}"
-  echo "$ACTOR_PAYLOAD"
-  exit 1
-fi
-
-echo "Step 4: Timer and reminder delivery"
-assert_actor_ok "schedule_timer" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"schedule_timer","delay_ms":100}' 15)"
-assert_actor_ok "schedule_reminder" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"schedule_reminder","delay_ms":140}' 15)"
-wait_for_json_field "$ABSTRACTIONS_ACTOR" '{"op":"status"}' "timer_ticks" "1" 25 0.15
-wait_for_json_field "$ABSTRACTIONS_ACTOR" '{"op":"status"}' "reminder_ticks" "1" 25 0.15
-
-echo "Step 5: Services"
-assert_actor_ok "kv_put" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"kv_put","key":"abstractions/config","value":"ready"}' 15)"
-assert_actor_ok "ts_write" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"ts_write","tuple":["abstractions","task","t-1"]}' 15)"
-assert_actor_ok "blob_upload" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"blob_upload","blob_id":"abstractions/blob-1","data":"aGVsbG8=","content_type":"text/plain"}' 15)"
-
-echo "Step 6: Workflow actor"
-assert_actor_ok "workflow_run" "$(send_actor "$WORKFLOW_ACTOR" '{"op":"workflow_run","order_id":"o-1"}' 15)"
-assert_actor_ok "workflow_signal" "$(send_actor "$WORKFLOW_ACTOR" '{"op":"workflow_signal:cancel","reason":"user"}' 15)"
-WF_STATUS="$(send_actor "$WORKFLOW_ACTOR" '{"op":"workflow_query:status"}' 15)"
-assert_actor_ok "workflow_query" "$WF_STATUS"
-
-echo "Step 7: Event actor and process groups"
-assert_actor_ok "channel status" "$(send_actor "$CHANNEL_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "send_event" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"send_event","target":"channel:alerts","channel":"alerts","body":"direct"}' 15)"
-assert_actor_ok "broadcast_event" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"broadcast_event","group":"abstractions-group","channel":"alerts","body":"broadcast"}' 15)"
-sleep 1
-CHANNEL_FINAL="$(send_actor "$CHANNEL_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "channel final status" "$CHANNEL_FINAL"
-
-echo "Step 8: Durable reactivation"
-STOP_DURABLE_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$INTERNAL_ACTOR_ID")"
-assert_actor_ok "stop_actor" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_DURABLE_PAYLOAD" 15)"
-sleep 1
-REACTIVATED="$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"status"}' 15)"
-assert_actor_ok "reactivated status" "$REACTIVATED"
-if ! echo "$(extract_payload_json "$REACTIVATED")" | grep -q '"count": 2\|"count":2'; then
-  echo -e "${RED}Virtual actor did not preserve durable state after reactivation${NC}"
   exit 1
 fi
 

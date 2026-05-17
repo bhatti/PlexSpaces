@@ -1,7 +1,7 @@
 name = "streaming-pipeline-ts"
 version = "1.0.0"
-namespace = "streaming-pipeline-ts"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -40,3 +40,4 @@ facets = [
 
 [supervisor.children.args]
 role = "worker"
+tenant_id = "default"

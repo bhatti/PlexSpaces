@@ -22,14 +22,6 @@ NC='\033[0m'
 # Configuration for simulation
 BODY_COUNT=3
 
-cleanup() {
-    echo ""
-    echo "Cleanup: Undeploying applications"
-    for i in $(seq 0 $((BODY_COUNT - 1))); do
-        APP_ID="nbody-body-$i"
-        curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
-    done
-}
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║     N-Body Gravitational Simulation (Python WASM Actors)       ║"
@@ -64,7 +56,6 @@ fi
 echo -e "${GREEN}✓ Node is running${NC}"
 echo ""
 
-trap cleanup EXIT
 
 # Define body configurations
 declare -a BODY_NAMES=("Sun" "Mercury" "Venus")
@@ -80,17 +71,25 @@ for i in $(seq 0 $((BODY_COUNT - 1))); do
     APP_NAME="${BODY_NAMES[$i]}"
     
     # Clean up any existing deployment
-    curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
     sleep 1
     
-    # Deploy via HTTP multipart
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-        -F "application_id=$APP_ID" \
-        -F "name=$APP_ID" \
-        -F "version=1.0.0" \
-        -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || RESPONSE=""
-    
-    if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
+    # Deploy via HTTP multipart (3 attempts)
+    _dep=0
+    for _attempt in 1 2 3; do
+      DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+          -F "application_id=$APP_ID" \
+          -F "name=$APP_ID" \
+          -F "version=1.0.0" \
+          -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || DEPLOY_OUT=""
+      _hc=$(echo "$DEPLOY_OUT" | tail -n1)
+      RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+      if [ "$_hc" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+        _dep=1; break
+      fi
+      sleep 3
+    done
+    if [ "$_dep" -eq 1 ]; then
         echo -e "  ${GREEN}✓${NC} Deployed $APP_ID ($APP_NAME)"
         DEPLOYED=$((DEPLOYED + 1))
     else

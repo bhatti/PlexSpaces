@@ -65,6 +65,13 @@ All endpoints support pagination via `PageRequest` and return `PageResponse`:
 - `GET /api/v1/dashboard/actor/{actor_id}` - Get actor detail for table actions
 - `POST /api/v1/dashboard/actor/{actor_id}/stop` - Stop a specific actor
 - `GET /api/v1/dashboard/system-info` - Get embedded version/build metadata for the footer
+- `GET /api/v1/dashboard/objects` - List object registry entries (actors, tuplespaces, services, VMs) with type/health filters
+- `GET /api/v1/dashboard/keyvalue` - List key/value store entries with prefix/namespace filters
+- `GET /api/v1/dashboard/tuplespace` - Get tuplespace stats and sample tuples
+- `GET /api/v1/dashboard/blobs` - List blob storage entries with kind/namespace filters
+- `POST /api/v1/dashboard/blob/{blob_id}/presigned-url` - Generate presigned download URL for a blob
+- `GET /api/v1/dashboard/service-links` - List service links configured on a node
+- `GET /api/v1/dashboard/metrics-table` - List metrics with name/label filters
 
 `/api/v1/dashboard/actors` is the shared table source for node, tenant, and application pages. It supports:
 - `behavior_kind` for runtime behavior filtering (`builtin`, `custom`, `gen_server`, `gen_event`, `gen_state_machine`, `workflow`, or a custom behavior name)

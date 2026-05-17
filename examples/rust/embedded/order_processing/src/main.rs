@@ -21,7 +21,7 @@
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
     ActorContext, BehaviorError, RequestContext, Message,
-    NodeBuilder, spawn, call_message, json, Value, ActorRef,, RequestContextExt};
+    NodeBuilder, spawn, call_message, json, Value, ActorRef, RequestContextExt};
 use plexspaces_node::CoordinationComputeTracker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -279,7 +279,7 @@ async fn main() -> Result<()> {
     }));
     
     metrics_tracker.start_compute();
-    let response = actor_ref.ask(create_msg, Duration::from_secs(5)).await?;
+    let response = actor_ref.ask(&ctx, create_msg, Duration::from_secs(5)).await?;
     metrics_tracker.end_compute();
     metrics_tracker.increment_message();
     
@@ -306,7 +306,7 @@ async fn main() -> Result<()> {
     }));
     
     metrics_tracker.start_compute();
-    let response2 = actor_ref.ask(create_msg2, Duration::from_secs(5)).await?;
+    let response2 = actor_ref.ask(&ctx, create_msg2, Duration::from_secs(5)).await?;
     metrics_tracker.end_compute();
     metrics_tracker.increment_message();
     
@@ -331,7 +331,7 @@ async fn main() -> Result<()> {
     let list_msg = call_message(json!({ "op": "list" }));
     
     metrics_tracker.start_compute();
-    let response = actor_ref.ask(list_msg, Duration::from_secs(5)).await?;
+    let response = actor_ref.ask(&ctx, list_msg, Duration::from_secs(5)).await?;
     metrics_tracker.end_compute();
     metrics_tracker.increment_message();
     
@@ -354,7 +354,7 @@ async fn main() -> Result<()> {
     let get_msg = call_message(json!({ "op": "get", "order_id": order1_id }));
     
     metrics_tracker.start_compute();
-    let response = actor_ref.ask(get_msg, Duration::from_secs(5)).await?;
+    let response = actor_ref.ask(&ctx, get_msg, Duration::from_secs(5)).await?;
     metrics_tracker.end_compute();
     metrics_tracker.increment_message();
     
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
     let cancel_msg = call_message(json!({ "op": "cancel", "order_id": order1_id }));
     
     metrics_tracker.start_compute();
-    let response = actor_ref.ask(cancel_msg, Duration::from_secs(5)).await?;
+    let response = actor_ref.ask(&ctx, cancel_msg, Duration::from_secs(5)).await?;
     metrics_tracker.end_compute();
     metrics_tracker.increment_message();
     

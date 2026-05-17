@@ -749,7 +749,71 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
         Ok(blobs.into_iter().map(|b| b.name).collect())
     }
 
+    async fn list_metadata(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+        kind_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<
+        (Vec<plexspaces_proto::storage::v1::BlobMetadata>, bool),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let filters = ListFilters {
+            name_prefix: if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix.to_string())
+            },
+            kind: kind_filter.map(|s| s.to_string()),
+            ..Default::default()
+        };
+        // Fetch one extra to determine has_next without a separate count query
+        let fetch_limit = (limit + 1) as i64;
+        // Convert offset to page number (list_blobs uses 1-indexed pages)
+        let page = (offset as i64 / fetch_limit) + 1;
+        let page_offset = offset as i64 % fetch_limit;
+        // Simpler: use direct offset by fetching offset+limit+1 from page 1
+        let (mut blobs, _total) = self
+            .list_blobs(ctx, &filters, (offset + limit + 1) as i64, 1)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        // Skip the offset entries
+        if offset < blobs.len() {
+            blobs.drain(..offset);
+        } else {
+            blobs.clear();
+        }
+        let has_next = blobs.len() > limit;
+        blobs.truncate(limit);
+        let _ = page; // suppress unused warning
+        let _ = page_offset;
+        Ok((blobs, has_next))
+    }
+
+    async fn generate_presigned_url(
+        &self,
+        ctx: &RequestContext,
+        blob_id: &str,
+        operation: &str,
+        expires_after: std::time::Duration,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let chrono_duration =
+            chrono::Duration::from_std(expires_after).unwrap_or(chrono::Duration::hours(1));
+        match BlobService::generate_presigned_url(self, ctx, blob_id, operation, chrono_duration)
+            .await
+        {
+            Ok(url) => Ok(Some(url)),
+            Err(e) if e.to_string().contains("not configured") || e.to_string().contains("not supported") => {
+                Ok(None)
+            }
+            Err(e) => Err(Box::new(e)),
+        }
+    }
+
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
         self
     }
 }
+

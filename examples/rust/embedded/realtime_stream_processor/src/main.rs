@@ -678,7 +678,7 @@ async fn main() -> Result<()> {
             "metadata": event.metadata,
         });
         
-        processors[processor_idx].cast("process_event", &event_data).await
+        processors[processor_idx].cast(&ctx, "process_event", &event_data).await
             .map_err(|e| anyhow::anyhow!("Failed to process event: {}", e))?;
         
         metrics_tracker.increment_message();

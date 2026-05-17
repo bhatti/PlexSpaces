@@ -1,6 +1,8 @@
 # Bank Accounts Application Configuration (TypeScript)
 # Same layout as Python bank_account: 3 accounts under a supervisor.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "account-alice"
+tenant_id = "default"
 actor_type = "bank_account_wasm"
 role = "account-alice"
 restart = "permanent"
@@ -36,3 +39,4 @@ behavior_kind = "GenServer"
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } }
 ]
+tenant_id = "default"

@@ -313,8 +313,7 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
 
     ApplicationSpec {
         name: yaml.name.clone(),
-        tenant_id: String::new(), // Set during deployment from JWT
-        namespace: yaml.name,     // Use name as namespace by default
+        tenant_id: String::new(),
         version: yaml.version,
         description: yaml.description,
         r#type: 0, // Default type

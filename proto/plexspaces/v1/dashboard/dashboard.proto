@@ -39,9 +39,14 @@ import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
 import "plexspaces/v1/application/application.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/keyvalue/keyvalue.proto";
 import "plexspaces/v1/metrics/metrics.proto";
 import "plexspaces/v1/node/node.proto";
+import "plexspaces/v1/node/outbound.proto";
+import "plexspaces/v1/registry/object_registry.proto";
+import "plexspaces/v1/storage/blob.proto";
 import "plexspaces/v1/system/system.proto";
+import "plexspaces/v1/tuplespace/tuplespace.proto";
 import "plexspaces/v1/workflow/workflow.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
@@ -143,6 +148,79 @@ service DashboardService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Dashboard Metrics"
       description: "Returns structured metric samples and optional full Prometheus text for this node"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get object registry entries (actors, tuplespaces, services, VMs, etc.)
+  rpc GetObjects(GetObjectsRequest) returns (GetObjectsResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/objects"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Object Registry"
+      description: "Returns paginated object registry entries with filtering by type, health, namespace"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get key/value store entries
+  rpc GetKeyValues(GetKeyValuesRequest) returns (GetKeyValuesResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/keyvalue"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Key/Value Entries"
+      description: "Returns paginated key/value store entries with optional prefix filter"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get tuplespace stats and sample tuples
+  rpc GetTupleSpaces(GetTupleSpacesRequest) returns (GetTupleSpacesResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/tuplespace"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get TupleSpace Stats"
+      description: "Returns tuplespace summary with tuple count and sample tuples"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get blob storage entries
+  rpc GetBlobs(GetBlobsRequest) returns (GetBlobsResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/blobs"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Blob Storage Entries"
+      description: "Returns paginated blob metadata with optional kind and prefix filters"
+      tags: "Dashboard"
+    };
+  }
+
+  // Generate presigned download URL for a blob
+  rpc GetBlobPresignedUrl(GetBlobPresignedUrlRequest) returns (GetBlobPresignedUrlResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/dashboard/blob/{blob_id}/presigned-url"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Blob Presigned URL"
+      description: "Generates a presigned download URL for a specific blob"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get service links configured on a node
+  rpc GetServiceLinks(GetServiceLinksRequest) returns (GetServiceLinksResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/service-links"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Service Links"
+      description: "Returns all service links (static + dynamically added) for a node"
+      tags: "Dashboard"
+    };
+  }
+
+  // Get metrics table with filtering (structured view of all metrics)
+  rpc GetMetricsTable(GetMetricsTableRequest) returns (GetMetricsTableResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/metrics-table"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Metrics Table"
+      description: "Returns all metrics as a structured table with optional name pattern and label filters"
       tags: "Dashboard"
     };
   }
@@ -462,4 +540,212 @@ message GetDashboardMetricsResponse {
   repeated plexspaces.metrics.v1.Metric metrics = 1;
   repeated plexspaces.metrics.v1.MetricDefinition definitions = 2;
   string prometheus_text = 3;
+}
+
+// ============================================================================
+// OBJECT REGISTRY
+// ============================================================================
+
+message GetObjectsRequest {
+  // Filter by node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by namespace (optional)
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by object type string: "ACTOR", "TUPLESPACE", "SERVICE", "VM", "APPLICATION", "WORKFLOW", "NODE" (optional)
+  string object_type = 4 [(buf.validate.field).string.max_len = 64];
+
+  // Filter by health status string: "HEALTHY", "DEGRADED", "DEAD" (optional)
+  string health_status = 5 [(buf.validate.field).string.max_len = 64];
+
+  // Filter by object ID pattern (optional)
+  string id_pattern = 6 [(buf.validate.field).string.max_len = 512];
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 7;
+}
+
+message GetObjectsResponse {
+  repeated plexspaces.object_registry.v1.ObjectRegistration objects = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// ============================================================================
+// KEY/VALUE STORE
+// ============================================================================
+
+message GetKeyValuesRequest {
+  // Filter by node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by namespace (optional)
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+
+  // Key prefix filter (optional)
+  string prefix = 4 [(buf.validate.field).string.max_len = 512];
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 5;
+}
+
+// Lightweight KV entry for dashboard display (value truncated for safety)
+message KeyValueDashboardEntry {
+  // The key
+  string key = 1;
+
+  // Value preview (first 100 UTF-8 bytes)
+  string value_preview = 2;
+
+  // Full value size in bytes
+  uint64 size_bytes = 3;
+}
+
+message GetKeyValuesResponse {
+  repeated KeyValueDashboardEntry entries = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// ============================================================================
+// TUPLESPACE
+// ============================================================================
+
+message GetTupleSpacesRequest {
+  // Filter by node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by namespace (optional)
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+
+  // Optional pattern string to match against tuples (default: wildcard)
+  string pattern = 4 [(buf.validate.field).string.max_len = 512];
+}
+
+// Summary of a tuplespace namespace
+message TupleSpaceSummary {
+  // Namespace this summary is for
+  string namespace = 1;
+
+  // Pattern used for counting (empty = wildcard)
+  string pattern = 2;
+
+  // Total tuple count matching the pattern
+  uint64 tuple_count = 3;
+
+  // Sample tuples (up to 20)
+  repeated plexspaces.tuplespace.v1.Tuple sample_tuples = 4;
+}
+
+message GetTupleSpacesResponse {
+  repeated TupleSpaceSummary spaces = 1;
+}
+
+// ============================================================================
+// BLOB STORAGE
+// ============================================================================
+
+message GetBlobsRequest {
+  // Filter by node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by tenant ID (optional, from auth context if not provided)
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by namespace (optional)
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by blob kind (optional)
+  string kind = 4 [(buf.validate.field).string.max_len = 255];
+
+  // Filter by blob name prefix (optional)
+  string prefix = 5 [(buf.validate.field).string.max_len = 512];
+
+  // Pagination
+  plexspaces.common.v1.PageRequest page = 6;
+}
+
+message GetBlobsResponse {
+  // Reuses existing BlobMetadata proto from storage package
+  repeated plexspaces.storage.v1.BlobMetadata blobs = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+message GetBlobPresignedUrlRequest {
+  // Blob ID (required)
+  string blob_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 255}
+  ];
+
+  // Node ID where the blob lives (optional, empty = local node)
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
+
+  // Tenant ID for authorization (optional, from auth context if not provided)
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
+
+  // Namespace for authorization (optional)
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
+}
+
+message GetBlobPresignedUrlResponse {
+  // Presigned download URL (empty if not available)
+  string url = 1;
+
+  // URL expiration timestamp
+  google.protobuf.Timestamp expires_at = 2;
+
+  // Error message if presigned URLs are not configured or blob not found
+  string error = 3;
+}
+
+// ============================================================================
+// SERVICE LINKS
+// ============================================================================
+
+message GetServiceLinksRequest {
+  // Node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Tenant ID (optional, used for filtering if auth enabled)
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+}
+
+message GetServiceLinksResponse {
+  // Reuses existing ServiceLinkConfig proto from node/outbound package
+  repeated plexspaces.node.v1.ServiceLinkConfig service_links = 1;
+}
+
+// ============================================================================
+// METRICS TABLE
+// ============================================================================
+
+message GetMetricsTableRequest {
+  // Node ID (optional, empty = local node)
+  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+
+  // Optional namespace label filter
+  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+
+  // Name glob; empty or "*" matches all metric names
+  string name_pattern = 3 [(buf.validate.field).string.max_len = 512];
+
+  // Additional label equality filters (AND)
+  map<string, string> label_filter = 4;
+}
+
+message GetMetricsTableResponse {
+  // All matching metrics with current values
+  repeated plexspaces.metrics.v1.Metric metrics = 1;
+
+  // Metric definitions (metadata: description, unit, type)
+  repeated plexspaces.metrics.v1.MetricDefinition definitions = 2;
 }

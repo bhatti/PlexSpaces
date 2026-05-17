@@ -1,6 +1,8 @@
 # Cadence → PlexSpaces: Payment Workflow (Go WASM)
 # Workflow run/signal/query + durability; idempotent payments with retry
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "payment-workflow"
+tenant_id = "default"
 actor_type = "migrating_cadence_wasm"
 role = "worker"
 restart = "permanent"

@@ -11,6 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$EXAMPLE_DIR"
 
+# Shared target: use workspace target directory
+WORKSPACE_TARGET="${SCRIPT_DIR}/../../../../../target"
+export CARGO_TARGET_DIR="${WORKSPACE_TARGET}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,8 +40,8 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Build the example
-echo -e "${YELLOW}📦 Building actor_groups_sharding...${NC}"
-if ! cargo build --release 2>&1 | grep -q "Finished"; then
+echo -e "${YELLOW}📦 Building event_analytics (using shared target, debug)...${NC}"
+if ! cargo build 2>&1; then
     echo -e "${RED}❌ Build failed${NC}"
     exit 1
 fi
@@ -45,13 +49,13 @@ echo -e "${GREEN}✅ Build successful${NC}"
 echo ""
 
 # Run the example and capture output
-echo -e "${YELLOW}🚀 Running actor_groups_sharding...${NC}"
+echo -e "${YELLOW}🚀 Running event_analytics...${NC}"
 echo ""
 
 OUTPUT_FILE=$(mktemp)
 
-# Run with timeout and capture output
-timeout ${TEST_DURATION}s cargo run --release --bin actor_groups_sharding 2>&1 | tee "$OUTPUT_FILE" || {
+# Run pre-built binary directly to avoid recompilation inside timeout
+timeout ${TEST_DURATION}s "${WORKSPACE_TARGET}/debug/event_analytics" 2>&1 | tee "$OUTPUT_FILE" || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo -e "${YELLOW}⏱️  Test completed (timeout after ${TEST_DURATION}s)${NC}"

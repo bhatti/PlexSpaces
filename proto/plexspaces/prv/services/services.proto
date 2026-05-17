@@ -67,6 +67,9 @@ enum ServiceName {
   SERVICE_NAME_WORKFLOW_SERVICE = 19;
   SERVICE_NAME_SYSTEM_SERVICE = 20;
   SERVICE_NAME_NODE_SERVICE = 21;
+  SERVICE_NAME_KEY_VALUE_SERVICE = 22;
+  SERVICE_NAME_SERVICE_LINK_SERVICE = 23;
+  SERVICE_NAME_METRICS_SERVICE = 24;
 }
 
 // ---------------------------------------------------------------------------

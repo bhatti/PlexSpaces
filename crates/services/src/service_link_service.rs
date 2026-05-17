@@ -14,6 +14,7 @@
 // - On startup (from the gRPC server setup), seeds the catalog from RuntimeConfig.service_links
 
 use plexspaces_actor::InitializableServiceLocator;
+use plexspaces_common::RequestContext;
 use plexspaces_proto::node::v1::{
     service_link_service_server::ServiceLinkService, AddServiceLinkRequest, AddServiceLinkResponse,
     GetServiceLinkRequest, GetServiceLinkResponse, ListServiceLinksRequest,
@@ -25,6 +26,7 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 /// gRPC implementation of ServiceLinkService.
+#[derive(Clone)]
 pub struct ServiceLinkServiceImpl {
     service_locator: Arc<dyn InitializableServiceLocator>,
     /// Live catalog of service links (may differ from RuntimeConfig if changed at runtime).
@@ -231,6 +233,19 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
             links: page,
             next_page_token,
         }))
+    }
+}
+
+#[async_trait::async_trait]
+impl plexspaces_service_traits::ServiceLinkAccess for ServiceLinkServiceImpl {
+    async fn list_links(
+        &self,
+        _ctx: &RequestContext,
+    ) -> Result<Vec<ServiceLinkConfig>, Box<dyn std::error::Error + Send + Sync>> {
+        let guard = self.links.read().await;
+        let mut links: Vec<ServiceLinkConfig> = guard.values().cloned().collect();
+        links.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(links)
     }
 }
 

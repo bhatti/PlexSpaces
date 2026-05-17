@@ -17,12 +17,71 @@ Across languages, the authoring vocabulary is shared deliberately: `actor`, `gen
 
 ## Available SDKs
 
-| Language | Status | Location | Build Target |
-|----------|--------|----------|--------------|
-| **Python** | ✅ Available | `sdks/python/` | WASM actors (componentize-py) |
-| **TypeScript** | ✅ Available | `sdks/typescript/` | WASM actors (jco componentize) |
-| **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn / spawn_with_facets + facets |
-| **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
+| Language | Status | Published | Build Target |
+|----------|--------|-----------|--------------|
+| **Python** | ✅ Available | [PyPI: plexspaces](https://pypi.org/project/plexspaces/) | WASM actors (componentize-py) |
+| **TypeScript** | ✅ Available | [npm: @plexspaces/sdk](https://www.npmjs.com/package/@plexspaces/sdk) | WASM actors (jco componentize) |
+| **Rust** | ✅ Available | [git: bhatti/PlexSpaces](https://github.com/bhatti/PlexSpaces/tags) | Native (embedded) + WASM actors |
+| **Go** | ✅ Available | [git: bhatti/PlexSpaces](https://github.com/bhatti/PlexSpaces/tags) | WASM actors (TinyGo) |
+
+## Installing SDKs
+
+All SDKs are published and can be consumed from outside this repository — no local checkout required.
+
+### Python
+
+```bash
+pip install "plexspaces~=0.1"
+pip install "componentize-py>=0.12"   # required to build WASM
+```
+
+### TypeScript / Node
+
+```bash
+npm install @plexspaces/sdk
+```
+
+`package.json` (version-pinned):
+
+```json
+{
+  "dependencies": {
+    "@plexspaces/sdk": "^0.1.0"
+  }
+}
+```
+
+### Rust (git dependency)
+
+Rust crates are published via git tags. Add to `Cargo.toml`:
+
+```toml
+# WASM app (no std, no native features)
+plexspaces-sdk   = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+plexspaces-proto = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+
+# Embedded / native binary (full features)
+plexspaces-sdk  = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", features = ["native"] }
+plexspaces-node = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
+```
+
+See [GitHub tags](https://github.com/bhatti/PlexSpaces/tags) for the latest release.
+
+### Go
+
+Add to `go.mod` (requires TinyGo for WASM builds):
+
+```
+require github.com/bhatti/PlexSpaces/sdks/go v0.1.3
+```
+
+Or run:
+
+```bash
+go get github.com/bhatti/PlexSpaces/sdks/go@v0.1.3
+```
+
+The Go module tag format is `sdks/go/vX.Y.Z`. See [GitHub tags](https://github.com/bhatti/PlexSpaces/tags) for the latest `sdks/go/...` tag.
 
 ### Proto generation and typed SDK models
 
@@ -252,12 +311,13 @@ let (events, new_cursor) = state.log.poll::<serde_json::Value>("audit:", "consum
 ### Installation
 
 ```bash
-# From source (development)
+# From PyPI (recommended)
+pip install "plexspaces~=0.1"
+pip install "componentize-py>=0.12"   # required to build WASM
+
+# From source (development / contributing)
 cd sdks/python
 pip install -e ".[dev]"
-
-# Required for building WASM
-pip install componentize-py
 ```
 
 ### Quick Start
@@ -847,16 +907,22 @@ The TypeScript SDK uses **inheritance** instead of decorators: extend `PlexSpace
 ### Installation
 
 ```bash
+# From npm (recommended)
+npm install @plexspaces/sdk
+
+# From source (development / contributing)
 cd sdks/typescript
 npm install
 npm run build
 ```
 
-In an example or app, add a dependency:
+In an app `package.json`:
 
 ```json
-"dependencies": {
-  "@plexspaces/sdk": "file:../../../../sdks/typescript"
+{
+  "dependencies": {
+    "@plexspaces/sdk": "^0.1.0"
+  }
 }
 ```
 
@@ -973,6 +1039,25 @@ const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
 The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use the same core macros across native Rust and deployable Rust WASM: `#[gen_server_actor]`, `#[handler("op")]`, and `#[plexspaces_handlers]`. For deployable Rust WASM actors on the `plexspaces:actor` WIT surface, use the WASM mode forms `#[gen_server_actor(wasm)]` and `#[plexspaces_handlers(wasm)]`.
 
 **Location**: `sdks/rust/plexspaces-sdk` and `sdks/rust/plexspaces-sdk-macros`.
+
+### Installation
+
+Add to `Cargo.toml` — crates are published via git tags (see [releases](https://github.com/bhatti/PlexSpaces/tags)):
+
+```toml
+# Deployable WASM actor (wasm32 target, no std)
+[dependencies]
+plexspaces-sdk   = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+plexspaces-proto = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+prost            = "0.13"
+wit-bindgen      = "0.51"
+
+# Embedded / native binary (full features, includes node, tuplespace, etc.)
+[dependencies]
+plexspaces-sdk  = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", features = ["native"] }
+plexspaces-node = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
+tokio           = { version = "1", features = ["full"] }
+```
 
 ### Handler dispatching (call/cast semantics)
 
@@ -1730,7 +1815,7 @@ The Go SDK uses **TinyGo** to compile actors to WASM components. Actors implemen
 Same API surface as Rust/Python/TypeScript. Use when driving multi-node from a Go program (entry node HTTP URL). The `leader_worker` package is excluded from WASM builds (`//go:build !tinygo.wasm`).
 
 ```go
-import "github.com/plexspaces/plexspaces/sdks/go/plexspaces"
+import "github.com/bhatti/PlexSpaces/sdks/go/plexspaces"
 
 client := plexspaces.NewLeaderWorkerClient("http://localhost:8091")
 ids, err := client.ListWorkerNodeIds("", 100, "")
@@ -1742,6 +1827,26 @@ ids, err := plexspaces.ListWorkerNodeIds("http://localhost:8091", "", 100)
 ```
 
 ### Installation
+
+Add the module to your `go.mod` (see [releases](https://github.com/bhatti/PlexSpaces/tags) for the latest `sdks/go/vX.Y.Z` tag):
+
+```bash
+go get github.com/bhatti/PlexSpaces/sdks/go@v0.1.3
+```
+
+Or edit `go.mod` directly:
+
+```
+module github.com/your-org/your-app
+
+go 1.21
+
+require github.com/bhatti/PlexSpaces/sdks/go v0.1.3
+```
+
+Then run `go mod tidy` before building with TinyGo.
+
+**Build toolchain:**
 
 ```bash
 # TinyGo required (0.36+)
@@ -1759,7 +1864,7 @@ cargo install wasm-tools
 ```go
 package main
 
-import "github.com/example/plexspaces/sdks/go/plexspaces"
+import "github.com/bhatti/PlexSpaces/sdks/go/plexspaces"
 
 type Counter struct {
     plexspaces.BaseActor

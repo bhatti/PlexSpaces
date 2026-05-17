@@ -96,7 +96,7 @@ class S3Config(betterproto.Message):
 
     use_path_style: bool = betterproto.bool_field(4)
     """
-    Use path-style URLs (required for MinIO and some S3-compatible stores)
+    Use path-style URLs (required for embedded and some S3-compatible stores)
     """
 
 

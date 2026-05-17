@@ -1,7 +1,7 @@
 name = "python-parameter-server"
 version = "1.0.0"
-namespace = "python-parameter-server"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -25,3 +25,4 @@ name = "worker"
 actor_type = "Worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
+tenant_id = "default"

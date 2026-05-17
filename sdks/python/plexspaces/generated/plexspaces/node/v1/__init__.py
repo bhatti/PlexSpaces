@@ -458,6 +458,15 @@ class NodeConfig(betterproto.Message):
      Example: "http://node1.example.com:8000"
     """
 
+    blob_http_port: int = betterproto.uint32_field(22)
+    """
+    Port for blob HTTP: the PlexSpaces blob REST API (non-embedded) or the
+     embedded rustfs S3-compatible subprocess (when backend = "embedded").
+    
+     Set to 0 (default) to derive automatically as listen_addr port + 100.
+     Example: if listen_addr is "0.0.0.0:8000", blob_http_port defaults to 8100.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class NodeRegistryConfig(betterproto.Message):

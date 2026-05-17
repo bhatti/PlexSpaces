@@ -52,6 +52,9 @@ impl ServiceNameExt for ServiceName {
             ServiceName::ServiceNameWorkflowService => "WorkflowService",
             ServiceName::ServiceNameSystemService => "SystemService",
             ServiceName::ServiceNameNodeService => "NodeService",
+            ServiceName::ServiceNameKeyValueService => "KeyValueService",
+            ServiceName::ServiceNameServiceLinkService => "ServiceLinkService",
+            ServiceName::ServiceNameMetricsService => "MetricsService",
         }
     }
 }
@@ -118,6 +121,18 @@ mod tests {
         assert_eq!(
             ServiceName::ServiceNameTuplespaceService.as_str(),
             "TupleSpaceService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameKeyValueService.as_str(),
+            "KeyValueService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameServiceLinkService.as_str(),
+            "ServiceLinkService"
+        );
+        assert_eq!(
+            ServiceName::ServiceNameMetricsService.as_str(),
+            "MetricsService"
         );
     }
 }

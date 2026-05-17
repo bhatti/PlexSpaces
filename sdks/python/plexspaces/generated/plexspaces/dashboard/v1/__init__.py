@@ -20,7 +20,10 @@ from ...application import v1 as __application_v1__
 from ...common import v1 as __common_v1__
 from ...metrics import v1 as __metrics_v1__
 from ...node import v1 as __node_v1__
+from ...object_registry import v1 as __object_registry_v1__
+from ...storage import v1 as __storage_v1__
 from ...system import v1 as __system_v1__
+from ...tuplespace import v1 as __tuplespace_v1__
 from ...workflow import v1 as __workflow_v1__
 
 if TYPE_CHECKING:
@@ -354,6 +357,218 @@ class GetDashboardMetricsResponse(betterproto.Message):
     prometheus_text: str = betterproto.string_field(3)
 
 
+@dataclass(eq=False, repr=False)
+class GetObjectsRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Filter by node ID (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(2)
+    """Filter by tenant ID (optional, from auth context if not provided)"""
+
+    namespace: str = betterproto.string_field(3)
+    """Filter by namespace (optional)"""
+
+    object_type: str = betterproto.string_field(4)
+    """
+    Filter by object type string: "ACTOR", "TUPLESPACE", "SERVICE", "VM", "APPLICATION", "WORKFLOW", "NODE" (optional)
+    """
+
+    health_status: str = betterproto.string_field(5)
+    """
+    Filter by health status string: "HEALTHY", "DEGRADED", "DEAD" (optional)
+    """
+
+    id_pattern: str = betterproto.string_field(6)
+    """Filter by object ID pattern (optional)"""
+
+    page: "__common_v1__.PageRequest" = betterproto.message_field(7)
+    """Pagination"""
+
+
+@dataclass(eq=False, repr=False)
+class GetObjectsResponse(betterproto.Message):
+    objects: List["__object_registry_v1__.ObjectRegistration"] = (
+        betterproto.message_field(1)
+    )
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class GetKeyValuesRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Filter by node ID (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(2)
+    """Filter by tenant ID (optional, from auth context if not provided)"""
+
+    namespace: str = betterproto.string_field(3)
+    """Filter by namespace (optional)"""
+
+    prefix: str = betterproto.string_field(4)
+    """Key prefix filter (optional)"""
+
+    page: "__common_v1__.PageRequest" = betterproto.message_field(5)
+    """Pagination"""
+
+
+@dataclass(eq=False, repr=False)
+class KeyValueDashboardEntry(betterproto.Message):
+    """
+    Lightweight KV entry for dashboard display (value truncated for safety)
+    """
+
+    key: str = betterproto.string_field(1)
+    """The key"""
+
+    value_preview: str = betterproto.string_field(2)
+    """Value preview (first 100 UTF-8 bytes)"""
+
+    size_bytes: int = betterproto.uint64_field(3)
+    """Full value size in bytes"""
+
+
+@dataclass(eq=False, repr=False)
+class GetKeyValuesResponse(betterproto.Message):
+    entries: List["KeyValueDashboardEntry"] = betterproto.message_field(1)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class GetTupleSpacesRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Filter by node ID (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(2)
+    """Filter by tenant ID (optional, from auth context if not provided)"""
+
+    namespace: str = betterproto.string_field(3)
+    """Filter by namespace (optional)"""
+
+    pattern: str = betterproto.string_field(4)
+    """Optional pattern string to match against tuples (default: wildcard)"""
+
+
+@dataclass(eq=False, repr=False)
+class TupleSpaceSummary(betterproto.Message):
+    """Summary of a tuplespace namespace"""
+
+    namespace: str = betterproto.string_field(1)
+    """Namespace this summary is for"""
+
+    pattern: str = betterproto.string_field(2)
+    """Pattern used for counting (empty = wildcard)"""
+
+    tuple_count: int = betterproto.uint64_field(3)
+    """Total tuple count matching the pattern"""
+
+    sample_tuples: List["__tuplespace_v1__.Tuple"] = betterproto.message_field(4)
+    """Sample tuples (up to 20)"""
+
+
+@dataclass(eq=False, repr=False)
+class GetTupleSpacesResponse(betterproto.Message):
+    spaces: List["TupleSpaceSummary"] = betterproto.message_field(1)
+
+
+@dataclass(eq=False, repr=False)
+class GetBlobsRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Filter by node ID (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(2)
+    """Filter by tenant ID (optional, from auth context if not provided)"""
+
+    namespace: str = betterproto.string_field(3)
+    """Filter by namespace (optional)"""
+
+    kind: str = betterproto.string_field(4)
+    """Filter by blob kind (optional)"""
+
+    prefix: str = betterproto.string_field(5)
+    """Filter by blob name prefix (optional)"""
+
+    page: "__common_v1__.PageRequest" = betterproto.message_field(6)
+    """Pagination"""
+
+
+@dataclass(eq=False, repr=False)
+class GetBlobsResponse(betterproto.Message):
+    blobs: List["__storage_v1__.BlobMetadata"] = betterproto.message_field(1)
+    """Reuses existing BlobMetadata proto from storage package"""
+
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class GetBlobPresignedUrlRequest(betterproto.Message):
+    blob_id: str = betterproto.string_field(1)
+    """Blob ID (required)"""
+
+    node_id: str = betterproto.string_field(2)
+    """Node ID where the blob lives (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(3)
+    """
+    Tenant ID for authorization (optional, from auth context if not provided)
+    """
+
+    namespace: str = betterproto.string_field(4)
+    """Namespace for authorization (optional)"""
+
+
+@dataclass(eq=False, repr=False)
+class GetBlobPresignedUrlResponse(betterproto.Message):
+    url: str = betterproto.string_field(1)
+    """Presigned download URL (empty if not available)"""
+
+    expires_at: datetime = betterproto.message_field(2)
+    """URL expiration timestamp"""
+
+    error: str = betterproto.string_field(3)
+    """Error message if presigned URLs are not configured or blob not found"""
+
+
+@dataclass(eq=False, repr=False)
+class GetServiceLinksRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Node ID (optional, empty = local node)"""
+
+    tenant_id: str = betterproto.string_field(2)
+    """Tenant ID (optional, used for filtering if auth enabled)"""
+
+
+@dataclass(eq=False, repr=False)
+class GetServiceLinksResponse(betterproto.Message):
+    service_links: List["__node_v1__.ServiceLinkConfig"] = betterproto.message_field(1)
+    """Reuses existing ServiceLinkConfig proto from node/outbound package"""
+
+
+@dataclass(eq=False, repr=False)
+class GetMetricsTableRequest(betterproto.Message):
+    node_id: str = betterproto.string_field(1)
+    """Node ID (optional, empty = local node)"""
+
+    namespace: str = betterproto.string_field(2)
+    """Optional namespace label filter"""
+
+    name_pattern: str = betterproto.string_field(3)
+    """Name glob; empty or "*" matches all metric names"""
+
+    label_filter: Dict[str, str] = betterproto.map_field(
+        4, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """Additional label equality filters (AND)"""
+
+
+@dataclass(eq=False, repr=False)
+class GetMetricsTableResponse(betterproto.Message):
+    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(1)
+    """All matching metrics with current values"""
+
+    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(2)
+    """Metric definitions (metadata: description, unit, type)"""
+
+
 class DashboardServiceStub(betterproto.ServiceStub):
     async def get_summary(
         self,
@@ -491,6 +706,125 @@ class DashboardServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
+    async def get_objects(
+        self,
+        get_objects_request: "GetObjectsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetObjectsResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetObjects",
+            get_objects_request,
+            GetObjectsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_key_values(
+        self,
+        get_key_values_request: "GetKeyValuesRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetKeyValuesResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetKeyValues",
+            get_key_values_request,
+            GetKeyValuesResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_tuple_spaces(
+        self,
+        get_tuple_spaces_request: "GetTupleSpacesRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetTupleSpacesResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetTupleSpaces",
+            get_tuple_spaces_request,
+            GetTupleSpacesResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_blobs(
+        self,
+        get_blobs_request: "GetBlobsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetBlobsResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetBlobs",
+            get_blobs_request,
+            GetBlobsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_blob_presigned_url(
+        self,
+        get_blob_presigned_url_request: "GetBlobPresignedUrlRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetBlobPresignedUrlResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetBlobPresignedUrl",
+            get_blob_presigned_url_request,
+            GetBlobPresignedUrlResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_service_links(
+        self,
+        get_service_links_request: "GetServiceLinksRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetServiceLinksResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetServiceLinks",
+            get_service_links_request,
+            GetServiceLinksResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def get_metrics_table(
+        self,
+        get_metrics_table_request: "GetMetricsTableRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetMetricsTableResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetMetricsTable",
+            get_metrics_table_request,
+            GetMetricsTableResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
 
 class DashboardServiceBase(ServiceBase):
 
@@ -532,6 +866,41 @@ class DashboardServiceBase(ServiceBase):
     async def get_dashboard_metrics(
         self, get_dashboard_metrics_request: "GetDashboardMetricsRequest"
     ) -> "GetDashboardMetricsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_objects(
+        self, get_objects_request: "GetObjectsRequest"
+    ) -> "GetObjectsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_key_values(
+        self, get_key_values_request: "GetKeyValuesRequest"
+    ) -> "GetKeyValuesResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_tuple_spaces(
+        self, get_tuple_spaces_request: "GetTupleSpacesRequest"
+    ) -> "GetTupleSpacesResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_blobs(
+        self, get_blobs_request: "GetBlobsRequest"
+    ) -> "GetBlobsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_blob_presigned_url(
+        self, get_blob_presigned_url_request: "GetBlobPresignedUrlRequest"
+    ) -> "GetBlobPresignedUrlResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_service_links(
+        self, get_service_links_request: "GetServiceLinksRequest"
+    ) -> "GetServiceLinksResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_metrics_table(
+        self, get_metrics_table_request: "GetMetricsTableRequest"
+    ) -> "GetMetricsTableResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
     async def __rpc_get_summary(
@@ -594,6 +963,59 @@ class DashboardServiceBase(ServiceBase):
         response = await self.get_dashboard_metrics(request)
         await stream.send_message(response)
 
+    async def __rpc_get_objects(
+        self, stream: "grpclib.server.Stream[GetObjectsRequest, GetObjectsResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_objects(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_key_values(
+        self, stream: "grpclib.server.Stream[GetKeyValuesRequest, GetKeyValuesResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_key_values(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_tuple_spaces(
+        self,
+        stream: "grpclib.server.Stream[GetTupleSpacesRequest, GetTupleSpacesResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_tuple_spaces(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_blobs(
+        self, stream: "grpclib.server.Stream[GetBlobsRequest, GetBlobsResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_blobs(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_blob_presigned_url(
+        self,
+        stream: "grpclib.server.Stream[GetBlobPresignedUrlRequest, GetBlobPresignedUrlResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_blob_presigned_url(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_service_links(
+        self,
+        stream: "grpclib.server.Stream[GetServiceLinksRequest, GetServiceLinksResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_service_links(request)
+        await stream.send_message(response)
+
+    async def __rpc_get_metrics_table(
+        self,
+        stream: "grpclib.server.Stream[GetMetricsTableRequest, GetMetricsTableResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_metrics_table(request)
+        await stream.send_message(response)
+
     def __mapping__(self) -> Dict[str, grpclib.const.Handler]:
         return {
             "/plexspaces.dashboard.v1.DashboardService/GetSummary": grpclib.const.Handler(
@@ -643,5 +1065,47 @@ class DashboardServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 GetDashboardMetricsRequest,
                 GetDashboardMetricsResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetObjects": grpclib.const.Handler(
+                self.__rpc_get_objects,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetObjectsRequest,
+                GetObjectsResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetKeyValues": grpclib.const.Handler(
+                self.__rpc_get_key_values,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetKeyValuesRequest,
+                GetKeyValuesResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetTupleSpaces": grpclib.const.Handler(
+                self.__rpc_get_tuple_spaces,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetTupleSpacesRequest,
+                GetTupleSpacesResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetBlobs": grpclib.const.Handler(
+                self.__rpc_get_blobs,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetBlobsRequest,
+                GetBlobsResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetBlobPresignedUrl": grpclib.const.Handler(
+                self.__rpc_get_blob_presigned_url,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetBlobPresignedUrlRequest,
+                GetBlobPresignedUrlResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetServiceLinks": grpclib.const.Handler(
+                self.__rpc_get_service_links,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetServiceLinksRequest,
+                GetServiceLinksResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetMetricsTable": grpclib.const.Handler(
+                self.__rpc_get_metrics_table,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetMetricsTableRequest,
+                GetMetricsTableResponse,
             ),
         }

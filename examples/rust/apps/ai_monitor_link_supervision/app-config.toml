@@ -1,7 +1,7 @@
 name = "rust-ai-monitor-link-supervision"
 version = "1.0.0"
-namespace = "rust-ai-monitor-link-supervision"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -63,3 +63,4 @@ behavior_kind = "GenEvent"
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "lazy" } }
 ]
+tenant_id = "default"

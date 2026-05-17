@@ -2,6 +2,8 @@
 # Convention: auction:coord-1 = auctioneer; bidders inject bids via place_bid.
 # Tuple space (host.TS()) + process group (Broadcast) + lock (commit).
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -9,6 +11,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "auction"
+tenant_id = "default"
 actor_type = "migrating_mozartspaces_wasm"
 role = "worker"
 restart = "permanent"

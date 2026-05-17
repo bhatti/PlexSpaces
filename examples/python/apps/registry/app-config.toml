@@ -7,6 +7,8 @@
 # Use case: Microservices service discovery - services register themselves,
 # clients discover services by type/category (similar to Consul, Eureka, Kubernetes).
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -16,6 +18,7 @@ max_restart_window_seconds = 60
 # Facets are defined as an array of inline tables inside each child (matching proto ChildSpec.facets)
 [[supervisor.children]]
 name = "registry"
+tenant_id = "default"
 actor_type = "registry_wasm"
 role = "worker"
 restart = "permanent"

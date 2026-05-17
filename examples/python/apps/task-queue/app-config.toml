@@ -6,6 +6,8 @@
 #
 # Use case: Distributed job processing, ensuring only one worker processes each job.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -15,6 +17,7 @@ max_restart_window_seconds = 60
 # Facets are defined as an array of inline tables inside each child (matching proto ChildSpec.facets)
 [[supervisor.children]]
 name = "task-queue"
+tenant_id = "default"
 actor_type = "task_queue_worker"
 role = "worker"
 restart = "permanent"

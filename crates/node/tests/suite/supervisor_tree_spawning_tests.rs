@@ -620,7 +620,6 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with simple supervisor tree".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -723,7 +722,6 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         let app_spec = ApplicationSpec {
             name: "nested-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with nested supervisor tree".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1017,7 +1015,6 @@ async fn test_deeply_nested_supervisor_tree() {
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1113,7 +1110,6 @@ async fn test_actors_tracked_in_application() {
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1192,7 +1188,6 @@ async fn test_complex_supervisor_hierarchy() {
         let app_spec = ApplicationSpec {
             name: "complex-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with complex supervisor hierarchy".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1365,7 +1360,6 @@ async fn test_multiple_sibling_supervisors() {
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1467,7 +1461,6 @@ async fn test_auto_generated_supervisor_tree() {
         let app_spec = ApplicationSpec {
             name: "auto-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with auto-generated supervisor".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1557,7 +1550,6 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
         let app_spec = ApplicationSpec {
             name: "shutdown-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app for graceful shutdown".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1648,7 +1640,6 @@ async fn test_actor_type_tracking_complex_tree() {
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1793,7 +1784,6 @@ async fn test_erlang_style_supervision_structure() {
         let app_spec = ApplicationSpec {
             name: "my_app".to_string(),
             tenant_id: String::new(),
-            namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Erlang-style supervision structure test".to_string(),
             r#type: ApplicationType::ApplicationTypeActive.into(),

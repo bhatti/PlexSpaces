@@ -95,8 +95,7 @@ pub fn create_default_application_spec(
 
     ApplicationSpec {
         name: name.to_string(),
-        tenant_id: String::new(),    // Set by deployment code from JWT
-        namespace: name.to_string(), // WASM app namespace defaults to app name
+        tenant_id: String::new(), // Set by deployment code from JWT
         version: version.to_string(),
         description: format!("WASM application: {}", name),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -444,13 +443,8 @@ impl ApplicationService for ApplicationServiceImpl {
             };
             merged_config.tenant_id = final_tenant_id.clone();
             merged_config.name = app_display_name.clone();
-            merged_config.namespace = app_display_name.clone();
-            let final_namespace = merged_config.namespace.clone();
-            if final_namespace.is_empty() {
-                return Err(Status::invalid_argument(
-                    "namespace is required for WASM deployment",
-                ));
-            }
+            // Namespace is always derived from the application name (spec.name).
+            let final_namespace = app_name.clone();
 
             if !merged_config.required_service_links.is_empty() {
                 let rt = self
@@ -627,7 +621,6 @@ impl ApplicationService for ApplicationServiceImpl {
 
         let mut merged_config = config.clone();
         merged_config.name = req.application_id.clone();
-        merged_config.namespace = req.application_id.clone();
         // Prefer JWT tenant_id; fall back to TOML-supplied value for file-copy deploys.
         merged_config.tenant_id = if !tenant_id.is_empty() {
             tenant_id.clone()
@@ -1068,7 +1061,6 @@ mod tests {
         let mut spec = ApplicationSpec {
             name: "seeded-app".to_string(),
             version: "1.0.0".to_string(),
-            namespace: "seeded-app".to_string(),
             ..Default::default()
         };
         spec.seed_nodes = vec!["127.0.0.1:8091".to_string(), "127.0.0.1:8093".to_string()];
@@ -1107,8 +1099,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_application_spec_uses_app_name_namespace() {
+    fn create_default_application_spec_uses_app_name() {
         let spec = create_default_application_spec("heat-diffusion-rust", "1.0.0", None);
-        assert_eq!(spec.namespace, "heat-diffusion-rust");
+        assert_eq!(spec.name, "heat-diffusion-rust");
     }
 }

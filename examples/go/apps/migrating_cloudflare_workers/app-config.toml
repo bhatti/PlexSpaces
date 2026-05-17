@@ -13,6 +13,8 @@
 #   name = "RATE_LIMITER"
 #   class_name = "RateLimiter"
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -21,6 +23,7 @@ max_restart_window_seconds = 60
 # ChatRoom actor (Durable Object: one per room)
 [[supervisor.children]]
 name = "ChatRoom"
+tenant_id = "default"
 actor_type = "ChatRoom"
 restart = "permanent"
 shutdown_timeout_seconds = 10
@@ -38,3 +41,4 @@ shutdown_timeout_seconds = 5
 [supervisor.children.args]
 max_tokens = "5"
 refill_rate_ms = "1000"
+tenant_id = "default"

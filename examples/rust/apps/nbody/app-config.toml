@@ -1,6 +1,8 @@
 # N-body gravitational simulation (Rust WASM)
 # GenServer: reset, step, run_steps, get_state, get_status
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "nbody"
+tenant_id = "default"
 actor_type = "nbody_wasm"
 role = "worker"
 restart = "permanent"

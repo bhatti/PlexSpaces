@@ -2,6 +2,8 @@
 # Convention: ensemble:coord-1 = coordinator; ensemble:worker-0, ensemble:worker-1 = workers.
 # Tuple space (host.ts) + process group (join/broadcast).
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -9,6 +11,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "ensemble"
+tenant_id = "default"
 actor_type = "migrating_eflows4hpc_wasm"
 role = "worker"
 restart = "permanent"

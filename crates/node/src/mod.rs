@@ -2183,9 +2183,15 @@ impl Node {
         let server_builder = {
             use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
             use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
-            let sls = ServiceLinkServiceImpl::new(self.service_locator.clone()
-                as Arc<dyn plexspaces_actor::InitializableServiceLocator>)
+            let sls = ServiceLinkServiceImpl::new(
+                self.service_locator.clone()
+                    as Arc<dyn plexspaces_actor::InitializableServiceLocator>,
+            )
             .await;
+            // Register in ServiceLocator so dashboard can query live service links
+            self.service_locator
+                .register_service_link_service(Arc::new(sls.clone()))
+                .await;
             server_builder.grpc_service(tonic_web::enable(
                 ServiceLinkServiceServer::new(sls)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
@@ -2757,7 +2763,7 @@ impl Node {
         tracing::warn!("   • Applications: {}", app_count);
         tracing::warn!("   • Actors: {}", actor_count);
         tracing::warn!("   • Total Mailbox Queue Size: {}", queue_size);
-        tracing::warn!("   • Active Requests: {}", active_reqs);
+        tracing::warn!("   • Messages Routed: {}", active_reqs);
         tracing::warn!("   • Connected Nodes: {}", conn_nodes);
 
         // Begin graceful shutdown on health reporter (sets NOT_SERVING, prevents new requests)
@@ -2983,9 +2989,9 @@ impl Node {
             queue_size.saturating_sub(final_queue_size)
         );
         tracing::warn!(
-            "   • Active Requests: {} (completed: {})",
+            "   • Messages Routed: {} (during shutdown: {})",
             final_active_reqs,
-            active_reqs.saturating_sub(final_active_reqs)
+            final_active_reqs.saturating_sub(active_reqs)
         );
 
         tracing::warn!("╔════════════════════════════════════════════════════════════════╗");

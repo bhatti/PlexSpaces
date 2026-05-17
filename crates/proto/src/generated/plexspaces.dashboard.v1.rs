@@ -320,52 +320,246 @@ pub struct GetDashboardMetricsResponse {
     #[prost(string, tag="3")]
     pub prometheus_text: ::prost::alloc::string::String,
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
+// ============================================================================
+// OBJECT REGISTRY
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetObjectsRequest {
+    /// Filter by node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Filter by tenant ID (optional, from auth context if not provided)
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Filter by namespace (optional)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Filter by object type string: "ACTOR", "TUPLESPACE", "SERVICE", "VM", "APPLICATION", "WORKFLOW", "NODE" (optional)
+    #[prost(string, tag="4")]
+    pub object_type: ::prost::alloc::string::String,
+    /// Filter by health status string: "HEALTHY", "DEGRADED", "DEAD" (optional)
+    #[prost(string, tag="5")]
+    pub health_status: ::prost::alloc::string::String,
+    /// Filter by object ID pattern (optional)
+    #[prost(string, tag="6")]
+    pub id_pattern: ::prost::alloc::string::String,
+    /// Pagination
+    #[prost(message, optional, tag="7")]
+    pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetObjectsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub objects: ::prost::alloc::vec::Vec<super::super::object_registry::v1::ObjectRegistration>,
+    #[prost(message, optional, tag="2")]
+    pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
+}
+// ============================================================================
+// KEY/VALUE STORE
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetKeyValuesRequest {
+    /// Filter by node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Filter by tenant ID (optional, from auth context if not provided)
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Filter by namespace (optional)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Key prefix filter (optional)
+    #[prost(string, tag="4")]
+    pub prefix: ::prost::alloc::string::String,
+    /// Pagination
+    #[prost(message, optional, tag="5")]
+    pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
+}
+/// Lightweight KV entry for dashboard display (value truncated for safety)
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct KeyValueDashboardEntry {
+    /// The key
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    /// Value preview (first 100 UTF-8 bytes)
+    #[prost(string, tag="2")]
+    pub value_preview: ::prost::alloc::string::String,
+    /// Full value size in bytes
+    #[prost(uint64, tag="3")]
+    pub size_bytes: u64,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetKeyValuesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub entries: ::prost::alloc::vec::Vec<KeyValueDashboardEntry>,
+    #[prost(message, optional, tag="2")]
+    pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
+}
+// ============================================================================
+// TUPLESPACE
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetTupleSpacesRequest {
+    /// Filter by node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Filter by tenant ID (optional, from auth context if not provided)
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Filter by namespace (optional)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Optional pattern string to match against tuples (default: wildcard)
+    #[prost(string, tag="4")]
+    pub pattern: ::prost::alloc::string::String,
+}
+/// Summary of a tuplespace namespace
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TupleSpaceSummary {
+    /// Namespace this summary is for
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Pattern used for counting (empty = wildcard)
+    #[prost(string, tag="2")]
+    pub pattern: ::prost::alloc::string::String,
+    /// Total tuple count matching the pattern
+    #[prost(uint64, tag="3")]
+    pub tuple_count: u64,
+    /// Sample tuples (up to 20)
+    #[prost(message, repeated, tag="4")]
+    pub sample_tuples: ::prost::alloc::vec::Vec<super::super::tuplespace::v1::Tuple>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetTupleSpacesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub spaces: ::prost::alloc::vec::Vec<TupleSpaceSummary>,
+}
+// ============================================================================
+// BLOB STORAGE
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetBlobsRequest {
+    /// Filter by node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Filter by tenant ID (optional, from auth context if not provided)
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Filter by namespace (optional)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Filter by blob kind (optional)
+    #[prost(string, tag="4")]
+    pub kind: ::prost::alloc::string::String,
+    /// Filter by blob name prefix (optional)
+    #[prost(string, tag="5")]
+    pub prefix: ::prost::alloc::string::String,
+    /// Pagination
+    #[prost(message, optional, tag="6")]
+    pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetBlobsResponse {
+    /// Reuses existing BlobMetadata proto from storage package
+    #[prost(message, repeated, tag="1")]
+    pub blobs: ::prost::alloc::vec::Vec<super::super::storage::v1::BlobMetadata>,
+    #[prost(message, optional, tag="2")]
+    pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetBlobPresignedUrlRequest {
+    /// Blob ID (required)
+    #[prost(string, tag="1")]
+    pub blob_id: ::prost::alloc::string::String,
+    /// Node ID where the blob lives (optional, empty = local node)
+    #[prost(string, tag="2")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Tenant ID for authorization (optional, from auth context if not provided)
+    #[prost(string, tag="3")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace for authorization (optional)
+    #[prost(string, tag="4")]
+    pub namespace: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetBlobPresignedUrlResponse {
+    /// Presigned download URL (empty if not available)
+    #[prost(string, tag="1")]
+    pub url: ::prost::alloc::string::String,
+    /// URL expiration timestamp
+    #[prost(message, optional, tag="2")]
+    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Error message if presigned URLs are not configured or blob not found
+    #[prost(string, tag="3")]
+    pub error: ::prost::alloc::string::String,
+}
+// ============================================================================
+// SERVICE LINKS
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetServiceLinksRequest {
+    /// Node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Tenant ID (optional, used for filtering if auth enabled)
+    #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetServiceLinksResponse {
+    /// Reuses existing ServiceLinkConfig proto from node/outbound package
+    #[prost(message, repeated, tag="1")]
+    pub service_links: ::prost::alloc::vec::Vec<super::super::node::v1::ServiceLinkConfig>,
+}
+// ============================================================================
+// METRICS TABLE
+// ============================================================================
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetMetricsTableRequest {
+    /// Node ID (optional, empty = local node)
+    #[prost(string, tag="1")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Optional namespace label filter
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Name glob; empty or "*" matches all metric names
+    #[prost(string, tag="3")]
+    pub name_pattern: ::prost::alloc::string::String,
+    /// Additional label equality filters (AND)
+    #[prost(map="string, string", tag="4")]
+    pub label_filter: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetMetricsTableResponse {
+    /// All matching metrics with current values
+    #[prost(message, repeated, tag="1")]
+    pub metrics: ::prost::alloc::vec::Vec<super::super::metrics::v1::Metric>,
+    /// Metric definitions (metadata: description, unit, type)
+    #[prost(message, repeated, tag="2")]
+    pub definitions: ::prost::alloc::vec::Vec<super::super::metrics::v1::MetricDefinition>,
+}
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

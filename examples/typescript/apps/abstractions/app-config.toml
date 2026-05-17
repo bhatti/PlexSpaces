@@ -1,5 +1,7 @@
 # Abstractions (TypeScript WASM): GenServer + Workflow + GenEvent with shared services.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -7,6 +9,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "abstractions"
+tenant_id = "default"
 actor_type = "abstractions_wasm"
 role = "abstractions"
 restart = "permanent"
@@ -63,3 +66,4 @@ restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
 args = { role = "controller" }
+tenant_id = "default"

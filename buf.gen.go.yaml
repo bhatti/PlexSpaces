@@ -15,7 +15,7 @@ managed:
   enabled: true
   # Keep the original go_package for third-party modules so their packages use standard paths.
   # Override go_package_prefix for plexspaces protos so generated files import each other using
-  # the SDK module path (github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/...).
+  # the SDK module path (github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto/...).
   disable:
     - module: buf.build/googleapis/googleapis
       file_option: go_package
@@ -25,7 +25,7 @@ managed:
       file_option: go_package
   override:
     - file_option: go_package_prefix
-      value: github.com/plexobject/plexspaces/sdks/go/plexspaces/proto
+      value: github.com/bhatti/PlexSpaces/sdks/go/plexspaces/proto
 plugins:
   # protoc-gen-go local plugin: generates typed Go structs from proto definitions.
   # Install: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest

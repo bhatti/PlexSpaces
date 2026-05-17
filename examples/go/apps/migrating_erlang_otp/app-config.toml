@@ -6,6 +6,8 @@
 # The rate limiter handles check_rate requests from multiple API clients,
 # each with independent sliding window counters.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -14,6 +16,7 @@ max_restart_window_seconds = 60
 # Rate limiter actor (GenServer equivalent)
 [[supervisor.children]]
 name = "rate-limiter"
+tenant_id = "default"
 actor_type = "migrating_erlang_otp_wasm"
 role = "worker"
 restart = "permanent"
@@ -22,3 +25,4 @@ shutdown_timeout_seconds = 10
 [supervisor.children.args]
 window_size_ms = "60000"
 max_requests = "100"
+tenant_id = "default"

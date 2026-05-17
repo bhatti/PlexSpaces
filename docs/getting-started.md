@@ -15,7 +15,40 @@ This guide will help you get started with PlexSpaces in minutes. You'll learn ho
 
 ## Installation
 
-### Quick Install (Docker)
+### SDK Installation (for building actors)
+
+Install the SDK for your language — no local checkout required:
+
+**Python**
+```bash
+pip install "plexspaces~=0.1"
+pip install "componentize-py>=0.12"   # required to build WASM actors
+```
+
+**TypeScript / Node**
+```bash
+npm install @plexspaces/sdk
+```
+
+**Rust** (`Cargo.toml`)
+```toml
+# WASM actor
+plexspaces-sdk   = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+plexspaces-proto = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+
+# Embedded / native binary
+plexspaces-sdk  = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", features = ["native"] }
+plexspaces-node = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
+```
+
+**Go** (`go.mod`)
+```bash
+go get github.com/bhatti/PlexSpaces/sdks/go@v0.1.3
+```
+
+See [SDK Guide](sdk.md#installing-sdks) for full details and [GitHub releases](https://github.com/bhatti/PlexSpaces/tags) for the latest tags.
+
+### Run a Node (Docker)
 
 ```bash
 # Pull the latest image
@@ -29,8 +62,8 @@ docker run -p 8080:8080 plexspaces/node:latest
 
 ```bash
 # Clone the repository
-git clone https://github.com/plexobject/plexspaces.git
-cd plexspaces
+git clone https://github.com/bhatti/PlexSpaces.git
+cd PlexSpaces
 
 # Build the project
 make build
@@ -521,8 +554,8 @@ If you encounter build errors:
 
 - **Documentation**: [Full API docs](https://docs.rs/plexspaces/)
 - **Examples**: [Example gallery](../examples/README.md)
-- **Community**: [GitHub Discussions](https://github.com/plexobject/plexspaces/discussions)
-- **Issues**: [Report bugs](https://github.com/plexobject/plexspaces/issues)
+- **Community**: [GitHub Discussions](https://github.com/bhatti/PlexSpaces/discussions)
+- **Issues**: [Report bugs](https://github.com/bhatti/PlexSpaces/issues)
 
 ---
 

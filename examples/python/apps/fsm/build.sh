@@ -19,7 +19,7 @@ echo "Building $ACTOR_NAME using PlexSpaces SDK..."
 # Install SDK if not already installed
 if ! python3 -c "import plexspaces" 2>/dev/null; then
     echo "Installing PlexSpaces SDK..."
-    pip install "plexspaces~=0.1" --quiet
+    pip install -e "../../../../sdks/python" --quiet --no-build-isolation
 fi
 
 # Build using SDK CLI

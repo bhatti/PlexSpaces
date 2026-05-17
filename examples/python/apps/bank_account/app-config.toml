@@ -3,6 +3,8 @@
 # Deploys 3 bank account instances under a supervisor.
 # Each account has its own durable state (balance, transactions).
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -11,6 +13,7 @@ max_restart_window_seconds = 60
 # Alice's account
 [[supervisor.children]]
 name = "account-alice"
+tenant_id = "default"
 actor_type = "bank_account_wasm"
 role = "account-alice"
 restart = "permanent"
@@ -20,7 +23,8 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } }
 ]
 
-# Bob's account[[supervisor.children]]
+# Bob's account
+[[supervisor.children]]
 name = "account-bob"
 actor_type = "bank_account_wasm"
 role = "account-bob"
@@ -31,7 +35,8 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } }
 ]
 
-# Charlie's account[[supervisor.children]]
+# Charlie's account
+[[supervisor.children]]
 name = "account-charlie"
 actor_type = "bank_account_wasm"
 role = "account-charlie"

@@ -178,11 +178,6 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
     // Version
     toml_lines.push(format!("version = \"{}\"", spec.version));
 
-    // Namespace (if set)
-    if !spec.namespace.is_empty() {
-        toml_lines.push(format!("namespace = \"{}\"", spec.namespace));
-    }
-
     if !spec.seed_nodes.is_empty() {
         let seed_nodes = spec
             .seed_nodes
@@ -302,7 +297,6 @@ mod tests {
         ApplicationSpec {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
-            namespace: "test-namespace".to_string(),
             ..Default::default()
         }
     }
@@ -375,7 +369,6 @@ mod tests {
         // Verify config file contents
         let config_str = fs::read_to_string(&config_file).unwrap();
         assert!(config_str.contains("version = \"1.0.0\""));
-        assert!(config_str.contains("namespace = \"test-namespace\""));
     }
 
     #[test]
@@ -394,7 +387,6 @@ mod tests {
         let spec = ApplicationSpec {
             name: "heat-diffusion-rust".to_string(),
             version: "1.0.0".to_string(),
-            namespace: "heat-diffusion-rust".to_string(),
             seed_nodes: vec!["localhost:8091".to_string(), "localhost:8093".to_string()],
             supervisor: Some(SupervisorSpec {
                 strategy: SupervisionStrategy::SupervisionStrategyOneForOne as i32,

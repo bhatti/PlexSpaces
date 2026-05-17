@@ -258,7 +258,6 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
     let app_spec = ApplicationSpec {
         name: "test-wasm-app".to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Test WASM application with supervisor tree".to_string(),
         r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive.into(),

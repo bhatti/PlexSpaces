@@ -1470,16 +1470,22 @@ See [SDK Documentation](../docs/sdk.md#node-connectivity-health-aware-connection
 
 Internal dashboard available at `/dashboard` showing:
 - **Home Page**: Aggregated metrics across all nodes (clusters, nodes, tenants, apps, actors by type)
-- **Node Page**: Detailed metrics and data for individual nodes
-- **Real-time Updates**: HTMX polling for live data
-- **System Metrics**: CPU, memory, disk, network metrics
+- **Node Page**: Detailed metrics and data tables for individual nodes
+- **Real-time Updates**: Auto-polling every 5 seconds
+- **System Metrics**: CPU, memory, uptime, peer nodes, message counts
 - **Dependency Health**: Monitor external dependencies (PostgreSQL, Redis, Kafka, etc.)
-- **Actor Metrics**: Active actors by type, message counts, error rates
-- **Multi-node Support**: Aggregate metrics from multiple nodes in a cluster
+- **Actor Metrics**: Active actors by type, message counts, error rates, behavior kind
+- **Object Registry**: Searchable table of all registered objects (actors, services, VMs, workflows) with health status
+- **Key/Value Store**: Browse KV entries with prefix filter and value preview
+- **Tuple Space**: Summary of all tuple spaces with counts and sample tuples
+- **Blobs**: Browse stored blobs with metadata, download via presigned URL
+- **Service Links**: Configured outbound HTTP/gRPC service dependencies
+- **Metrics Table**: All Prometheus metrics with label filtering
+- **Multi-node Support**: Any table can target a remote node via `node_id` query param
 
 **Access**: `GET /dashboard` or `GET /api/v1/dashboard/summary`
 
-**Future Enhancement**: Pre-built Grafana dashboards for Prometheus metrics (see [Actor System Improvements Plan](actor-system-improvements-plan.md) for details).
+**Tenant Isolation**: Tables show only tenant-scoped data when `x-tenant-id` is set; admin role sees all tenants.
 
 ### OpenTelemetry Integration
 

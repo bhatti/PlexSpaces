@@ -2,6 +2,8 @@
 # Convention: sweep:coord-1 = coordinator; sweep:worker-0, worker-1, ... = pool workers.
 # Elastic pool (merlin-workers) + tuple space (host.TS()); fallback: process group.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -9,6 +11,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "sweep"
+tenant_id = "default"
 actor_type = "migrating_merlin_wasm"
 role = "worker"
 restart = "permanent"

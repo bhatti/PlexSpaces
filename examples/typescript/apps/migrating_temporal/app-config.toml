@@ -13,6 +13,8 @@
 # Facets:
 # - durability: State persistence (order state survives crashes/deactivation)
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -22,6 +24,7 @@ max_restart_window_seconds = 60
 # virtual_actor: enables order-fulfillment:order-1, order-fulfillment:order-2, etc. (get_or_activate)
 [[supervisor.children]]
 name = "order-fulfillment"
+tenant_id = "default"
 actor_type = "migrating_temporal_wasm"
 role = "worker"
 restart = "permanent"

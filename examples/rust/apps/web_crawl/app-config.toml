@@ -4,7 +4,6 @@ tenant_id = "default"
 
 name = "web-crawl-rust"
 version = "1.0.0"
-namespace = "web-crawl-rust"
 seed_nodes = ["localhost:8091"]
 
 [supervisor]

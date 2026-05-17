@@ -8,8 +8,3 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260316172706-e463d84ca32d
 	google.golang.org/protobuf v1.36.11
 )
-
-// Generated proto files (make proto-go) use go_package = "github.com/bhatti/PlexSpaces/gen/go/..."
-// but live locally under ./plexspaces/proto/. This replace maps the declared import path to
-// the local directory so they resolve without a separate Go module or registry.
-replace github.com/bhatti/PlexSpaces/gen/go => ./plexspaces/proto

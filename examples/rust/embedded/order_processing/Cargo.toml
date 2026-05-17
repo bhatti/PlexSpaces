@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 # PlexSpaces SDK (includes core, actor, macros)
-plexspaces-sdk = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }

@@ -195,12 +195,8 @@ impl SpecApplication {
             );
 
             let actor_type = identity.actor_type.clone();
-            // Namespace: use spec.namespace if set; fall back to app name (matches ApplicationManager.register convention).
-            let effective_namespace = if self.spec.namespace.is_empty() {
-                self.spec.name.clone()
-            } else {
-                self.spec.namespace.clone()
-            };
+            // Namespace is always the application name.
+            let effective_namespace = self.spec.name.clone();
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
             // Tenant/namespace: use effective_namespace derived above.
@@ -633,16 +629,10 @@ impl Application for SpecApplication {
                         "ActorFactory not found in ServiceLocator".to_string()
                     ))?;
                 
-                // Create RequestContext for shutdown using application's namespace.
-                // Fall back to app name if namespace was not set in ApplicationSpec.
-                let shutdown_namespace = if self.spec.namespace.is_empty() {
-                    self.spec.name.clone()
-                } else {
-                    self.spec.namespace.clone()
-                };
+                // Namespace is always the application name.
                 let ctx = RequestContext::new_without_auth(
                     String::new(), // tenant_id - empty for internal operations
-                    shutdown_namespace,
+                    self.spec.name.clone(),
                 );
                 
                 for actor_id in actor_ids.iter().rev() {
@@ -868,7 +858,6 @@ mod tests {
     fn create_test_spec_with_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
-            namespace: "test-namespace".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeActive as i32,
@@ -919,7 +908,6 @@ mod tests {
     fn create_test_spec_no_supervisor() -> ApplicationSpec {
         ApplicationSpec {
             name: "test-app".to_string(),
-            namespace: "test-namespace".to_string(),
             version: "0.1.0".to_string(),
             description: "Test application".to_string(),
             r#type: ApplicationType::ApplicationTypeLibrary as i32,

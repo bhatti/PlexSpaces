@@ -40,6 +40,7 @@ pub mod actor_state_checker;
 pub mod actor_state_handle;
 pub mod blob_service;
 pub mod channel_service;
+pub mod service_link_access;
 pub mod elastic_pool;
 pub mod health;
 pub mod journal_storage;
@@ -60,6 +61,7 @@ pub use actor_ref::ActorRef;
 pub use actor_state_checker::ActorStateChecker;
 pub use actor_state_handle::ActorStateHandle;
 pub use blob_service::BlobServiceTrait;
+pub use service_link_access::ServiceLinkAccess;
 pub use channel_service::{ChannelService, ProcessGroupService};
 pub use elastic_pool::{ElasticPoolService, PoolServiceError};
 pub use health::{

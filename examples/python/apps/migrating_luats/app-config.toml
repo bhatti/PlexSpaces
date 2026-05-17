@@ -1,6 +1,8 @@
 # LuaTS → PlexSpaces: Event-driven data pipeline (CDC-style)
 # TupleSpace (event buffer) + Linda-style take/read by pattern; timer-style window flush via handler.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "pipeline"
+tenant_id = "default"
 actor_type = "migrating_luats_wasm"
 role = "worker"
 restart = "permanent"

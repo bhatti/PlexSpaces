@@ -53,7 +53,7 @@
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, Message, NodeBuilder, RequestContext,
-    spawn, json, Value,, RequestContextExt};
+    spawn, json, Value, RequestContextExt};
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -164,7 +164,7 @@ impl WebhookHandlerActor {
 const TENANT_ID: &str = "acme-corp";
 const NAMESPACE: &str = "webhooks";
 const GRPC_PORT: u16 = 8001;
-const HTTP_PORT: u16 = 8002;
+const HTTP_PORT: u16 = 8001; // single-port server: gRPC and HTTP share one port
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -42,6 +42,9 @@ class ServiceName(betterproto.Enum):
     WORKFLOW_SERVICE = 19
     SYSTEM_SERVICE = 20
     NODE_SERVICE = 21
+    KEY_VALUE_SERVICE = 22
+    SERVICE_LINK_SERVICE = 23
+    METRICS_SERVICE = 24
 
 
 class ServiceCallErrorCode(betterproto.Enum):

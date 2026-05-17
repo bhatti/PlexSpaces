@@ -94,77 +94,54 @@ option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/applicati
 // shutdown_strategy = "graceful"
 // ```
 message ApplicationSpec {
-  // Application name (unique identifier within node)
+  // Application name (unique identifier within node).
+  // Serves as the namespace for all actors spawned by this application.
   // Examples: "byzantine-generals", "genomics-coordinator"
   string name = 1;
 
   // Tenant ID for multi-tenancy isolation.
-  // Extracted from JWT token during deployment.
-  // All actors spawned by this application will be scoped to this tenant.
-  // This is the source of truth for tenant isolation - ActorFactory enforces it.
+  // Extracted from JWT token during deployment; fallback from app-config.toml.
   string tenant_id = 2;
-
-  // Namespace for actor isolation within a tenant.
-  // All actors spawned by this application will be registered in this namespace.
-  // If empty, defaults to application_id during deployment.
-  // Examples: "bank-test", "genomics-prod", "dev-sandbox"
-  string namespace = 3;
 
   // Application version (semantic versioning)
   // Examples: "0.1.0", "1.2.3"
-  string version = 4;
+  string version = 3;
 
   // Human-readable description
-  string description = 5;
+  string description = 4;
 
   // Application type (library or active)
-  ApplicationType type = 6;
+  ApplicationType type = 5;
 
   // Dependencies (other applications that must start first)
-  // e.g., ["plexspaces-core", "plexspaces-tuplespace"]
-  repeated string dependencies = 7;
+  repeated string dependencies = 6;
 
   // Application-level environment variables
-  map<string, string> env = 8;
+  map<string, string> env = 7;
 
   // Supervision tree (only for active applications)
-  optional plexspaces.supervision.v1.SupervisorSpec supervisor = 9;
+  optional plexspaces.supervision.v1.SupervisorSpec supervisor = 8;
 
-  // ==================== DEPLOYMENT CONFIGURATION ====================
-  // (Merged from ApplicationConfig)
+  // Whether application is enabled (false = skip loading). Default: true
+  bool enabled = 9;
 
-  // Whether application is enabled (false = skip loading)
-  // Default: true
-  bool enabled = 10;
+  // Whether to start application automatically on node boot. Default: true
+  bool auto_start = 10;
 
-  // Whether to start application automatically on node boot
-  // Default: true
-  // Future: false allows manual start via ApplicationService API
-  bool auto_start = 11;
+  // Shutdown timeout (force kill if exceeded). Default: 60 seconds
+  google.protobuf.Duration shutdown_timeout = 11;
 
-  // Shutdown timeout (force kill if exceeded)
-  // Default: 60 seconds
-  google.protobuf.Duration shutdown_timeout = 12;
-
-  // Shutdown strategy (graceful or immediate)
-  // Default: GRACEFUL
-  ShutdownStrategy shutdown_strategy = 13;
+  // Shutdown strategy (graceful or immediate). Default: GRACEFUL
+  ShutdownStrategy shutdown_strategy = 12;
 
   // Application metadata (tags, labels, annotations)
-  // Examples:
-  // - environment: "production"
-  // - team: "genomics"
-  // - criticality: "high"
-  plexspaces.common.v1.Metadata metadata = 14;
+  plexspaces.common.v1.Metadata metadata = 13;
 
   // Seed nodes (gRPC addresses) to connect to when this application is deployed.
-  // The node will connect to these addresses if not already connected, so
-  // leader-worker and scatter/gather can use workers on other nodes.
-  // Example: ["localhost:8091", "localhost:8093"]
-  repeated string seed_nodes = 15;
+  repeated string seed_nodes = 14;
 
-  // External service links this application expects at deploy time (validated against node catalog).
-  repeated ApplicationServiceLinkRequirement required_service_links = 16 [
+  // External service links this application expects at deploy time.
+  repeated ApplicationServiceLinkRequirement required_service_links = 15 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).repeated = {max_items: 128},
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Links that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys."}
@@ -574,26 +551,23 @@ message ApplicationInfo {
   // Application ID
   string application_id = 1;
 
-  // Application name
+  // Application name (also serves as the namespace for actors in this application)
   string name = 2;
 
   // Tenant ID for visibility and isolation.
   string tenant_id = 3;
 
-  // Namespace for application-scoped actors and filters.
-  string namespace = 4;
-
   // Application version
-  string version = 5;
+  string version = 4;
 
   // Current status
-  ApplicationStatus status = 6;
+  ApplicationStatus status = 5;
 
   // When the application was deployed
-  google.protobuf.Timestamp deployed_at = 7;
+  google.protobuf.Timestamp deployed_at = 6;
 
   // Application metrics (optional)
-  optional ApplicationMetrics metrics = 8;
+  optional ApplicationMetrics metrics = 7;
 }
 
 // Application metrics

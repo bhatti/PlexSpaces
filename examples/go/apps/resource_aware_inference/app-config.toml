@@ -1,7 +1,7 @@
 name = "go-resource-aware-inference"
 version = "1.0.0"
-namespace = "go-resource-aware-inference"
-seed_nodes = ["localhost:8091", "localhost:8093"]
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
 
 [supervisor]
 strategy = "one_for_one"

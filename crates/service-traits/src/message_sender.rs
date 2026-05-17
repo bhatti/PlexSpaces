@@ -91,6 +91,11 @@ pub trait MessageSender: Send + Sync + Any {
     /// Updates the local lifecycle/state handle carried by this sender when supported.
     async fn set_local_state_handle(&self, _handle: Option<Arc<dyn ActorStateHandle>>) {}
 
+    /// Returns the creation timestamp recorded when this actor was spawned.
+    fn created_at(&self) -> Option<prost_types::Timestamp> {
+        None
+    }
+
     /// Returns a reference to `self` as `dyn Any`.
     fn as_any(&self) -> &dyn Any;
 }

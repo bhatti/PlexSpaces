@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  publish-python-sdk:
+    name: Publish Python SDK to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build and publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          cd sdks/python
+          python -m build
+          twine upload dist/*
+
+  publish-npm-sdk:
+    name: Publish TypeScript SDK to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd sdks/typescript
+          npm install --no-audit --no-fund
+          npm run build
+          npm publish --access public
+
+  publish-docker:
+    name: Publish Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: bash scripts/publish-docker.sh ${{ steps.version.outputs.VERSION }}
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [publish-python-sdk, publish-npm-sdk, publish-docker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version without v prefix
+        id: ver
+        run: echo "PLAIN=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## SDK Installation
+
+            **Rust** (via git tag — no crates.io required):
+            ```toml
+            plexspaces-sdk = { git = "https://github.com/plexobject/plexspaces", tag = "${{ github.ref_name }}" }
+            ```
+
+            **Go** (via Go module proxy):
+            ```go
+            require github.com/plexobject/plexspaces/sdks/go ${{ github.ref_name }}
+            ```
+
+            **Python**:
+            ```bash
+            pip install plexspaces==${{ steps.ver.outputs.PLAIN }}
+            ```
+
+            **TypeScript/JavaScript**:
+            ```bash
+            npm install @plexspaces/sdk@${{ steps.ver.outputs.PLAIN }}
+            ```
+
+            **Docker** (server):
+            ```bash
+            docker pull plexobject/plexspaces:${{ github.ref_name }}
+            ```

@@ -12,6 +12,8 @@
 # - virtual_actor: Automatic activation/deactivation (lazy activation)
 # Note: Durability facet removed for simplicity - virtual actors handle state via GetState/SetState
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -20,6 +22,7 @@ max_restart_window_seconds = 60
 # Game Room Actor (Virtual Actor: one per room, auto-activated)
 [[supervisor.children]]
 name = "game-room"
+tenant_id = "default"
 actor_type = "migrating_rivet_wasm"
 role = "worker"
 restart = "permanent"
@@ -34,3 +37,4 @@ max_players = 10
 min_players = 2
 game_mode = "5v5"
 idle_timeout_ms = 300000
+tenant_id = "default"

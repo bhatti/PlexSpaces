@@ -167,6 +167,63 @@ impl GrpcConnectionManager {
             .await
     }
 
+    pub async fn get_key_value_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::ServiceNameKeyValueService, node_id, node_address)
+            .await
+    }
+
+    pub async fn get_blob_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::ServiceNameBlobService, node_id, node_address)
+            .await
+    }
+
+    pub async fn get_service_link_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(
+            ServiceType::ServiceNameServiceLinkService,
+            node_id,
+            node_address,
+        )
+        .await
+    }
+
+    pub async fn get_metrics_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(
+            ServiceType::ServiceNameMetricsService,
+            node_id,
+            node_address,
+        )
+        .await
+    }
+
+    pub async fn get_object_registry_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(
+            ServiceType::ServiceNameObjectRegistry,
+            node_id,
+            node_address,
+        )
+        .await
+    }
+
     pub async fn shutdown(&self) {
         self.pools.write().await.clear();
     }
@@ -220,5 +277,41 @@ mod tests {
             .get(&(ServiceType::ServiceNameActorService, "node-b".to_string()))
             .expect("pool should exist");
         assert_eq!(pool.channels.len(), 2, "pool must not exceed pool_size");
+    }
+
+    #[tokio::test]
+    async fn new_service_type_helpers_use_distinct_pools() {
+        // Each service type gets its own pool entry per node — verified by counting
+        // distinct (ServiceType, node_id) keys after calling each typed helper.
+        let manager = GrpcConnectionManager::new(Some(1));
+        let addr = "http://localhost:9999";
+        let node = "node-c";
+        let _ = manager.get_key_value_service_connection(node, addr).await;
+        let _ = manager.get_blob_service_connection(node, addr).await;
+        let _ = manager.get_service_link_service_connection(node, addr).await;
+        let _ = manager.get_metrics_service_connection(node, addr).await;
+        let _ = manager.get_object_registry_service_connection(node, addr).await;
+        let pools = manager.pools.read().await;
+        // Each typed helper must have created exactly one pool entry
+        assert!(
+            pools.contains_key(&(ServiceType::ServiceNameKeyValueService, node.to_string())),
+            "KeyValue pool missing"
+        );
+        assert!(
+            pools.contains_key(&(ServiceType::ServiceNameBlobService, node.to_string())),
+            "Blob pool missing"
+        );
+        assert!(
+            pools.contains_key(&(ServiceType::ServiceNameServiceLinkService, node.to_string())),
+            "ServiceLink pool missing"
+        );
+        assert!(
+            pools.contains_key(&(ServiceType::ServiceNameMetricsService, node.to_string())),
+            "Metrics pool missing"
+        );
+        assert!(
+            pools.contains_key(&(ServiceType::ServiceNameObjectRegistry, node.to_string())),
+            "ObjectRegistry pool missing"
+        );
     }
 }

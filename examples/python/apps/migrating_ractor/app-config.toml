@@ -3,6 +3,8 @@
 # Deploys a CalculatorActor from one WASM module.
 # Single-actor example: framework passes child_spec.id as "actor_id" in init config.
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -11,6 +13,7 @@ max_restart_window_seconds = 60
 # Calculator actor (Ractor-style typed message handler)
 [[supervisor.children]]
 name = "calculator"
+tenant_id = "default"
 actor_type = "migrating_ractor_wasm"
 role = "worker"
 restart = "permanent"

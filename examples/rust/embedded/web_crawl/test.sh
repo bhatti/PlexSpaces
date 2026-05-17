@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+export CARGO_TARGET_DIR="${REPO_ROOT}/target"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -20,8 +20,8 @@ echo "================================================================"
 echo ""
 echo "Step 0: Build"
 cd "$SCRIPT_DIR"
-cargo build --release 2>&1 | grep -E '^(error|warning: unused|Compiling|Finished)' || true
-BINARY="$CARGO_TARGET_DIR/release/web_crawl"
+cargo build 2>&1
+BINARY="$CARGO_TARGET_DIR/debug/web_crawl"
 if [ ! -f "$BINARY" ]; then
   echo -e "${RED}Build failed — binary not found: $BINARY${NC}"
   exit 1
@@ -42,27 +42,31 @@ echo "$output"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Validate output contains expected fields
-if ! echo "$output" | grep -q '"pages_crawled"'; then
-  echo -e "${RED}Test failed: expected pages_crawled in output${NC}"
+if ! echo "$output" | grep -q 'Pages crawled'; then
+  echo -e "${RED}Test failed: expected 'Pages crawled' in output${NC}"
   exit 1
 fi
 
-echo "$output" | python3 - <<'PY'
-import sys, json, re
-text = sys.stdin.read()
-m = re.search(r'\{.*\}', text, re.DOTALL)
-if not m:
-    raise SystemExit("No JSON found in output")
-d = json.loads(m.group(0))
-pages = d.get("pages_crawled", 0)
-links = d.get("total_links", 0)
-words = d.get("top_words") or []
+OUTPUT="$output" python3 - <<'PY'
+import os, re, sys
+text = os.environ["OUTPUT"]
+pages_m = re.search(r'Pages crawled\s*:\s*(\d+)', text)
+links_m = re.search(r'Total links\s*:\s*(\d+)', text)
+pages = int(pages_m.group(1)) if pages_m else 0
+links = int(links_m.group(1)) if links_m else 0
 print(f"  Pages crawled : {pages}")
 print(f"  Total links   : {links}")
-print("  Top words     :")
-for entry in words:
-    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-        print(f"    {entry[0]:<20} {entry[1]}")
+# Extract top words lines (indented with spaces after "Top words:")
+in_words = False
+for line in text.splitlines():
+    if 'Top words' in line:
+        in_words = True
+        continue
+    if in_words:
+        if re.match(r'\s{4}\S', line):
+            print(f"  {line.strip()}")
+        else:
+            in_words = False
 if pages < 1:
     raise SystemExit("Expected at least 1 page crawled")
 PY

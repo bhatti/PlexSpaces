@@ -271,8 +271,7 @@ async fn deploy_app_to_node(node_addr: &str, vm_id: &str, wasm_path: &PathBuf) -
     // Create minimal application config
     let app_config = ApplicationSpec {
         name: app_name.clone(),
-        tenant_id: "default".to_string(), // Default tenant for Firecracker deployments
-        namespace: format!("{}-{}", vm_id, app_name), // Use app_id pattern as namespace
+        tenant_id: "default".to_string(),
         version: "1.0.0".to_string(),
         description: format!("Application deployed to VM {}", vm_id),
         r#type: ApplicationType::ApplicationTypeActive.into(),

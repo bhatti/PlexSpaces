@@ -4,10 +4,10 @@
 // PlexSpaces Go SDK - Multi-Actor Router
 //
 // Dispatch rule (matches Python and TypeScript SDKs):
-//   1. config.actor_type — exact lookup (primary; always set by the framework).
-//   2. config.role       — exact lookup (same-actor_type multi-instance only,
-//                          e.g. "ephemeral"/"channel" both map to the same struct).
-//   3. Error — no silent fallback; a missing registration is always a bug.
+//   1. config.role       — exact match (wins for same-module multi-role variants).
+//   2. config.actor_type — exact match (the WASM module type name).
+//   3. config.role       — prefix match (e.g. "sensor" matches "sensor-dc-zone-a").
+//   4. Error — no silent fallback; a missing registration is always a bug.
 //
 // Example (normal case — distinct actor types):
 //
@@ -27,6 +27,7 @@ package plexspaces
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // ActorFactory is a function that creates a new Actor instance.
@@ -86,7 +87,15 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	// 1. actor_type — exact match (primary dispatch key, always set by framework)
+	// 1. role — exact match (checked first so same-module multi-role variants win)
+	if config.Role != "" {
+		if factory, ok := r.factories[config.Role]; ok {
+			r.active = factory()
+			return r.active.Init(configJSON)
+		}
+	}
+
+	// 2. actor_type — exact match (the WASM module type name)
 	if config.ActorType != "" {
 		if factory, ok := r.factories[config.ActorType]; ok {
 			r.active = factory()
@@ -94,11 +103,13 @@ func (r *ActorRouter) Init(configJSON string) string {
 		}
 	}
 
-	// 2. role — exact match (same-actor_type multi-instance only)
+	// 3. role — prefix match (e.g. "sensor" matches "sensor-dc-zone-a")
 	if config.Role != "" {
-		if factory, ok := r.factories[config.Role]; ok {
-			r.active = factory()
-			return r.active.Init(configJSON)
+		for key, factory := range r.factories {
+			if strings.HasPrefix(config.Role, key) {
+				r.active = factory()
+				return r.active.Init(configJSON)
+			}
 		}
 	}
 

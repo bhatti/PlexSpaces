@@ -23,7 +23,7 @@
 use plexspaces_sdk::{
     workflow_actor, plexspaces_handlers,
     ActorContext, BehaviorError, RequestContext, Message, new_message,
-    NodeBuilder, spawn_workflow_actor, WorkflowRef, TimerFacet,, RequestContextExt};
+    NodeBuilder, spawn_workflow_actor, WorkflowRef, TimerFacet, RequestContextExt};
 // Note: run_handler, signal_handler, query_handler are used via #[plexspaces_handlers(workflow)]
 use plexspaces_node::CoordinationComputeTracker;
 use serde::{Deserialize, Serialize};

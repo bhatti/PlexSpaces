@@ -19,7 +19,7 @@ echo "Building $ACTOR_NAME (Python workflow + TupleSpace CDC - LuaTS-style)..."
 
 if ! python3 -c "import plexspaces" 2>/dev/null; then
     echo "Installing PlexSpaces SDK..."
-    pip install "plexspaces~=0.1" --quiet
+    pip install -e "../../../../sdks/python" --quiet --no-build-isolation
 fi
 
 plexspaces-py build "${ACTOR_NAME}.py" -o "${ACTOR_NAME}.wasm" --wit-dir "$PROJECT_ROOT/wit/plexspaces-actor"

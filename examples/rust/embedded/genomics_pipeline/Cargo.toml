@@ -17,7 +17,7 @@ description = "DNA sequencing pipeline demonstrating durable workflows with Plex
 [dependencies]
 # PlexSpaces crates
 plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-proto = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3" }
+plexspaces-proto = { path = "../../../../crates/proto" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
 # plexspaces-supervisor merged into plexspaces-actor
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
@@ -25,7 +25,7 @@ plexspaces-journaling = { path = "../../../../crates/journaling" }
 plexspaces-facet = { path = "../../../../crates/facet" }
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-application = { path = "../../../../crates/application" }
-plexspaces-sdk = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", features = ["native"] }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 
 # Async runtime
 tokio = { version = "1.44", features = ["full"] }

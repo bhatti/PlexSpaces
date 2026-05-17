@@ -2253,8 +2253,6 @@ impl Supervisor {
                                 create_facets_from_proto(&spec.proto.facets, &facet_registry).await;
 
                             // Attach facets to the actor before starting
-                            // Phase 2: Supervisor Facet Metrics - Record metrics for facet attachment
-                            let facet_attach_start = std::time::Instant::now();
                             let mut attached_count = 0;
 
                             for facet in facets {
@@ -2274,11 +2272,6 @@ impl Supervisor {
                                 }
                             }
 
-                            let facet_attach_duration = facet_attach_start.elapsed();
-                            metrics::histogram!("plexspaces_supervisor_facet_attach_duration_seconds",
-                                "supervisor_id" => self.id.clone(),
-                                "child_id" => spec.actor_id.to_string()
-                            ).record(facet_attach_duration.as_secs_f64());
                             metrics::counter!("plexspaces_supervisor_facets_attached_total",
                                 "supervisor_id" => self.id.clone(),
                                 "child_id" => spec.actor_id.to_string()
@@ -2290,7 +2283,6 @@ impl Supervisor {
                                 child_id = %spec.actor_id,
                                 facet_count = spec.proto.facets.len(),
                                 attached_count = attached_count,
-                                duration_ms = facet_attach_duration.as_millis(),
                                 "Attached facets from ChildSpec before starting actor"
                             );
                         } else {

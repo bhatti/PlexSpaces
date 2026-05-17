@@ -135,8 +135,7 @@ pub async fn deploy(
         // For now, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
-            tenant_id: String::new(),      // Set by server from JWT
-            namespace: app_id.to_string(), // Use app_id as namespace
+            tenant_id: String::new(),
             version: version.to_string(),
             description: format!("Application {}", name),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -158,8 +157,7 @@ pub async fn deploy(
         // For WASM apps, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
-            tenant_id: String::new(),      // Set by server from JWT
-            namespace: app_id.to_string(), // Use app_id as namespace
+            tenant_id: String::new(),
             version: version.to_string(),
             description: format!("WASM application {}", name),
             r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -539,7 +537,6 @@ mod list_json_tests {
                 application_id: "app-1".into(),
                 name: "my-app".into(),
                 tenant_id: "tenant-a".into(),
-                namespace: "my-app".into(),
                 version: "1.0.0".into(),
                 status: 0,
                 deployed_at: None,
@@ -562,7 +559,6 @@ mod list_json_tests {
                 application_id: "a".into(),
                 name: "n".into(),
                 tenant_id: "tenant-a".into(),
-                namespace: "n".into(),
                 version: "1".into(),
                 status: 0,
                 deployed_at: Some(prost_types::Timestamp {

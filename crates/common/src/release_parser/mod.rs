@@ -617,7 +617,6 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                 ApplicationSpec {
                     name: app.name.clone(),
                     tenant_id: String::new(), // Set during deployment from JWT
-                    namespace: app.name,      // Use app name as namespace by default
                     version: app.version,
                     description: String::new(), // Not in TOML
                     r#type: 0,                  // APPLICATION_TYPE_UNSPECIFIED
@@ -1228,7 +1227,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-b".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1249,7 +1247,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-a".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1380,7 +1377,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-c".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1401,7 +1397,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-a".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1422,7 +1417,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-b".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1502,7 +1496,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-d".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1523,7 +1516,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-a".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1544,7 +1536,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-b".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1565,7 +1556,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-c".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1647,7 +1637,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-a".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1668,7 +1657,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-b".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1747,7 +1735,6 @@ mod tests {
             applications: vec![ApplicationSpec {
                 name: "app-a".to_string(),
                 tenant_id: String::new(),
-                namespace: String::new(),
                 version: "1.0.0".to_string(),
                 description: String::new(),
                 r#type: 0,
@@ -1831,7 +1818,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-a".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,
@@ -1852,7 +1838,6 @@ mod tests {
                 ApplicationSpec {
                     name: "app-b".to_string(),
                     tenant_id: String::new(),
-                    namespace: String::new(),
                     version: "1.0.0".to_string(),
                     description: String::new(),
                     r#type: 0,

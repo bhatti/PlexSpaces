@@ -12,7 +12,7 @@
     "verify": "npm run build && npm test"
   },
   "dependencies": {
-    "@plexspaces/sdk": "^0.1"
+    "@plexspaces/sdk": "file:../../../../sdks/typescript"
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.14.0",

@@ -32,7 +32,7 @@ use plexspaces_sdk::{
     call_message,
     // Storage for durable actors
     JournalStorage,
-    json, Value,, RequestContextExt};
+    json, Value, RequestContextExt};
 use plexspaces_journaling::SqliteJournalStorage;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -399,13 +399,13 @@ impl DurablePlayerSession {
 // Helper function to send messages
 // =============================================================================
 
-async fn send_call(actor_ref: &ActorRef, op: &str, payload: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+async fn send_call(ctx: &RequestContext, actor_ref: &ActorRef, op: &str, payload: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let mut merged = payload.as_object().cloned().unwrap_or_default();
     merged.insert("op".to_string(), json!(op));
-    
+
     let msg = call_message(serde_json::Value::Object(merged));
-    
-    let response = actor_ref.ask(msg, Duration::from_secs(5)).await?;
+
+    let response = actor_ref.ask(ctx, msg, Duration::from_secs(5)).await?;
     let result: Value = serde_json::from_slice(&response.payload)?;
     Ok(result)
 }
@@ -484,24 +484,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Step A.3: Player actions (login, add items, update stats)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    send_call(&virtual_player, "login", json!({
+    send_call(&ctx, &virtual_player,"login", json!({
         "username": "VirtualPlayer",
         "position": { "x": 100.0, "y": 50.0, "z": 100.0, "world": "main" }
     })).await?;
     
-    send_call(&virtual_player, "add_item", json!({
+    send_call(&ctx, &virtual_player,"add_item", json!({
         "item_id": "sword-001",
         "name": "Iron Sword",
         "quantity": 1,
         "rarity": "common"
     })).await?;
     
-    send_call(&virtual_player, "update_stats", json!({
+    send_call(&ctx, &virtual_player,"update_stats", json!({
         "add_xp": 500,
         "add_gold": 100
     })).await?;
     
-    let state_before = send_call(&virtual_player, "get_state", json!({})).await?;
+    let state_before = send_call(&ctx, &virtual_player, "get_state", json!({})).await?;
     println!();
     println!("  State BEFORE termination:");
     println!("    Gold: {}", state_before["player"]["stats"]["gold"]);
@@ -531,11 +531,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         VirtualPlayerSession::new("player-virtual"),
     ).await?;
     
-    send_call(&virtual_player2, "login", json!({
+    send_call(&ctx, &virtual_player2,"login", json!({
         "username": "VirtualPlayer"
     })).await?;
     
-    let state_after = send_call(&virtual_player2, "get_state", json!({})).await?;
+    let state_after = send_call(&ctx, &virtual_player2, "get_state", json!({})).await?;
     let gold_after = state_after["player"]["stats"]["gold"].as_u64().unwrap_or(0);
     let inventory_after = state_after["player"]["inventory"].as_array().map(|a| a.len()).unwrap_or(0);
     
@@ -595,24 +595,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Step B.4: Player actions (login, add items, update stats)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    send_call(&durable_player, "login", json!({
+    send_call(&ctx, &durable_player,"login", json!({
         "username": "DurablePlayer",
         "position": { "x": 200.0, "y": 100.0, "z": 200.0, "world": "main" }
     })).await?;
     
-    send_call(&durable_player, "add_item", json!({
+    send_call(&ctx, &durable_player,"add_item", json!({
         "item_id": "shield-001",
         "name": "Steel Shield",
         "quantity": 1,
         "rarity": "rare"
     })).await?;
     
-    send_call(&durable_player, "update_stats", json!({
+    send_call(&ctx, &durable_player,"update_stats", json!({
         "add_xp": 1000,
         "add_gold": 500
     })).await?;
     
-    let durable_state = send_call(&durable_player, "get_state", json!({})).await?;
+    let durable_state = send_call(&ctx, &durable_player, "get_state", json!({})).await?;
     println!();
     println!("  State (JOURNALED):");
     println!("    Gold: {}", durable_state["player"]["stats"]["gold"]);

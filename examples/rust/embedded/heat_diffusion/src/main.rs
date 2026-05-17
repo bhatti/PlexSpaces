@@ -382,7 +382,7 @@ async fn main() -> Result<()> {
         metrics_tracker.start_compute();
         let compute_phase_start = Instant::now();
         for region_ref in &region_refs {
-            let result: serde_json::Value = region_ref.call("compute", &request).await
+            let result: serde_json::Value = region_ref.call(&ctx, "compute", &request).await
                 .map_err(|e| anyhow::anyhow!("Region compute failed: {}", e))?;
             
             let diff = result["max_diff"].as_f64().unwrap_or(0.0);

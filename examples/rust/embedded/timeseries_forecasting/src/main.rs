@@ -19,7 +19,7 @@
 
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
-    ActorContext, BehaviorError, Message, RequestContext, spawn,, RequestContextExt};
+    ActorContext, BehaviorError, Message, RequestContext, spawn, RequestContextExt};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

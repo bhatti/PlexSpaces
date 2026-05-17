@@ -17,8 +17,8 @@ description = "Parameter server leader/worker WASM app with shard-group scatter-
 crate-type = ["cdylib"]
 
 [dependencies]
-plexspaces-proto = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
-plexspaces-sdk   = { git = "https://github.com/bhatti/PlexSpaces", tag = "v0.1.3", default-features = false }
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
 prost            = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

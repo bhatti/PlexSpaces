@@ -315,7 +315,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::SubmitTask {
         task: training_task.clone(),
     })?);
-    let result = scheduler.ask(msg, Duration::from_secs(5)).await?;
+    let result = scheduler.ask(&ctx, msg, Duration::from_secs(5)).await?;
     let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::TaskScheduled { allocation } = reply {
         info!(
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::SubmitTask {
         task: inference_task.clone(),
     })?);
-    let result = scheduler.ask(msg, Duration::from_secs(5)).await?;
+    let result = scheduler.ask(&ctx, msg, Duration::from_secs(5)).await?;
     let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::TaskScheduled { allocation } = reply {
         info!(
@@ -366,7 +366,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::GetBestResources {
             task: training_task,
         })?);
-    let result = scheduler.ask(msg, Duration::from_secs(5)).await?;
+    let result = scheduler.ask(&ctx, msg, Duration::from_secs(5)).await?;
     let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::ResourceRecommendation { allocation } = reply {
         info!(
@@ -424,7 +424,7 @@ mod tests {
         let msg = plexspaces_sdk::call_message(
             serde_json::to_value(&SkyPilotMessage::SubmitTask { task }).unwrap(),
         );
-        let result = scheduler.ask(msg, Duration::from_secs(5)).await.unwrap();
+        let result = scheduler.ask(&ctx, msg, Duration::from_secs(5)).await.unwrap();
 
         let reply: SkyPilotMessage = serde_json::from_slice(&result.payload).unwrap();
         if let SkyPilotMessage::TaskScheduled { allocation } = reply {

@@ -17,10 +17,6 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-cleanup() {
-    curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 echo "================================================================"
 echo "  Order Fulfillment Workflow (Go WASM)"
@@ -38,19 +34,30 @@ if [ "$HTTP_CHECK" = "000" ]; then
 fi
 
 echo "Step 1: Deploy"
-curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/undeploy.sh" "$HTTP_PORT"
 sleep 1
-DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-    -F "application_id=$APP_ID" \
-    -F "name=temporal-order-fulfillment-go" \
-    -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1)
-HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
-RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
-if [ "$HTTP_CODE" != "200" ] || ! echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo -e "${RED}Deploy failed (HTTP $HTTP_CODE): $RESPONSE${NC}"
-    exit 1
+_deployed=0
+for _attempt in 1 2 3; do
+  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+      -F "application_id=$APP_ID" \
+      -F "name=temporal-order-fulfillment-go" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$CONFIG_FILE" 2>&1)
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
+  RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
+  fi
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
+done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $RESPONSE${NC}"
+  exit 1
 fi
 echo -e "${GREEN}Deployed $APP_ID${NC}"
 sleep 2

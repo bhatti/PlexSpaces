@@ -30,7 +30,7 @@ run_python() {
 }
 
 if ! run_python -c "import plexspaces" 2>/dev/null; then
-  run_python -m pip install "plexspaces~=0.1" --quiet
+  run_python -m pip install -e "../../../../sdks/python" --quiet --no-build-isolation
 fi
 
 if ! run_python -c "import componentize_py" 2>/dev/null; then

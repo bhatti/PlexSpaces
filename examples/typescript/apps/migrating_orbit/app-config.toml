@@ -11,6 +11,8 @@
 # - virtual_actor: Automatic activation/deactivation (lazy activation)
 # - durability: State persistence (read states survive crashes)
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -19,6 +21,7 @@ max_restart_window_seconds = 60
 # ReadStateTracker actor (Virtual Actor: one per user, auto-activated)
 [[supervisor.children]]
 name = "read-state-tracker"
+tenant_id = "default"
 actor_type = "migrating_orbit_wasm"
 role = "worker"
 restart = "permanent"

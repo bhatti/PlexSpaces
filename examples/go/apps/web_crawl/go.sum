@@ -1,7 +1,7 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1 h1:PMmTMyvHScV9Mn8wc6ASge9uRcHy0jtqPd+fM35LmsQ=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1/go.mod h1:tvtbpgaVXZX4g6Pn+AnzFycuRK3MOz5HJfEGeEllXYM=
-github.com/bhatti/plexspaces/sdks/go v0.1.2 h1:nR756BamkpIEhDNo+xxeYJZc41XChe1OdBrFTO3DIsY=
-github.com/bhatti/plexspaces/sdks/go v0.1.2/go.mod h1:Mcr5KWqakKkKqIqdFFKGWD0GFmYzPxo0ba9m5N/OLSM=
+github.com/bhatti/PlexSpaces/sdks/go v0.1.3 h1:CQAGbW7syVrBMIN8d0q1+hlHUspVJJIyr2+eR7oWQ2I=
+github.com/bhatti/PlexSpaces/sdks/go v0.1.3/go.mod h1:v4jtWr7yPyA3zpBcJdyVZfQu1Ur11AOQ9dfscp7cE88=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 h1:HWRh5R2+9EifMyIHV7ZV+MIZqgz+PMpZ14Jynv3O2Zs=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0/go.mod h1:JfhWUomR1baixubs02l85lZYYOm7LV6om4ceouMv45c=
 google.golang.org/genproto/googleapis/api v0.0.0-20260316172706-e463d84ca32d h1:RdWlPmVySdTF0IBIZzvZJvSD0ZocPBNUsnE+uGBxj+4=

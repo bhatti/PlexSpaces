@@ -1,0 +1,20 @@
+name = "leader-election"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "actor1"
+actor_type = "leader_election"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+name = "actor2"
+actor_type = "leader_election"
+restart = "permanent"
+shutdown_timeout_seconds = 5

@@ -258,102 +258,68 @@ class ApplicationSpec(betterproto.Message):
 
     name: str = betterproto.string_field(1)
     """
-    Application name (unique identifier within node)
+    Application name (unique identifier within node).
+     Serves as the namespace for all actors spawned by this application.
      Examples: "byzantine-generals", "genomics-coordinator"
     """
 
     tenant_id: str = betterproto.string_field(2)
     """
     Tenant ID for multi-tenancy isolation.
-     Extracted from JWT token during deployment.
-     All actors spawned by this application will be scoped to this tenant.
-     This is the source of truth for tenant isolation - ActorFactory enforces it.
+     Extracted from JWT token during deployment; fallback from app-config.toml.
     """
 
-    namespace: str = betterproto.string_field(3)
-    """
-    Namespace for actor isolation within a tenant.
-     All actors spawned by this application will be registered in this namespace.
-     If empty, defaults to application_id during deployment.
-     Examples: "bank-test", "genomics-prod", "dev-sandbox"
-    """
-
-    version: str = betterproto.string_field(4)
+    version: str = betterproto.string_field(3)
     """
     Application version (semantic versioning)
      Examples: "0.1.0", "1.2.3"
     """
 
-    description: str = betterproto.string_field(5)
+    description: str = betterproto.string_field(4)
     """Human-readable description"""
 
-    type: "ApplicationType" = betterproto.enum_field(6)
+    type: "ApplicationType" = betterproto.enum_field(5)
     """Application type (library or active)"""
 
-    dependencies: List[str] = betterproto.string_field(7)
-    """
-    Dependencies (other applications that must start first)
-     e.g., ["plexspaces-core", "plexspaces-tuplespace"]
-    """
+    dependencies: List[str] = betterproto.string_field(6)
+    """Dependencies (other applications that must start first)"""
 
     env: Dict[str, str] = betterproto.map_field(
-        8, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+        7, betterproto.TYPE_STRING, betterproto.TYPE_STRING
     )
     """Application-level environment variables"""
 
     supervisor: Optional["__supervision_v1__.SupervisorSpec"] = (
-        betterproto.message_field(9, optional=True)
+        betterproto.message_field(8, optional=True)
     )
     """Supervision tree (only for active applications)"""
 
-    enabled: bool = betterproto.bool_field(10)
+    enabled: bool = betterproto.bool_field(9)
+    """Whether application is enabled (false = skip loading). Default: true"""
+
+    auto_start: bool = betterproto.bool_field(10)
     """
-    Whether application is enabled (false = skip loading)
-     Default: true
+    Whether to start application automatically on node boot. Default: true
     """
 
-    auto_start: bool = betterproto.bool_field(11)
-    """
-    Whether to start application automatically on node boot
-     Default: true
-     Future: false allows manual start via ApplicationService API
-    """
+    shutdown_timeout: timedelta = betterproto.message_field(11)
+    """Shutdown timeout (force kill if exceeded). Default: 60 seconds"""
 
-    shutdown_timeout: timedelta = betterproto.message_field(12)
-    """
-    Shutdown timeout (force kill if exceeded)
-     Default: 60 seconds
-    """
+    shutdown_strategy: "ShutdownStrategy" = betterproto.enum_field(12)
+    """Shutdown strategy (graceful or immediate). Default: GRACEFUL"""
 
-    shutdown_strategy: "ShutdownStrategy" = betterproto.enum_field(13)
-    """
-    Shutdown strategy (graceful or immediate)
-     Default: GRACEFUL
-    """
+    metadata: "__common_v1__.Metadata" = betterproto.message_field(13)
+    """Application metadata (tags, labels, annotations)"""
 
-    metadata: "__common_v1__.Metadata" = betterproto.message_field(14)
-    """
-    Application metadata (tags, labels, annotations)
-     Examples:
-     - environment: "production"
-     - team: "genomics"
-     - criticality: "high"
-    """
-
-    seed_nodes: List[str] = betterproto.string_field(15)
+    seed_nodes: List[str] = betterproto.string_field(14)
     """
     Seed nodes (gRPC addresses) to connect to when this application is deployed.
-     The node will connect to these addresses if not already connected, so
-     leader-worker and scatter/gather can use workers on other nodes.
-     Example: ["localhost:8091", "localhost:8093"]
     """
 
     required_service_links: List["ApplicationServiceLinkRequirement"] = (
-        betterproto.message_field(16)
+        betterproto.message_field(15)
     )
-    """
-    External service links this application expects at deploy time (validated against node catalog).
-    """
+    """External service links this application expects at deploy time."""
 
 
 @dataclass(eq=False, repr=False)
@@ -556,25 +522,24 @@ class ApplicationInfo(betterproto.Message):
     """Application ID"""
 
     name: str = betterproto.string_field(2)
-    """Application name"""
+    """
+    Application name (also serves as the namespace for actors in this application)
+    """
 
     tenant_id: str = betterproto.string_field(3)
     """Tenant ID for visibility and isolation."""
 
-    namespace: str = betterproto.string_field(4)
-    """Namespace for application-scoped actors and filters."""
-
-    version: str = betterproto.string_field(5)
+    version: str = betterproto.string_field(4)
     """Application version"""
 
-    status: "ApplicationStatus" = betterproto.enum_field(6)
+    status: "ApplicationStatus" = betterproto.enum_field(5)
     """Current status"""
 
-    deployed_at: datetime = betterproto.message_field(7)
+    deployed_at: datetime = betterproto.message_field(6)
     """When the application was deployed"""
 
     metrics: Optional["ApplicationMetrics"] = betterproto.message_field(
-        8, optional=True
+        7, optional=True
     )
     """Application metrics (optional)"""
 

@@ -150,6 +150,13 @@ pub trait ServiceLocator: plexspaces_service_traits::ServiceLocatorBase {
     /// Get BlobService
     async fn get_blob_service(&self) -> Option<std::sync::Arc<dyn BlobServiceTrait>>;
 
+    /// Get ServiceLinkAccess for live service link catalog
+    async fn get_service_link_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ServiceLinkAccess>> {
+        None
+    }
+
     /// Get NodeRegistry
     async fn get_node_registry(&self) -> Option<std::sync::Arc<dyn NodeRegistryTrait>>;
 
@@ -235,6 +242,10 @@ pub trait InitializableServiceLocator: ServiceLocator {
         service: std::sync::Arc<dyn crate::ElasticPoolService>,
     );
     async fn register_blob_service(&self, service: std::sync::Arc<dyn BlobServiceTrait>);
+    async fn register_service_link_service(
+        &self,
+        service: std::sync::Arc<dyn plexspaces_service_traits::ServiceLinkAccess>,
+    );
     async fn register_node_registry(&self, registry: std::sync::Arc<dyn NodeRegistryTrait>);
     async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn KeyValueStore>);
     async fn register_outbound_http_client(

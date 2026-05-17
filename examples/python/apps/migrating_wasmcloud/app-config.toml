@@ -7,6 +7,8 @@
 #
 # Capabilities are accessed via host functions (host.kv_*, host.send_after, host.ask)
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -15,6 +17,7 @@ max_restart_window_seconds = 60
 # Session Store actor
 [[supervisor.children]]
 name = "session-store"
+tenant_id = "default"
 actor_type = "migrating_wasmcloud_wasm"
 role = "worker"
 restart = "permanent"
@@ -24,3 +27,4 @@ shutdown_timeout_seconds = 10
 default_ttl_sec = "3600"        # Default session TTL: 1 hour
 cleanup_interval_sec = "60"     # Cleanup timer interval: 60 seconds
 auth_service_actor = ""         # Optional: Actor ID for user validation (empty = disabled)
+tenant_id = "default"

@@ -105,6 +105,9 @@ pub enum ServiceName {
     ServiceNameWorkflowService = 19,
     ServiceNameSystemService = 20,
     ServiceNameNodeService = 21,
+    ServiceNameKeyValueService = 22,
+    ServiceNameServiceLinkService = 23,
+    ServiceNameMetricsService = 24,
 }
 impl ServiceName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -135,6 +138,9 @@ impl ServiceName {
             ServiceName::ServiceNameWorkflowService => "SERVICE_NAME_WORKFLOW_SERVICE",
             ServiceName::ServiceNameSystemService => "SERVICE_NAME_SYSTEM_SERVICE",
             ServiceName::ServiceNameNodeService => "SERVICE_NAME_NODE_SERVICE",
+            ServiceName::ServiceNameKeyValueService => "SERVICE_NAME_KEY_VALUE_SERVICE",
+            ServiceName::ServiceNameServiceLinkService => "SERVICE_NAME_SERVICE_LINK_SERVICE",
+            ServiceName::ServiceNameMetricsService => "SERVICE_NAME_METRICS_SERVICE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -162,6 +168,9 @@ impl ServiceName {
             "SERVICE_NAME_WORKFLOW_SERVICE" => Some(Self::ServiceNameWorkflowService),
             "SERVICE_NAME_SYSTEM_SERVICE" => Some(Self::ServiceNameSystemService),
             "SERVICE_NAME_NODE_SERVICE" => Some(Self::ServiceNameNodeService),
+            "SERVICE_NAME_KEY_VALUE_SERVICE" => Some(Self::ServiceNameKeyValueService),
+            "SERVICE_NAME_SERVICE_LINK_SERVICE" => Some(Self::ServiceNameServiceLinkService),
+            "SERVICE_NAME_METRICS_SERVICE" => Some(Self::ServiceNameMetricsService),
             _ => None,
         }
     }

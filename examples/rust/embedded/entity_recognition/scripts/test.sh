@@ -3,30 +3,21 @@
 
 set -e
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
+# Shared target: use workspace target directory
+WORKSPACE_TARGET="${SCRIPT_DIR}/../../../../target"
+export CARGO_TARGET_DIR="${WORKSPACE_TARGET}"
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║          Entity Recognition Example - Tests                     ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Check if Redis is running (for multi-node tests)
-if command -v redis-cli &> /dev/null; then
-    if redis-cli ping &> /dev/null 2>&1; then
-        echo "✓ Redis is running"
-        USE_REDIS=true
-    else
-        echo "⚠ Redis not running, using memory backend"
-        USE_REDIS=false
-    fi
-else
-    echo "⚠ redis-cli not found, using memory backend"
-    USE_REDIS=false
-fi
-
 # Build
 echo ""
-echo "Building example..."
+echo "Building example (shared target, debug)..."
 cargo build
 
 # Run unit tests
@@ -41,9 +32,9 @@ echo "Note: This example demonstrates resource-aware scheduling"
 echo "      In production, use multi-node setup with Redis backend"
 echo ""
 
-# Run the example to validate it works
+# Run the pre-built binary to validate it works
 echo "Running example to validate..."
-timeout 30 cargo run -- \
+timeout 30 "${WORKSPACE_TARGET}/debug/entity-recognition-app" \
     doc1.txt doc2.txt doc3.txt 2>&1 | tee /tmp/entity_recognition_test.txt || {
     if [ $? -eq 124 ]; then
         echo ""
@@ -70,10 +61,3 @@ fi
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║                    ✅ Test Complete                            ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
-echo ""
-echo "To run the example with metrics display:"
-echo "  ./scripts/run_with_metrics.sh"
-echo ""
-echo "Or use the simple run script:"
-echo "  ./scripts/run.sh"
-echo ""

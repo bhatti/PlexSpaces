@@ -1,0 +1,14 @@
+name = "receipt-storage-test"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "receipt_store"
+actor_type = "receipt_storage"
+restart = "permanent"
+shutdown_timeout_seconds = 5

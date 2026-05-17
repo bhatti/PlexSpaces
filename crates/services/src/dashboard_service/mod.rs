@@ -46,11 +46,15 @@ use plexspaces_proto::application::v1::ApplicationInfo;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, ActorInfo, GetActorsRequest, GetActorsResponse,
-    GetApplicationsRequest, GetApplicationsResponse, GetDashboardMetricsRequest,
+    GetApplicationsRequest, GetApplicationsResponse, GetBlobPresignedUrlRequest,
+    GetBlobPresignedUrlResponse, GetBlobsRequest, GetBlobsResponse, GetDashboardMetricsRequest,
     GetDashboardMetricsResponse, GetDependencyHealthRequest, GetDependencyHealthResponse,
+    GetKeyValuesRequest, GetKeyValuesResponse, GetMetricsTableRequest, GetMetricsTableResponse,
     GetNodeDashboardRequest, GetNodeDashboardResponse, GetNodesRequest, GetNodesResponse,
-    GetSummaryRequest, GetSummaryResponse, GetWorkflowsRequest, GetWorkflowsResponse,
-    NodeSummaryMetrics,
+    GetObjectsRequest, GetObjectsResponse, GetServiceLinksRequest, GetServiceLinksResponse,
+    GetSummaryRequest, GetSummaryResponse, GetTupleSpacesRequest, GetTupleSpacesResponse,
+    GetWorkflowsRequest, GetWorkflowsResponse, KeyValueDashboardEntry, NodeSummaryMetrics,
+    TupleSpaceSummary,
 };
 use plexspaces_proto::metrics::v1::{ActorMetrics, SystemMetrics};
 use plexspaces_proto::node::v1::{
@@ -468,7 +472,7 @@ impl DashboardServiceImpl {
             return false;
         }
 
-        if !req.namespace.is_empty() && app.namespace != req.namespace {
+        if !req.namespace.is_empty() && app.name != req.namespace {
             return false;
         }
 
@@ -612,7 +616,6 @@ impl DashboardServiceImpl {
                     application_id: registration.object_id.clone(),
                     name: registration.object_name.clone(),
                     tenant_id: registration.tenant_id.clone(),
-                    namespace: registration.namespace.clone(),
                     version: registration.version.clone(),
                     status: ApplicationStatus::ApplicationStatusRunning as i32,
                     deployed_at: registration.created_at.clone(),
@@ -646,7 +649,8 @@ impl DashboardServiceImpl {
                     }
                 } else if let Ok(mut remote_info) = self
                     .query_remote_application_status(
-                        &registration.grpc_address,
+                        &registration.node_id,
+                        &Self::normalize_grpc_endpoint(&registration.grpc_address),
                         &registration.object_name,
                         tenant_id,
                         Some(registration.namespace.as_str()),
@@ -657,7 +661,6 @@ impl DashboardServiceImpl {
                     remote_info.application_id = registration.object_id.clone();
                     remote_info.name = registration.object_name.clone();
                     remote_info.tenant_id = registration.tenant_id.clone();
-                    remote_info.namespace = registration.namespace.clone();
                     info = remote_info;
                 }
 
@@ -682,22 +685,28 @@ impl DashboardServiceImpl {
         Ok((applications, page_response))
     }
 
+    /// Query a remote node's ApplicationService for a single application status.
+    ///
+    /// Uses [`GrpcConnectionManager`] for pooled, lazy connections — no new TCP
+    /// sockets are opened if a channel to this node already exists.
     async fn query_remote_application_status(
         &self,
+        node_id: &str,
         grpc_address: &str,
         application_name: &str,
         tenant_id: Option<&str>,
         namespace: Option<&str>,
         is_admin: bool,
     ) -> Result<ApplicationInfo, Status> {
-        use tonic::transport::Channel;
-
-        let endpoint = Channel::from_shared(Self::normalize_grpc_endpoint(grpc_address))
-            .map_err(|e| Status::internal(format!("Invalid endpoint: {e}")))?;
-        let channel = endpoint
-            .connect()
+        let conn_mgr = self
+            .service_locator
+            .get_grpc_connection_manager()
             .await
-            .map_err(|e| Status::internal(format!("Connection failed: {e}")))?;
+            .ok_or_else(|| Status::internal("GrpcConnectionManager not available"))?;
+        let channel = conn_mgr
+            .get_application_service_connection(node_id, grpc_address)
+            .await
+            .map_err(|e| Status::unavailable(format!("Cannot reach node {node_id}: {e}")))?;
         let mut client = ApplicationServiceClient::new(channel);
         let response = client
             .get_application_status(Self::tonic_request_with_dashboard_metadata(
@@ -856,9 +865,8 @@ impl DashboardServiceImpl {
         exposition: &str,
         local_registry: Option<&Arc<ActorRegistry>>,
     ) {
-        let namespace = if !info.namespace.is_empty() {
-            info.namespace.as_str()
-        } else if !info.name.is_empty() {
+        // Namespace is always derived from the application name.
+        let namespace = if !info.name.is_empty() {
             info.name.as_str()
         } else {
             info.application_id.as_str()
@@ -921,12 +929,15 @@ impl DashboardServiceImpl {
         info.metrics = Some(metrics);
     }
 
-    /// Remote `GetMetrics` via gRPC (same shape as local [`crate::node_service::snapshot_local_node_metrics`]).
+    /// Remote `GetMetrics` via gRPC using a pooled [`GrpcConnectionManager`] channel.
+    ///
+    /// Same shape as local `node_service::snapshot_local_node_metrics`.
     async fn query_remote_node_metrics(
         &self,
         ctx: &RequestContext,
         node_id: &str,
     ) -> Result<ProtoNodeMetrics, Status> {
+        use plexspaces_actor::grpc_connection_manager::ServiceType;
         use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
         use plexspaces_proto::node::v1::GetMetricsRequest;
         use plexspaces_proto::object_registry::v1::ObjectType;
@@ -943,13 +954,16 @@ impl DashboardServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
 
-        let endpoint =
-            tonic::transport::Channel::from_shared(format!("http://{}", registration.grpc_address))
-                .map_err(|e| Status::internal(format!("Invalid endpoint: {}", e)))?;
-        let channel = endpoint
-            .connect()
+        let addr = Self::normalize_grpc_endpoint(&registration.grpc_address);
+        let conn_mgr = self
+            .service_locator
+            .get_grpc_connection_manager()
             .await
-            .map_err(|e| Status::internal(format!("Connection failed: {}", e)))?;
+            .ok_or_else(|| Status::internal("GrpcConnectionManager not available"))?;
+        let channel = conn_mgr
+            .get_connection(ServiceType::ServiceNameNodeService, node_id, &addr)
+            .await
+            .map_err(|e| Status::unavailable(format!("Cannot reach node {node_id}: {e}")))?;
 
         let mut client = NodeServiceClient::new(channel);
         client
@@ -1340,7 +1354,19 @@ impl DashboardService for DashboardServiceImpl {
         let registered_entries = actor_registry.registered_actor_entries().await;
         let actor_configs = actor_registry.actor_configs().read().await.clone();
 
-        let mut actors = Vec::new();
+
+        // Phase 1: filter cheaply, collect candidates without expensive per-actor lookups.
+        struct ActorCandidate {
+            actor_id: ActorId,
+            actor_type: String,
+            actor_group: String,
+            namespace: String,
+            tenant_id: String,
+            node_id: String,
+            status: String,
+            behavior_kind: String,
+        }
+        let mut candidates: Vec<ActorCandidate> = Vec::new();
         for (entry_tenant_id, entry_namespace, actor_id) in registered_entries {
             // Apply filters (proto fields are String, not Option<String>, so check if empty)
             if !req.actor_id_pattern.is_empty() {
@@ -1445,39 +1471,67 @@ impl DashboardService for DashboardServiceImpl {
                 continue;
             }
 
-            // Get journal metrics for durable actors
-            let (journal_size_bytes, last_checkpoint) =
-                self.get_durable_actor_metrics(&actor_id).await;
-
-            // Get actor metrics
-            let metrics = self.get_actor_metrics(&actor_id).await;
-
-            // Get created_at from metadata if available
-            // Note: Creation time is not currently stored in ActorMetadata
-            // This can be enhanced when ActorMetadata includes creation timestamp
-            let created_at = None;
-
-            // Create ActorInfo
-            let actor_info = ActorInfo {
-                actor_id: actor_id.to_string(),
+            candidates.push(ActorCandidate {
+                node_id: actor_id.node_id().to_string(),
+                actor_id,
                 actor_type,
                 actor_group,
-                namespace: entry_namespace.clone(),
-                tenant_id: entry_tenant_id.clone(),
-                node_id: actor_id.node_id().to_string(),
+                namespace: entry_namespace,
+                tenant_id: entry_tenant_id,
                 status: current_status,
+                behavior_kind,
+            });
+        }
+
+        // Phase 2: paginate on the cheap candidate list, then enrich only the page subset.
+        let total_size = candidates.len();
+        let (offset, limit) = Self::page_window(req.page.as_ref());
+        let start = offset.min(total_size);
+        let end = (start + limit).min(total_size);
+        let has_next = end < total_size;
+        let page_response = PageResponse {
+            total_size: total_size as i32,
+            offset: start as i32,
+            limit: limit as i32,
+            has_next,
+        };
+        let page_candidates = &candidates[start..end];
+
+        let mut actors = Vec::with_capacity(page_candidates.len());
+        for c in page_candidates {
+            let actor_id_str = c.actor_id.to_string();
+
+            // Get journal metrics for durable actors
+            let (journal_size_bytes, last_checkpoint) =
+                self.get_durable_actor_metrics(&c.actor_id).await;
+
+            // Get actor metrics
+            let metrics = self.get_actor_metrics(&c.actor_id).await;
+
+            // Get created_at from the ActorRef (set at spawn time).
+            // ActorRef::local() records SystemTime::now() at construction — always present for live actors.
+            let created_at = actor_registry
+                .lookup_actor(&c.actor_id)
+                .await
+                .and_then(|sender| sender.created_at());
+
+            actors.push(ActorInfo {
+                actor_id: actor_id_str,
+                actor_type: c.actor_type.clone(),
+                actor_group: c.actor_group.clone(),
+                namespace: c.namespace.clone(),
+                tenant_id: c.tenant_id.clone(),
+                node_id: c.node_id.clone(),
+                status: c.status.clone(),
                 metrics,
                 journal_size_bytes,
                 last_checkpoint,
                 created_at,
-                behavior_kind,
-            };
-
-            actors.push(actor_info);
+                behavior_kind: c.behavior_kind.clone(),
+            });
         }
 
-        // Apply pagination
-        let (paginated_actors, page_response) = Self::apply_pagination(actors, req.page);
+        let paginated_actors = actors;
 
         Ok(Response::new(GetActorsResponse {
             actors: paginated_actors,
@@ -1634,6 +1688,55 @@ impl DashboardService for DashboardServiceImpl {
             page: Some(page_response),
         }))
     }
+
+    async fn get_objects(
+        &self,
+        request: Request<GetObjectsRequest>,
+    ) -> Result<Response<GetObjectsResponse>, Status> {
+        self.get_objects_impl(request).await
+    }
+
+    async fn get_key_values(
+        &self,
+        request: Request<GetKeyValuesRequest>,
+    ) -> Result<Response<GetKeyValuesResponse>, Status> {
+        self.get_key_values_impl(request).await
+    }
+
+    async fn get_tuple_spaces(
+        &self,
+        request: Request<GetTupleSpacesRequest>,
+    ) -> Result<Response<GetTupleSpacesResponse>, Status> {
+        self.get_tuple_spaces_impl(request).await
+    }
+
+    async fn get_blobs(
+        &self,
+        request: Request<GetBlobsRequest>,
+    ) -> Result<Response<GetBlobsResponse>, Status> {
+        self.get_blobs_impl(request).await
+    }
+
+    async fn get_blob_presigned_url(
+        &self,
+        request: Request<GetBlobPresignedUrlRequest>,
+    ) -> Result<Response<GetBlobPresignedUrlResponse>, Status> {
+        self.get_blob_presigned_url_impl(request).await
+    }
+
+    async fn get_service_links(
+        &self,
+        request: Request<GetServiceLinksRequest>,
+    ) -> Result<Response<GetServiceLinksResponse>, Status> {
+        self.get_service_links_impl(request).await
+    }
+
+    async fn get_metrics_table(
+        &self,
+        request: Request<GetMetricsTableRequest>,
+    ) -> Result<Response<GetMetricsTableResponse>, Status> {
+        self.get_metrics_table_impl(request).await
+    }
 }
 
 impl DashboardServiceImpl {
@@ -1780,6 +1883,672 @@ impl DashboardServiceImpl {
             "builtin" => Self::is_builtin_behavior_kind(behavior_kind),
             "custom" => !behavior_kind.is_empty() && !Self::is_builtin_behavior_kind(behavior_kind),
             other => behavior_kind == other,
+        }
+    }
+
+    async fn local_node_id_string(&self) -> String {
+        self.service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.id)
+            .unwrap_or_default()
+    }
+
+    fn is_local_node(&self, node_id: &str, local_id: &str) -> bool {
+        Self::is_local_node_id(local_id, node_id)
+    }
+
+    pub(crate) fn is_local_node_id(local_id: &str, node_id: &str) -> bool {
+        node_id.is_empty() || node_id == local_id
+    }
+
+    /// Build a [`RequestContext`] for dashboard RPCs from gRPC request metadata.
+    ///
+    /// `x-tenant-id` is populated by the auth interceptor from the JWT `tenant_id` claim
+    /// when auth is enabled. `x-namespace` is set from request query parameters by the
+    /// HTTP→gRPC gateway. Both default to an empty string (effectively system-scoped)
+    /// when auth is disabled or the header is absent.
+    async fn dashboard_ctx_from_metadata(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+    ) -> RequestContext {
+        let auth_disabled = self.service_locator.is_auth_disabled().await;
+        let tenant_id = metadata
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let namespace = metadata
+            .get("x-namespace")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let is_admin = auth_disabled
+            || metadata
+                .get("x-admin")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+        RequestContext::new_without_auth(tenant_id, namespace).with_admin(is_admin)
+    }
+
+    /// Resolve the gRPC address for a remote node and return a pooled channel.
+    ///
+    /// Node registry lookups are infra-level (not tenant-scoped) so an empty tenant context
+    /// is appropriate here — the registry stores node topology, not tenant data.
+    async fn get_remote_channel(
+        &self,
+        node_id: &str,
+        service_type: plexspaces_actor::grpc_connection_manager::ServiceType,
+    ) -> Result<tonic::transport::Channel, Status> {
+        use plexspaces_actor::grpc_connection_manager::ServiceType;
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
+            .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
+        // Node lookup is topology/infra — not tenant-scoped.
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        let reg = node_registry
+            .lookup_node(&ctx, node_id)
+            .await
+            .map_err(|e| Status::internal(format!("Node lookup failed: {e}")))?
+            .ok_or_else(|| Status::not_found(format!("Node not found: {node_id}")))?;
+        let addr = Self::normalize_grpc_endpoint(&reg.node_address);
+        let conn_mgr = self
+            .service_locator
+            .get_grpc_connection_manager()
+            .await
+            .ok_or_else(|| Status::internal("GrpcConnectionManager not available"))?;
+        conn_mgr
+            .get_connection(service_type, node_id, &addr)
+            .await
+            .map_err(|e| Status::unavailable(format!("Cannot reach node {node_id}: {e}")))
+    }
+}
+
+impl DashboardServiceImpl {
+    async fn get_objects_impl(
+        &self,
+        request: Request<GetObjectsRequest>,
+    ) -> Result<Response<GetObjectsResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+        let ctx = self.dashboard_ctx_from_metadata(&metadata).await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let registry = self
+                .service_locator
+                .get_object_registry()
+                .await
+                .ok_or_else(|| Status::unavailable("Object registry not available"))?;
+
+            use plexspaces_proto::object_registry::v1::ObjectType;
+            let object_type = if req.object_type.is_empty() {
+                None
+            } else {
+                match req.object_type.to_uppercase().as_str() {
+                    "ACTOR" => Some(ObjectType::ObjectTypeActor),
+                    "TUPLESPACE" => Some(ObjectType::ObjectTypeTuplespace),
+                    "SERVICE" => Some(ObjectType::ObjectTypeService),
+                    "VM" => Some(ObjectType::ObjectTypeVm),
+                    "APPLICATION" => Some(ObjectType::ObjectTypeApplication),
+                    "WORKFLOW" => Some(ObjectType::ObjectTypeWorkflow),
+                    "NODE" => Some(ObjectType::ObjectTypeNode),
+                    _ => None,
+                }
+            };
+
+            use plexspaces_proto::object_registry::v1::HealthStatus;
+            let health_status = if req.health_status.is_empty() {
+                None
+            } else {
+                match req.health_status.to_uppercase().as_str() {
+                    "HEALTHY" => Some(HealthStatus::HealthStatusHealthy),
+                    "DEGRADED" => Some(HealthStatus::HealthStatusDegraded),
+                    "DEAD" => Some(HealthStatus::HealthStatusDead),
+                    _ => None,
+                }
+            };
+
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            // Fetch limit+1 to determine has_next without a separate count query
+            let fetch_limit = limit + 1;
+
+            let registrations = registry
+                .discover(
+                    &ctx,
+                    object_type,
+                    None,
+                    None,
+                    None,
+                    health_status,
+                    offset,
+                    fetch_limit,
+                )
+                .await
+                .map_err(|e| Status::internal(format!("Object registry query failed: {e}")))?;
+
+            let id_pat = req.id_pattern.to_lowercase();
+            let has_next = registrations.len() > limit;
+            let objects: Vec<plexspaces_proto::object_registry::v1::ObjectRegistration> =
+                registrations.into_iter()
+                    .filter(|r| id_pat.is_empty() || r.object_id.to_lowercase().contains(&id_pat))
+                    .take(limit)
+                    .map(|r| {
+                    plexspaces_proto::object_registry::v1::ObjectRegistration {
+                        object_id: r.object_id,
+                        object_name: r.object_name,
+                        object_type: r.object_type as i32,
+                        version: r.version,
+                        tenant_id: r.tenant_id,
+                        namespace: r.namespace,
+                        node_id: r.node_id,
+                        grpc_address: r.grpc_address,
+                        object_category: r.object_category,
+                        capabilities: r.capabilities,
+                        metadata: None,
+                        health_status: r.health_status as i32,
+                        last_heartbeat: r.last_heartbeat,
+                        created_at: r.created_at,
+                        ..Default::default()
+                    }
+                }).collect();
+
+            let page_response = plexspaces_proto::common::v1::PageResponse {
+                total_size: -1, // unknown without count query
+                offset: offset as i32,
+                limit: limit as i32,
+                has_next,
+            };
+
+            Ok(Response::new(GetObjectsResponse {
+                objects,
+                page: Some(page_response),
+            }))
+        } else {
+            // Remote node — forward via object registry gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameObjectRegistry,
+                )
+                .await?;
+            let mut client = plexspaces_proto::object_registry::v1::object_registry_client::ObjectRegistryClient::new(channel);
+
+            use plexspaces_proto::object_registry::v1::ObjectType as RemoteObjType;
+            let discover_req = plexspaces_proto::object_registry::v1::DiscoverRequest {
+                object_type: if req.object_type.is_empty() {
+                    0
+                } else {
+                    match req.object_type.to_uppercase().as_str() {
+                        "ACTOR" => RemoteObjType::ObjectTypeActor as i32,
+                        "TUPLESPACE" => RemoteObjType::ObjectTypeTuplespace as i32,
+                        "SERVICE" => RemoteObjType::ObjectTypeService as i32,
+                        "VM" => RemoteObjType::ObjectTypeVm as i32,
+                        "APPLICATION" => RemoteObjType::ObjectTypeApplication as i32,
+                        "WORKFLOW" => RemoteObjType::ObjectTypeWorkflow as i32,
+                        "NODE" => RemoteObjType::ObjectTypeNode as i32,
+                        _ => 0,
+                    }
+                },
+                tenant_id: ctx.tenant_id().to_string(),
+                namespace: ctx.namespace().to_string(),
+                page_size: req.page.as_ref().map(|p| p.limit).unwrap_or(50),
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(discover_req);
+            *remote_req.metadata_mut() = metadata;
+            let resp = client
+                .discover(remote_req)
+                .await
+                .map_err(|e| Status::internal(format!("Remote object registry failed: {e}")))?;
+            let inner = resp.into_inner();
+            let has_more = inner.has_more;
+            let total = inner.total_count;
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            Ok(Response::new(GetObjectsResponse {
+                objects: inner.registrations,
+                page: Some(plexspaces_proto::common::v1::PageResponse {
+                    total_size: total as i32,
+                    offset: offset as i32,
+                    limit: limit as i32,
+                    has_next: has_more,
+                }),
+            }))
+        }
+    }
+
+    async fn get_key_values_impl(
+        &self,
+        request: Request<GetKeyValuesRequest>,
+    ) -> Result<Response<GetKeyValuesResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+        let ctx = self.dashboard_ctx_from_metadata(&metadata).await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let kv = self
+                .service_locator
+                .get_keyvalue_store()
+                .await
+                .ok_or_else(|| Status::unavailable("Key/value store not available"))?;
+
+            let all_keys = kv
+                .list_keys(&ctx, &req.prefix)
+                .await
+                .map_err(|e| Status::internal(format!("KV list failed: {e}")))?;
+
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            let total_size = all_keys.len();
+            let has_next = (offset + limit) < total_size;
+            let page_keys: Vec<String> = all_keys.into_iter().skip(offset).take(limit).collect();
+
+            let mut entries = Vec::with_capacity(page_keys.len());
+            for key in &page_keys {
+                let value_bytes = kv
+                    .get(&ctx, key)
+                    .await
+                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let size_bytes = value_bytes.len() as u64;
+                let value_preview = String::from_utf8_lossy(&value_bytes[..value_bytes.len().min(100)]).to_string();
+                entries.push(KeyValueDashboardEntry {
+                    key: key.clone(),
+                    value_preview,
+                    size_bytes,
+                });
+            }
+
+            Ok(Response::new(GetKeyValuesResponse {
+                entries,
+                page: Some(plexspaces_proto::common::v1::PageResponse {
+                    total_size: total_size as i32,
+                    offset: offset as i32,
+                    limit: limit as i32,
+                    has_next,
+                }),
+            }))
+        } else {
+            // Remote node — forward via KeyValue gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameKeyValueService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::keyvalue::v1::key_value_service_client::KeyValueServiceClient::new(channel);
+            let list_req = plexspaces_proto::keyvalue::v1::ListRequest {
+                prefix: req.prefix,
+                namespace: req.namespace,
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(list_req);
+            *remote_req.metadata_mut() = metadata;
+            let resp = client
+                .list(remote_req)
+                .await
+                .map_err(|e| Status::internal(format!("Remote KV list failed: {e}")))?;
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            let keys = resp.into_inner().keys;
+            let total_size = keys.len();
+            let has_next = (offset + limit) < total_size;
+            let page_keys: Vec<String> = keys.into_iter().skip(offset).take(limit).collect();
+            let entries = page_keys.into_iter().map(|key| KeyValueDashboardEntry {
+                key,
+                value_preview: String::new(),
+                size_bytes: 0,
+            }).collect();
+            Ok(Response::new(GetKeyValuesResponse {
+                entries,
+                page: Some(plexspaces_proto::common::v1::PageResponse {
+                    total_size: total_size as i32,
+                    offset: offset as i32,
+                    limit: limit as i32,
+                    has_next,
+                }),
+            }))
+        }
+    }
+
+    async fn get_tuple_spaces_impl(
+        &self,
+        request: Request<GetTupleSpacesRequest>,
+    ) -> Result<Response<GetTupleSpacesResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let provider = self
+                .service_locator
+                .get_tuplespace_provider()
+                .await
+                .ok_or_else(|| Status::unavailable("TupleSpace provider not available"))?;
+
+            let namespace = if req.namespace.is_empty() {
+                "default".to_string()
+            } else {
+                req.namespace.clone()
+            };
+
+            use plexspaces_tuplespace::{Pattern, PatternField};
+            let wildcard = Pattern::new(vec![PatternField::Wildcard]);
+            let count = provider.count(&wildcard).await.unwrap_or(0);
+            let raw_tuples = provider.read(&wildcard).await.unwrap_or_default();
+            // Convert to proto Tuple and take up to 20 as sample
+            let sample_tuples: Vec<plexspaces_proto::tuplespace::v1::Tuple> = raw_tuples
+                .into_iter()
+                .take(20)
+                .map(|t| plexspaces_tuplespace::proto_conversion::tuple_to_proto_tuple(&t))
+                .collect();
+
+            let summary = TupleSpaceSummary {
+                namespace,
+                pattern: req.pattern.clone(),
+                tuple_count: count as u64,
+                sample_tuples,
+            };
+
+            Ok(Response::new(GetTupleSpacesResponse {
+                spaces: vec![summary],
+            }))
+        } else {
+            // Remote node — forward via TupleSpace gRPC count call
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameTuplespaceService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::tuplespace::v1::tuple_space_service_client::TupleSpaceServiceClient::new(channel);
+            let count_req = plexspaces_proto::tuplespace::v1::CountRequest {
+                template: None,
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(count_req);
+            *remote_req.metadata_mut() = metadata;
+            let count = client
+                .count(remote_req)
+                .await
+                .map(|r| r.into_inner().count)
+                .unwrap_or(0);
+            Ok(Response::new(GetTupleSpacesResponse {
+                spaces: vec![TupleSpaceSummary {
+                    namespace: req.namespace,
+                    pattern: req.pattern,
+                    tuple_count: count as u64,
+                    sample_tuples: vec![],
+                }],
+            }))
+        }
+    }
+
+    async fn get_blobs_impl(
+        &self,
+        request: Request<GetBlobsRequest>,
+    ) -> Result<Response<GetBlobsResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+        let ctx = self.dashboard_ctx_from_metadata(&metadata).await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let blob_svc = self
+                .service_locator
+                .get_blob_service()
+                .await
+                .ok_or_else(|| Status::unavailable("Blob service not available"))?;
+
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            let kind_filter = if req.kind.is_empty() { None } else { Some(req.kind.as_str()) };
+
+            let (blobs, has_next) = blob_svc
+                .list_metadata(&ctx, &req.prefix, kind_filter, offset, limit)
+                .await
+                .map_err(|e| Status::internal(format!("Blob list failed: {e}")))?;
+
+            let page_response = plexspaces_proto::common::v1::PageResponse {
+                total_size: -1,
+                offset: offset as i32,
+                limit: limit as i32,
+                has_next,
+            };
+
+            Ok(Response::new(GetBlobsResponse {
+                blobs,
+                page: Some(page_response),
+            }))
+        } else {
+            // Remote node — forward via Blob gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameBlobService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::storage::v1::blob_service_client::BlobServiceClient::new(channel);
+            let (offset, limit) = Self::page_window(req.page.as_ref());
+            let list_req = plexspaces_proto::storage::v1::ListBlobsRequest {
+                name_prefix: req.prefix,
+                kind: req.kind,
+                namespace: req.namespace,
+                page: Some(plexspaces_proto::common::v1::PageRequest {
+                    offset: offset as i32,
+                    limit: limit as i32,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(list_req);
+            *remote_req.metadata_mut() = metadata;
+            let resp = client
+                .list_blobs(remote_req)
+                .await
+                .map_err(|e| Status::internal(format!("Remote blob list failed: {e}")))?;
+            let inner = resp.into_inner();
+            let page = inner.page;
+            Ok(Response::new(GetBlobsResponse {
+                blobs: inner.blobs,
+                page,
+            }))
+        }
+    }
+
+    async fn get_blob_presigned_url_impl(
+        &self,
+        request: Request<GetBlobPresignedUrlRequest>,
+    ) -> Result<Response<GetBlobPresignedUrlResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+        let ctx = self.dashboard_ctx_from_metadata(&metadata).await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let blob_svc = self
+                .service_locator
+                .get_blob_service()
+                .await
+                .ok_or_else(|| Status::unavailable("Blob service not available"))?;
+
+            match blob_svc
+                .generate_presigned_url(
+                    &ctx,
+                    &req.blob_id,
+                    "GET",
+                    std::time::Duration::from_secs(3600),
+                )
+                .await
+            {
+                Ok(Some(url)) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    url,
+                    error: String::new(),
+                    expires_at: Some(prost_types::Timestamp {
+                        seconds: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+                        nanos: 0,
+                    }),
+                })),
+                Ok(None) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    url: String::new(),
+                    error: "Presigned URLs not supported by this blob backend".to_string(),
+                    expires_at: None,
+                })),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let user_msg = if msg.contains("Access key") || msg.contains("credentials") || msg.contains("Configuration error") {
+                        "Download unavailable: blob storage not configured for presigned URLs".to_string()
+                    } else {
+                        format!("Download failed: {e}")
+                    };
+                    Ok(Response::new(GetBlobPresignedUrlResponse {
+                        url: String::new(),
+                        error: user_msg,
+                        expires_at: None,
+                    }))
+                }
+            }
+        } else {
+            // Remote node — forward via Blob gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameBlobService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::storage::v1::blob_service_client::BlobServiceClient::new(channel);
+            let presign_req = plexspaces_proto::storage::v1::GeneratePresignedUrlRequest {
+                blob_id: req.blob_id,
+                operation: "GET".to_string(),
+                tenant_id: req.tenant_id,
+                namespace: req.namespace,
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(presign_req);
+            *remote_req.metadata_mut() = metadata;
+            match client.generate_presigned_url(remote_req).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    Ok(Response::new(GetBlobPresignedUrlResponse {
+                        url: inner.url,
+                        expires_at: inner.expires_at,
+                        error: String::new(),
+                    }))
+                }
+                Err(e) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    url: String::new(),
+                    error: format!("Remote presigned URL failed: {e}"),
+                    expires_at: None,
+                })),
+            }
+        }
+    }
+
+    async fn get_service_links_impl(
+        &self,
+        request: Request<GetServiceLinksRequest>,
+    ) -> Result<Response<GetServiceLinksResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+        let ctx = self.dashboard_ctx_from_metadata(&metadata).await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            let sls = self.service_locator.get_service_link_service().await;
+            let service_links = if let Some(sls) = sls {
+                sls.list_links(&ctx)
+                    .await
+                    .map_err(|e| Status::internal(format!("Service link list failed: {e}")))?
+            } else {
+                // Fall back to static RuntimeConfig if live service not registered
+                self.service_locator
+                    .get_runtime_config()
+                    .await
+                    .map(|rc| rc.service_links)
+                    .unwrap_or_default()
+            };
+            Ok(Response::new(GetServiceLinksResponse { service_links }))
+        } else {
+            // Remote node — forward via ServiceLink gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameServiceLinkService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::node::v1::service_link_service_client::ServiceLinkServiceClient::new(channel);
+            let list_req = plexspaces_proto::node::v1::ListServiceLinksRequest {
+                page_size: 1000,
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(list_req);
+            *remote_req.metadata_mut() = metadata;
+            let resp = client
+                .list_service_links(remote_req)
+                .await
+                .map_err(|e| Status::internal(format!("Remote service links failed: {e}")))?;
+            Ok(Response::new(GetServiceLinksResponse {
+                service_links: resp.into_inner().links,
+            }))
+        }
+    }
+
+    async fn get_metrics_table_impl(
+        &self,
+        request: Request<GetMetricsTableRequest>,
+    ) -> Result<Response<GetMetricsTableResponse>, Status> {
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+        let local_id = self.local_node_id_string().await;
+
+        if self.is_local_node(&req.node_id, &local_id) {
+            // Re-use GetDashboardMetrics internally
+            let dash_req = GetDashboardMetricsRequest {
+                namespace: req.namespace,
+                name_pattern: req.name_pattern,
+                label_filter: req.label_filter,
+                include_definitions: true,
+                include_prometheus_text: false,
+            };
+            let mut inner_request = tonic::Request::new(dash_req);
+            *inner_request.metadata_mut() = metadata;
+            let resp = self.get_dashboard_metrics(inner_request).await?;
+            let inner = resp.into_inner();
+            Ok(Response::new(GetMetricsTableResponse {
+                metrics: inner.metrics,
+                definitions: inner.definitions,
+            }))
+        } else {
+            // Remote node — forward via MetricsService gRPC client
+            let channel = self
+                .get_remote_channel(
+                    &req.node_id,
+                    plexspaces_actor::grpc_connection_manager::ServiceType::ServiceNameMetricsService,
+                )
+                .await?;
+            let mut client =
+                plexspaces_proto::metrics::v1::metrics_service_client::MetricsServiceClient::new(channel);
+            let get_req = plexspaces_proto::metrics::v1::GetMetricsRequest {
+                name_pattern: req.name_pattern,
+                label_filter: req.label_filter,
+                ..Default::default()
+            };
+            let mut remote_req = tonic::Request::new(get_req);
+            *remote_req.metadata_mut() = metadata;
+            let resp = client
+                .get_metrics(remote_req)
+                .await
+                .map_err(|e| Status::internal(format!("Remote metrics failed: {e}")))?;
+            let inner = resp.into_inner();
+            Ok(Response::new(GetMetricsTableResponse {
+                metrics: inner.metrics,
+                definitions: vec![],
+            }))
         }
     }
 }
@@ -2018,5 +2787,21 @@ mod tests {
         let diff = now.signed_duration_since(since_dt);
         let hours = diff.num_hours();
         assert!(hours >= 23 && hours <= 25);
+    }
+
+    #[test]
+    fn test_is_local_node_empty_node_id_is_local() {
+        // Empty node_id always routes locally
+        assert!(DashboardServiceImpl::is_local_node_id("local-node", ""));
+    }
+
+    #[test]
+    fn test_is_local_node_matching_is_local() {
+        assert!(DashboardServiceImpl::is_local_node_id("my-node-123", "my-node-123"));
+    }
+
+    #[test]
+    fn test_is_local_node_different_id_is_remote() {
+        assert!(!DashboardServiceImpl::is_local_node_id("node-a", "node-b"));
     }
 }

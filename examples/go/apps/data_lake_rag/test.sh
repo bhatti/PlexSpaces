@@ -54,35 +54,11 @@ ENTRY_HOST="${ENTRY_NODE%%:*}"
 ENTRY_PORT="${ENTRY_NODE##*:}"
 TEMP_CONFIG=""
 
-cleanup() {
-  if [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]]; then
-    rm -f "$TEMP_CONFIG"
-  fi
-  # Undeploy on exit hides whether the leader stalled vs. was torn down by this trap.
-  if [[ -n "${SKIP_TEST_UNDEPLOY:-}" ]]; then
-    echo -e "${YELLOW}SKIP_TEST_UNDEPLOY set: leaving applications deployed (no DELETE on exit).${NC}"
-    return 0
-  fi
-  for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  done
-}
-trap cleanup EXIT
 
 grpc_seed_nodes() {
-  local seed_list=()
+  local joined="" sep=""
   for node in "${NODE_LIST[@]}"; do
-    local host="${node%%:*}"
-    local port="${node##*:}"
-    # gRPC and HTTP share a single port
-    seed_list+=("\"${host}:${port}\"")
-  done
-  local joined=""
-  local sep=""
-  for entry in "${seed_list[@]}"; do
-    joined="${joined}${sep}${entry}"
+    joined="${joined}${sep}\"${node}\""
     sep=", "
   done
   printf '%s' "$joined"
@@ -134,13 +110,14 @@ done
 TEMP_CONFIG="$(mktemp -t data-lake-rag-app-config)"
 render_config "$TEMP_CONFIG"
 
-for node in "${NODE_LIST[@]}"; do
-  host="${node%%:*}"
-  port="${node##*:}"
-  echo "Step 1: Deploy to ${host}:${port}"
-  curl -s -X DELETE "http://${host}:${port}/api/v1/applications/$APP_ID" >/dev/null 2>&1 || true
-  sleep 1
-  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+echo "Step 1: Undeploy existing app from all nodes"
+"$SCRIPT_DIR/undeploy.sh" $NODES
+sleep 2
+
+echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
+_deployed=0
+for _attempt in 1 2 3; do
+  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
@@ -148,12 +125,18 @@ for node in "${NODE_LIST[@]}"; do
     -F "config=@$TEMP_CONFIG" 2>&1)
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
-  if [ "$http_code" != "200" ] || ! echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo -e "${RED}Deploy failed on ${host}:${port}: $response${NC}"
-    exit 1
+  if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    _deployed=1
+    break
   fi
-  echo -e "  ${GREEN}Deployed${NC}"
+  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  sleep 3
 done
+if [ "$_deployed" -eq 0 ]; then
+  echo -e "${RED}Deploy failed: $response${NC}"
+  exit 1
+fi
+echo -e "  ${GREEN}Deployed${NC}"
 # SWIM + async seed ping need time so each node's registry lists peers (not only self).
 # Override with DATA_LAKE_RAG_POST_DEPLOY_SECS if your cluster is slower.
 sleep "${DATA_LAKE_RAG_POST_DEPLOY_SECS:-5}"

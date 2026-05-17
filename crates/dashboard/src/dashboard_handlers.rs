@@ -44,8 +44,10 @@ use plexspaces_proto::application::v1::ApplicationMetrics;
 use plexspaces_proto::common::v1::PageRequest;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
-    GetDashboardMetricsRequest, GetDependencyHealthRequest, GetNodeDashboardRequest,
-    GetNodesRequest, GetSummaryRequest,
+    GetBlobPresignedUrlRequest, GetBlobsRequest, GetDashboardMetricsRequest,
+    GetDependencyHealthRequest, GetKeyValuesRequest, GetMetricsTableRequest,
+    GetNodeDashboardRequest, GetNodesRequest, GetObjectsRequest, GetServiceLinksRequest,
+    GetSummaryRequest, GetTupleSpacesRequest,
 };
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_services::actor_service::ActorServiceImpl;
@@ -69,6 +71,7 @@ pub fn create_dashboard_router() -> Router<HttpGatewayState> {
         .route("/dashboard", get(home_page)) // Alias for home
         .route("/dashboard/node/:node_id", get(node_page))
         .route("/node/:node_id", get(node_page)) // Also support without /dashboard prefix
+        .route("/dashboard/metrics/:node_id", get(metrics_page))
         .route("/dashboard/application/:name", get(application_page))
         .route("/dashboard/tenant/:tenant_id", get(tenant_page))
         .route("/static/dashboard.css", get(serve_css))
@@ -94,6 +97,20 @@ pub fn create_dashboard_router() -> Router<HttpGatewayState> {
         )
         .route("/api/v1/dashboard/dependencies", get(api_dependencies))
         .route("/api/v1/dashboard/system-info", get(api_system_info))
+        .route("/api/v1/dashboard/objects", get(api_objects))
+        .route("/api/v1/dashboard/keyvalue", get(api_keyvalues))
+        .route("/api/v1/dashboard/tuplespace", get(api_tuplespaces))
+        .route("/api/v1/dashboard/blobs", get(api_blobs))
+        .route(
+            "/api/v1/dashboard/blob/:blob_id/presigned-url",
+            post(api_blob_presigned_url),
+        )
+        .route(
+            "/api/v1/dashboard/blob/:blob_id/download",
+            get(api_blob_download),
+        )
+        .route("/api/v1/dashboard/service-links", get(api_service_links))
+        .route("/api/v1/dashboard/metrics-table", get(api_metrics_table))
 }
 
 /// Home page handler
@@ -105,6 +122,12 @@ async fn home_page() -> Html<&'static str> {
 async fn node_page(Path(node_id): Path<String>) -> Result<Html<String>, StatusCode> {
     // Replace all :node_id placeholders in HTML with actual node_id
     let html = include_str!("../static/dashboard/node.html").replace(":node_id", &node_id);
+    Ok(Html(html))
+}
+
+/// Metrics detail page handler.
+async fn metrics_page(Path(node_id): Path<String>) -> Result<Html<String>, StatusCode> {
+    let html = include_str!("../static/dashboard/metrics.html").replace(":node_id", &node_id);
     Ok(Html(html))
 }
 
@@ -303,6 +326,86 @@ mod tests {
         assert_eq!(value["metrics"]["active_actors"], 9);
         assert_eq!(value["metrics"]["failed_deliveries"], 3);
         assert_eq!(value["metrics"]["cpu_usage_percent"], 37.5);
+    }
+
+    #[test]
+    fn blob_metadata_fields_map_to_expected_json_keys() {
+        use plexspaces_proto::storage::v1::BlobMetadata;
+        let blob = BlobMetadata {
+            blob_id: "blob-1".to_string(),
+            name: "test.wasm".to_string(),
+            kind: "ARTIFACT".to_string(),
+            content_length: 1024,
+            content_type: "application/wasm".to_string(),
+            tenant_id: "t1".to_string(),
+            namespace: "ns1".to_string(),
+            ..Default::default()
+        };
+        // Verify the fields we rely on exist (this is a compile-time check)
+        assert_eq!(blob.blob_id, "blob-1");
+        assert_eq!(blob.content_length, 1024);
+        assert_eq!(blob.kind, "ARTIFACT");
+    }
+
+    #[test]
+    fn service_link_config_fields_map_to_expected_json_keys() {
+        use plexspaces_proto::node::v1::ServiceLinkConfig;
+        let link = ServiceLinkConfig {
+            name: "payments-api".to_string(),
+            transport: 1,
+            base_url: "https://api.example.com".to_string(),
+            policy_template: Some("strict".to_string()),
+            api_key_header_name: Some("X-API-Key".to_string()),
+            ..Default::default()
+        };
+        // Verify the fields we rely on exist (compile-time check)
+        assert_eq!(link.name, "payments-api");
+        assert_eq!(link.policy_template, Some("strict".to_string()));
+        assert_eq!(link.api_key_header_name, Some("X-API-Key".to_string()));
+    }
+
+    #[test]
+    fn metric_value_variants_serialize_correctly() {
+        use plexspaces_proto::metrics::v1::{metric::Value as MV, Metric};
+        let counter = Metric {
+            name: "actor_messages_total".to_string(),
+            value: Some(MV::CounterValue(42.0)),
+            ..Default::default()
+        };
+        let gauge = Metric {
+            name: "active_actors".to_string(),
+            value: Some(MV::GaugeValue(7.0)),
+            ..Default::default()
+        };
+        // Verify variant arms we handle
+        match &counter.value {
+            Some(MV::CounterValue(v)) => assert_eq!(*v, 42.0),
+            _ => panic!("expected CounterValue"),
+        }
+        match &gauge.value {
+            Some(MV::GaugeValue(v)) => assert_eq!(*v, 7.0),
+            _ => panic!("expected GaugeValue"),
+        }
+    }
+
+    #[test]
+    fn tuple_field_variants_match_expected_enum_names() {
+        use plexspaces_proto::tuplespace::v1::{tuple_field::Value as TFV, TupleField};
+        let sf = TupleField { value: Some(TFV::String("hello".to_string())) };
+        let iv = TupleField { value: Some(TFV::Integer(42)) };
+        let bv = TupleField { value: Some(TFV::Boolean(true)) };
+        match &sf.value {
+            Some(TFV::String(s)) => assert_eq!(s, "hello"),
+            _ => panic!("expected String"),
+        }
+        match &iv.value {
+            Some(TFV::Integer(i)) => assert_eq!(*i, 42),
+            _ => panic!("expected Integer"),
+        }
+        match &bv.value {
+            Some(TFV::Boolean(b)) => assert!(*b),
+            _ => panic!("expected Boolean"),
+        }
     }
 }
 
@@ -681,7 +784,7 @@ async fn api_applications(
 
         app_json.insert(
             "namespace".to_string(),
-            serde_json::Value::String(app.namespace.clone()),
+            serde_json::Value::String(app.name.clone()),
         );
         app_json.insert(
             "tenant_id".to_string(),
@@ -1094,7 +1197,7 @@ async fn api_application_detail(
         GetActorsRequest {
             node_id: String::new(),
             tenant_id: app.tenant_id.clone(),
-            namespace: app.namespace.clone(),
+            namespace: app.name.clone(),
             actor_id_pattern: String::new(),
             actor_group: String::new(),
             actor_type: String::new(),
@@ -1169,7 +1272,7 @@ async fn api_application_detail(
     );
     app_json.insert(
         "namespace".to_string(),
-        serde_json::Value::String(app.namespace.clone()),
+        serde_json::Value::String(app.name.clone()),
     );
     app_json.insert(
         "tenant_id".to_string(),
@@ -1373,6 +1476,550 @@ async fn api_actor_stop(
         "actor_id": actor_id,
         "stopped": true
     })))
+}
+
+/// API: Get object registry entries
+async fn api_objects(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let offset = params
+        .get("offset")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(50);
+
+    let page_request = Some(PageRequest {
+        offset,
+        limit,
+        filter: String::new(),
+        order_by: String::new(),
+    });
+
+    let request = dashboard_request(
+        GetObjectsRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+            object_type: params.get("object_type").cloned().unwrap_or_default(),
+            health_status: params.get("health_status").cloned().unwrap_or_default(),
+            id_pattern: params.get("id_pattern").cloned().unwrap_or_default(),
+            page: page_request,
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_objects(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let objects: Vec<serde_json::Value> = inner
+        .objects
+        .iter()
+        .map(|obj| {
+            let mut m = serde_json::Map::new();
+            m.insert("object_id".into(), obj.object_id.clone().into());
+            m.insert("object_type".into(), obj.object_type.into());
+            m.insert("object_category".into(), obj.object_category.clone().into());
+            m.insert("health_status".into(), obj.health_status.into());
+            m.insert("tenant_id".into(), obj.tenant_id.clone().into());
+            m.insert("namespace".into(), obj.namespace.clone().into());
+            m.insert(
+                "labels".into(),
+                serde_json::Value::Array(
+                    obj.labels
+                        .iter()
+                        .map(|s| serde_json::Value::String(s.clone()))
+                        .collect(),
+                ),
+            );
+            if let Some(ts) = &obj.last_heartbeat {
+                m.insert(
+                    "last_heartbeat".into(),
+                    serde_json::json!({"seconds": ts.seconds, "nanos": ts.nanos}),
+                );
+            }
+            if let Some(ts) = &obj.created_at {
+                m.insert(
+                    "created_at".into(),
+                    serde_json::json!({"seconds": ts.seconds, "nanos": ts.nanos}),
+                );
+            }
+            serde_json::Value::Object(m)
+        })
+        .collect();
+
+    let mut json = serde_json::Map::new();
+    json.insert("objects".into(), serde_json::Value::Array(objects));
+    if let Some(page) = inner.page {
+        json.insert(
+            "page".into(),
+            serde_json::json!({
+                "total_size": page.total_size,
+                "offset": page.offset,
+                "limit": page.limit,
+                "has_next": page.has_next,
+            }),
+        );
+    }
+
+    Ok(Json(serde_json::Value::Object(json)))
+}
+
+/// API: Get key/value store entries
+async fn api_keyvalues(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let offset = params
+        .get("offset")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(50);
+
+    let page_request = Some(PageRequest {
+        offset,
+        limit,
+        filter: String::new(),
+        order_by: String::new(),
+    });
+
+    let request = dashboard_request(
+        GetKeyValuesRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+            prefix: params.get("prefix").cloned().unwrap_or_default(),
+            page: page_request,
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_key_values(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let entries: Vec<serde_json::Value> = inner
+        .entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "key": e.key,
+                "value_preview": e.value_preview,
+                "size_bytes": e.size_bytes,
+            })
+        })
+        .collect();
+
+    let mut json = serde_json::Map::new();
+    json.insert("entries".into(), serde_json::Value::Array(entries));
+    if let Some(page) = inner.page {
+        json.insert(
+            "page".into(),
+            serde_json::json!({
+                "total_size": page.total_size,
+                "offset": page.offset,
+                "limit": page.limit,
+                "has_next": page.has_next,
+            }),
+        );
+    }
+
+    Ok(Json(serde_json::Value::Object(json)))
+}
+
+/// API: Get tuplespace stats and sample tuples
+async fn api_tuplespaces(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let request = dashboard_request(
+        GetTupleSpacesRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+            pattern: params.get("pattern").cloned().unwrap_or_default(),
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_tuple_spaces(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let spaces: Vec<serde_json::Value> = inner
+        .spaces
+        .iter()
+        .map(|s| {
+            let samples: Vec<serde_json::Value> = s
+                .sample_tuples
+                .iter()
+                .map(|t| {
+                    let fields: Vec<serde_json::Value> = t
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(v) = &f.value {
+                                use plexspaces_proto::tuplespace::v1::tuple_field::Value as TFV;
+                                match v {
+                                    TFV::String(sv) => serde_json::Value::String(sv.clone()),
+                                    TFV::Integer(iv) => serde_json::json!(iv),
+                                    TFV::Float(fv) => serde_json::json!(fv),
+                                    TFV::Boolean(bv) => serde_json::Value::Bool(*bv),
+                                    TFV::Binary(bts) => {
+                                        serde_json::Value::String(format!("<bytes:{}>", bts.len()))
+                                    }
+                                    TFV::Null(_) | TFV::Wildcard(_) => serde_json::Value::Null,
+                                }
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        })
+                        .collect();
+                    serde_json::json!({"fields": fields})
+                })
+                .collect();
+            serde_json::json!({
+                "namespace": s.namespace,
+                "pattern": s.pattern,
+                "tuple_count": s.tuple_count,
+                "sample_tuples": samples,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "spaces": spaces })))
+}
+
+/// API: Get blob storage entries
+async fn api_blobs(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let offset = params
+        .get("offset")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(50);
+
+    let page_request = Some(PageRequest {
+        offset,
+        limit,
+        filter: String::new(),
+        order_by: String::new(),
+    });
+
+    let request = dashboard_request(
+        GetBlobsRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+            kind: params.get("kind").cloned().unwrap_or_default(),
+            prefix: params.get("prefix").cloned().unwrap_or_default(),
+            page: page_request,
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_blobs(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let blobs: Vec<serde_json::Value> = inner
+        .blobs
+        .iter()
+        .map(|b| {
+            let mut m = serde_json::Map::new();
+            m.insert("blob_id".into(), b.blob_id.clone().into());
+            m.insert("name".into(), b.name.clone().into());
+            m.insert("kind".into(), b.kind.clone().into());
+            m.insert("size_bytes".into(), serde_json::json!(b.content_length));
+            m.insert("content_type".into(), b.content_type.clone().into());
+            m.insert("tenant_id".into(), b.tenant_id.clone().into());
+            m.insert("namespace".into(), b.namespace.clone().into());
+            if let Some(ts) = &b.created_at {
+                m.insert(
+                    "created_at".into(),
+                    serde_json::json!({"seconds": ts.seconds, "nanos": ts.nanos}),
+                );
+            }
+            serde_json::Value::Object(m)
+        })
+        .collect();
+
+    let mut json = serde_json::Map::new();
+    json.insert("blobs".into(), serde_json::Value::Array(blobs));
+    if let Some(page) = inner.page {
+        json.insert(
+            "page".into(),
+            serde_json::json!({
+                "total_size": page.total_size,
+                "offset": page.offset,
+                "limit": page.limit,
+                "has_next": page.has_next,
+            }),
+        );
+    }
+
+    Ok(Json(serde_json::Value::Object(json)))
+}
+
+/// API: Generate presigned download URL for a blob
+async fn api_blob_presigned_url(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Path(blob_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let request = dashboard_request(
+        GetBlobPresignedUrlRequest {
+            blob_id,
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_blob_presigned_url(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    Ok(Json(serde_json::json!({
+        "url": inner.url,
+        "error": inner.error,
+    })))
+}
+
+/// API: Direct blob download - streams blob bytes back to caller.
+async fn api_blob_download(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        service_locator,
+        _dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Path(blob_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Response, StatusCode> {
+    use axum::body::Body;
+    use plexspaces_actor::RequestContext;
+
+    let blob_svc = service_locator
+        .get_blob_service()
+        .await
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let tenant_id = params.get("tenant_id").cloned().unwrap_or_default();
+    let namespace = params.get("namespace").cloned().unwrap_or_default();
+    let ctx = RequestContext::new_without_auth(tenant_id, namespace).with_admin(true);
+
+    let bytes = blob_svc
+        .download(&ctx, &blob_id)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let disposition = format!("attachment; filename=\"{}\"", blob_id);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(Body::from(bytes))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// API: Get service links
+async fn api_service_links(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let request = dashboard_request(
+        GetServiceLinksRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_service_links(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let links: Vec<serde_json::Value> = inner
+        .service_links
+        .iter()
+        .map(|l| {
+            serde_json::json!({
+                "name": l.name,
+                "transport": l.transport,
+                "base_url": l.base_url,
+                "policy_template": l.policy_template,
+                "api_key_header_name": l.api_key_header_name,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "service_links": links })))
+}
+
+/// API: Get metrics table
+async fn api_metrics_table(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        _service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let label_filter: HashMap<String, String> = params
+        .iter()
+        .filter(|(k, _)| k.starts_with("label_"))
+        .map(|(k, v)| (k.trim_start_matches("label_").to_string(), v.clone()))
+        .collect();
+
+    let request = dashboard_request(
+        GetMetricsTableRequest {
+            node_id: params.get("node_id").cloned().unwrap_or_default(),
+            namespace: params.get("namespace").cloned().unwrap_or_default(),
+            name_pattern: params
+                .get("name_pattern")
+                .cloned()
+                .unwrap_or_else(|| "*".to_string()),
+            label_filter,
+        },
+        &headers,
+    );
+
+    let response = dashboard_service
+        .get_metrics_table(request)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let inner = response.into_inner();
+
+    let metrics: Vec<serde_json::Value> = inner
+        .metrics
+        .iter()
+        .map(|m| {
+            use plexspaces_proto::metrics::v1::metric::Value as MV;
+            let labels: serde_json::Map<String, serde_json::Value> = m
+                .labels
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            let (metric_type, value) = match &m.value {
+                Some(MV::CounterValue(v)) => ("counter", serde_json::json!(v)),
+                Some(MV::GaugeValue(v)) => ("gauge", serde_json::json!(v)),
+                Some(MV::HistogramValue(h)) => {
+                    ("histogram", serde_json::json!({"count": h.count, "sum": h.sum}))
+                }
+                Some(MV::SummaryValue(s)) => {
+                    ("summary", serde_json::json!({"count": s.count, "sum": s.sum}))
+                }
+                None => ("unknown", serde_json::Value::Null),
+            };
+            let mut mj = serde_json::Map::new();
+            mj.insert("name".into(), m.name.clone().into());
+            mj.insert("metric_type".into(), metric_type.into());
+            mj.insert("value".into(), value);
+            mj.insert("labels".into(), serde_json::Value::Object(labels));
+            if let Some(ts) = &m.timestamp {
+                mj.insert(
+                    "timestamp".into(),
+                    serde_json::json!({"seconds": ts.seconds, "nanos": ts.nanos}),
+                );
+            }
+            serde_json::Value::Object(mj)
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "metrics": metrics })))
 }
 
 /// API: Get system info (version, build date, git commit)

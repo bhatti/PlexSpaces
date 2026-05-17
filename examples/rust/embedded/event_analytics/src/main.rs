@@ -40,7 +40,7 @@
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers,
     ActorContext, BehaviorError, RequestContext, Message,
-    NodeBuilder, spawn_gen_server, json, Value, GenServerRef,, RequestContextExt};
+    NodeBuilder, spawn_gen_server, json, Value, GenServerRef, RequestContextExt};
 use plexspaces_node::CoordinationComputeTracker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -411,7 +411,7 @@ async fn main() -> Result<()> {
             "metadata": event.metadata,
         });
         
-        shards[shard_id].cast("track_event", &event_data).await
+        shards[shard_id].cast(&ctx, "track_event", &event_data).await
             .map_err(|e| anyhow::anyhow!("Failed to track event: {}", e))?;
         
         let event_time = event_start.elapsed();
@@ -455,7 +455,7 @@ async fn main() -> Result<()> {
     let mut query_futures = Vec::new();
     for shard in &shards {
         // call() serializes immediately, so reference lifetime is fine
-        query_futures.push(shard.call::<serde_json::Value, ShardMetrics>("get_metrics", &empty_query));
+        query_futures.push(shard.call::<serde_json::Value, ShardMetrics>(&ctx, "get_metrics", &empty_query));
     }
     
     // Collect results from all shards (scatter-gather aggregation)

@@ -1,6 +1,8 @@
 # Restate → PlexSpaces: Exactly-Once Payment (TypeScript WASM)
 # Idempotent payment with journaling replay; Workflow + virtual_actor + durability
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "payment"
+tenant_id = "default"
 actor_type = "migrating_restate_wasm"
 role = "worker"
 restart = "permanent"

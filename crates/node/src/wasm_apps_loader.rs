@@ -233,14 +233,6 @@ pub fn parse_app_config_toml(
         .unwrap_or("1.0.0")
         .to_string();
 
-    // WASM app namespaces isolate actors by deployed app name. Persisted specs and
-    // startup replay use the app directory name when namespace is omitted.
-    let namespace = parsed
-        .get("namespace")
-        .and_then(|v| v.as_str())
-        .unwrap_or(app_name)
-        .to_string();
-
     // tenant_id for embedded/file-copy deploys.
     // For API deployments this is overridden by the JWT-extracted tenant from RequestContext.
     // For file-copy deploys with no JWT, this TOML value is the only source of truth for
@@ -279,7 +271,6 @@ pub fn parse_app_config_toml(
 
     Ok(ApplicationSpec {
         name: app_name.to_string(),
-        namespace,
         version,
         tenant_id,
         seed_nodes,
@@ -818,7 +809,6 @@ facets = [
     fn test_parse_app_config_preserves_seed_nodes_and_args() {
         let toml_str = r#"
 version = "1.0.0"
-namespace = "heat-diffusion-rust"
 seed_nodes = ["localhost:8091", "localhost:8093"]
 
 [supervisor]
@@ -845,7 +835,7 @@ args = { role = "worker" }
 
         let spec = parse_app_config_toml(toml_str, "heat-diffusion-rust").unwrap();
 
-        assert_eq!(spec.namespace, "heat-diffusion-rust");
+        assert_eq!(spec.name, "heat-diffusion-rust");
         assert_eq!(
             spec.seed_nodes,
             vec!["localhost:8091".to_string(), "localhost:8093".to_string()]
@@ -864,7 +854,7 @@ args = { role = "worker" }
     }
 
     #[test]
-    fn test_parse_app_config_defaults_namespace_to_app_name() {
+    fn test_parse_app_config_sets_name_from_app_name() {
         let toml_str = r#"
 version = "1.0.0"
 
@@ -874,7 +864,7 @@ max_restarts = 1
 "#;
 
         let spec = parse_app_config_toml(toml_str, "heat-diffusion-rust").unwrap();
-        assert_eq!(spec.namespace, "heat-diffusion-rust");
+        assert_eq!(spec.name, "heat-diffusion-rust");
     }
 
     #[test]

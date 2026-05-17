@@ -121,7 +121,11 @@ class LeaderElection:
         )
         if out and out.startswith("ERROR"):
             return {"leader": True, "candidate_id": display_id, "lock_version": self.lock_version, "renewed": False, "error": out}
-        self.lock_version = out
+        try:
+            data = json.loads(out)
+            self.lock_version = data.get("version", out)
+        except (json.JSONDecodeError, AttributeError):
+            self.lock_version = out
         host.log("info", f"Renewed leader lease: {self.current_holder_id} (lease_secs={lease_duration_secs})")
         return {"leader": True, "candidate_id": display_id, "lock_version": self.lock_version, "renewed": True}
 

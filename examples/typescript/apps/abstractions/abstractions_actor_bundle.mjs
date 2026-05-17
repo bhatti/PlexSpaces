@@ -437,8 +437,8 @@ function encodeTupleField(v, allowWildcardStar) {
     if (allowWildcardStar && v === "*") {
       return appendVarint(new Uint8Array([56]), 1);
     }
-    const enc2 = new TextEncoder();
-    const bytes = new Uint8Array(enc2.encode(v));
+    const enc3 = new TextEncoder();
+    const bytes = new Uint8Array(enc3.encode(v));
     let inner = new Uint8Array([26]);
     inner = appendVarint(inner, bytes.length);
     inner = concatBytes(inner, bytes);
@@ -615,10 +615,10 @@ function bytesToBase64Sync(bytes) {
 }
 function encodeHttpFetchRequestWire(headers, body) {
   let buf = new Uint8Array(0);
-  const enc2 = new TextEncoder();
+  const enc3 = new TextEncoder();
   for (const [k, v] of Object.entries(headers)) {
-    const kb = new Uint8Array(enc2.encode(k));
-    const vb = new Uint8Array(enc2.encode(v));
+    const kb = new Uint8Array(enc3.encode(k));
+    const vb = new Uint8Array(enc3.encode(v));
     let entry = appendLengthDelimited(new Uint8Array(0), 1, kb);
     entry = appendLengthDelimited(entry, 2, vb);
     buf = appendLengthDelimited(buf, 1, entry);
@@ -1256,6 +1256,248 @@ function encodeApplicationMetrics(metrics) {
   return buf;
 }
 
+// ../../../../sdks/typescript/dist/wire/registry-proto-wire.js
+var enc2 = new TextEncoder();
+var dec = new TextDecoder();
+function appendStringField(buf, fieldNum, s) {
+  if (!s)
+    return buf;
+  const encoded = enc2.encode(s);
+  const bytes = new Uint8Array(encoded.length);
+  bytes.set(encoded);
+  const tag = fieldNum << 3 | 2;
+  let b = appendVarint(buf, tag);
+  b = appendVarint(b, bytes.length);
+  return concatBytes(b, bytes);
+}
+function appendVarintField(buf, fieldNum, v) {
+  const tag = fieldNum << 3;
+  let b = appendVarint(buf, tag);
+  return appendVarint(b, v);
+}
+function objectTypeToString(n) {
+  switch (n) {
+    case 1:
+      return "actor";
+    case 2:
+      return "tuplespace";
+    case 3:
+      return "service";
+    case 4:
+      return "vm";
+    case 5:
+      return "application";
+    case 6:
+      return "workflow";
+    case 7:
+      return "node";
+    case 8:
+      return "process_group";
+    default:
+      return "";
+  }
+}
+function objectTypeFromString(s) {
+  switch (s) {
+    case "actor":
+      return 1;
+    case "tuplespace":
+      return 2;
+    case "service":
+      return 3;
+    case "vm":
+      return 4;
+    case "application":
+      return 5;
+    case "workflow":
+      return 6;
+    case "node":
+      return 7;
+    case "process_group":
+      return 8;
+    default:
+      return 0;
+  }
+}
+function encodeObjectRegistration(reg) {
+  let b = new Uint8Array(0);
+  b = appendStringField(b, 1, reg.objectId);
+  const ot = objectTypeFromString(reg.objectType);
+  if (ot !== 0)
+    b = appendVarintField(b, 3, ot);
+  if (reg.grpcAddress)
+    b = appendStringField(b, 8, reg.grpcAddress);
+  if (reg.objectCategory)
+    b = appendStringField(b, 9, reg.objectCategory);
+  if (reg.tenantId)
+    b = appendStringField(b, 5, reg.tenantId);
+  if (reg.namespace)
+    b = appendStringField(b, 6, reg.namespace);
+  for (const cap of reg.capabilities ?? [])
+    b = appendStringField(b, 10, cap);
+  for (const lbl of reg.labels ?? [])
+    b = appendStringField(b, 13, lbl);
+  if (reg.alias)
+    b = appendStringField(b, 18, reg.alias);
+  return b;
+}
+function encodeRegisterRequest(reg) {
+  const inner = encodeObjectRegistration(reg);
+  return appendLengthDelimited(new Uint8Array(0), 1, inner);
+}
+function encodeUnregisterRequest(objectId, objectType, tenantId, namespace) {
+  let b = new Uint8Array(0);
+  b = appendStringField(b, 1, objectId);
+  if (objectType !== 0)
+    b = appendVarintField(b, 2, objectType);
+  if (tenantId)
+    b = appendStringField(b, 3, tenantId);
+  if (namespace)
+    b = appendStringField(b, 4, namespace);
+  return b;
+}
+function encodeLookupRequest(objectId, objectType, tenantId, namespace, alias) {
+  let b = new Uint8Array(0);
+  if (objectId)
+    b = appendStringField(b, 1, objectId);
+  if (objectType !== 0)
+    b = appendVarintField(b, 2, objectType);
+  if (tenantId)
+    b = appendStringField(b, 3, tenantId);
+  if (namespace)
+    b = appendStringField(b, 4, namespace);
+  if (alias)
+    b = appendStringField(b, 5, alias);
+  return b;
+}
+function encodeDiscoverRequest(opts) {
+  let b = new Uint8Array(0);
+  if (opts.objectType)
+    b = appendVarintField(b, 1, opts.objectType);
+  if (opts.objectCategory)
+    b = appendStringField(b, 2, opts.objectCategory);
+  if (opts.tenantId)
+    b = appendStringField(b, 4, opts.tenantId);
+  if (opts.namespace)
+    b = appendStringField(b, 5, opts.namespace);
+  for (const cap of opts.capabilities ?? [])
+    b = appendStringField(b, 6, cap);
+  for (const lbl of opts.labels ?? [])
+    b = appendStringField(b, 7, lbl);
+  if (opts.pageSize && opts.pageSize > 0)
+    b = appendVarintField(b, 10, opts.pageSize);
+  return b;
+}
+function encodeHeartbeatRequest(objectId, objectType, tenantId, namespace) {
+  let b = new Uint8Array(0);
+  b = appendStringField(b, 1, objectId);
+  if (objectType !== 0)
+    b = appendVarintField(b, 2, objectType);
+  if (tenantId)
+    b = appendStringField(b, 3, tenantId);
+  if (namespace)
+    b = appendStringField(b, 4, namespace);
+  return b;
+}
+function decodeObjectRegistration(data) {
+  const reg = { objectId: "", objectType: "" };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n } = readVarint(data, pos);
+    pos += n;
+    const fn_ = Number(tagVal >> 3n);
+    const wt = Number(tagVal & 7n);
+    if (wt === 2) {
+      const { value: ln, n: m } = readVarint(data, pos);
+      pos += m;
+      const end = pos + Number(ln);
+      const chunk = data.slice(pos, end);
+      pos = end;
+      const str = dec.decode(chunk);
+      switch (fn_) {
+        case 1:
+          reg.objectId = str;
+          break;
+        case 5:
+          reg.tenantId = str;
+          break;
+        case 6:
+          reg.namespace = str;
+          break;
+        case 8:
+          reg.grpcAddress = str;
+          break;
+        case 9:
+          reg.objectCategory = str;
+          break;
+        case 10:
+          (reg.capabilities ?? (reg.capabilities = [])).push(str);
+          break;
+        case 13:
+          (reg.labels ?? (reg.labels = [])).push(str);
+          break;
+        case 18:
+          reg.alias = str;
+          break;
+      }
+    } else if (wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      if (fn_ === 3)
+        reg.objectType = objectTypeToString(Number(v));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return reg;
+}
+function decodeLookupResponse(data) {
+  let pos = 0;
+  let regBytes = null;
+  let found = false;
+  while (pos < data.length) {
+    const { value: tagVal, n } = readVarint(data, pos);
+    pos += n;
+    const fn_ = Number(tagVal >> 3n);
+    const wt = Number(tagVal & 7n);
+    if (fn_ === 1 && wt === 2) {
+      const { value: ln, n: m } = readVarint(data, pos);
+      pos += m;
+      regBytes = data.slice(pos, pos + Number(ln));
+      pos += Number(ln);
+    } else if (fn_ === 2 && wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      found = v !== 0n;
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  if (!found || !regBytes)
+    return null;
+  return decodeObjectRegistration(regBytes);
+}
+function decodeDiscoverResponse(data) {
+  const results = [];
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tagVal, n } = readVarint(data, pos);
+    pos += n;
+    const fn_ = Number(tagVal >> 3n);
+    const wt = Number(tagVal & 7n);
+    if (fn_ === 1 && wt === 2) {
+      const { value: ln, n: m } = readVarint(data, pos);
+      pos += m;
+      const regBytes = data.slice(pos, pos + Number(ln));
+      pos += Number(ln);
+      results.push(decodeObjectRegistration(regBytes));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return results;
+}
+
 // ../../../../sdks/typescript/dist/process_groups.js
 function firstGroupMember(members) {
   return members.length > 0 ? members[0] : null;
@@ -1430,8 +1672,9 @@ var ProcessGroups = class {
   }
   /** Get members of a process group */
   members(group) {
-    const result = safeCall(hostPgMembers, group);
-    if (typeof result === "string" && result.startsWith("ERROR:")) {
+    const raw = safeCall(hostPgMembers, group);
+    const result = decodeWitPayloadUtf8(raw);
+    if (result.startsWith("ERROR:")) {
       throw new Error(result);
     }
     try {
@@ -1442,8 +1685,8 @@ var ProcessGroups = class {
   }
   /** Broadcast to all group members. msgType is used for routing so payload can be data-only. */
   broadcast(group, msgType, payload) {
-    const payloadJson = payload !== void 0 ? JSON.stringify(payload) : "{}";
-    const result = safeCall(hostPgBroadcast, group, msgType, payloadJson);
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "{}");
+    const result = safeCall(hostPgBroadcast, group, msgType, payloadBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
@@ -1461,8 +1704,9 @@ var Registry = class {
   /**
    * Register an object in the registry.
    */
-  register(ctx, objectId, objectType, grpcAddress, objectCategory, capabilities = [], labels = []) {
-    const result = safeCall(hostRegistryRegister, ctx, objectId, objectType, grpcAddress, objectCategory ?? null, capabilities, labels);
+  register(reg) {
+    const reqBytes = encodeRegisterRequest(reg);
+    const result = safeCall(hostRegistryRegister, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
@@ -1470,8 +1714,9 @@ var Registry = class {
   /**
    * Unregister an object from the registry.
    */
-  unregister(ctx, objectType, objectId) {
-    const result = safeCall(hostRegistryUnregister, ctx, objectType, objectId);
+  unregister(objectId, objectType, tenantId, namespace) {
+    const reqBytes = encodeUnregisterRequest(objectId, objectType, tenantId, namespace);
+    const result = safeCall(hostRegistryUnregister, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
@@ -1479,62 +1724,58 @@ var Registry = class {
   /**
    * Look up an object by ID. Returns null if not found, throws on storage errors.
    */
-  lookup(ctx, objectType, objectId) {
-    const raw = safeCall(hostRegistryLookup, ctx, objectType, objectId);
+  lookup(objectId, objectType = 0, tenantId, namespace) {
+    const reqBytes = encodeLookupRequest(objectId, objectType, tenantId, namespace);
+    const raw = safeCall(hostRegistryLookup, reqBytes);
     if (typeof raw === "string" && raw.startsWith("ERROR:")) {
       throw new Error(raw);
     }
-    if (!raw || raw === "null")
+    if (!raw)
       return null;
-    try {
-      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return result ?? null;
-    } catch {
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0)
       return null;
-    }
+    return decodeLookupResponse(bytes);
   }
   /**
    * Look up an object by alias (Orleans grain directory pattern).
    * Alias format: "{actor_type}:{name}:{namespace}:{tenant_id}"
    * Returns null if not found, throws on storage errors.
    */
-  lookupByAlias(ctx, alias) {
-    const raw = safeCall(hostRegistryLookupByAlias, ctx, alias);
+  lookupByAlias(alias) {
+    const raw = safeCall(hostRegistryLookupByAlias, alias);
     if (typeof raw === "string" && raw.startsWith("ERROR:")) {
       throw new Error(raw);
     }
-    if (!raw || raw === "null")
+    if (!raw)
       return null;
-    try {
-      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return result ?? null;
-    } catch {
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0)
       return null;
-    }
+    return decodeLookupResponse(bytes);
   }
   /**
    * Discover objects with optional filtering.
    */
-  discover(ctx, options = {}) {
-    const { objectType, objectCategory, capabilities = [], labels = [], healthStatus, offset = 0, limit = 100 } = options;
-    const raw = safeCall(hostRegistryDiscover, ctx, objectType ?? null, objectCategory ?? null, capabilities, labels, healthStatus ?? null, offset, limit);
+  discover(options = {}) {
+    const reqBytes = encodeDiscoverRequest(options);
+    const raw = safeCall(hostRegistryDiscover, reqBytes);
     if (!raw)
       return [];
     if (typeof raw === "string" && raw.startsWith("ERROR:")) {
       throw new Error(raw);
     }
-    try {
-      const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return Array.isArray(result) ? result : [];
-    } catch {
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(0);
+    if (bytes.length === 0)
       return [];
-    }
+    return decodeDiscoverResponse(bytes);
   }
   /**
    * Update the heartbeat for a registered object.
    */
-  heartbeat(ctx, objectType, objectId) {
-    const result = safeCall(hostRegistryHeartbeat, ctx, objectType, objectId);
+  heartbeat(objectId, objectType = 0, tenantId, namespace) {
+    const reqBytes = encodeHeartbeatRequest(objectId, objectType, tenantId, namespace);
+    const result = safeCall(hostRegistryHeartbeat, reqBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
@@ -1551,8 +1792,8 @@ var Host = class {
   // ========================================================================
   /** Send message to another actor (fire-and-forget) */
   send(to, msgType, payload) {
-    const payloadJson = payload !== void 0 ? JSON.stringify(payload) : "";
-    const raw = safeCall(hostSend, to, msgType, payloadJson);
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "");
+    const raw = safeCall(hostSend, to, msgType, payloadBytes);
     if (typeof raw !== "string") {
       return "";
     }
@@ -1560,9 +1801,10 @@ var Host = class {
   }
   /** Send request and wait for response (request-reply) */
   ask(to, msgType, payload, timeoutMs = 5e3) {
-    const payloadJson = payload !== void 0 ? JSON.stringify(payload) : "";
-    const result = safeCall(hostAsk, to, msgType, payloadJson, BigInt(timeoutMs));
-    if (typeof result === "string" && result.startsWith("ERROR:")) {
+    const payloadBytes = encodeWitPayloadUtf8(payload !== void 0 ? JSON.stringify(payload) : "");
+    const raw = safeCall(hostAsk, to, msgType, payloadBytes, BigInt(timeoutMs));
+    const result = decodeWitPayloadUtf8(raw);
+    if (result.startsWith("ERROR:")) {
       throw new Error(result);
     }
     try {
@@ -1589,8 +1831,8 @@ var Host = class {
    * @returns Spawned actor ID string (may be auto-generated if actorId was empty)
    */
   spawn(moduleRef, actorId = "", initConfig) {
-    const configJson = initConfig !== void 0 ? JSON.stringify(initConfig) : "{}";
-    const result = safeCall(hostSpawn, moduleRef, actorId, configJson);
+    const configBytes = encodeWitPayloadUtf8(initConfig !== void 0 ? JSON.stringify(initConfig) : "{}");
+    const result = safeCall(hostSpawn, moduleRef, actorId, configBytes);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }

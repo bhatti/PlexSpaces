@@ -683,16 +683,48 @@ Unified Prometheus-oriented metrics: in-process `metrics` macros, export via `Ex
 
 **Proto**: `proto/plexspaces/v1/dashboard/dashboard.proto`
 
-Dashboard and monitoring UI backend.
+Dashboard and monitoring UI backend. All RPCs support local dispatch (via `ServiceLocator`) or
+remote dispatch (via gRPC to the target `node_id`). Tenant isolation is enforced through
+the `x-tenant-id` metadata header populated by the gRPC `AuthInterceptor`.
 
 #### RPCs
 
 | Method | Description | Request | Response |
 |--------|-------------|---------|----------|
-| `GetClusterOverview` | Cluster summary | `GetClusterOverviewRequest` | `ClusterOverview` |
-| `GetNodeDetails` | Node details | `GetNodeDetailsRequest` | `NodeDetails` |
-| `GetActorDetails` | Actor details | `GetActorDetailsRequest` | `ActorDetails` |
-| `GetSystemHealth` | System health | `GetSystemHealthRequest` | `SystemHealth` |
+| `GetSummary` | Cluster-level summary counts | `GetSummaryRequest` | `GetSummaryResponse` |
+| `GetNodes` | List nodes with metrics and pagination | `GetNodesRequest` | `GetNodesResponse` |
+| `GetNodeDashboard` | Full node detail including metrics | `GetNodeDashboardRequest` | `GetNodeDashboardResponse` |
+| `GetApplications` | List applications with pagination | `GetApplicationsRequest` | `GetApplicationsResponse` |
+| `GetActors` | List actors with filtering + pagination | `GetActorsRequest` | `GetActorsResponse` |
+| `GetWorkflows` | List workflow executions | `GetWorkflowsRequest` | `GetWorkflowsResponse` |
+| `GetDashboardMetrics` | In-process Prometheus metrics | `GetDashboardMetricsRequest` | `GetDashboardMetricsResponse` |
+| `GetDependencyHealth` | Dependency health checks | `GetDependencyHealthRequest` | `GetDependencyHealthResponse` |
+| `GetObjects` | Object registry entries (actors, services, VMs, etc.) | `GetObjectsRequest` | `GetObjectsResponse` |
+| `GetKeyValues` | Key/value store entries with prefix filter | `GetKeyValuesRequest` | `GetKeyValuesResponse` |
+| `GetTupleSpaces` | TupleSpace stats and sample tuples | `GetTupleSpacesRequest` | `GetTupleSpacesResponse` |
+| `GetBlobs` | Blob metadata listing | `GetBlobsRequest` | `GetBlobsResponse` |
+| `GetBlobPresignedUrl` | Generate presigned download URL for a blob | `GetBlobPresignedUrlRequest` | `GetBlobPresignedUrlResponse` |
+| `GetServiceLinks` | Configured outbound service links | `GetServiceLinksRequest` | `GetServiceLinksResponse` |
+| `GetMetricsTable` | Metrics with label filtering | `GetMetricsTableRequest` | `GetMetricsTableResponse` |
+
+#### HTTP Routes
+
+All dashboard RPCs are also exposed as HTTP GET/POST endpoints under `/api/v1/dashboard/*`:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/dashboard/summary` | GET | Cluster summary |
+| `/api/v1/dashboard/nodes` | GET | Node list |
+| `/api/v1/dashboard/node/:node_id` | GET | Node details |
+| `/api/v1/dashboard/applications` | GET | Application list |
+| `/api/v1/dashboard/actors` | GET | Actor list |
+| `/api/v1/dashboard/objects` | GET | Object registry |
+| `/api/v1/dashboard/keyvalue` | GET | KV store entries |
+| `/api/v1/dashboard/tuplespace` | GET | TupleSpace stats |
+| `/api/v1/dashboard/blobs` | GET | Blob list |
+| `/api/v1/dashboard/blob/:id/presigned-url` | POST | Presigned download URL |
+| `/api/v1/dashboard/service-links` | GET | Service links |
+| `/api/v1/dashboard/metrics-table` | GET | Metrics table |
 
 ### SchedulingService
 

@@ -1,6 +1,8 @@
 # Zeebe/Camunda → PlexSpaces: Insurance Claim Workflow (Python WASM)
 # BPMN-style: submit → validate → human review → approve/reject; SLA escalation via reminder
 
+tenant_id = "default"
+
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -8,6 +10,7 @@ max_restart_window_seconds = 60
 
 [[supervisor.children]]
 name = "claim"
+tenant_id = "default"
 actor_type = "migrating_zeebe_wasm"
 role = "worker"
 restart = "permanent"

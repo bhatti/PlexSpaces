@@ -794,7 +794,6 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
     ApplicationSpec {
         name: name.to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with multiple facets", name),
         r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive as i32,
@@ -854,7 +853,6 @@ fn create_application_spec_with_single_facet(
     ApplicationSpec {
         name: name.to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with {} facet", name, facet_type),
         r#type: plexspaces_proto::application::v1::ApplicationType::ApplicationTypeActive as i32,

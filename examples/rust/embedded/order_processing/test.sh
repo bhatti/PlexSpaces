@@ -7,18 +7,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Shared target: use workspace target directory
+WORKSPACE_TARGET="${SCRIPT_DIR}/../../../../target"
+export CARGO_TARGET_DIR="${WORKSPACE_TARGET}"
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║     Order Processing Example Test                              ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
 # Build
-echo "📦 Building..."
-cargo build --quiet
+echo "📦 Building (shared target, debug)..."
+cargo build
 
-# Run with timeout
+# Run pre-built binary with timeout
 echo "🚀 Running example..."
-timeout 30s cargo run --bin order_processing 2>&1 || {
+timeout 30s "${WORKSPACE_TARGET}/debug/order_processing" 2>&1 || {
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 124 ]; then
         echo "⏱️  Timeout (expected for long-running example)"

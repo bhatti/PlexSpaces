@@ -58,5 +58,31 @@ pub trait BlobServiceTrait: Send + Sync {
         limit: usize,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// List blobs with rich metadata for dashboard display.
+    /// Returns (page_of_metadata, has_next).
+    async fn list_metadata(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+        kind_filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<
+        (Vec<plexspaces_proto::storage::v1::BlobMetadata>, bool),
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
+
+    /// Generate a presigned URL for direct client access to a blob.
+    ///
+    /// Returns `Ok(None)` when the configured storage backend does not support presigned
+    /// URLs (e.g. local filesystem). Returns `Ok(Some(url))` on success.
+    async fn generate_presigned_url(
+        &self,
+        ctx: &RequestContext,
+        blob_id: &str,
+        operation: &str,
+        expires_after: std::time::Duration,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>>;
+
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync>;
 }

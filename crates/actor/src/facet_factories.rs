@@ -1174,6 +1174,12 @@ mod tests {
 
         async fn register_blob_service(&self, _service: Arc<dyn BlobServiceTrait>) {}
 
+        async fn register_service_link_service(
+            &self,
+            _service: Arc<dyn plexspaces_service_traits::ServiceLinkAccess>,
+        ) {
+        }
+
         async fn register_node_registry(&self, _registry: Arc<dyn NodeRegistryTrait>) {}
 
         async fn register_keyvalue_store(&self, store: Arc<dyn KeyValueStore>) {

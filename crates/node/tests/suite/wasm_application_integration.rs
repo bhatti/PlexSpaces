@@ -271,7 +271,6 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
     let app_spec = ApplicationSpec {
         name: "test-app".to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Test application with supervisor tree".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -941,9 +940,9 @@ async fn actor_ask_json(
     payload: serde_json::Value,
 ) -> serde_json::Value {
     let request = AskReplyRequest {
-        namespace: namespace.to_string(),
         actor_type: actor_type.to_string(),
         actor_name: String::new(),
+        namespace: namespace.to_string(),
         http_method: "POST".to_string(),
         payload: serde_json::to_vec(&payload).expect("payload JSON should serialize"),
         headers: HashMap::new(),
@@ -1018,7 +1017,6 @@ fn create_wasm_module_from_fixture_with_supervisor(
     let app_spec = ApplicationSpec {
         name: actor_name.to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: format!("WASM application with supervisor: {}", actor_name),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1153,7 +1151,6 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
     let app_spec = ApplicationSpec {
         name: "multi-worker-app".to_string(),
         tenant_id: String::new(),
-        namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "App with multiple supervised workers".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1305,7 +1302,6 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
                     name: actor_id.name().to_string(),
                     actor_type: actor_type.to_string(),
                 }),
-                namespace: namespace.to_string(),
                 tenant_id: String::new(),
                 ..Default::default()
             },
@@ -1378,7 +1374,6 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
         .expect("test actor id should be valid");
     let (wasm_module, mut app_spec) =
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
-    app_spec.namespace = app_id.to_string();
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
@@ -1435,7 +1430,6 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
                     name: actor_id.name().to_string(),
                     actor_type: actor_type.to_string(),
                 }),
-                namespace: app_id.to_string(),
                 tenant_id: tenant_id.to_string(),
                 ..Default::default()
             },
@@ -1497,7 +1491,6 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
 
     let (redeploy_wasm_module, mut redeploy_app_spec) =
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
-    redeploy_app_spec.namespace = app_id.to_string();
     redeploy_app_spec.name = app_id.to_string();
     let redeploy_request = DeployApplicationRequest {
         application_id: app_id.to_string(),
@@ -1539,7 +1532,6 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
 
     let (wasm_module, mut app_spec) =
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
-    app_spec.namespace = app_id.to_string();
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
@@ -1596,7 +1588,6 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
                     name: actor_id.name().to_string(),
                     actor_type: actor_type.to_string(),
                 }),
-                namespace: app_id.to_string(),
                 tenant_id: tenant_id.to_string(),
                 ..Default::default()
             },
@@ -1768,7 +1759,6 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
     let app_spec = ApplicationSpec {
         name: app_id.to_string(),
         tenant_id: String::new(),
-        namespace: app_id.to_string(),
         version: "1.0.0".to_string(),
         description: "Controller + virtual child deployment".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -1905,7 +1895,6 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
     let app_spec = ApplicationSpec {
         name: app_id.to_string(),
         tenant_id: String::new(),
-        namespace: app_id.to_string(),
         version: "1.0.0".to_string(),
         description: "Go SDK controller stop integration".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -2069,7 +2058,6 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
     let app_spec = ApplicationSpec {
         name: app_id.to_string(),
         tenant_id: String::new(),
-        namespace: app_id.to_string(),
         version: "1.0.0".to_string(),
         description: "Python SDK nondurable virtual actor reactivation".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -2232,7 +2220,6 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
     let app_spec = ApplicationSpec {
         name: app_id.to_string(),
         tenant_id: String::new(),
-        namespace: app_id.to_string(),
         version: "1.0.0".to_string(),
         description: "TypeScript SDK nondurable virtual actor reactivation".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),
@@ -2355,7 +2342,6 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
 
     let mut app_spec = load_typescript_abstractions_example_config();
     app_spec.name = app_id.to_string();
-    app_spec.namespace = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
         application_id: app_id.to_string(),
@@ -2510,7 +2496,6 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
 
     let mut app_spec = load_typescript_abstractions_example_config();
     app_spec.name = app_id.to_string();
-    app_spec.namespace = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
         application_id: app_id.to_string(),
@@ -2712,7 +2697,6 @@ async fn test_multi_actor_dispatch_by_actor_type() {
     let app_spec = ApplicationSpec {
         name: app_id.to_string(),
         tenant_id: String::new(),
-        namespace: app_id.to_string(),
         version: "1.0.0".to_string(),
         description: "Multi-actor dispatch integration test".to_string(),
         r#type: ApplicationType::ApplicationTypeActive.into(),

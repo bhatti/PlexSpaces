@@ -35,77 +35,54 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApplicationSpec {
-    /// Application name (unique identifier within node)
+    /// Application name (unique identifier within node).
+    /// Serves as the namespace for all actors spawned by this application.
     /// Examples: "byzantine-generals", "genomics-coordinator"
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
     /// Tenant ID for multi-tenancy isolation.
-    /// Extracted from JWT token during deployment.
-    /// All actors spawned by this application will be scoped to this tenant.
-    /// This is the source of truth for tenant isolation - ActorFactory enforces it.
+    /// Extracted from JWT token during deployment; fallback from app-config.toml.
     #[prost(string, tag="2")]
     pub tenant_id: ::prost::alloc::string::String,
-    /// Namespace for actor isolation within a tenant.
-    /// All actors spawned by this application will be registered in this namespace.
-    /// If empty, defaults to application_id during deployment.
-    /// Examples: "bank-test", "genomics-prod", "dev-sandbox"
-    #[prost(string, tag="3")]
-    pub namespace: ::prost::alloc::string::String,
     /// Application version (semantic versioning)
     /// Examples: "0.1.0", "1.2.3"
-    #[prost(string, tag="4")]
+    #[prost(string, tag="3")]
     pub version: ::prost::alloc::string::String,
     /// Human-readable description
-    #[prost(string, tag="5")]
+    #[prost(string, tag="4")]
     pub description: ::prost::alloc::string::String,
     /// Application type (library or active)
-    #[prost(enumeration="ApplicationType", tag="6")]
+    #[prost(enumeration="ApplicationType", tag="5")]
     pub r#type: i32,
     /// Dependencies (other applications that must start first)
-    /// e.g., \["plexspaces-core", "plexspaces-tuplespace"\]
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag="6")]
     pub dependencies: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Application-level environment variables
-    #[prost(map="string, string", tag="8")]
+    #[prost(map="string, string", tag="7")]
     pub env: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Supervision tree (only for active applications)
-    #[prost(message, optional, tag="9")]
+    #[prost(message, optional, tag="8")]
     pub supervisor: ::core::option::Option<super::super::supervision::v1::SupervisorSpec>,
-    // ==================== DEPLOYMENT CONFIGURATION ====================
-    // (Merged from ApplicationConfig)
-
-    /// Whether application is enabled (false = skip loading)
-    /// Default: true
-    #[prost(bool, tag="10")]
+    /// Whether application is enabled (false = skip loading). Default: true
+    #[prost(bool, tag="9")]
     pub enabled: bool,
-    /// Whether to start application automatically on node boot
-    /// Default: true
-    /// Future: false allows manual start via ApplicationService API
-    #[prost(bool, tag="11")]
+    /// Whether to start application automatically on node boot. Default: true
+    #[prost(bool, tag="10")]
     pub auto_start: bool,
-    /// Shutdown timeout (force kill if exceeded)
-    /// Default: 60 seconds
-    #[prost(message, optional, tag="12")]
+    /// Shutdown timeout (force kill if exceeded). Default: 60 seconds
+    #[prost(message, optional, tag="11")]
     pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
-    /// Shutdown strategy (graceful or immediate)
-    /// Default: GRACEFUL
-    #[prost(enumeration="ShutdownStrategy", tag="13")]
+    /// Shutdown strategy (graceful or immediate). Default: GRACEFUL
+    #[prost(enumeration="ShutdownStrategy", tag="12")]
     pub shutdown_strategy: i32,
     /// Application metadata (tags, labels, annotations)
-    /// Examples:
-    /// - environment: "production"
-    /// - team: "genomics"
-    /// - criticality: "high"
-    #[prost(message, optional, tag="14")]
+    #[prost(message, optional, tag="13")]
     pub metadata: ::core::option::Option<super::super::common::v1::Metadata>,
     /// Seed nodes (gRPC addresses) to connect to when this application is deployed.
-    /// The node will connect to these addresses if not already connected, so
-    /// leader-worker and scatter/gather can use workers on other nodes.
-    /// Example: \["localhost:8091", "localhost:8093"\]
-    #[prost(string, repeated, tag="15")]
+    #[prost(string, repeated, tag="14")]
     pub seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// External service links this application expects at deploy time (validated against node catalog).
-    #[prost(message, repeated, tag="16")]
+    /// External service links this application expects at deploy time.
+    #[prost(message, repeated, tag="15")]
     pub required_service_links: ::prost::alloc::vec::Vec<ApplicationServiceLinkRequirement>,
 }
 /// Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
@@ -286,26 +263,23 @@ pub struct ApplicationInfo {
     /// Application ID
     #[prost(string, tag="1")]
     pub application_id: ::prost::alloc::string::String,
-    /// Application name
+    /// Application name (also serves as the namespace for actors in this application)
     #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
     /// Tenant ID for visibility and isolation.
     #[prost(string, tag="3")]
     pub tenant_id: ::prost::alloc::string::String,
-    /// Namespace for application-scoped actors and filters.
-    #[prost(string, tag="4")]
-    pub namespace: ::prost::alloc::string::String,
     /// Application version
-    #[prost(string, tag="5")]
+    #[prost(string, tag="4")]
     pub version: ::prost::alloc::string::String,
     /// Current status
-    #[prost(enumeration="ApplicationStatus", tag="6")]
+    #[prost(enumeration="ApplicationStatus", tag="5")]
     pub status: i32,
     /// When the application was deployed
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="6")]
     pub deployed_at: ::core::option::Option<::prost_types::Timestamp>,
     /// Application metrics (optional)
-    #[prost(message, optional, tag="8")]
+    #[prost(message, optional, tag="7")]
     pub metrics: ::core::option::Option<ApplicationMetrics>,
 }
 /// Application metrics
@@ -701,52 +675,6 @@ impl ApplicationErrorCode {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

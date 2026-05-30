@@ -26,7 +26,7 @@ mod tests {
     use hyper::{Method, Request, StatusCode, Uri};
     use object_store::local::LocalFileSystem;
     use plexspaces_actor::{RequestContext, RequestContextExt};
-    use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService};
+    use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService, UploadBlobParams};
     use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
     use std::sync::Arc;
     use std::sync::Once;
@@ -185,14 +185,12 @@ mod tests {
         let metadata = service
             .upload_blob(
                 &ctx,
-                "test.txt",
-                b"Hello, World!".to_vec(),
-                Some("text/plain".to_string()),
-                None,
-                None,
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-                None,
+                UploadBlobParams {
+                    name: "test.txt".to_string(),
+                    data: b"Hello, World!".to_vec(),
+                    content_type: Some("text/plain".to_string()),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();

@@ -56,7 +56,6 @@
 
 mod security_config_toml;
 
-use crate::RequestContextExt;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -258,7 +257,6 @@ impl Default for SystemApplicationsToml {
 struct ApplicationSpecToml {
     name: String,
     version: String,
-    config_path: String,
     enabled: bool,
     auto_start: bool,
     shutdown_timeout_seconds: u64,
@@ -573,7 +571,6 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                             .collect(),
                     })
                     .collect(),
-                ..Default::default()
             }),
             health: Some(HealthConfig {
                 heartbeat_interval_seconds: toml.runtime.health.heartbeat_interval_seconds,

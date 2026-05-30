@@ -72,10 +72,12 @@ struct LockEntry {
 /// - Uses `tokio::sync::Semaphore` for per-lock coordination
 /// - Thread-safe and async-friendly
 /// - No persistence (locks are lost on restart)
+type LockStore = Arc<Mutex<HashMap<(String, String, String), LockEntry>>>;
+
 #[derive(Clone)]
 pub struct MemoryLockManager {
-    /// Lock storage: (tenant_id, namespace, lock_key) -> LockEntry
-    locks: Arc<Mutex<HashMap<(String, String, String), LockEntry>>>,
+    /// Lock storage keyed by (tenant_id, namespace, lock_key)
+    locks: LockStore,
 }
 
 impl MemoryLockManager {

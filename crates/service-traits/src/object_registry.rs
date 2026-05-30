@@ -26,6 +26,9 @@ pub enum RegisterResult {
 }
 
 /// Trait for object registry (service discovery).
+// TODO(crate-21): Replace the 7-arg discover() signature with a DiscoverOptions struct.
+// The allow below is temporary until that refactor is done across all 14 implementations.
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait ObjectRegistry: Send + Sync {
     async fn lookup(

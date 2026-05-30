@@ -19,7 +19,6 @@ plexspaces-actor = { path = "../../../crates/actor", optional = true }
 plexspaces-node = { path = "../../../crates/node", optional = true }
 plexspaces-proto = { path = "../../../crates/proto", default-features = false }
 plexspaces-facet = { path = "../../../crates/facet", optional = true }
-plexspaces-behavior = { path = "../../../crates/behavior", optional = true }
 plexspaces-journaling = { path = "../../../crates/journaling", optional = true }
 plexspaces-workflow = { path = "../../../crates/workflow", optional = true }
 plexspaces-common = { path = "../../../crates/common", optional = true }
@@ -44,7 +43,6 @@ native = [
     "dep:async-trait",
     "dep:futures",
     "dep:plexspaces-actor",
-    "dep:plexspaces-behavior",
     "dep:plexspaces-common",
     "dep:plexspaces-facet",
     "dep:plexspaces-journaling",

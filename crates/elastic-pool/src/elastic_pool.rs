@@ -27,8 +27,7 @@ use tokio::sync::{oneshot, watch, Mutex, RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
-// Re-export proto-generated error enum
-pub use plexspaces_proto::pool::v1::ElasticPoolError as ElasticPoolErrorProto;
+use plexspaces_proto::pool::v1::ElasticPoolError as ElasticPoolErrorProto;
 
 /// Error types for ElasticPool operations
 ///
@@ -36,27 +35,33 @@ pub use plexspaces_proto::pool::v1::ElasticPoolError as ElasticPoolErrorProto;
 /// The proto enum is the source of truth. This wrapper provides:
 /// - String messages and Duration (proto enum doesn't have payloads)
 /// - thiserror::Error implementation
-/// - Backward compatibility with existing code
 #[derive(Debug, thiserror::Error)]
 pub enum ElasticPoolError {
+    /// The requested pool was not found
     #[error("Pool not found: {0}")]
     PoolNotFound(String),
 
+    /// A checkout request exceeded the given wait duration
     #[error("Checkout timeout: waited {0:?} for actor")]
     CheckoutTimeout(Duration),
 
+    /// All actors are busy and the pool has reached its maximum size
     #[error("Pool exhausted: all actors busy, max size reached")]
     PoolExhausted,
 
+    /// The circuit breaker is open due to too many recent failures
     #[error("Circuit open: too many failures")]
     CircuitOpen,
 
+    /// The pool is draining and not accepting new requests
     #[error("Pool draining: not accepting new requests")]
     PoolDraining,
 
+    /// The supplied pool configuration is invalid
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    /// An error was returned from the actor
     #[error("Actor error: {0}")]
     ActorError(String),
 }
@@ -111,37 +116,21 @@ impl From<ElasticPoolErrorProto> for ElasticPoolError {
 enum WorkerState {
     Available,
     Busy,
-    Idle,
-    Failed,
 }
 
 /// Actor metadata in pool
 struct Worker {
-    actor_id: String,
     state: WorkerState,
-    last_checkout: Option<Instant>,
-    last_checkin: Option<Instant>,
-    checkout_count: u64,
-    failure_count: u64,
 }
 
 impl Worker {
-    fn new(actor_id: String) -> Self {
-        Self {
-            actor_id,
-            state: WorkerState::Available,
-            last_checkout: None,
-            last_checkin: None,
-            checkout_count: 0,
-            failure_count: 0,
-        }
+    fn new() -> Self {
+        Self { state: WorkerState::Available }
     }
 }
 
 /// Checkout request waiting in queue
 struct CheckoutWaiter {
-    timeout: Duration,
-    enqueued_at: Instant,
     response_tx: oneshot::Sender<Result<ActorHandle, ElasticPoolError>>,
 }
 
@@ -272,7 +261,7 @@ impl ElasticPool {
 
             for _ in 0..count {
                 let worker_id = ulid::Ulid::new().to_string();
-                let worker = Worker::new(worker_id.clone());
+                let worker = Worker::new();
                 workers.insert(worker_id.clone(), worker);
                 available.push_back(worker_id);
             }
@@ -344,11 +333,7 @@ impl ElasticPool {
 
         // No workers available, enqueue and wait
         let (tx, rx) = oneshot::channel();
-        let waiter = CheckoutWaiter {
-            timeout,
-            enqueued_at: Instant::now(),
-            response_tx: tx,
-        };
+        let waiter = CheckoutWaiter { response_tx: tx };
 
         self.checkout_queue.lock().await.push_back(waiter);
 
@@ -377,8 +362,6 @@ impl ElasticPool {
 
         if let Some(worker) = workers.get_mut(&worker_id) {
             worker.state = WorkerState::Busy;
-            worker.last_checkout = Some(now);
-            worker.checkout_count += 1;
 
             // Update metrics
             let mut metrics = self.metrics.write().await;
@@ -423,13 +406,11 @@ impl ElasticPool {
     /// ```
     pub async fn checkin(&self, handle: ActorHandle) -> Result<(), ElasticPoolError> {
         let worker_id = handle.actor_id;
-        let now = Instant::now();
 
         let mut workers = self.workers.write().await;
 
         if let Some(worker) = workers.get_mut(&worker_id) {
             worker.state = WorkerState::Available;
-            worker.last_checkin = Some(now);
 
             // Update metrics
             let mut metrics = self.metrics.write().await;
@@ -487,29 +468,22 @@ impl ElasticPool {
     /// deadlock with any caller that holds one of those locks and then calls update_metrics().
     async fn update_metrics(&self) {
         // Phase 1: snapshot live state under the read/mutex locks, then release them all.
-        let (total, busy, idle, failed, avail_len, q_len) = {
+        let (total, busy, avail_len, q_len) = {
             let workers = self.workers.read().await;
             let available = self.available_workers.lock().await;
             let queue = self.checkout_queue.lock().await;
 
             let mut total = 0u32;
             let mut busy = 0u32;
-            let mut idle = 0u32;
-            let mut failed = 0u32;
             for worker in workers.values() {
                 total += 1;
-                match worker.state {
-                    WorkerState::Busy => busy += 1,
-                    WorkerState::Idle => idle += 1,
-                    WorkerState::Failed => failed += 1,
-                    WorkerState::Available => {}
+                if worker.state == WorkerState::Busy {
+                    busy += 1;
                 }
             }
             (
                 total,
                 busy,
-                idle,
-                failed,
                 available.len() as u32,
                 queue.len() as u32,
             )
@@ -523,8 +497,6 @@ impl ElasticPool {
         metrics.total_actors = total;
         metrics.available_actors = avail_len;
         metrics.busy_actors = busy;
-        metrics.idle_actors = idle;
-        metrics.failed_actors = failed;
         metrics.waiting_requests = q_len;
         metrics.current_load = if total > 0 {
             (busy as f64 + q_len as f64) / total as f64
@@ -686,17 +658,19 @@ impl ElasticPoolData {
             };
 
             // Scale up if load high
-            if load > self.config.scaling_threshold && total_actors < self.config.max_size {
-                if self.should_scale_up().await {
-                    self.scale_up().await;
-                }
+            if load > self.config.scaling_threshold
+                && total_actors < self.config.max_size
+                && self.should_scale_up().await
+            {
+                self.scale_up().await;
             }
 
             // Scale down if load low
-            if load < self.config.scale_down_threshold && total_actors > self.config.min_size {
-                if self.should_scale_down().await {
-                    self.scale_down().await;
-                }
+            if load < self.config.scale_down_threshold
+                && total_actors > self.config.min_size
+                && self.should_scale_down().await
+            {
+                self.scale_down().await;
             }
         }
     }
@@ -748,7 +722,7 @@ impl ElasticPoolData {
             let mut available = self.available_workers.lock().await;
             for _ in 0..to_add {
                 let worker_id = ulid::Ulid::new().to_string();
-                workers.insert(worker_id.clone(), Worker::new(worker_id.clone()));
+                workers.insert(worker_id.clone(), Worker::new());
                 available.push_back(worker_id);
             }
         } // workers and available released here
@@ -781,8 +755,7 @@ impl ElasticPoolData {
 
         let policy = self.config.scaling_policy.as_ref();
         let strategy = policy
-            .map(|p| Strategy::try_from(p.strategy).ok())
-            .flatten()
+            .and_then(|p| Strategy::try_from(p.strategy).ok())
             .unwrap_or(Strategy::StrategyIncremental);
 
         let amount = match strategy {
@@ -792,7 +765,7 @@ impl ElasticPoolData {
                 ((current_size as f64) * factor).max(1.0) as u32
             }
             Strategy::StrategyExponential => current_size, // Double or halve
-            Strategy::StrategyCustom => 1,                 // TODO: Custom function
+            Strategy::StrategyCustom => 1, // Custom scaling function not yet implemented; falls back to increment-by-one
         };
 
         // Apply min/max constraints

@@ -29,11 +29,21 @@ use thiserror::Error;
 pub enum SecurityValidationError {
     /// Secret found in config file (should be in environment variable)
     #[error("Security violation: Secret found in config file for field '{}'. Use environment variable '{}' instead.", .field, .env_var)]
-    SecretInConfig { field: String, env_var: String },
+    SecretInConfig {
+        /// Config field name containing the secret
+        field: String,
+        /// Recommended environment variable name
+        env_var: String,
+    },
 
     /// Missing required secret
     #[error("Security violation: Required secret '{}' not found in environment variable '{}'", .field, .env_var)]
-    MissingSecret { field: String, env_var: String },
+    MissingSecret {
+        /// Config field name that is missing
+        field: String,
+        /// Environment variable name that should be set
+        env_var: String,
+    },
 }
 
 /// Security validator

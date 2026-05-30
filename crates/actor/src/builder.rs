@@ -534,12 +534,7 @@ impl ActorBuilder {
         let mailbox_id = format!("mailbox_{actor_id}");
         let mailbox = Mailbox::new(mailbox_config, mailbox_id)
             .await
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to create mailbox: {e}"),
-                )
-            })?;
+            .map_err(|e| std::io::Error::other(format!("Failed to create mailbox: {e}")))?;
 
         let node_id = Some("unassigned".to_string());
 
@@ -584,12 +579,10 @@ impl ActorBuilder {
 
         // Attach facets after building
         for facet in self.facets {
-            actor.attach_facet(facet).await.map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to attach facet: {}", e),
-                )
-            })?;
+            actor
+                .attach_facet(facet)
+                .await
+                .map_err(|e| std::io::Error::other(format!("Failed to attach facet: {e}")))?;
         }
 
         Ok(actor)

@@ -34,7 +34,6 @@ use chrono::{DateTime, Utc};
 
 // Required for macro-generated code
 
-extern crate plexspaces_behavior;
 
 // =============================================================================
 // Domain Types - Document Approval

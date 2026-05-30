@@ -101,9 +101,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
-// Observability
-use metrics;
-use tracing;
+/// Maps promise IDs to their resolved results and timestamps.
+type ResolvedPromises = Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>;
 
 /// Durability facet providing journaling and deterministic replay
 ///
@@ -151,8 +150,7 @@ pub struct DurabilityFacet {
     pending_promises: Arc<RwLock<HashSet<String>>>,
 
     /// Resolved promises (promise_id -> (result, timestamp))
-    resolved_promises:
-        Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>,
+    resolved_promises: ResolvedPromises,
 
     /// Replay handler for deterministic message replay.
     ///
@@ -166,9 +164,6 @@ pub struct DurabilityFacet {
     /// Framework-owned adapter for automatic checkpoint capture and restore.
     checkpoint_state_adapter: Arc<RwLock<Option<Box<dyn CheckpointStateAdapter>>>>,
 }
-
-/// Default priority for DurabilityFacet
-pub const DURABILITY_FACET_DEFAULT_PRIORITY: i32 = 50;
 
 impl DurabilityFacet {
     /// Create a new durability facet
@@ -202,7 +197,7 @@ impl DurabilityFacet {
         let checkpoint_config = CheckpointConfig {
             enabled: durability_config.checkpoint_interval > 0,
             entry_interval: durability_config.checkpoint_interval,
-            time_interval: durability_config.checkpoint_timeout.clone(),
+            time_interval: durability_config.checkpoint_timeout,
             compression: durability_config.compression,
             retention_count: 2,   // Keep last 2 checkpoints
             auto_truncate: false, // Don't auto-truncate - let users control this via config
@@ -389,7 +384,7 @@ impl DurabilityFacet {
                     side_effect_type: se.effect_type.to_string(),
                     input_data: se.request.clone(),
                     output_data: se.response.clone(),
-                    executed_at: entry.timestamp.clone(),
+                    executed_at: entry.timestamp,
                     metadata: HashMap::new(),
                 };
                 side_effects.push(side_effect_entry);
@@ -465,7 +460,7 @@ impl DurabilityFacet {
                     side_effect_type: se.effect_type.to_string(),
                     input_data: se.request.clone(),
                     output_data: se.response.clone(),
-                    executed_at: entry.timestamp.clone(),
+                    executed_at: entry.timestamp,
                     metadata: HashMap::new(),
                 };
                 side_effects.push(side_effect_entry);
@@ -558,15 +553,13 @@ impl DurabilityFacet {
                     replayed_count
                 );
             }
-        } else {
-            if !entries.is_empty() {
-                tracing::warn!(
-                    actor_id = %actor_id,
-                    entries_count = entries.len(),
-                    "⚠️ No replay handler set - {} journal entries will not be replayed through actor handler (side effects cached only)",
-                    entries.len()
-                );
-            }
+        } else if !entries.is_empty() {
+            tracing::warn!(
+                actor_id = %actor_id,
+                entries_count = entries.len(),
+                "⚠️ No replay handler set - {} journal entries will not be replayed through actor handler (side effects cached only)",
+                entries.len()
+            );
         }
 
         // Update message_sequence to highest sequence number from ALL entries
@@ -746,8 +739,7 @@ impl DurabilityFacet {
                     result,
                     entry
                         .timestamp
-                        .clone()
-                        .unwrap_or_else(|| prost_types::Timestamp {
+                        .unwrap_or(prost_types::Timestamp {
                             seconds: 0,
                             nanos: 0,
                         }),
@@ -820,8 +812,7 @@ impl DurabilityFacet {
                             result,
                             entry
                                 .timestamp
-                                .clone()
-                                .unwrap_or_else(|| prost_types::Timestamp {
+                                .unwrap_or(prost_types::Timestamp {
                                     seconds: 0,
                                     nanos: 0,
                                 }),
@@ -1381,7 +1372,7 @@ impl Facet for DurabilityFacet {
                     id: ulid::Ulid::new().to_string(),
                     actor_id: actor_id.clone(),
                     sequence: se_sequence,
-                    timestamp: se.executed_at.clone(),
+                    timestamp: se.executed_at,
                     correlation_id: String::new(),
                     entry: Some(
                         plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(

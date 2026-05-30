@@ -15,7 +15,7 @@ use plexspaces_blob::{
     embedded_object_store::EmbeddedObjectStore,
     repository::sql::SqlBlobRepository,
     repository::ListFilters,
-    BlobService,
+    BlobService, UploadBlobParams,
 };
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
@@ -103,14 +103,11 @@ async fn get_test_service() -> Option<Arc<BlobService>> {
     let probe_ctx = create_test_context("__probe__", "__probe__");
     svc.upload_blob(
         &probe_ctx,
-        "__connectivity_probe__",
-        b"probe".to_vec(),
-        None,
-        None,
-        None,
-        std::collections::HashMap::new(),
-        std::collections::HashMap::new(),
-        None,
+        UploadBlobParams {
+            name: "__connectivity_probe__".to_string(),
+            data: b"probe".to_vec(),
+            ..Default::default()
+        },
     )
     .await
     .unwrap_or_else(|e| panic!("Object store is reachable but S3 operations fail: {}", e));

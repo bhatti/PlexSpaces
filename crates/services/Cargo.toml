@@ -78,7 +78,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tokio-test = "0.4"
-plexspaces-behavior = { path = "../behavior" }
 plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 plexspaces-scheduler = { path = "../scheduler" }
 jsonwebtoken = "9.0"

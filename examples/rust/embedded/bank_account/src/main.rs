@@ -46,7 +46,6 @@ use std::time::{Duration, Instant};
 use tracing::Level;
 
 // Required for macro-generated code
-extern crate plexspaces_behavior;
 
 
 // =============================================================================

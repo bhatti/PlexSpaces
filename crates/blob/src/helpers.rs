@@ -32,7 +32,7 @@ pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
 
 /// Convert prost Timestamp to chrono DateTime
 pub fn timestamp_to_datetime(ts: Option<Timestamp>) -> Option<DateTime<Utc>> {
-    ts.map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_else(|| Utc::now()))
+    ts.map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_else(Utc::now))
 }
 
 /// Get storage path for blob
@@ -48,7 +48,7 @@ pub fn get_storage_path(metadata: &BlobMetadata, prefix: &str) -> String {
 /// Check if blob is expired
 pub fn is_expired(metadata: &BlobMetadata) -> bool {
     if let Some(expires_at) = &metadata.expires_at {
-        if let Some(expires_dt) = timestamp_to_datetime(Some(expires_at.clone())) {
+        if let Some(expires_dt) = timestamp_to_datetime(Some(*expires_at)) {
             return Utc::now() > expires_dt;
         }
     }

@@ -136,6 +136,7 @@ impl SqliteLockManager {
         Utc::now().timestamp()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lock_from_row(
         lock_key: String,
         holder_id: String,

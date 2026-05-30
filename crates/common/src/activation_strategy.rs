@@ -33,7 +33,7 @@ pub fn from_config_str(s: &str) -> ProtoActivationStrategy {
     match s.to_lowercase().as_str() {
         "eager" => ProtoActivationStrategy::ActivationStrategyEager,
         "prewarm" => ProtoActivationStrategy::ActivationStrategyPrewarm,
-        "lazy" | _ => ProtoActivationStrategy::ActivationStrategyLazy,
+        _ => ProtoActivationStrategy::ActivationStrategyLazy,
     }
 }
 

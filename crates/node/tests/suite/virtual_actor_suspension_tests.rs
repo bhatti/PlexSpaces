@@ -8,7 +8,7 @@ use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, RequestContextExt, ServiceLocator, ServiceLocatorBase,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalError, JournalResult, JournalStorage, SqliteJournalStorage,
     StateLoader, VirtualActorFacet,

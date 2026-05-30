@@ -608,14 +608,12 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         match blob_service
             .upload_blob(
                 &ctx,
-                &blob_id,
-                data,
-                Some(content_type.clone()),
-                None,           // blob_group
-                None,           // kind
-                HashMap::new(), // metadata
-                HashMap::new(), // tags
-                None,           // expires_after
+                plexspaces_blob::UploadBlobParams {
+                    name: blob_id.clone(),
+                    data,
+                    content_type: Some(content_type.clone()),
+                    ..Default::default()
+                },
             )
             .await
         {

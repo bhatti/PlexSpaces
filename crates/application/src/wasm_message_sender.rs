@@ -984,7 +984,6 @@ mod tests {
             sent_messages: sent.clone(),
         });
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
-        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(NoopObjectRegistry);
         let sender_id =
             ActorId::from_canonical("health_monitor//miniclaw_wasm::go-miniclaw@test-node-8091")
                 .expect("sender actor id should be valid");
@@ -994,10 +993,7 @@ mod tests {
         );
         // ActorRegistry with local node test-node-8091. The target is on test-node-8093
         // (remote), so tell routes through actor_service.send.
-        let actor_registry = Arc::new(ActorRegistry::new(
-            object_registry,
-            "test-node-8091".to_string(),
-        ));
+        let actor_registry = Arc::new(ActorRegistry::new("test-node-8091".to_string()));
         let virtual_actor_manager = Arc::new(plexspaces_actor::VirtualActorManager::new(
             actor_registry.clone(),
         ));

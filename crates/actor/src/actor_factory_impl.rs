@@ -27,7 +27,7 @@
 //! It uses ActorRegistry, VirtualActorManager, and other services to spawn actors.
 
 use crate::core::{
-    ActorContext, ActorFactory, ActorId, ActorRegistry, ApplicationManager, ExitReason,
+    ActorContext, ActorFactory, ActorId, ActorRegistry, ExitReason,
     MessageSender, RequestContext, RequestContextExt, Service,
     ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
 };
@@ -95,6 +95,7 @@ pub struct ActorFactoryImpl {
 }
 
 impl ActorFactoryImpl {
+    /// Create a new `ActorFactoryImpl` backed by the given service locator.
     pub fn new(service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
         Self {
             service_locator,
@@ -102,6 +103,7 @@ impl ActorFactoryImpl {
         }
     }
 
+    /// Create a new `ActorFactoryImpl` wrapped in an `Arc`.
     pub async fn new_arc(service_locator: Arc<dyn ServiceLocatorTrait>) -> Arc<Self> {
         Arc::new(Self::new(service_locator))
     }
@@ -204,7 +206,6 @@ impl ActorFactoryImpl {
     /// - Creates ActorRef::local() with namespace from ctx
     /// - Registers in ActorRegistry via register_temporary_sender() with ctx
     /// - Returns temp_sender_ref for use in ask() pattern
-    /// Internal implementation of create_temporary_sender (trait method delegates here).
     pub async fn create_temporary_sender_impl(
         &self,
         ctx: &RequestContext,
@@ -300,13 +301,11 @@ impl ActorFactoryImpl {
                             "Found stored exit reason in actor (terminated due to EXIT)"
                         );
                     }
-                } else {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %actor_id_clone,
-                            "No stored exit reason (normal termination)"
-                        );
-                    }
+                } else if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        actor_id = %actor_id_clone,
+                        "No stored exit reason (normal termination)"
+                    );
                 }
                 cloned
             };
@@ -473,7 +472,7 @@ impl ActorFactoryImpl {
                 // Parse reason string - handle linked reasons properly
                 let converted = if reason.starts_with("linked:") {
                     // Use ExitReason::from_str to parse linked reasons correctly
-                    ExitReason::from_str(&reason)
+                    reason.parse().unwrap_or(ExitReason::Normal)
                 } else {
                     match reason.as_str() {
                         "normal" => ExitReason::Normal,
@@ -634,7 +633,7 @@ impl ActorFactory for ActorFactoryImpl {
             let tenant_id = metadata.spec.tenant_id.clone();
             let namespace = metadata.spec.namespace.clone();
             // Compute initial_state via wasm_init_payload (uses spec.args, injects actor_id).
-            let initial_state = crate::core::wasm_init_payload(&metadata.spec, &actor_id);
+            let _initial_state = crate::core::wasm_init_payload(&metadata.spec, &actor_id);
             let labels = metadata.spec.labels.clone();
             let tenant_id_clone = tenant_id.clone();
 
@@ -979,7 +978,7 @@ impl ActorFactory for ActorFactoryImpl {
             .map(|c| {
                 let mut cfg = mailbox_config_default();
                 if c.max_mailbox_size > 0 {
-                    cfg.capacity = c.max_mailbox_size as u32;
+                    cfg.capacity = c.max_mailbox_size;
                 }
                 cfg
             })
@@ -1101,7 +1100,7 @@ impl ActorFactoryImpl {
         ctx: &RequestContext,
         actor: Arc<ActorInstance>,
         actor_type: String,
-        initial_state: Vec<u8>,
+        _initial_state: Vec<u8>,
         labels: HashMap<String, String>,
     ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         // Use the provided actor_type (required); derive from behavior only as last resort
@@ -1242,15 +1241,13 @@ impl ActorFactoryImpl {
         // Check if actor has VirtualActorFacet
         let facets = actor.list_facets().await;
         let is_virtual = facets.contains(&"virtual_actor".to_string());
-        let mut activation_strategy_opt: Option<plexspaces_journaling::ActivationStrategy> = None;
-        let mut should_activate_eagerly = false;
         if is_virtual {
             // Virtual actor handling
             let actor_facets = actor.facets();
             let facets_guard = actor_facets.read().await;
             let virtual_facet_arc = facets_guard
                 .get_facet("virtual_actor")
-                .ok_or_else(|| format!("VirtualActorFacet not found in actor facets"))?;
+                .ok_or("VirtualActorFacet not found in actor facets")?;
 
             // Extract VirtualActorFacet to check activation strategy
             let virtual_facet_guard = virtual_facet_arc.read().await;
@@ -1259,17 +1256,17 @@ impl ActorFactoryImpl {
             let virtual_facet = virtual_facet_guard
                 .as_any()
                 .downcast_ref::<VirtualActorFacet>()
-                .ok_or_else(|| format!("Failed to downcast to VirtualActorFacet"))?;
+                .ok_or("Failed to downcast to VirtualActorFacet")?;
 
             // Check activation strategy
             let activation_strategy = virtual_facet.get_activation_strategy().await;
-            should_activate_eagerly = matches!(
+            let should_activate_eagerly = matches!(
                 activation_strategy,
                 plexspaces_journaling::ActivationStrategy::ActivationStrategyEager
                     | plexspaces_journaling::ActivationStrategy::ActivationStrategyPrewarm
             );
             let activation_strategy_clone = activation_strategy.clone();
-            activation_strategy_opt = Some(activation_strategy);
+            let activation_strategy_opt = Some(activation_strategy);
 
             // Create new facet for registration
             drop(virtual_facet_guard);
@@ -1312,7 +1309,7 @@ impl ActorFactoryImpl {
                 // This ensures that EAGER overrides used for reactivation (in activate_virtual_actor)
                 // do NOT overwrite the original lazy/eager strategy stored in type-level metadata.
                 use plexspaces_common::ActivationStrategy;
-                let activation_strategy = {
+                let _activation_strategy = {
                     // Use the actor_type parameter directly (not parsed from actor_id) because
                     // actor_id may use "name@node" format which differs from the registered type name.
                     let type_strategy = manager
@@ -1490,7 +1487,7 @@ impl ActorFactoryImpl {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
                 }
-                let (actor_arc, actor_ref) = self
+                let (_actor_arc, actor_ref) = self
                     .start_registered_local_actor(
                         actor,
                         &actor_id,
@@ -1552,30 +1549,6 @@ impl ActorFactoryImpl {
 
                 return Ok(actor_ref);
             }
-
-            // OBSERVABILITY: Log actor spawn with full context (after determining activation strategy)
-            let activation_info = match activation_strategy_opt {
-                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyLazy)
-                | Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyUnspecified) => {
-                    " (virtual actor with lazy activation - will activate on first message)"
-                }
-                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyEager) => {
-                    " (virtual actor with eager activation)"
-                }
-                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyPrewarm) => {
-                    " (virtual actor with prewarm activation)"
-                }
-                None => "",
-            };
-            tracing::info!(
-                actor_id = %actor_id,
-                node_id = %local_node_id,
-                namespace = %actor_namespace_for_log,
-                tenant_id = %actor_tenant_id_for_log,
-                actor_type = ?actor_type,
-                "Actor spawned{}",
-                activation_info
-            );
         }
 
         // OBSERVABILITY: Log actor spawn with full context (for non-virtual actors)
@@ -1785,7 +1758,7 @@ impl ActorFactoryImpl {
             let manager = virtual_actor_manager
                 .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
             if let Ok(facet_arc) = manager.get_facet(actor_id).await {
-                let mut facet_guard = facet_arc.write().await;
+                let facet_guard = facet_arc.write().await;
                 facet_guard.mark_deactivated().await;
             }
             manager.remove_from_active_tracking(actor_id).await;
@@ -1868,16 +1841,18 @@ impl ActorFactoryImpl {
             RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace.to_string());
 
         use crate::actor_context::RegisterResult;
-        use crate::object_registry_helpers::register_actor;
+        use crate::object_registry_helpers::{register_actor, RegisterActorParams};
         match register_actor(
             &obj_registry,
             &reg_ctx,
-            &actor_id.to_string(),
-            actor_type,
-            actor_id.name(),
-            actor_id.node_id(),
-            &grpc_address,
-            enforce_unique,
+            RegisterActorParams {
+                actor_id: actor_id.as_ref(),
+                actor_type,
+                actor_name: actor_id.name(),
+                node_id: actor_id.node_id(),
+                grpc_address: &grpc_address,
+                enforce_unique,
+            },
         )
         .await?
         {
@@ -1907,7 +1882,7 @@ impl ActorFactoryImpl {
         };
 
         use crate::object_registry_helpers::unregister_actor;
-        if let Err(e) = unregister_actor(&obj_registry, ctx, &actor_id.to_string()).await {
+        if let Err(e) = unregister_actor(&obj_registry, ctx, actor_id.as_ref()).await {
             let msg = e.to_string().to_lowercase();
             if msg.contains("not found") || msg.contains("does not exist") {
                 tracing::debug!(actor_id = %actor_id, "Actor not in object registry, skip unregister");
@@ -2100,10 +2075,6 @@ impl ActorFactoryImpl {
         .await
     }
 }
-
-/// Configure facets that need actor_ref and actor_service after actor spawn.
-///
-/// ## Purpose
 
 // Implement Service trait so ActorFactoryImpl can be registered in ServiceLocator
 impl Service for ActorFactoryImpl {

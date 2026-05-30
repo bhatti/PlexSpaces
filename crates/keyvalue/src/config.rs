@@ -50,7 +50,7 @@
 //! ```
 
 use crate::{KVError, KVResult, KeyValueStore};
-use plexspaces_common::{resolve_shared_db_backend, RequestContextExt, SharedDbBackend};
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_proto::storage::v1::{
     storage_provider_config, SharedDbConfig, StorageProvider, StorageProviderConfig,
 };
@@ -476,6 +476,7 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_common::RequestContextExt;
     use plexspaces_proto::storage::v1::SharedDbConfig;
 
     #[test]
@@ -503,6 +504,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_keyvalue_in_memory() {
         let config = KVConfig::new(BackendType::InMemory);
@@ -517,6 +519,7 @@ mod tests {
         assert_eq!(value, Some(b"value".to_vec()));
     }
 
+    #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_keyvalue_from_shared_db_sqlite() {
         let shared_db = SharedDbConfig {

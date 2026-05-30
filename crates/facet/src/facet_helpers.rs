@@ -150,7 +150,7 @@ pub async fn create_facet_from_json(
 /// ## Arguments
 /// * `facet_config` - JSON config containing facet configurations
 ///   - If object: each key is a facet type, value is its config
-///   - If object with single key: legacy format (just virtual_actor config)
+///   - If object with single key: single-facet format (just virtual_actor config)
 /// * `facet_registry` - FacetRegistry to create facet instances
 ///
 /// ## Returns

@@ -42,10 +42,7 @@ pub mod virtual_actor_config;
 pub mod test_helpers;
 
 pub use activation_strategy::{from_config_str, to_config_str, ActivationStrategy};
-pub use aws_config::{
-    AWSConfig, AwsConfigExt, DLQConfig, DynamoDBConfig, DynamoDbConfigExt, S3Config, S3ConfigExt,
-    SQSConfig, SqsConfigExt,
-};
+pub use aws_config::{AwsConfigExt, DynamoDbConfigExt, S3Config, S3ConfigExt, SqsConfigExt};
 pub use config_manager::{
     get_env, get_env_bool, get_env_or, get_env_u32, get_env_u64, initialize, EnvConfig,
 };

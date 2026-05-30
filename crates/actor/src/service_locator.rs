@@ -68,14 +68,14 @@ pub async fn request_context_from_grpc_request(
     let tenant_id_from_labels = labels
         .get("tenant_id")
         .filter(|s| !s.is_empty())
-        .map(|s| s.clone());
+        .cloned();
 
     // Extract namespace - can be empty, RequestContext::from_auth handles defaults
     let namespace_from_header = metadata
         .get("x-namespace")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let namespace_from_labels = labels.get("namespace").map(|s| s.clone());
+    let namespace_from_labels = labels.get("namespace").cloned();
 
     // Extract user_id and admin from metadata
     let user_id = metadata

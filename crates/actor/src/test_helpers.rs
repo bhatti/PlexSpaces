@@ -88,7 +88,7 @@ pub fn docker_compose_available() -> bool {
     }
     // Try docker compose (newer versions)
     Command::new("docker")
-        .args(&["compose", "version"])
+        .args(["compose", "version"])
         .output()
         .is_ok()
 }
@@ -183,10 +183,7 @@ async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
 async fn check_redis_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
 
-    match timeout(timeout_duration, TcpStream::connect(addr)).await {
-        Ok(Ok(_)) => true,
-        _ => false,
-    }
+    matches!(timeout(timeout_duration, TcpStream::connect(addr)).await, Ok(Ok(_)))
 }
 
 /// Get DynamoDB endpoint URL (from env or default)
@@ -470,8 +467,5 @@ pub fn firecracker_prerequisites_error() -> Option<String> {
 async fn check_tcp_port(addr: &str, timeout_duration: Duration) -> bool {
     use tokio::net::TcpStream;
 
-    match timeout(timeout_duration, TcpStream::connect(addr)).await {
-        Ok(Ok(_)) => true,
-        _ => false,
-    }
+    matches!(timeout(timeout_duration, TcpStream::connect(addr)).await, Ok(Ok(_)))
 }

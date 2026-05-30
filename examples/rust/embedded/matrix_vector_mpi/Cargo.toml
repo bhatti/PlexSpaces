@@ -23,7 +23,6 @@ path = "tests/e2e_application.rs"
 [dependencies]
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-proto = { path = "../../../../crates/proto" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-persistence = { path = "../../../../crates/persistence" }
 plexspaces-tuplespace = { path = "../../../../crates/tuplespace" }

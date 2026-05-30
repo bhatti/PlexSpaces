@@ -57,6 +57,8 @@ use plexspaces_channel::{create_channel, Channel, ChannelError};
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider};
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 
+type IdempotencyCache = Arc<RwLock<LruCache<String, (SystemTime, Option<ProtoMessage>)>>>;
+
 /// Prefix for all control messages (e.g. "__DOWN__", "__EXIT__").
 /// Mirrors `plexspaces_actor::CTRL_MSG_PREFIX` without the cyclic dependency.
 const CTRL_MSG_PREFIX: &str = "__";
@@ -80,8 +82,6 @@ use lru_cache::LruCache;
 #[path = "message_helpers.rs"]
 mod message_helpers;
 pub use message_helpers::*;
-// Re-export Message so tests using `use super::*` can access it
-pub use plexspaces_proto::common::v1::Message;
 
 // Re-export proto-generated types
 pub use plexspaces_proto::mailbox::v1::{
@@ -89,7 +89,7 @@ pub use plexspaces_proto::mailbox::v1::{
     OrderingStrategy,
 };
 
-// Wrapper for MailboxError to provide thiserror compatibility
+/// Mailbox operation errors
 #[derive(Debug, thiserror::Error)]
 pub enum MailboxError {
     /// Mailbox has reached capacity and cannot accept more messages
@@ -141,8 +141,7 @@ impl From<MailboxErrorProto> for MailboxError {
     }
 }
 
-// Helper functions for MessagePriority conversion (proto uses different values)
-// Cannot add methods to proto-generated types, so use free functions
+/// Returns the numeric sort value for a `MessagePriority` (higher = higher priority).
 pub fn message_priority_value(priority: &MessagePriority) -> i32 {
     match priority {
         MessagePriority::MessagePriorityUnspecified => 0,
@@ -155,20 +154,8 @@ pub fn message_priority_value(priority: &MessagePriority) -> i32 {
     }
 }
 
-fn message_priority_from_value(value: i32) -> MessagePriority {
-    // Proto values: System=10, Highest=5, High=4, Normal=3, Low=2, Lowest=1
-    match value {
-        10 => MessagePriority::System,
-        5 => MessagePriority::Highest,
-        4 => MessagePriority::High,
-        3 => MessagePriority::Normal,
-        2 => MessagePriority::Low,
-        1 => MessagePriority::Lowest,
-        _ => MessagePriority::Normal,
-    }
-}
 
-// Helper functions for MailboxConfig (cannot add methods to proto-generated types)
+/// Returns a `MailboxConfig` populated with sensible production defaults.
 pub fn mailbox_config_default() -> MailboxConfig {
     MailboxConfig {
         mailbox_type: 0, // MailboxTypeUnspecified (defaults to Unbounded)
@@ -265,13 +252,7 @@ pub struct Mailbox {
     /// LRU cache for idempotency key deduplication (idempotency_key -> (timestamp, cached_response))
     /// Fixed size cache (default: 10000 entries) with TTL expiration
     /// Idempotency keys seen within deduplication_window return cached response
-    idempotency_cache: Arc<RwLock<LruCache<String, (SystemTime, Option<ProtoMessage>)>>>,
-    /// Deduplication time window (default: 24 hours)
-    deduplication_window: Duration,
-    /// Maximum cache size for message ID deduplication (default: 10000)
-    message_id_cache_size: usize,
-    /// Maximum cache size for idempotency key deduplication (default: 10000)
-    idempotency_cache_size: usize,
+    idempotency_cache: IdempotencyCache,
     /// Shutdown flag: when true, mailbox stops accepting new messages
     /// For non-memory channels, also stops receiving from channel backend
     shutdown_flag: Arc<RwLock<bool>>,
@@ -434,9 +415,6 @@ impl Mailbox {
                 mailbox_config_idempotency_cache_size(&config),
                 mailbox_config_deduplication_window(&config),
             ))),
-            deduplication_window: mailbox_config_deduplication_window(&config),
-            message_id_cache_size: mailbox_config_message_id_cache_size(&config),
-            idempotency_cache_size: mailbox_config_idempotency_cache_size(&config),
             shutdown_flag: Arc::new(RwLock::new(false)),
             in_progress_count: Arc::new(RwLock::new(0)),
             ctrl_sender,
@@ -1453,13 +1431,11 @@ impl Mailbox {
                     error = %e,
                     "Failed to close channel during shutdown"
                 );
-            } else {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        mailbox_id = %self.mailbox_id,
-                        "Channel closed successfully"
-                    );
-                }
+            } else if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    mailbox_id = %self.mailbox_id,
+                    "Channel closed successfully"
+                );
             }
         }
 
@@ -1514,6 +1490,7 @@ impl MailboxObservabilityStats {
 mod tests {
     use super::*;
     use plexspaces_proto::channel::v1::ChannelProvider;
+    use plexspaces_proto::common::v1::Message;
 
     /// Helper to create a test mailbox with InMemory backend
     async fn create_test_mailbox(config: MailboxConfig) -> Mailbox {

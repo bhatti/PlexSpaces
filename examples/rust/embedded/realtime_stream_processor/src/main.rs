@@ -62,7 +62,6 @@ use anyhow::Result;
 
 // Required for macro-generated code
 
-extern crate plexspaces_behavior;
 
 // =============================================================================
 // Domain Types - Clickstream Analytics

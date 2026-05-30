@@ -41,7 +41,7 @@ use plexspaces_actor::supervisor::{
 };
 use plexspaces_actor::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLocator};
 use plexspaces_actor::{ActorInstance, ChildSpec};
-use plexspaces_behavior::MockBehavior;
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 use plexspaces_proto::supervision::v1::SupervisorEventType as ProtoSupervisorEventType;

@@ -40,19 +40,17 @@
 //! ```
 
 use async_trait::async_trait;
-use metrics;
 use plexspaces_common::RequestContextExt;
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
-use plexspaces_service_traits::{ActorService, ServiceLocatorBase};
+use plexspaces_service_traits::ServiceLocatorBase;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing;
 
 // Optional dependency for distributed locking
 #[cfg(feature = "locks")]
@@ -188,7 +186,7 @@ impl TimerFacet {
             .read()
             .await
             .clone()
-            .ok_or_else(|| TimerError::NotAttached)?;
+            .ok_or(TimerError::NotAttached)?;
 
         // Validate registration
         if registration.timer_name.is_empty() {
@@ -266,7 +264,7 @@ impl TimerFacet {
                 let mut headers = std::collections::HashMap::new();
                 headers.insert("type".to_string(), "TimerFired".to_string());
                 headers.insert("timer_name".to_string(), timer_name_for_task.clone());
-                let mut message = Message {
+                let message = Message {
                     id: ulid::Ulid::new().to_string(),
                     payload,
                     message_type: "TimerFired".to_string(),
@@ -453,29 +451,6 @@ impl TimerFacet {
         Ok(timer_name_for_return)
     }
 
-    /// Register a timer with distributed lock (opt-in multi-node protection)
-    ///
-    /// ## Purpose
-    /// Registers a timer with distributed locking to prevent duplicate execution
-    /// across multiple nodes. Only the node holding the lock will fire the timer.
-    ///
-    /// ## Usage
-    /// ```rust
-    /// // With LockManager configured
-    /// timer_facet.register_with_lock(
-    ///     "heartbeat",
-    ///     Duration::from_secs(2),
-    ///     true, // periodic
-    ///     Some("heartbeat-lock".to_string()), // lock key
-    /// ).await?;
-    /// ```
-    ///
-    /// ## Arguments
-    /// * `name` - Timer name
-    /// * `interval` - Interval for periodic timers, or delay for one-time timers
-    /// * `periodic` - Whether timer is periodic
-    /// Note: lock_key removed from TimerRegistration proto - locking disabled
-
     /// Unregister a timer
     ///
     /// ## Arguments
@@ -537,7 +512,7 @@ impl TimerFacet {
             .read()
             .await
             .clone()
-            .ok_or_else(|| TimerError::NotAttached)?;
+            .ok_or(TimerError::NotAttached)?;
 
         let registration = TimerRegistration {
             actor_id,
@@ -720,15 +695,19 @@ impl Facet for TimerFacet {
 /// Timer errors
 #[derive(Debug, thiserror::Error)]
 pub enum TimerError {
+    /// Timer facet is not yet attached to an actor.
     #[error("Timer facet not attached to actor")]
     NotAttached,
 
+    /// A timer with the given name already exists.
     #[error("Timer already exists: {0}")]
     TimerExists(String),
 
+    /// No timer with the given name was found.
     #[error("Timer not found: {0}")]
     TimerNotFound(String),
 
+    /// The timer registration is invalid.
     #[error("Invalid registration: {0}")]
     InvalidRegistration(String),
 }

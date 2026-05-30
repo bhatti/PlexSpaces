@@ -9,7 +9,7 @@ use plexspaces_actor::{
     RequestContext, RequestContextExt,
 };
 use plexspaces_actor::{InitializableServiceLocator, ServiceLocator, ServiceLocatorBase};
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::{
     DurabilityFacet, JournalStorage, SqliteJournalStorage, StateLoader, VirtualActorFacet,
 };

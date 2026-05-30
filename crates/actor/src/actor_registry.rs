@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::actor_context::{ActorService, ObjectRegistry};
+use crate::actor_context::ActorService;
 use crate::service_locator_trait::ServiceLocator;
 use crate::ActorFactory;
 use crate::Service;
@@ -45,6 +45,9 @@ use tracing;
 use crate::actor_monitor::{create_down_message, create_exit_message, exit_reason_to_string};
 // MonitorLink is now defined in actor_monitor and re-exported from crate root.
 pub use crate::actor_monitor::MonitorLink;
+
+/// Type index key: (tenant_id, namespace, actor_type) mapped to actor IDs.
+type ActorTypeIndex = Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>;
 
 /// Error types for ActorRegistry operations
 #[derive(Debug, thiserror::Error)]
@@ -96,8 +99,6 @@ pub enum ActorRegistryError {
 /// - Actor configurations
 /// - Lifecycle event subscribers
 pub struct ActorRegistry {
-    /// ObjectRegistry retained for local registry integration points.
-    object_registry: Arc<dyn ObjectRegistry>,
     /// Local actor senders keyed by tenant/namespace scope plus actor id.
     /// Virtual actors may be absent while passivated and are re-instantiated
     /// from VirtualActorManager metadata on demand.
@@ -143,7 +144,7 @@ pub struct ActorRegistry {
     /// Used for FaaS-style actor request routing to quickly find actors by type
     /// Maintained in sync with actors map for O(1) lookup
     /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
-    actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
+    actor_type_index: ActorTypeIndex,
     // === Parent-Child Relationships (Phase 3) ===
     /// Parent-to-children mapping: parent_id -> Vec<child_id>
     /// Tracks supervision hierarchy for graceful shutdown and subtree operations
@@ -184,6 +185,22 @@ struct ScopedActorKey {
     actor_id: ActorId,
 }
 
+/// Parameters for [`ActorRegistry::register_actor`].
+pub struct ActorRegistrationParams {
+    /// The actor's unique identifier.
+    pub actor_id: ActorId,
+    /// Message sender for the running actor.
+    pub sender: Arc<dyn MessageSender>,
+    /// Actor type string used for dashboard visibility and type-index lookups.
+    pub actor_type: String,
+    /// Optional resource configuration attached to this actor.
+    pub config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+    /// Optional local runtime state handle (present only for locally running actors).
+    pub instance: Option<Arc<dyn crate::actor_state_checker::ActorStateHandle>>,
+    /// Optional OTP-style behavior kind for logging (GenServer, GenEvent, etc.).
+    pub behavior_kind: Option<crate::BehaviorType>,
+}
+
 impl ActorRegistry {
     fn scoped_actor_key(
         tenant_id: impl Into<String>,
@@ -198,7 +215,6 @@ impl ActorRegistry {
     }
 
     /// ## Arguments
-    /// * `object_registry` - Object registry service
     /// * `local_node_id` - ID of the local node
     ///
     /// ## Returns
@@ -207,16 +223,13 @@ impl ActorRegistry {
     /// ## Example
     /// ```rust,no_run
     /// # use plexspaces_actor::ActorRegistry;
-    /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let object_registry = Arc::new(plexspaces_object_registry::ObjectRegistry::new(/* ... */));
-    /// let registry = ActorRegistry::new(object_registry, "node1".to_string());
+    /// let registry = ActorRegistry::new("node1".to_string());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(object_registry: Arc<dyn ObjectRegistry>, local_node_id: String) -> Self {
+    pub fn new(local_node_id: String) -> Self {
         ActorRegistry {
-            object_registry,
             actors: Arc::new(RwLock::new(HashMap::new())),
             local_node_id,
             facet_manager: Arc::new(plexspaces_facet::FacetManager::new()),
@@ -243,6 +256,7 @@ impl ActorRegistry {
         *self.local_listen_addr.write().await = addr;
     }
 
+    /// Set the ActorFactory used to spawn new actors from spec.
     pub async fn set_actor_factory(&self, actor_factory: Arc<dyn ActorFactory>) {
         *self.actor_factory.write().await = Some(actor_factory);
     }
@@ -625,12 +639,11 @@ impl ActorRegistry {
     }
 
     /// Get actor type index (for efficient type-based lookups)
-    pub fn actor_type_index(
-        &self,
-    ) -> &Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>> {
+    pub fn actor_type_index(&self) -> &ActorTypeIndex {
         &self.actor_type_index
     }
 
+    /// Convert a `BehaviorType` to the canonical string key stored in the registry.
     pub fn behavior_kind_key(behavior_kind: &crate::BehaviorType) -> String {
         match behavior_kind {
             crate::BehaviorType::GenServer => "gen_server".to_string(),
@@ -648,34 +661,19 @@ impl ActorRegistry {
             .and_then(|sender| sender.behavior_kind())
     }
 
-    /// Register an actor (consolidated method for all actor types)
+    /// Register an actor (consolidated method for all actor types).
     ///
-    /// ## Purpose
-    /// Unified registration method for all actors.
-    ///
-    /// ## Arguments
-    /// * `ctx` - Request context for tenant/namespace isolation
-    /// * `actor_id` - Actor ID
-    /// * `sender` - MessageSender for a running actor
-    /// * `actor_type` - Optional actor type for dashboard visibility
-    /// * `config` - Optional actor configuration (resource requirements, etc.)
-    /// * `instance` - Optional local runtime/state handle for running local actors
-    /// * `behavior_kind` - Optional OTP-style behavior kind for logging (GenServer, GenEvent, etc.)
-    ///
-    /// ## Design
-    /// - Running actors are registered with their live `MessageSender`
-    /// - Local runtime state hangs off that sender through `ActorStateHandle`
-    /// - Config remains separate for resource tracking
-    pub async fn register_actor(
-        &self,
-        ctx: &RequestContext,
-        actor_id: ActorId,
-        sender: Arc<dyn MessageSender>,
-        actor_type: String,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        instance: Option<Arc<dyn crate::actor_state_checker::ActorStateHandle>>,
-        behavior_kind: Option<crate::BehaviorType>,
-    ) {
+    /// Accepts a [`ActorRegistrationParams`] bundle instead of positional arguments
+    /// to keep the signature within clippy's argument limit and make call sites self-documenting.
+    pub async fn register_actor(&self, ctx: &RequestContext, p: ActorRegistrationParams) {
+        let ActorRegistrationParams {
+            actor_id,
+            sender,
+            actor_type,
+            config,
+            instance,
+            behavior_kind,
+        } = p;
         sender.set_actor_type(Some(actor_type.clone())).await;
         if let Some(ref behavior_kind) = behavior_kind {
             sender
@@ -1064,7 +1062,7 @@ impl ActorRegistry {
         let result = if is_remote {
             // Remote node: route via ActorService (gRPC).
             let svc = self.actor_service.read().await.clone();
-            svc.send(ctx, &actor_id.to_string(), message)
+            svc.send(ctx, actor_id.as_ref(), message)
                 .await
                 .map(|_| ())
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
@@ -1127,7 +1125,7 @@ impl ActorRegistry {
 
         let dispatch_result = if is_remote {
             let svc = self.actor_service.read().await.clone();
-            svc.send(ctx, &actor_id.to_string(), message)
+            svc.send(ctx, actor_id.as_ref(), message)
                 .await
                 .map(|_| ())
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
@@ -1206,16 +1204,6 @@ impl ActorRegistry {
             let _ = subscriber.send(event.clone());
         }
     }
-
-    /// Register actor with config
-    ///
-    /// ## Purpose
-    /// Registers an actor with optional configuration for resource tracking.
-    /// This is called after an actor is spawned to track it in the registry.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor ID
-    /// * `config` - Optional actor configuration
 
     /// Unregister actor with cleanup
     ///
@@ -1297,16 +1285,6 @@ impl ActorRegistry {
         Ok(())
     }
 
-    /// Notify monitors that an actor has terminated
-    ///
-    /// ## Purpose
-    /// Notifies all supervisors monitoring this actor that it has terminated.
-    /// This is part of the Erlang-style supervision system.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - The actor that terminated
-    /// * `reason` - Reason for termination (e.g., "normal", "panic: ...", "killed")
-
     // === Temporary Sender Management ===
 
     /// Register a temporary sender ActorRef for ask() pattern
@@ -1337,12 +1315,14 @@ impl ActorRegistry {
         let correlation_id_clone = correlation_id.clone();
         self.register_actor(
             ctx,
-            temporary_sender_id.clone(),
-            temporary_sender_ref,
-            TEMP_SENDER_ACTOR_TYPE.to_string(),
-            None,
-            None,
-            None,
+            ActorRegistrationParams {
+                actor_id: temporary_sender_id.clone(),
+                sender: temporary_sender_ref,
+                actor_type: TEMP_SENDER_ACTOR_TYPE.to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 
@@ -1400,14 +1380,14 @@ impl ActorRegistry {
             );
         }
         let mut temp_senders = self.temporary_senders.write().await;
-        if temp_senders.remove(temporary_sender_id).is_some() {
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
-                    temporary_sender_id,
-                    temp_senders.len()
-                );
-            }
+        if temp_senders.remove(temporary_sender_id).is_some()
+            && tracing::enabled!(tracing::Level::TRACE)
+        {
+            tracing::trace!(
+                "ActorRegistry: Removed temporary sender: temporary_sender_id={}, remaining={}",
+                temporary_sender_id,
+                temp_senders.len()
+            );
         }
     }
 
@@ -1449,17 +1429,14 @@ impl ActorRegistry {
             let after_count = temp_senders.len();
 
             // OBSERVABILITY: Track expired temporary sender cleanup
-            #[cfg(feature = "metrics")]
-            {
-                metrics::counter!("plexspaces_actor_registry_temporary_sender_expired_total",
-                    "node_id" => self.local_node_id.clone()
-                )
-                .increment(expired_count as u64);
-                metrics::gauge!("plexspaces_actor_registry_temporary_sender_mappings",
-                    "node_id" => self.local_node_id.clone()
-                )
-                .set(after_count as f64);
-            }
+            metrics::counter!("plexspaces_actor_registry_temporary_sender_expired_total",
+                "node_id" => self.local_node_id.clone()
+            )
+            .increment(expired_count as u64);
+            metrics::gauge!("plexspaces_actor_registry_temporary_sender_mappings",
+                "node_id" => self.local_node_id.clone()
+            )
+            .set(after_count as f64);
 
             after_count
         } else {
@@ -1508,6 +1485,7 @@ impl ActorRegistry {
         actor_ids
     }
 
+    /// Returns the number of outstanding temporary senders (reply correlations in flight).
     pub async fn temporary_sender_count(&self) -> usize {
         let temp_senders = self.temporary_senders.read().await;
         temp_senders.len()
@@ -2126,7 +2104,7 @@ impl ActorRegistry {
                 let svc = self.actor_service.read().await.clone();
                 svc.send(
                     &monitor_link.monitoring_context,
-                    &monitoring_id.to_string(),
+                    monitoring_id.as_ref(),
                     down_msg,
                 )
                 .await

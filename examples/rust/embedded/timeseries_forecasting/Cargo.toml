@@ -17,7 +17,6 @@ path = "src/main.rs"
 # PlexSpaces SDK (includes core, actor, macros)
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 plexspaces-actor = { path = "../../../../crates/actor" }  # Required for macro-generated code
-plexspaces-behavior = { path = "../../../../crates/behavior" }  # Required for macro-generated code
 plexspaces-node = { path = "../../../../crates/node" }
 
 # Async runtime

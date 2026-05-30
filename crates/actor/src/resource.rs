@@ -37,23 +37,48 @@ pub use plexspaces_proto::actor::v1::{
 // ResourceViolation — stays in Rust (thiserror ADT, non-serializable payloads)
 // ============================================================================
 
-/// Resource violation error
+/// Resource limit exceeded by an actor at runtime.
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceViolation {
+    /// CPU utilization exceeds the contract ceiling.
     #[error("CPU usage exceeded: allowed {allowed}%, actual {actual}%")]
-    CpuExceeded { allowed: f32, actual: f32 },
+    CpuExceeded {
+        /// Configured CPU percent ceiling.
+        allowed: f32,
+        /// Measured CPU percent at time of violation.
+        actual: f32,
+    },
 
+    /// Memory usage exceeds the contract ceiling.
     #[error("Memory usage exceeded: allowed {allowed} bytes, actual {actual} bytes")]
-    MemoryExceeded { allowed: u64, actual: u64 },
+    MemoryExceeded {
+        /// Configured memory ceiling in bytes.
+        allowed: u64,
+        /// Measured memory usage in bytes at time of violation.
+        actual: u64,
+    },
 
+    /// I/O operations per second exceed the contract ceiling.
     #[error("I/O operations exceeded: allowed {allowed}/s, actual {actual}/s")]
-    IoExceeded { allowed: u32, actual: u32 },
+    IoExceeded {
+        /// Configured I/O ops/s ceiling.
+        allowed: u32,
+        /// Measured I/O ops/s at time of violation.
+        actual: u32,
+    },
 
+    /// Network bandwidth exceeds the contract ceiling.
     #[error("Network bandwidth exceeded: allowed {allowed} Mbps, actual {actual} Mbps")]
-    NetworkExceeded { allowed: u32, actual: u32 },
+    NetworkExceeded {
+        /// Configured bandwidth ceiling in Mbps.
+        allowed: u32,
+        /// Measured bandwidth in Mbps at time of violation.
+        actual: u32,
+    },
 }
 
 impl ResourceViolation {
+    /// Returns the proto `ResourceViolationCode` enum value for this violation.
     pub fn code(&self) -> ResourceViolationCode {
         match self {
             ResourceViolation::CpuExceeded { .. } => {
@@ -76,10 +101,15 @@ impl ResourceViolation {
 // Extension trait: ResourceContractExt — factory methods and validation
 // ============================================================================
 
+/// Factory methods and usage validation for `ResourceContract`.
 pub trait ResourceContractExt {
+    /// Returns a preset contract suitable for CPU-bound actors (80% CPU, 1 GB RAM).
     fn cpu_intensive() -> ResourceContract;
+    /// Returns a preset contract suitable for I/O-bound actors (20% CPU, 10 000 IOPS).
     fn io_intensive() -> ResourceContract;
+    /// Returns a preset contract suitable for network-bound actors (30% CPU, 100 Mbps).
     fn network_intensive() -> ResourceContract;
+    /// Checks `usage` against this contract; returns `Err(ResourceViolation)` on first breach.
     fn validate_usage(&self, usage: &ResourceUsage) -> Result<(), ResourceViolation>;
 }
 
@@ -155,10 +185,15 @@ impl ResourceContractExt for ResourceContract {
 // Extension trait: ActorHealthExt — factory method for stuck detection
 // ============================================================================
 
+/// Factory methods and stuck-detection helpers for `ActorHealth`.
 pub trait ActorHealthExt {
+    /// Returns a healthy `ActorHealth` with no stuck_since or failure_reason.
     fn healthy() -> ActorHealth;
+    /// Returns a stuck `ActorHealth` with `stuck_since` set to `since`.
     fn stuck(since: Duration) -> ActorHealth;
+    /// Returns `healthy()` when `last_message_elapsed <= threshold`, otherwise `stuck(elapsed)`.
     fn check_stuck(last_message_elapsed: Duration, threshold: Duration) -> ActorHealth;
+    /// Returns true iff `status == Healthy`.
     fn is_healthy(&self) -> bool;
 }
 

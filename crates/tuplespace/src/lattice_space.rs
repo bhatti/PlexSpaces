@@ -23,7 +23,7 @@
 //! their states without locks or consensus.
 
 use crate::{Pattern, Tuple};
-use plexspaces_lattice::{ConsistencyLevel, Lattice, OrSetLattice, VectorClock};
+use plexspaces_lattice::{Lattice, OrSetLattice, VectorClock};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -40,20 +40,15 @@ pub struct LatticeTupleSpace {
 
     /// Node ID for this replica
     node_id: String,
-
-    /// Consistency level for operations
-    #[allow(dead_code)]
-    consistency: ConsistencyLevel,
 }
 
 impl LatticeTupleSpace {
     /// Create a new lattice-based TupleSpace
-    pub fn new(node_id: String, consistency: ConsistencyLevel) -> Self {
+    pub fn new(node_id: String) -> Self {
         LatticeTupleSpace {
             tuples: Arc::new(RwLock::new(OrSetLattice::new())),
             clock: Arc::new(RwLock::new(VectorClock::new())),
             node_id,
-            consistency,
         }
     }
 
@@ -253,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lattice_tuplespace_write_read() {
-        let space = LatticeTupleSpace::new("node1".to_string(), ConsistencyLevel::Eventual);
+        let space = LatticeTupleSpace::new("node1".to_string());
 
         // Write tuples
         let tuple1 = Tuple::new(vec!["user".into(), "alice".into(), 25.into()]);
@@ -275,8 +270,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_lattice_tuplespace_merge() {
-        let space1 = LatticeTupleSpace::new("node1".to_string(), ConsistencyLevel::Eventual);
-        let space2 = LatticeTupleSpace::new("node2".to_string(), ConsistencyLevel::Eventual);
+        let space1 = LatticeTupleSpace::new("node1".to_string());
+        let space2 = LatticeTupleSpace::new("node2".to_string());
 
         // Write different tuples to each space
         let tuple1 = Tuple::new(vec!["data".into(), "from_node1".into()]);
@@ -299,8 +294,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_vector_clock_causality() {
-        let space1 = LatticeTupleSpace::new("node1".to_string(), ConsistencyLevel::Causal);
-        let space2 = LatticeTupleSpace::new("node2".to_string(), ConsistencyLevel::Causal);
+        let space1 = LatticeTupleSpace::new("node1".to_string());
+        let space2 = LatticeTupleSpace::new("node2".to_string());
 
         // Write to space1
         space1.write(Tuple::new(vec!["test".into()])).await.unwrap();

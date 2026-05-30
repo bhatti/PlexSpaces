@@ -47,6 +47,7 @@ pub trait RequestContextExt: Sized {
     /// Create a new `RequestContext` with the given tenant_id, namespace, and auth setting.
     ///
     /// Returns an error if `auth_enabled` is true and `tenant_id` is empty.
+    #[allow(clippy::new_ret_no_self)]
     fn new(
         tenant_id: String,
         namespace: String,
@@ -74,6 +75,7 @@ pub trait RequestContextExt: Sized {
     ) -> Result<RequestContext, RequestContextError>;
 
     /// Same as [`from_auth`](RequestContextExt::from_auth) but also attaches propagation headers.
+    #[allow(clippy::too_many_arguments)]
     fn from_auth_with_headers(
         tenant_id: Option<String>,
         namespace: Option<String>,
@@ -227,6 +229,7 @@ impl RequestContextExt for RequestContext {
         Ok(ctx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn from_auth_with_headers(
         tenant_id: Option<String>,
         namespace: Option<String>,
@@ -448,21 +451,21 @@ mod tests {
 
     #[test]
     fn test_with_user_id() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "default".to_string())
             .with_user_id("user-456".to_string());
         assert_eq!(ctx.user_id(), Some("user-456"));
     }
 
     #[test]
     fn test_with_correlation_id() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "default".to_string())
             .with_correlation_id("corr-789".to_string());
         assert_eq!(ctx.correlation_id(), Some("corr-789"));
     }
 
     #[test]
     fn test_with_metadata() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
+        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "default".to_string())
             .with_metadata("key1".to_string(), "value1".to_string())
             .with_metadata("key2".to_string(), "value2".to_string());
 

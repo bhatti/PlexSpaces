@@ -22,6 +22,7 @@ use object_store::local::LocalFileSystem;
 use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_blob::{
     repository::sql::SqlBlobRepository, repository::ListFilters, BlobError, BlobService,
+    UploadBlobParams,
 };
 use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
@@ -97,14 +98,12 @@ async fn test_upload_and_download() {
     let metadata = service
         .upload_blob(
             &ctx,
-            "test.txt",
-            data.clone(),
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams {
+                name: "test.txt".to_string(),
+                data: data.clone(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -135,14 +134,7 @@ async fn test_deduplication() {
     let metadata1 = service
         .upload_blob(
             &ctx,
-            "file1.txt",
-            data.clone(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "file1.txt".to_string(), data: data.clone(), ..Default::default() },
         )
         .await
         .unwrap();
@@ -151,14 +143,7 @@ async fn test_deduplication() {
     let metadata2 = service
         .upload_blob(
             &ctx,
-            "file2.txt",
-            data.clone(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "file2.txt".to_string(), data: data.clone(), ..Default::default() },
         )
         .await
         .unwrap();
@@ -176,18 +161,15 @@ async fn test_get_metadata() {
     let metadata = service
         .upload_blob(
             &ctx,
-            "test.txt",
-            b"content".to_vec(),
-            Some("text/plain".to_string()),
-            Some("group1".to_string()),
-            Some("ARTIFACTS".to_string()),
-            {
-                let mut m = std::collections::HashMap::new();
-                m.insert("key1".to_string(), "value1".to_string());
-                m
+            UploadBlobParams {
+                name: "test.txt".to_string(),
+                data: b"content".to_vec(),
+                content_type: Some("text/plain".to_string()),
+                blob_group: Some("group1".to_string()),
+                kind: Some("ARTIFACTS".to_string()),
+                metadata: [("key1".to_string(), "value1".to_string())].into_iter().collect(),
+                ..Default::default()
             },
-            std::collections::HashMap::new(),
-            None,
         )
         .await
         .unwrap();
@@ -210,18 +192,12 @@ async fn test_list_blobs() {
         service
             .upload_blob(
                 &ctx,
-                &format!("file{}.txt", i),
-                format!("content{}", i).into_bytes(),
-                None,
-                if i % 2 == 0 {
-                    Some("even".to_string())
-                } else {
-                    Some("odd".to_string())
+                UploadBlobParams {
+                    name: format!("file{}.txt", i),
+                    data: format!("content{}", i).into_bytes(),
+                    blob_group: Some(if i % 2 == 0 { "even" } else { "odd" }.to_string()),
+                    ..Default::default()
                 },
-                None,
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-                None,
             )
             .await
             .unwrap();
@@ -255,14 +231,7 @@ async fn test_delete_blob() {
     let metadata = service
         .upload_blob(
             &ctx,
-            "test.txt",
-            b"content".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "test.txt".to_string(), data: b"content".to_vec(), ..Default::default() },
         )
         .await
         .unwrap();
@@ -289,14 +258,7 @@ async fn test_empty_data_error() {
     let result = service
         .upload_blob(
             &ctx,
-            "empty.txt",
-            vec![],
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "empty.txt".to_string(), data: vec![], ..Default::default() },
         )
         .await;
 
@@ -326,14 +288,12 @@ async fn test_expiration() {
     let metadata = service
         .upload_blob(
             &ctx,
-            "test.txt",
-            b"content".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            Some(Duration::hours(1)),
+            UploadBlobParams {
+                name: "test.txt".to_string(),
+                data: b"content".to_vec(),
+                expires_after: Some(Duration::hours(1)),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -355,14 +315,7 @@ async fn test_multi_tenancy_isolation() {
     let metadata1 = service
         .upload_blob(
             &ctx1,
-            "file.txt",
-            b"tenant1".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "file.txt".to_string(), data: b"tenant1".to_vec(), ..Default::default() },
         )
         .await
         .unwrap();
@@ -371,14 +324,7 @@ async fn test_multi_tenancy_isolation() {
     let metadata2 = service
         .upload_blob(
             &ctx2,
-            "file.txt",
-            b"tenant2".to_vec(),
-            None,
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams { name: "file.txt".to_string(), data: b"tenant2".to_vec(), ..Default::default() },
         )
         .await
         .unwrap();
@@ -470,14 +416,12 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
     let metadata1 = service
         .upload_blob(
             &ctx,
-            "stale_test.txt",
-            data.clone(),
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams {
+                name: "stale_test.txt".to_string(),
+                data: data.clone(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -517,14 +461,12 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
     let metadata2 = service
         .upload_blob(
             &ctx,
-            "stale_test_new.txt",
-            data.clone(),
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams {
+                name: "stale_test_new.txt".to_string(),
+                data: data.clone(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -563,14 +505,12 @@ async fn test_blob_operations_by_name() {
     let metadata = service
         .upload_blob(
             &ctx,
-            blob_name,
-            data.clone(),
-            Some("image/png".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams {
+                name: blob_name.to_string(),
+                data: data.clone(),
+                content_type: Some("image/png".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

@@ -28,21 +28,24 @@ use std::collections::{BTreeSet, HashMap};
 
 /// Core lattice trait with ACI merge properties
 pub trait Lattice: Clone + Send + Sync + 'static + PartialEq {
-    /// Merge with another lattice value
-    /// Must be associative, commutative, and idempotent
+    /// Merge with another lattice value.
+    /// Must be associative, commutative, and idempotent.
+    #[must_use]
     fn merge(&self, other: &Self) -> Self;
 
-    /// Check if this value subsumes (dominates) another
+    /// Check if this value subsumes (dominates) another.
+    #[must_use]
     fn subsumes(&self, other: &Self) -> bool {
         self.merge(other) == *self
     }
 
-    /// Get the bottom element (identity for merge)
+    /// Get the bottom element (identity for merge).
+    #[must_use]
     fn bottom() -> Self;
 }
 
-/// Last-Writer-Wins lattice
-/// Resolves conflicts by keeping the value with the highest timestamp
+/// Last-Writer-Wins lattice.
+/// Resolves conflicts by keeping the value with the highest timestamp.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LWWLattice<T: Clone> {
     /// The actual value stored
@@ -54,12 +57,7 @@ pub struct LWWLattice<T: Clone> {
 }
 
 impl<T: Clone + Send + Sync + 'static> LWWLattice<T> {
-    /// Creates a new Last-Writer-Wins lattice value
-    ///
-    /// # Arguments
-    /// * `value` - The value to store
-    /// * `timestamp` - Timestamp when this value was written
-    /// * `writer_id` - Unique identifier of the writer (for tie-breaking)
+    /// Creates a new Last-Writer-Wins lattice value.
     pub fn new(value: T, timestamp: u64, writer_id: String) -> Self {
         LWWLattice {
             value,
@@ -75,7 +73,6 @@ impl<T: Clone + Send + Sync + 'static + PartialEq> Lattice for LWWLattice<T> {
             Ordering::Less => other.clone(),
             Ordering::Greater => self.clone(),
             Ordering::Equal => {
-                // Tie-break with writer_id for determinism
                 if other.writer_id > self.writer_id {
                     other.clone()
                 } else {
@@ -90,7 +87,7 @@ impl<T: Clone + Send + Sync + 'static + PartialEq> Lattice for LWWLattice<T> {
     }
 }
 
-/// Set lattice - grows monotonically by union
+/// Set lattice — grows monotonically by union.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetLattice<T: Ord + Clone> {
     /// Elements in the set
@@ -104,31 +101,34 @@ impl<T: Ord + Clone + Send + Sync + 'static> Default for SetLattice<T> {
 }
 
 impl<T: Ord + Clone + Send + Sync + 'static> SetLattice<T> {
-    /// Creates a new empty set lattice
+    /// Creates a new empty set lattice.
     pub fn new() -> Self {
         SetLattice {
             elements: BTreeSet::new(),
         }
     }
 
-    /// Creates a set lattice with a single element
+    /// Creates a set lattice with a single element.
     pub fn singleton(value: T) -> Self {
         let mut elements = BTreeSet::new();
         elements.insert(value);
         SetLattice { elements }
     }
 
-    /// Checks if the set contains the given value
+    /// Returns `true` if the set contains the given value.
+    #[must_use]
     pub fn contains(&self, value: &T) -> bool {
         self.elements.contains(value)
     }
 
-    /// Returns the number of elements in the set
+    /// Returns the number of elements in the set.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.elements.len()
     }
 
-    /// Returns true if the set contains no elements
+    /// Returns `true` if the set contains no elements.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }
@@ -146,7 +146,7 @@ impl<T: Ord + Clone + Send + Sync + 'static> Lattice for SetLattice<T> {
     }
 }
 
-/// Counter lattice - vector clock style
+/// Counter lattice — vector clock style distributed counter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CounterLattice {
     /// Per-actor counters for distributed counting
@@ -160,26 +160,28 @@ impl Default for CounterLattice {
 }
 
 impl CounterLattice {
-    /// Creates a new empty counter lattice
+    /// Creates a new empty counter lattice.
     pub fn new() -> Self {
         CounterLattice {
             counts: HashMap::new(),
         }
     }
 
-    /// Creates a counter lattice with a single actor's count
+    /// Creates a counter lattice recording `amount` for `actor_id`.
     pub fn inc(actor_id: String, amount: u64) -> Self {
         let mut counts = HashMap::new();
         counts.insert(actor_id, amount);
         CounterLattice { counts }
     }
 
-    /// Returns the total count across all actors
+    /// Returns the total count across all actors.
+    #[must_use]
     pub fn total(&self) -> u64 {
         self.counts.values().sum()
     }
 
-    /// Gets the count for a specific actor
+    /// Gets the count for a specific actor.
+    #[must_use]
     pub fn get(&self, actor_id: &str) -> u64 {
         self.counts.get(actor_id).copied().unwrap_or(0)
     }
@@ -202,7 +204,7 @@ impl Lattice for CounterLattice {
     }
 }
 
-/// Max lattice - keeps maximum value
+/// Max lattice — keeps the maximum value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaxLattice<T: Ord + Clone> {
     /// The maximum value
@@ -210,16 +212,13 @@ pub struct MaxLattice<T: Ord + Clone> {
 }
 
 impl<T: Ord + Clone + Send + Sync + 'static> MaxLattice<T> {
-    /// Creates a new max lattice with the given value
+    /// Creates a new max lattice with the given value.
     pub fn new(value: T) -> Self {
         MaxLattice { value }
     }
 }
 
-impl<T: Ord + Clone + Send + Sync + 'static> Lattice for MaxLattice<T>
-where
-    T: Default,
-{
+impl<T: Ord + Clone + Send + Sync + 'static + Default> Lattice for MaxLattice<T> {
     fn merge(&self, other: &Self) -> Self {
         MaxLattice {
             value: self.value.clone().max(other.value.clone()),
@@ -233,7 +232,7 @@ where
     }
 }
 
-/// Min lattice - keeps minimum value
+/// Min lattice — keeps the minimum value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MinLattice<T: Ord + Clone> {
     /// The minimum value
@@ -241,16 +240,13 @@ pub struct MinLattice<T: Ord + Clone> {
 }
 
 impl<T: Ord + Clone + Send + Sync + 'static> MinLattice<T> {
-    /// Creates a new min lattice with the given value
+    /// Creates a new min lattice with the given value.
     pub fn new(value: T) -> Self {
         MinLattice { value }
     }
 }
 
-impl<T: Ord + Clone + Send + Sync + 'static> Lattice for MinLattice<T>
-where
-    T: Default,
-{
+impl<T: Ord + Clone + Send + Sync + 'static + Default> Lattice for MinLattice<T> {
     fn merge(&self, other: &Self) -> Self {
         MinLattice {
             value: self.value.clone().min(other.value.clone()),
@@ -264,7 +260,7 @@ where
     }
 }
 
-/// Vector clock for causal consistency
+/// Vector clock for causal consistency.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorClock {
     /// Per-node logical clocks for causality tracking
@@ -278,14 +274,14 @@ impl Default for VectorClock {
 }
 
 impl VectorClock {
-    /// Creates a new empty vector clock
+    /// Creates a new empty vector clock.
     pub fn new() -> Self {
         VectorClock {
             clocks: HashMap::new(),
         }
     }
 
-    /// Increments the clock for the given node
+    /// Increments the clock for the given node.
     pub fn inc(&mut self, node_id: String) {
         self.clocks
             .entry(node_id)
@@ -293,18 +289,21 @@ impl VectorClock {
             .or_insert(1);
     }
 
-    /// Gets the clock value for a specific node
+    /// Gets the clock value for a specific node.
+    #[must_use]
     pub fn get(&self, node_id: &str) -> u64 {
         self.clocks.get(node_id).copied().unwrap_or(0)
     }
 
-    /// Check if this clock happens-before another
+    /// Returns `true` if this clock happens-before `other`.
+    #[must_use]
     pub fn happens_before(&self, other: &Self) -> bool {
         self.clocks.iter().all(|(k, &v)| other.get(k) >= v)
             && self.clocks.len() <= other.clocks.len()
     }
 
-    /// Check if two clocks are concurrent (neither happens-before the other)
+    /// Returns `true` if neither clock happens-before the other.
+    #[must_use]
     pub fn concurrent(&self, other: &Self) -> bool {
         !self.happens_before(other) && !other.happens_before(self)
     }
@@ -327,7 +326,7 @@ impl Lattice for VectorClock {
     }
 }
 
-/// Pair lattice - combines two lattices
+/// Pair lattice — combines two independent lattices.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PairLattice<A: Lattice, B: Lattice> {
     /// First lattice component
@@ -337,7 +336,7 @@ pub struct PairLattice<A: Lattice, B: Lattice> {
 }
 
 impl<A: Lattice, B: Lattice> PairLattice<A, B> {
-    /// Creates a new pair lattice from two lattices
+    /// Creates a new pair lattice from two lattice values.
     pub fn new(first: A, second: B) -> Self {
         PairLattice { first, second }
     }
@@ -359,34 +358,30 @@ impl<A: Lattice, B: Lattice> Lattice for PairLattice<A, B> {
     }
 }
 
-/// Map lattice - maps keys to lattice values
+/// Map lattice — maps keys to lattice values, merging on conflict.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MapLattice<K: Ord + Clone + std::hash::Hash + Eq, V: Lattice> {
     /// Entries mapping keys to lattice values
     pub entries: HashMap<K, V>,
 }
 
-impl<K: Ord + Clone + Send + Sync + 'static, V: Lattice> Default for MapLattice<K, V>
-where
-    K: std::hash::Hash + Eq,
+impl<K: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq, V: Lattice> Default
+    for MapLattice<K, V>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Ord + Clone + Send + Sync + 'static, V: Lattice> MapLattice<K, V>
-where
-    K: std::hash::Hash + Eq,
-{
-    /// Creates a new empty map lattice
+impl<K: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq, V: Lattice> MapLattice<K, V> {
+    /// Creates a new empty map lattice.
     pub fn new() -> Self {
         MapLattice {
             entries: HashMap::new(),
         }
     }
 
-    /// Inserts or merges a value at the given key
+    /// Inserts a value at `key`, merging with any existing value.
     pub fn insert(&mut self, key: K, value: V) {
         self.entries
             .entry(key)
@@ -394,7 +389,8 @@ where
             .or_insert(value);
     }
 
-    /// Gets the lattice value for a specific key
+    /// Gets the lattice value for a specific key.
+    #[must_use]
     pub fn get(&self, key: &K) -> Option<&V> {
         self.entries.get(key)
     }
@@ -421,14 +417,14 @@ where
     }
 }
 
-/// Observed-Remove Set for removable sets
+/// Observed-Remove Set — allows conflict-free add and remove.
 ///
-/// A CRDT that allows both additions and removals with conflict-free semantics.
-/// Uses unique IDs to track additions so concurrent add/remove operations are handled correctly.
+/// Uses unique IDs per addition so concurrent add/remove operations resolve
+/// deterministically: add wins over a concurrent remove of the same value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrSetLattice<T: Ord + Clone + std::hash::Hash + Eq> {
-    added: HashMap<T, BTreeSet<String>>, // value -> unique IDs
-    removed: BTreeSet<String>,           // removed IDs
+    added: HashMap<T, BTreeSet<String>>,
+    removed: BTreeSet<String>,
 }
 
 impl<T: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq> Default for OrSetLattice<T> {
@@ -438,7 +434,7 @@ impl<T: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq> Default for 
 }
 
 impl<T: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq> OrSetLattice<T> {
-    /// Creates a new empty OR-Set
+    /// Creates a new empty OR-Set.
     pub fn new() -> Self {
         OrSetLattice {
             added: HashMap::new(),
@@ -446,12 +442,12 @@ impl<T: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq> OrSetLattice
         }
     }
 
-    /// Adds a value with a unique ID for tracking
+    /// Adds a value with a unique ID for tracking.
     pub fn add(&mut self, value: T, unique_id: String) {
         self.added.entry(value).or_default().insert(unique_id);
     }
 
-    /// Removes a value by marking all its IDs as removed
+    /// Removes a value by marking all its current IDs as removed.
     pub fn remove(&mut self, value: &T) {
         if let Some(ids) = self.added.get(value) {
             for id in ids {
@@ -460,16 +456,16 @@ impl<T: Ord + Clone + Send + Sync + 'static + std::hash::Hash + Eq> OrSetLattice
         }
     }
 
-    /// Checks if the set contains the value (not marked as removed)
+    /// Returns `true` if the set contains `value` and it has not been removed.
+    #[must_use]
     pub fn contains(&self, value: &T) -> bool {
-        if let Some(ids) = self.added.get(value) {
-            ids.iter().any(|id| !self.removed.contains(id))
-        } else {
-            false
-        }
+        self.added
+            .get(value)
+            .map(|ids| ids.iter().any(|id| !self.removed.contains(id)))
+            .unwrap_or(false)
     }
 
-    /// Returns an iterator over all non-removed elements
+    /// Returns an iterator over all live (non-removed) elements.
     pub fn elements(&self) -> impl Iterator<Item = &T> {
         self.added
             .iter()
@@ -490,7 +486,6 @@ where
                 .or_default()
                 .extend(ids.clone());
         }
-
         OrSetLattice {
             added: merged_added,
             removed: self.removed.union(&other.removed).cloned().collect(),
@@ -502,7 +497,7 @@ where
     }
 }
 
-/// Consistency level for operations
+/// Consistency level for distributed operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsistencyLevel {
     /// Basic lattice merge, no ordering guarantees
@@ -530,22 +525,20 @@ mod tests {
         assert_eq!(merged.value, "value2");
         assert_eq!(merged.timestamp, 200);
 
-        // Test idempotence
         let merged2 = merged.merge(&merged);
         assert_eq!(merged, merged2);
     }
 
     #[test]
     fn test_set_lattice() {
-        let mut set1 = SetLattice::singleton("a");
-        let mut set2 = SetLattice::singleton("b");
+        let set1 = SetLattice::singleton("a");
+        let set2 = SetLattice::singleton("b");
 
         let merged = set1.merge(&set2);
         assert!(merged.contains(&"a"));
         assert!(merged.contains(&"b"));
         assert_eq!(merged.len(), 2);
 
-        // Test commutativity
         let merged2 = set2.merge(&set1);
         assert_eq!(merged, merged2);
     }
@@ -572,7 +565,7 @@ mod tests {
         assert!(vc1.concurrent(&vc2));
 
         let merged = vc1.merge(&vc2);
-        assert!(merged.happens_before(&merged)); // Reflexive
+        assert!(merged.happens_before(&merged));
         assert_eq!(merged.get("node1"), 1);
         assert_eq!(merged.get("node2"), 1);
     }

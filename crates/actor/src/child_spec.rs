@@ -81,21 +81,34 @@ pub type StartFn =
     Arc<dyn Fn() -> BoxFuture<'static, Result<StartedChild, ActorError>> + Send + Sync>;
 
 /// Result of starting a child
+///
+/// Large variant size difference is intentional: Supervisor trees are typically
+/// small compared to the number of Worker actors; boxing would add a heap indirection
+/// on the common path.
+#[allow(clippy::large_enum_variant)]
 pub enum StartedChild {
     /// Worker child (actor)
     Worker {
+        /// The actor instance that was started.
         actor: ActorInstance,
+        /// Reference to the running actor.
         actor_ref: ActorRef,
     },
     /// Supervisor child (nested supervisor)
-    Supervisor { supervisor: crate::Supervisor },
+    Supervisor {
+        /// The supervisor that was started.
+        supervisor: crate::Supervisor,
+    },
 }
 
-/// Shutdown specification - Erlang semantics
+/// Shutdown specification — Erlang semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownSpec {
+    /// Abort the child immediately without waiting for graceful shutdown.
     BrutalKill,
+    /// Wait up to `Duration` for graceful shutdown, then abort.
     Timeout(Duration),
+    /// Wait indefinitely for graceful shutdown (used for supervisor children).
     Infinity,
 }
 
@@ -222,6 +235,11 @@ impl ChildSpec {
 }
 
 impl ShutdownSpec {
+    /// Convert an `Option<Duration>` to a `ShutdownSpec`.
+    ///
+    /// - `None` → `Infinity`
+    /// - `Some(Duration::ZERO)` → `BrutalKill`
+    /// - `Some(d)` → `Timeout(d)`
     pub fn from_duration(timeout: Option<Duration>) -> Self {
         match timeout {
             None => ShutdownSpec::Infinity,
@@ -230,6 +248,7 @@ impl ShutdownSpec {
         }
     }
 
+    /// Convert back to `Option<Duration>` for use in timeout APIs.
     pub fn to_duration(&self) -> Option<Duration> {
         match self {
             ShutdownSpec::BrutalKill => Some(Duration::ZERO),

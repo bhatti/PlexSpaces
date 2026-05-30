@@ -30,9 +30,10 @@ use tokio::sync::RwLock;
 use plexspaces_actor::actor_context::ObjectRegistry;
 use plexspaces_actor::LinkProvider;
 use plexspaces_actor::{
-    ActorId, ActorRegistry, ActorService, ApplicationManager as ApplicationManagerTrait,
-    ExitReason, InitializableServiceLocator, ProcessResourceSampler, RequestContext,
-    RequestContextExt, ServiceLocator as ServiceLocatorTrait,
+    ActorId, ActorRegistrationParams, ActorRegistry, ActorService,
+    ApplicationManager as ApplicationManagerTrait, ExitReason, InitializableServiceLocator,
+    ProcessResourceSampler, RequestContext, RequestContextExt,
+    ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_application::{Application, ApplicationError, ApplicationManager, ApplicationNode};
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
@@ -2595,7 +2596,7 @@ impl Node {
     /// ## Usage
     /// ```ignore
     /// use plexspaces_actor::Actor;
-    /// use plexspaces_behavior::GenServer;
+    /// use plexspaces_actor::behavior::GenServer;
     ///
     /// // Create actor
     /// let mut actor = Actor::new(...);
@@ -2656,7 +2657,7 @@ impl Node {
 
                 // Actor terminated normally - handle termination comprehensively
                 if let Ok(actor_registry) = self.actor_registry().await {
-                    let exit_reason = ExitReason::from_str(&terminated.reason);
+                    let exit_reason = terminated.reason.parse().unwrap_or(ExitReason::Normal);
                     if let Ok(actor_id) = ActorId::from_canonical(&event.actor_id) {
                         actor_registry
                             .handle_actor_termination(&actor_id, exit_reason)
@@ -3477,12 +3478,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_id.clone(),
-                wrapper,
-                actor_id.actor_type().to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_id.clone(),
+                    sender: wrapper,
+                    actor_type: actor_id.actor_type().to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
     }
@@ -3540,12 +3543,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -3608,12 +3613,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -3625,12 +3632,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -3687,12 +3696,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -3707,12 +3718,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -3757,12 +3770,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -3884,7 +3899,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_actor_creates_and_returns_ref() {
-        use plexspaces_behavior::MockBehavior;
+        use plexspaces_actor::behavior::MockBehavior;
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use std::sync::Arc;
 
@@ -3988,7 +4003,7 @@ mod tests {
             registry
                 .register_simple("test", || {
                     Box::pin(async move {
-                        Ok(Box::new(plexspaces_behavior::MockBehavior::new())
+                        Ok(Box::new(plexspaces_actor::behavior::MockBehavior::new())
                             as Box<dyn plexspaces_actor::Actor>)
                     })
                 })
@@ -4113,12 +4128,14 @@ mod tests {
         actor_registry2
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "gen_server".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "gen_server".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4258,12 +4275,14 @@ mod tests {
         actor_registry2
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "gen_server".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "gen_server".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4374,12 +4393,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "gen_server".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "gen_server".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4543,12 +4564,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4791,12 +4814,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4813,12 +4838,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4929,12 +4956,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -4951,12 +4980,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5081,12 +5112,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5225,12 +5258,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5245,12 +5280,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    Some(config.clone()),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config.clone()),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -5320,12 +5357,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5382,12 +5421,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5401,12 +5442,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    Some(config),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -5475,12 +5518,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor1_ref.id().clone(),
-                wrapper1,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor1_ref.id().clone(),
+                    sender: wrapper1,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
         let config1 =
@@ -5492,12 +5537,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor1_ref.id().clone(),
-                    sender1,
-                    "test_actor".to_string(),
-                    Some(config1),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor1_ref.id().clone(),
+                        sender: sender1,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config1),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -5539,12 +5586,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor2_ref.id().clone(),
-                wrapper2,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor2_ref.id().clone(),
+                    sender: wrapper2,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
         let actor_registry = get_actor_registry(&node).await;
@@ -5554,12 +5603,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor2_ref.id().clone(),
-                    sender2,
-                    "test_actor".to_string(),
-                    Some(config2),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor2_ref.id().clone(),
+                        sender: sender2,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config2),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -5651,12 +5702,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
         let mut config = plexspaces_proto::v1::actor::ActorConfig::default();
@@ -5669,12 +5722,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    Some(config),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -5723,12 +5778,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id.clone(),
-                sender.clone(),
-                "test_actor".to_string(),
-                Some(config),
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_id.clone(),
+                    sender: sender.clone(),
+                    actor_type: "test_actor".to_string(),
+                    config: Some(config),
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -5825,12 +5882,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_ref.id().clone(),
-                wrapper,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id: actor_ref.id().clone(),
+                    sender: wrapper,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
         let actor_registry = get_actor_registry(&node).await;
@@ -5840,12 +5899,14 @@ mod tests {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_ref.id().clone(),
-                    sender,
-                    "test_actor".to_string(),
-                    Some(config),
-                    None,
-                    None,
+                    ActorRegistrationParams {
+                        actor_id: actor_ref.id().clone(),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: Some(config),
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }

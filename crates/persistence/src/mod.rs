@@ -23,7 +23,6 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use plexspaces_mailbox::new_message;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -287,9 +286,10 @@ pub enum PromiseResult {
 }
 
 /// Compression type for snapshot state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CompressionType {
     /// No compression
+    #[default]
     None,
     /// Snappy compression (fast, ~2x compression)
     Snappy,
@@ -297,27 +297,14 @@ pub enum CompressionType {
     Zstd,
 }
 
-#[allow(clippy::derivable_impls)]
-impl Default for CompressionType {
-    fn default() -> Self {
-        CompressionType::None
-    }
-}
-
 /// Encryption type for snapshot state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EncryptionType {
     /// No encryption
+    #[default]
     None,
     /// AES-256-GCM authenticated encryption
     Aes256Gcm,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for EncryptionType {
-    fn default() -> Self {
-        EncryptionType::None
-    }
 }
 
 /// State snapshot
@@ -377,22 +364,12 @@ impl From<std::io::Error> for JournalError {
 }
 
 /// Checkpoint retention configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RetentionConfig {
     /// Number of old snapshots to retain (0 = keep all)
     pub retention_count: u32,
     /// Automatically truncate journal entries after snapshot
     pub auto_truncate: bool,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for RetentionConfig {
-    fn default() -> Self {
-        Self {
-            retention_count: 0, // Keep all by default
-            auto_truncate: false,
-        }
-    }
 }
 
 /// In-memory journal implementation for testing
@@ -741,6 +718,7 @@ impl Journal for MemoryJournal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_mailbox::new_message;
 
     #[tokio::test]
     async fn test_memory_journal() {

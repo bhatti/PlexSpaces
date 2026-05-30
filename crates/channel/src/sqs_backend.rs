@@ -19,7 +19,7 @@
 //! AWS SQS backend for distributed channels.
 //!
 //! ## Purpose
-//! Provides a production-grade AWS SQS backend for channel messaging with
+//! Provides an AWS SQS backend for channel messaging with
 //! Dead Letter Queue (DLQ) support, ACK/NACK operations, and comprehensive observability.
 //!
 //! ## Design

@@ -21,7 +21,6 @@
 pub use plexspaces_proto::services::prv::ServiceName;
 
 /// Trait for services that can be registered in ServiceLocator
-
 pub trait Service: Send + Sync {
     /// Get the service name for registration
     fn service_name(&self) -> String;

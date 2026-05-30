@@ -65,7 +65,7 @@ use tokio::time::timeout;
 macro_rules! skip_if_unavailable {
     ($guard:expr, $service:expr) => {
         if !$guard {
-            eprintln!("Skipping test: {} not available", $service);
+            tracing::info!("Skipping test: {} not available", $service);
             return;
         }
     };

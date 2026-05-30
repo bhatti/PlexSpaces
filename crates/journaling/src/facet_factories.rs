@@ -33,8 +33,6 @@ use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_service_traits::ServiceLocatorBase;
 use serde_json::Value;
 use std::sync::Arc;
-use tracing;
-
 /// Facet factory for VirtualActorFacet
 ///
 /// ## Purpose
@@ -320,17 +318,12 @@ impl FacetFactory for MemoizeFacetFactory {
 /// EventSourcingFacet uses generics which requires concrete JournalStorage types.
 /// This factory returns an error explaining that EventSourcingFacet needs to be
 /// refactored to use trait objects (like DurabilityFacet) or created with a concrete type.
-pub struct EventSourcingFacetFactory {
-    service_locator: Arc<dyn ServiceLocatorBase>,
-}
+pub struct EventSourcingFacetFactory;
 
 impl EventSourcingFacetFactory {
     /// Create a new EventSourcingFacetFactory
-    ///
-    /// ## Arguments
-    /// * `service_locator` - ServiceLocator to get JournalStorage from
-    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
-        Self { service_locator }
+    pub fn new(_service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
+        Self
     }
 }
 

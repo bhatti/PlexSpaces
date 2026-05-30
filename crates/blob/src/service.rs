@@ -36,6 +36,27 @@ use crate::{
 use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
+/// Parameters for uploading a blob
+#[derive(Debug, Default)]
+pub struct UploadBlobParams {
+    /// Blob name
+    pub name: String,
+    /// Blob content
+    pub data: Vec<u8>,
+    /// Optional content type
+    pub content_type: Option<String>,
+    /// Optional blob group
+    pub blob_group: Option<String>,
+    /// Optional blob kind
+    pub kind: Option<String>,
+    /// Optional metadata map
+    pub metadata: std::collections::HashMap<String, String>,
+    /// Optional tags map
+    pub tags: std::collections::HashMap<String, String>,
+    /// Optional expiration duration
+    pub expires_after: Option<Duration>,
+}
+
 /// Ensures the S3-compatible bucket exists, creating it if necessary.
 /// Called during BlobService initialization for s3/embedded backends.
 #[cfg(feature = "s3-backend")]
@@ -315,26 +336,23 @@ impl BlobService {
     ///
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
-    /// * `name` - Blob name
-    /// * `data` - Blob content
-    /// * `content_type` - Optional content type
-    /// * `blob_group` - Optional blob group
-    /// * `kind` - Optional blob kind
-    /// * `metadata` - Optional metadata map
-    /// * `tags` - Optional tags map
-    /// * `expires_after` - Optional expiration duration
+    /// * `params` - Upload parameters (name, data, content type, metadata, etc.)
     pub async fn upload_blob(
         &self,
         ctx: &RequestContext,
-        name: &str,
-        data: Vec<u8>,
-        content_type: Option<String>,
-        blob_group: Option<String>,
-        kind: Option<String>,
-        metadata: std::collections::HashMap<String, String>,
-        tags: std::collections::HashMap<String, String>,
-        expires_after: Option<Duration>,
+        params: UploadBlobParams,
     ) -> BlobResult<BlobMetadata> {
+        let UploadBlobParams {
+            name,
+            data,
+            content_type,
+            blob_group,
+            kind,
+            metadata,
+            tags,
+            expires_after,
+        } = params;
+        let name = name.as_str();
         if data.is_empty() {
             return Err(BlobError::InvalidInput("data cannot be empty".to_string()));
         }
@@ -401,9 +419,9 @@ impl BlobService {
             etag: String::new(),
             blob_group: blob_group.unwrap_or_default(),
             kind: kind.unwrap_or_default(),
-            metadata: metadata,
-            tags: tags,
-            expires_at: expires_at,
+            metadata,
+            tags,
+            expires_at,
             created_at: Some(datetime_to_timestamp(now)),
             updated_at: Some(datetime_to_timestamp(now)),
         };
@@ -658,14 +676,13 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
         let blob_metadata = self
             .upload_blob(
                 ctx,
-                name,
-                data,
-                content_type,
-                None, // blob_group
-                None, // kind
-                metadata,
-                std::collections::HashMap::new(), // tags
-                None,                             // expires_after
+                UploadBlobParams {
+                    name: name.to_string(),
+                    data,
+                    content_type,
+                    metadata,
+                    ..Default::default()
+                },
             )
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;

@@ -18,7 +18,6 @@ description = "DNA sequencing pipeline demonstrating durable workflows with Plex
 # PlexSpaces crates
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-proto = { path = "../../../../crates/proto" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 # plexspaces-supervisor merged into plexspaces-actor
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-journaling = { path = "../../../../crates/journaling" }

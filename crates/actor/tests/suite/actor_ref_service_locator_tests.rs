@@ -160,20 +160,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
     // Test: Remote ActorRef should use ServiceLocator for gRPC client caching
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
-    let object_repo = Arc::new(
-        plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
-            .await
-            .unwrap(),
-    );
-    let object_registry_impl =
-        Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "test-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
 
     // Register ActorRegistry in ServiceLocator
     service_locator
@@ -225,14 +212,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
         .await
         .unwrap();
 
-    // Create ActorRegistry with the ObjectRegistry that has the node registered
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl.clone(),
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "test-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
 
     // Register ActorRegistry in ServiceLocator
     service_locator
@@ -308,14 +288,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
         .await
         .unwrap();
 
-    // Create ActorRegistry with the ObjectRegistry that has the node registered
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl.clone(),
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "test-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
 
     // Register ActorRegistry in ServiceLocator
     service_locator

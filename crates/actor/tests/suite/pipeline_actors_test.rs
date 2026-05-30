@@ -10,7 +10,7 @@ use plexspaces_actor::{
     Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
     RequestContextExt, ServiceLocator,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

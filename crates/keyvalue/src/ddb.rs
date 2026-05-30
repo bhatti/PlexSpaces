@@ -19,7 +19,7 @@
 //! DynamoDB-based KeyValue store implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for key-value storage
+//! Provides a DynamoDB backend for key-value storage
 //! with proper tenant isolation, TTL support, and comprehensive observability.
 //!
 //! ## Design
@@ -79,7 +79,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 use tracing::{debug, error, instrument, warn};
 
-/// DynamoDB KeyValue store with production-grade observability.
+/// DynamoDB KeyValue store with full observability (metrics, tracing, structured logging).
 ///
 /// ## Example
 /// ```rust,no_run

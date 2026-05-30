@@ -264,15 +264,14 @@
 //! - No shared mutable state (immutable after creation)
 
 use crate::core::{
-    ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext, RequestContextExt,
+    ActorId, ActorStateHandle, MessageSender, RequestContextExt,
 };
 use async_trait::async_trait;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use ulid::Ulid;
 
 use crate::core::ServiceLocator as ServiceLocatorTrait;
 
@@ -286,6 +285,7 @@ use prost_types;
 /// Error types for ActorRef operations
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ActorRefError {
+    /// The target actor could not be found in the registry.
     #[error("Actor not found: {0}")]
     ActorNotFound(ActorId),
 
@@ -293,18 +293,23 @@ pub enum ActorRefError {
     #[error("Invalid actor ID: {0}")]
     InvalidActorId(String),
 
+    /// Message delivery failed (e.g., mailbox closed or transport error).
     #[error("Failed to send message: {0}")]
     SendFailed(String),
 
+    /// The actor's mailbox is full and cannot accept new messages.
     #[error("Mailbox full")]
     MailboxFull,
 
+    /// The actor has already terminated and cannot receive messages.
     #[error("Actor terminated")]
     ActorTerminated,
 
+    /// An ask() call did not receive a reply within the timeout period.
     #[error("Timeout waiting for response")]
     Timeout,
 
+    /// Remote messaging is not yet implemented for this operation.
     #[error("Remote messaging not implemented: {0}")]
     RemoteNotImplemented(String),
 
@@ -379,18 +384,6 @@ pub struct ActorRef {
     /// Present only for local actors. Remote refs never expose local runtime state.
     local_state_handle: Arc<RwLock<Option<Arc<dyn ActorStateHandle>>>>,
 
-    /// Current temporary sender ID (if any)
-    ///
-    /// ## Purpose
-    /// Tracks the current temporary sender ActorRef ID created when ask() is called from outside actor context.
-    /// Used for cleanup tracking only - the ActorRegistry is the source of truth.
-    ///
-    /// ## Design
-    /// - One temporary sender per ask() call (stored here for cleanup)
-    /// - Temporary sender ActorRef is registered in ActorRegistry (so it can be looked up)
-    /// - This Option is only used for cleanup - ActorRegistry tracks everything else
-    /// - Since we clean up immediately after ask() completes, we only need to track one at a time
-    temporary_sender: Arc<RwLock<Option<String>>>,
     /// Timestamp recorded when this ActorRef was first created (actor spawn time).
     created_at: Option<prost_types::Timestamp>,
 }
@@ -456,7 +449,6 @@ impl ActorRef {
             actor_type: Arc::new(RwLock::new(None)),
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
-            temporary_sender: Arc::new(RwLock::new(None)),
             created_at: None,
         })
     }
@@ -491,7 +483,6 @@ impl ActorRef {
             actor_type: Arc::new(RwLock::new(None)),
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
-            temporary_sender: Arc::new(RwLock::new(None)),
             created_at,
         }
     }
@@ -543,7 +534,6 @@ impl ActorRef {
             actor_type: Arc::new(RwLock::new(None)),
             behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
-            temporary_sender: Arc::new(RwLock::new(None)),
             created_at: None,
         }
     }
@@ -600,32 +590,6 @@ impl ActorRef {
         false
     }
 
-    /// Cleanup reply waiter and temporary sender after ask() (success or error).
-    async fn cleanup_ask_resources(
-        service_locator: &Arc<dyn ServiceLocatorTrait>,
-        correlation_id: &str,
-        temp_sender_id: &ActorId,
-        actor_id: &str,
-        node_id: &str,
-    ) {
-        if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry.remove(correlation_id).await;
-        }
-        if let Some(registry) = service_locator.actor_registry().await {
-            registry.remove_temporary_sender(temp_sender_id).await;
-        }
-        metrics::counter!("plexspaces_actor_ref_temporary_sender_cleaned_total",
-            "actor_id" => actor_id.to_string(),
-            "node_id" => node_id.to_string()
-        )
-        .increment(1);
-        metrics::gauge!("plexspaces_actor_ref_temporary_sender_mappings",
-            "actor_id" => actor_id.to_string(),
-            "node_id" => node_id.to_string()
-        )
-        .set(0.0);
-    }
-
     /// Check if this is a local actor
     pub fn is_local(&self) -> bool {
         matches!(self.inner, ActorRefInner::Local { .. })
@@ -645,24 +609,6 @@ impl ActorRef {
         crate::core::ActorId::from_canonical(actor_id)
             .map(|id| id.is_temporary_sender())
             .unwrap_or(false)
-    }
-
-    async fn get_caller_node_id(&self) -> Result<String, ActorRefError> {
-        match &self.inner {
-            ActorRefInner::Local {
-                service_locator, ..
-            }
-            | ActorRefInner::Remote {
-                service_locator, ..
-            } => {
-                use crate::core::ActorRegistry;
-                let registry: Arc<ActorRegistry> =
-                    service_locator.actor_registry().await.ok_or_else(|| {
-                        ActorRefError::SendFailed("ActorRegistry not available".to_string())
-                    })?;
-                Ok(registry.local_node_id().to_string())
-            }
-        }
     }
 
     /// Get namespace for this actor
@@ -695,20 +641,13 @@ impl ActorRef {
     /// This method enforces the correct pattern for multi-tenancy:
     /// - Tenant isolation comes from auth (external to ActorRef)
     /// - Namespace isolation comes from ActorRef (stored at creation)
-    /// Get tenant_id for this actor
-    ///
-    /// ## Purpose
-    /// Returns the tenant_id stored in this ActorRef. The tenant_id flows from API → ActorBuilder → ActorRef.
-    ///
-    /// ## Multi-tenancy Design
-    /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
     }
 
     /// Returns the creation timestamp recorded when this actor was spawned.
     pub fn created_at(&self) -> Option<prost_types::Timestamp> {
-        self.created_at.clone()
+        self.created_at
     }
 
     /// Returns the registered actor type when known.
@@ -865,17 +804,18 @@ impl ActorRef {
         }
 
         // OBSERVABILITY: Log self-messaging (safe in async tell(), but worth observing)
-        if !message.sender_id.is_empty() && actor_id == message.sender_id {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    message_id = %message.id,
-                    sender_id = %message.sender_id,
-                    receiver_id = %actor_id,
-                    message_type = %message_type,
-                    correlation_id = ?message.correlation_id,
-                    "ActorRef::tell: self-messaging detected (safe in async context)"
-                );
-            }
+        if !message.sender_id.is_empty()
+            && actor_id == message.sender_id
+            && tracing::enabled!(tracing::Level::DEBUG)
+        {
+            tracing::debug!(
+                message_id = %message.id,
+                sender_id = %message.sender_id,
+                receiver_id = %actor_id,
+                message_type = %message_type,
+                correlation_id = ?message.correlation_id,
+                "ActorRef::tell: self-messaging detected (safe in async context)"
+            );
         }
 
         // VALIDATION: Check if receiver matches this ActorRef
@@ -982,7 +922,6 @@ impl ActorRef {
                 // (Reply routing to temporary sender is handled above before this match)
                 let msg_sender = message.sender_id.clone();
                 let msg_receiver = message.receiver_id.clone();
-                let msg_correlation_id = message.correlation_id.clone();
                 // Convert proto Message to mailbox Message
                 // Use proto Message directly - no conversion needed
                 let send_result = mailbox.send(message).await
@@ -1123,11 +1062,10 @@ impl ActorRef {
             | ActorRefInner::Remote {
                 service_locator, ..
             } => {
-                if let Some(registry) = service_locator.actor_registry().await {
-                    Some(registry.local_node_id().to_string())
-                } else {
-                    None
-                }
+                service_locator
+                    .actor_registry()
+                    .await
+                    .map(|registry| registry.local_node_id().to_string())
             }
         }
     }
@@ -1379,7 +1317,6 @@ impl ActorRef {
     ) -> Result<(), ActorRefError> {
         // Use send() method - temporary sender behaves like normal actor
         // Set message fields: receiver=target_actor_id, sender=current_actor, correlation_id
-        use crate::core::actor_context::ActorService;
         let actor_service = service_locator.get_actor_service().await.ok_or_else(|| {
             ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string())
         })?;
@@ -1392,11 +1329,11 @@ impl ActorRef {
         }
         // Build context from sender's canonical actor ID (namespace-aware)
         use crate::core::RequestContext;
-        let ctx = crate::core::ActorId::from_canonical(&sender_id.to_string())
+        let ctx = crate::core::ActorId::from_canonical(sender_id)
             .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
             .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
         actor_service
-            .send(&ctx, &target_actor_id.to_string(), reply_msg)
+            .send(&ctx, &target_actor_id, reply_msg)
             .await
             .map(|_| ()) // Ignore message_id return value
             .map_err(|e| ActorRefError::SendFailed(format!("ActorService::send() failed: {}", e)))
@@ -1511,7 +1448,7 @@ impl MessageSender for ActorRef {
     }
 
     fn created_at(&self) -> Option<prost_types::Timestamp> {
-        self.created_at.clone()
+        self.created_at
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1649,12 +1586,14 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    test_actor_id("test-actor", "node1"),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id: test_actor_id("test-actor", "node1"),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -1882,12 +1821,14 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    test_actor_id("test-actor", "node1"),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id: test_actor_id("test-actor", "node1"),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -2050,12 +1991,14 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    test_actor_id("target-actor", "node1"),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id: test_actor_id("target-actor", "node1"),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -2224,12 +2167,14 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    test_actor_id("target", "node1"),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id: test_actor_id("target", "node1"),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }
@@ -2491,12 +2436,14 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    test_actor_id("actor", "node1"),
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id: test_actor_id("actor", "node1"),
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }

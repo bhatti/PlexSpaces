@@ -31,8 +31,8 @@
 //! ## Backends
 //! - [`SqliteJournalStorage`]: SQLite with WAL mode (use `:memory:` for in-memory)
 //! - [`PostgresJournalStorage`]: PostgreSQL with auto-migrations (production)
-//! - [`RedisJournalStorage`]: Redis (distributed, eventually consistent)
-//! - [`DynamoDBJournalStorage`]: DynamoDB (AWS managed)
+//! - `RedisJournalStorage`: Redis (distributed, eventually consistent)
+//! - `DynamoDBJournalStorage`: DynamoDB (AWS managed)
 
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_proto::storage::v1::SharedDbConfig;

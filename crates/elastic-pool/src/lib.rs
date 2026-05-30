@@ -272,13 +272,3 @@ mod pool_registry;
 pub use elastic_pool::*;
 pub use pool_registry::PoolRegistry;
 
-// Re-export proto types for convenience
-pub use plexspaces_proto::pool::v1::{
-    pool_service_client::PoolServiceClient, pool_service_server::PoolService,
-    pool_service_server::PoolServiceServer, ActorConfig, ActorHandle, CheckinRequest,
-    CheckinResponse, CheckoutError, CheckoutRequest, CheckoutResponse, CreatePoolRequest,
-    CreatePoolResponse, DeletePoolRequest, DeletePoolResponse, DrainRequest, DrainResponse,
-    GetStatsRequest, GetStatsResponse, PauseScalingRequest, PauseScalingResponse, PoolConfig,
-    PoolMetrics, ResumeScalingRequest, ResumeScalingResponse, ScaleRequest, ScaleResponse,
-    ScalingPolicy, ScalingState, StreamMetricsRequest,
-};

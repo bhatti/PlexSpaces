@@ -14,7 +14,6 @@ members = [
     "crates/facet",
     # "crates/core" - merged into plexspaces-actor (Phase 9)
     "crates/application",
-    "crates/behavior",
     "crates/actor",
     "crates/node",
     # "crates/supervisor" - merged into plexspaces-actor
@@ -55,7 +54,6 @@ default-members = [
     "crates/facet",
     # "crates/core" - merged into plexspaces-actor (Phase 9)
     "crates/application",
-    "crates/behavior",
     "crates/actor",
     "crates/node",
     # "crates/supervisor" - merged into plexspaces-actor
@@ -113,7 +111,6 @@ plexspaces-persistence = { path = "crates/persistence" }
 plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-facet = { path = "crates/facet" }
 plexspaces-application = { path = "crates/application" }
-plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }
 # plexspaces-supervisor merged into plexspaces-actor
 plexspaces-node = { path = "crates/node" }
@@ -274,7 +271,6 @@ plexspaces-tuplespace = { path = "crates/tuplespace" }
 plexspaces-keyvalue = { path = "crates/keyvalue" }
 plexspaces-facet = { path = "crates/facet" }
 plexspaces-application = { path = "crates/application" }
-plexspaces-behavior = { path = "crates/behavior" }
 plexspaces-actor = { path = "crates/actor" }
 plexspaces-node = { path = "crates/node" }
 # plexspaces-supervisor merged into plexspaces-actor

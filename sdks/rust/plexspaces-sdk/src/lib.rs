@@ -210,19 +210,19 @@ pub fn cast_message(payload: serde_json::Value) -> Message {
 
 /// Re-export GenServer trait for #[plexspaces_handlers] generated code
 #[cfg(feature = "native")]
-pub use plexspaces_behavior::GenServer;
+pub use plexspaces_actor::behavior::GenServer;
 
 /// Re-export EventHandler trait for #[plexspaces_handlers(event)] generated code
 #[cfg(feature = "native")]
-pub use plexspaces_behavior::EventHandler;
+pub use plexspaces_actor::behavior::EventHandler;
 
 /// Re-export Workflow trait for #[plexspaces_handlers(workflow)] generated code
 #[cfg(feature = "native")]
-pub use plexspaces_behavior::Workflow;
+pub use plexspaces_actor::behavior::Workflow;
 
 /// Re-export ExecutionContext for workflow handlers
 #[cfg(feature = "native")]
-pub use plexspaces_behavior::ExecutionContext;
+pub use plexspaces_actor::behavior::ExecutionContext;
 
 /// Re-export async_trait for use with macros
 #[cfg(feature = "native")]

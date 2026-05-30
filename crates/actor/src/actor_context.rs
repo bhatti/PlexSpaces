@@ -37,7 +37,6 @@ use crate::{ActorId, RequestContext, RequestContextExt, ServiceLocator};
 // self_ref and parent_ref use the lightweight service-traits ActorRef (no mailbox required).
 use plexspaces_proto::common::v1::Message;
 use plexspaces_service_traits::ActorRef;
-use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 
 // ObjectRegistry, TupleSpaceProvider, ObjectRegistration live in service-traits.
 pub use plexspaces_service_traits::object_registry::{

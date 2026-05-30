@@ -53,18 +53,10 @@ use tracing::{debug, error, instrument, warn};
 pub const PROCESS_GROUP_FACET_DEFAULT_PRIORITY: i32 = 30;
 
 /// Configuration for process group facet
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProcessGroupConfig {
     /// Default topics if not specified in join
     pub default_topics: Option<Vec<String>>,
-}
-
-impl Default for ProcessGroupConfig {
-    fn default() -> Self {
-        ProcessGroupConfig {
-            default_topics: None,
-        }
-    }
 }
 
 /// Trait for process group registry implementations (to avoid circular dependency)

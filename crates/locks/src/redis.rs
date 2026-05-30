@@ -16,17 +16,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Redis-based lock manager implementation.
+//! Redis-based distributed lock manager.
 //!
-//! This backend is intended to provide a high-performance, TTL-based
-//! distributed lock manager using Redis primitives (`SET NX PX`, Lua
-//! scripts for compare-and-set, etc.). The full fair-semaphore behavior of
-//! the `db-locks` project can be ported here incrementally.
+//! Implements distributed locking using Redis SET NX PX with Lua scripts for
+//! atomic compare-and-delete (release) and compare-and-extend (renew).
 //!
-//! For now we provide a minimal implementation surface that compiles under
-//! the `redis-backend` feature and returns backend errors for all
-//! operations. This keeps the API stable while we incrementally port the
-//! production-grade algorithms from `/workspace/db-locks`.
+//! ## Key format
+//! `{tenant_id}#{namespace}#{lock_key}`
+//!
+//! ## Value format
+//! `{holder_id}:{version}`
 
 use crate::{
     AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions,
@@ -34,28 +33,24 @@ use crate::{
 };
 use async_trait::async_trait;
 use plexspaces_common::RequestContext;
+use std::time::SystemTime;
+use ulid::Ulid;
 
 #[cfg(feature = "redis-backend")]
-use redis::aio::ConnectionManager;
+use redis::{aio::ConnectionManager, AsyncCommands, Script};
 
-/// Minimal Redis lock manager placeholder.
-///
-/// NOTE: This is intentionally conservative and **does not** perform any
-/// real locking yet – all operations return `LockError::BackendError`.
-/// This allows enabling the `redis-backend` feature without breaking
-/// compilation while the full implementation is brought over.
 #[cfg(feature = "redis-backend")]
+/// Redis-based distributed lock manager using SET NX PX semantics.
 #[derive(Clone)]
 pub struct RedisLockManager {
-    #[allow(dead_code)]
     conn: ConnectionManager,
 }
 
 #[cfg(feature = "redis-backend")]
 impl RedisLockManager {
-    /// Create a new Redis lock manager with the given URL.
+    /// Create a new Redis lock manager connecting to `redis_url`.
     ///
-    /// Example URLs:
+    /// # Examples
     /// - `redis://127.0.0.1/`
     /// - `redis+tls://host:6379/`
     pub async fn new(redis_url: &str) -> LockResult<Self> {
@@ -66,59 +61,209 @@ impl RedisLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect redis: {e}")))?;
 
-        // Mask password in URL for logging
         let display_url = redis_url
             .split('@')
             .last()
-            .map(|s| format!("redis://...@{}", s))
+            .map(|s| format!("redis://...@{s}"))
             .unwrap_or_else(|| redis_url.to_string());
-
-        tracing::info!(
-            url = %display_url,
-            backend = "Redis",
-            "Locks storage initialized"
-        );
+        tracing::info!(url = %display_url, backend = "Redis", "Locks storage initialized");
 
         Ok(Self { conn })
+    }
+
+    fn redis_key(ctx: &RequestContext, lock_key: &str) -> String {
+        format!("{}#{}#{}", ctx.tenant_id(), ctx.namespace(), lock_key)
+    }
+
+    fn expires_at(lease_duration_secs: u32) -> SystemTime {
+        SystemTime::now() + std::time::Duration::from_secs(lease_duration_secs as u64)
+    }
+
+    fn build_lock(lock_key: &str, holder_id: &str, version: &str, lease_duration_secs: u32) -> Lock {
+        let now = SystemTime::now();
+        let expires = now + std::time::Duration::from_secs(lease_duration_secs as u64);
+        Lock {
+            lock_key: lock_key.to_string(),
+            holder_id: holder_id.to_string(),
+            version: version.to_string(),
+            expires_at: Some(plexspaces_proto::prost_types::Timestamp::from(expires)),
+            lease_duration_secs,
+            last_heartbeat: Some(plexspaces_proto::prost_types::Timestamp::from(now)),
+            metadata: Default::default(),
+            locked: true,
+        }
     }
 }
 
 #[cfg(feature = "redis-backend")]
 #[async_trait]
 impl LockManager for RedisLockManager {
+    #[tracing::instrument(skip(self, ctx, options), fields(
+        tenant_id = %ctx.tenant_id(),
+        namespace = %ctx.namespace(),
+        lock_key = %options.lock_key,
+        holder_id = %options.holder_id,
+    ))]
     async fn acquire_lock(
         &self,
-        _ctx: &RequestContext,
-        _options: AcquireLockOptions,
+        ctx: &RequestContext,
+        options: AcquireLockOptions,
     ) -> LockResult<Lock> {
-        Err(LockError::BackendError(
-            "RedisLockManager::acquire_lock not yet implemented".into(),
-        ))
+        let key = Self::redis_key(ctx, &options.lock_key);
+        let version = Ulid::new().to_string();
+        // value = holder_id:version so release/renew can verify ownership atomically
+        let value = format!("{}:{}", options.holder_id, version);
+        let ttl_ms = (options.lease_duration_secs as u64) * 1000;
+
+        let mut conn = self.conn.clone();
+        let set_result: Option<String> = conn
+            .set_options(
+                &key,
+                &value,
+                redis::SetOptions::default()
+                    .conditional_set(redis::ExistenceCheck::NX)
+                    .with_expiration(redis::SetExpiry::PX(ttl_ms)),
+            )
+            .await
+            .map_err(|e| LockError::BackendError(format!("redis SET NX: {e}")))?;
+
+        // SET NX returns "OK" on success, nil (None) if key already exists
+        if set_result.as_deref() == Some("OK") {
+            Ok(Self::build_lock(
+                &options.lock_key,
+                &options.holder_id,
+                &version,
+                options.lease_duration_secs,
+            ))
+        } else {
+            Err(LockError::LockAlreadyHeld(options.lock_key.clone()))
+        }
     }
 
+    #[tracing::instrument(skip(self, ctx, options), fields(
+        tenant_id = %ctx.tenant_id(),
+        namespace = %ctx.namespace(),
+        lock_key = %options.lock_key,
+        holder_id = %options.holder_id,
+    ))]
     async fn renew_lock(
         &self,
-        _ctx: &RequestContext,
-        _options: RenewLockOptions,
+        ctx: &RequestContext,
+        options: RenewLockOptions,
     ) -> LockResult<Lock> {
-        Err(LockError::BackendError(
-            "RedisLockManager::renew_lock not yet implemented".into(),
-        ))
+        let key = Self::redis_key(ctx, &options.lock_key);
+        let expected_prefix = format!("{}:", options.holder_id);
+        let new_version = Ulid::new().to_string();
+        let new_value = format!("{}:{}", options.holder_id, new_version);
+        let new_ttl_ms = (options.lease_duration_secs as u64) * 1000;
+
+        // Atomically verify ownership then reset TTL with new version
+        let script = Script::new(
+            r#"
+            local cur = redis.call('GET', KEYS[1])
+            if cur == false then return 0 end
+            if string.sub(cur, 1, #ARGV[1]) ~= ARGV[1] then return 0 end
+            redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+            return 1
+            "#,
+        );
+        let mut conn = self.conn.clone();
+        let renewed: i64 = script
+            .key(&key)
+            .arg(&expected_prefix)
+            .arg(&new_value)
+            .arg(new_ttl_ms)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| LockError::BackendError(format!("redis renew script: {e}")))?;
+
+        if renewed == 1 {
+            Ok(Self::build_lock(
+                &options.lock_key,
+                &options.holder_id,
+                &new_version,
+                options.lease_duration_secs,
+            ))
+        } else {
+            Err(LockError::LockNotHeld(options.lock_key.clone()))
+        }
     }
 
+    #[tracing::instrument(skip(self, ctx, options), fields(
+        tenant_id = %ctx.tenant_id(),
+        namespace = %ctx.namespace(),
+        lock_key = %options.lock_key,
+        holder_id = %options.holder_id,
+    ))]
     async fn release_lock(
         &self,
-        _ctx: &RequestContext,
-        _options: ReleaseLockOptions,
+        ctx: &RequestContext,
+        options: ReleaseLockOptions,
     ) -> LockResult<()> {
-        Err(LockError::BackendError(
-            "RedisLockManager::release_lock not yet implemented".into(),
-        ))
+        let key = Self::redis_key(ctx, &options.lock_key);
+        let expected_prefix = format!("{}:", options.holder_id);
+
+        // Atomically DEL only if value starts with holder_id (prevents stealing another's lock)
+        let script = Script::new(
+            r#"
+            local cur = redis.call('GET', KEYS[1])
+            if cur == false then return 0 end
+            if string.sub(cur, 1, #ARGV[1]) ~= ARGV[1] then return 0 end
+            return redis.call('DEL', KEYS[1])
+            "#,
+        );
+        let mut conn = self.conn.clone();
+        let deleted: i64 = script
+            .key(&key)
+            .arg(&expected_prefix)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| LockError::BackendError(format!("redis release script: {e}")))?;
+
+        if deleted == 1 {
+            Ok(())
+        } else {
+            Err(LockError::LockNotHeld(options.lock_key.clone()))
+        }
     }
 
-    async fn get_lock(&self, _ctx: &RequestContext, _lock_key: &str) -> LockResult<Option<Lock>> {
-        Err(LockError::BackendError(
-            "RedisLockManager::get_lock not yet implemented".into(),
-        ))
+    #[tracing::instrument(skip(self, ctx), fields(
+        tenant_id = %ctx.tenant_id(),
+        namespace = %ctx.namespace(),
+        lock_key = %lock_key,
+    ))]
+    async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> LockResult<Option<Lock>> {
+        let key = Self::redis_key(ctx, lock_key);
+        let mut conn = self.conn.clone();
+        let raw: Option<String> = conn
+            .get(&key)
+            .await
+            .map_err(|e| LockError::BackendError(format!("redis GET: {e}")))?;
+
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let Some((holder_id, version)) = raw.split_once(':') else {
+            return Ok(None);
+        };
+
+        // Fetch remaining TTL from Redis to compute lease_duration_secs
+        let ttl_ms: i64 = conn
+            .pttl(&key)
+            .await
+            .map_err(|e| LockError::BackendError(format!("redis PTTL: {e}")))?;
+        // pttl returns -2 if key gone, -1 if no expiry; treat both as 0
+        let lease_duration_secs = if ttl_ms > 0 {
+            ((ttl_ms as u64 + 999) / 1000) as u32
+        } else {
+            0
+        };
+
+        Ok(Some(Self::build_lock(
+            lock_key,
+            holder_id,
+            version,
+            lease_duration_secs,
+        )))
     }
 }

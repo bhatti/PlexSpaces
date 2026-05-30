@@ -29,20 +29,12 @@
 //! - **Production-Grade**: Handles errors gracefully, supports all facet types
 //! - **Runtime Config**: Factories use ServiceLocator to get runtime configuration
 
-use crate::{ProcessGroupService, RequestContext};
-use async_trait::async_trait;
 use plexspaces_facet::{
-    Facet, FacetContainer, FacetError, FacetFactory, FacetMetadata, FacetRegistry,
+    Facet, FacetError, FacetRegistry,
 };
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
-use plexspaces_proto::locks::prv::{
-    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
-};
-use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
-use tracing;
 
 // Re-export facet helpers from facet crate (for consistency)
 pub use plexspaces_facet::facet_helpers::{

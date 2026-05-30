@@ -68,7 +68,7 @@ pub use helpers::{get_storage_path, is_expired, validate_metadata};
 pub use repository::BlobRepository;
 #[cfg(feature = "ddb-backend")]
 pub use repository::{DynamoDBBlobRepository, ListFilters};
-pub use service::BlobService;
+pub use service::{BlobService, UploadBlobParams};
 
 #[cfg(feature = "server")]
 pub use server::grpc::BlobServiceImpl;

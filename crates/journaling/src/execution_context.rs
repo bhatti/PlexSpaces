@@ -76,10 +76,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
-// Observability
-use metrics;
-use tracing;
-
 /// Implementation of ExecutionContext with side effect caching
 ///
 /// ## Purpose

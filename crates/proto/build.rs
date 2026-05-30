@@ -40,11 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for file_path in generated_files {
             let mut content = fs::read_to_string(&file_path)?;
             let original_content = content.clone();
-
-            // Remove Copy from all prost::Message derives
-            content = remove_copy_derives(content);
-            content = gate_tonic_includes(content);
-
+            content = post_process(content);
             if content != original_content {
                 fs::write(&file_path, content)?;
             }
@@ -101,58 +97,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .out_dir(&out_dir)
         .file_descriptor_set_path(out_dir.join("descriptor.bin"))
         .emit_rerun_if_changed(true)
-        .compile_with_config(config, &proto_files, &include_dirs)?;
+        .compile_protos_with_config(config, &proto_files, &include_dirs)?;
 
-    // Post-process generated files to remove incorrect `Copy` derives
-    println!("Post-processing generated files to remove incorrect `Copy` derives...");
     let generated_files = find_rust_files(&out_dir)?;
     for file_path in generated_files {
         let mut content = fs::read_to_string(&file_path)?;
         let original_content = content.clone();
-
-        // First, remove Copy from ALL prost::Message derives (we'll be more selective if needed)
-        // This is safer - prost types with Option<Timestamp> or Option<Duration> can't be Copy
-        content = content.replace(
-            "#[derive(Clone, Copy, PartialEq, ::prost::Message)]",
-            "#[derive(Clone, PartialEq, ::prost::Message)]",
-        );
-        content = content.replace(
-            "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Message)]",
-            "#[derive(Clone, PartialEq, Eq, ::prost::Message)]",
-        );
-        // Remove `Copy` from `prost::Oneof` derives
-        content = content.replace(
-            "#[derive(Clone, Copy, PartialEq, ::prost::Oneof)]",
-            "#[derive(Clone, PartialEq, ::prost::Oneof)]",
-        );
-        content = content.replace(
-            "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Oneof)]",
-            "#[derive(Clone, PartialEq, Eq, ::prost::Oneof)]",
-        );
-        // Remove `Copy` from enum derives (prost::Enumeration) - enums can be Copy if all variants are Copy
-        // But we're being conservative and removing Copy from all for consistency
-        content = content.replace(
-            "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
-            "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
-        );
-        content = content.replace(
-            "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
-            "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
-        );
-        // Remove standalone Copy derives (more patterns)
-        content = content.replace(", Copy,", ",");
-        content = content.replace(", Copy)", ")");
-        content = content.replace("(Copy,", "(");
-        content = content.replace("(Copy)", "()");
-        // Replace prost's Empty with unit type for better ergonomics
-        content = content.replace("::prost_types::Empty", "()");
-        content = gate_tonic_includes(content);
-
+        content = post_process(content);
         if content != original_content {
             fs::write(&file_path, content)?;
         }
     }
-    println!("Post-processing complete!");
 
     // Tell cargo to rerun if proto files change
     println!("cargo:rerun-if-changed={}", proto_dir.display());
@@ -165,54 +120,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Remove Copy derives from generated proto code
-fn remove_copy_derives(content: String) -> String {
-    let mut content = content;
-
-    // Remove `Copy` from `prost::Message` derives (multiple patterns)
-    // Pattern: #[derive(Clone, Copy, PartialEq, ::prost::Message)]
-    content = content.replace(
-        "#[derive(Clone, Copy, PartialEq, ::prost::Message)]",
-        "#[derive(Clone, PartialEq, ::prost::Message)]",
-    );
-    // Pattern: #[derive(Clone, Copy, PartialEq, Eq, ::prost::Message)]
-    content = content.replace(
-        "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Message)]",
-        "#[derive(Clone, PartialEq, Eq, ::prost::Message)]",
-    );
-    // Pattern: #[derive(Clone, Copy, PartialEq, ::prost::Message)] (with different spacing)
-    content = content.replace(
-        "#[derive(Clone,Copy,PartialEq,::prost::Message)]",
-        "#[derive(Clone,PartialEq,::prost::Message)]",
-    );
-    // Remove `Copy` from `prost::Oneof` derives
-    content = content.replace(
-        "#[derive(Clone, Copy, PartialEq, ::prost::Oneof)]",
-        "#[derive(Clone, PartialEq, ::prost::Oneof)]",
-    );
-    content = content.replace(
-        "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Oneof)]",
-        "#[derive(Clone, PartialEq, Eq, ::prost::Oneof)]",
-    );
-    // Remove `Copy` from enum derives (prost::Enumeration)
-    content = content.replace(
-        "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
-        "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
-    );
-    content = content.replace(
-        "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
-        "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
-    );
-    // Remove standalone Copy derives (more patterns)
-    content = content.replace(", Copy,", ",");
-    content = content.replace(", Copy)", ")");
-    content = content.replace("(Copy,", "(");
-    content = content.replace("(Copy)", "()");
-    // Replace prost's Empty with unit type for better ergonomics
-    content = content.replace("::prost_types::Empty", "()");
-    content = gate_tonic_includes(content);
-
-    content
+/// Post-process a generated Rust file: remove `Copy` derives and gate tonic includes.
+fn post_process(mut content: String) -> String {
+    let replacements = [
+        (
+            "#[derive(Clone, Copy, PartialEq, ::prost::Message)]",
+            "#[derive(Clone, PartialEq, ::prost::Message)]",
+        ),
+        (
+            "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Message)]",
+            "#[derive(Clone, PartialEq, Eq, ::prost::Message)]",
+        ),
+        (
+            "#[derive(Clone,Copy,PartialEq,::prost::Message)]",
+            "#[derive(Clone,PartialEq,::prost::Message)]",
+        ),
+        (
+            "#[derive(Clone, Copy, PartialEq, ::prost::Oneof)]",
+            "#[derive(Clone, PartialEq, ::prost::Oneof)]",
+        ),
+        (
+            "#[derive(Clone, Copy, PartialEq, Eq, ::prost::Oneof)]",
+            "#[derive(Clone, PartialEq, Eq, ::prost::Oneof)]",
+        ),
+        (
+            "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
+            "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]",
+        ),
+        (
+            "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
+            "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]",
+        ),
+        (", Copy,", ","),
+        (", Copy)", ")"),
+        ("(Copy,", "("),
+        ("(Copy)", "()"),
+        ("::prost_types::Empty", "()"),
+    ];
+    for (from, to) in replacements {
+        content = content.replace(from, to);
+    }
+    gate_tonic_includes(content)
 }
 
 /// Gate tonic client/server includes behind the grpc feature so message-only users

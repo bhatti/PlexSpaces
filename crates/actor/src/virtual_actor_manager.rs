@@ -41,14 +41,16 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
-use crate::Service;
 use crate::{ActorId, ActorRegistry};
 use plexspaces_common::{
-    from_config_str, ActivationStrategy, RequestContext, RequestContextExt, ServiceNameExt,
+    from_config_str, ActivationStrategy, RequestContext, ServiceNameExt,
 };
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::common::v1::Message;
+
+/// Pending activation queue: actor_id -> list of (message, caller context).
+type PendingActivationMap = Arc<RwLock<HashMap<ActorId, Vec<(Message, RequestContext)>>>>;
 
 /// Compute the WASM init payload bytes for a virtual actor activation.
 ///
@@ -220,12 +222,15 @@ impl VirtualActorMetadata {
 /// Tracks active instances per actor_type with last_access time
 #[derive(Clone)]
 pub struct ActiveInstance {
+    /// The actor ID of the active instance.
     pub actor_id: ActorId,
+    /// Timestamp of the last message processed by this instance.
     pub last_access: std::time::SystemTime,
 }
 
+/// Composite key for looking up a virtual actor type definition by namespace and name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct VirtualActorDefinitionKey {
+pub struct VirtualActorDefinitionKey {
     namespace: String,
     name: String,
 }
@@ -247,7 +252,7 @@ pub struct VirtualActorRegistry {
     ///
     /// Preserves the `RequestContext` from each `tell` so post-activation delivery runs the same
     /// visibility and tracing semantics as an immediate send (see `ActorRef::tell`).
-    pending_activations: Arc<RwLock<HashMap<ActorId, Vec<(Message, RequestContext)>>>>,
+    pending_activations: PendingActivationMap,
     /// Virtual actor types: actor_type -> VirtualActorMetadata
     /// Key is actor_type (behavior class, e.g. "inference_worker").
     /// Used for BehaviorRegistry lookup, canonical ID construction, and LRU eviction.
@@ -277,16 +282,17 @@ impl VirtualActorRegistry {
         }
     }
 
+    /// Returns the map of all registered virtual actor instances.
     pub fn virtual_actors(&self) -> &Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>> {
         &self.virtual_actors
     }
 
-    pub fn pending_activations(
-        &self,
-    ) -> &Arc<RwLock<HashMap<ActorId, Vec<(Message, RequestContext)>>>> {
+    /// Returns the pending activation map (messages queued while an actor was being activated).
+    pub fn pending_activations(&self) -> &PendingActivationMap {
         &self.pending_activations
     }
 
+    /// Returns the map from actor type name to its virtual actor metadata.
     pub fn virtual_actor_types(&self) -> &Arc<RwLock<HashMap<String, VirtualActorMetadata>>> {
         &self.virtual_actor_types
     }
@@ -297,10 +303,12 @@ impl VirtualActorRegistry {
         &self.named_virtual_actor_definitions
     }
 
+    /// Returns the reverse index from declaration name to actor type (behavior class).
     pub fn name_to_actor_type(&self) -> &Arc<RwLock<HashMap<VirtualActorDefinitionKey, String>>> {
         &self.name_to_actor_type
     }
 
+    /// Returns the per-type active instance lists used for LRU eviction.
     pub fn active_instances_by_type(&self) -> &Arc<RwLock<HashMap<String, Vec<ActiveInstance>>>> {
         &self.active_instances_by_type
     }
@@ -393,12 +401,12 @@ fn facet_config_to_proto_facets(
                         .as_object()
                         .map(|m| {
                             m.iter()
-                                .filter_map(|(k, v)| {
+                                .map(|(k, v)| {
                                     let s = match v {
                                         serde_json::Value::String(s) => s.clone(),
                                         other => other.to_string(),
                                     };
-                                    Some((k.clone(), s))
+                                    (k.clone(), s)
                                 })
                                 .collect::<HashMap<String, String>>()
                         })
@@ -445,6 +453,7 @@ impl VirtualActorManager {
             .unwrap_or(ActivationStrategy::ActivationStrategyLazy)
     }
 
+    /// Creates a new `VirtualActorManager` backed by the given `ActorRegistry`.
     pub fn new(actor_registry: Arc<ActorRegistry>) -> Self {
         use plexspaces_common::virtual_actor_config::DEFAULT_MAX_POOL_PER_ACTOR_TYPE;
         Self {
@@ -1179,6 +1188,7 @@ mod tests {
     use crate::actor_context::ObjectRegistry;
     use crate::ActorRegistry;
     use async_trait::async_trait;
+    use plexspaces_common::RequestContextExt;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::common::v1::Facet as ProtoFacet;
     use std::collections::HashMap;
@@ -1284,16 +1294,7 @@ mod tests {
     }
 
     async fn create_test_manager() -> VirtualActorManager {
-        let object_repo = Arc::new(
-            SqliteObjectRegistryRepository::new(":memory:")
-                .await
-                .unwrap(),
-        );
-        let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-        let object_registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryAdapter {
-            inner: object_registry_impl,
-        });
-        let actor_registry = Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()));
+        let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
         VirtualActorManager::new(actor_registry)
     }
 

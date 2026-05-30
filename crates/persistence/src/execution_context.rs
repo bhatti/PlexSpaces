@@ -189,7 +189,9 @@ impl ExecutionContext {
                 self.side_effect_cache
                     .insert(effect_id.to_string(), (sequence, result_bytes.into()));
 
-                // TODO: Journal side effect with sequence
+                // Side-effect journaling (persist sequence + result for deterministic replay) is not yet
+                // implemented. The cache above handles in-process replay; durable replay across restarts
+                // requires a `journal_side_effect` call here once the journal integration is complete.
                 // self.journal_side_effect(effect_id, sequence, &result_bytes).await?;
 
                 Ok(result)

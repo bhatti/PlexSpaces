@@ -19,7 +19,7 @@
 //! DynamoDB-based lock manager implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for distributed lock/lease coordination
+//! DynamoDB backend for distributed lock/lease coordination
 //! with proper tenant isolation, version-based optimistic locking, and comprehensive observability.
 //!
 //! ## Design
@@ -27,7 +27,7 @@
 //! - **Version-based optimistic locking**: Prevents lost updates
 //! - **TTL support**: Uses DynamoDB TTL for automatic expiration cleanup
 //! - **Auto-table creation**: Creates table with proper schema on initialization
-//! - **Extensible schema**: Uses JSON for metadata, schema_version for future compatibility
+//! - **Extensible schema**: Uses JSON for metadata with schema_version
 //! - **Production-grade**: Full observability (metrics, tracing, structured logging)
 //!
 //! ## Table Schema
@@ -84,7 +84,7 @@ use std::time::{Duration, SystemTime};
 use tracing::{debug, error, instrument, warn};
 use ulid::Ulid;
 
-/// DynamoDB lock manager with production-grade observability.
+/// DynamoDB lock manager with full observability (metrics, tracing, structured logging).
 ///
 /// ## Example
 /// ```rust,no_run

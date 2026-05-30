@@ -65,7 +65,7 @@
 //! This crate depends on:
 //! - [`plexspaces_core`]: Common types (ActorId, ActorRef, ActorContext)
 //! - [`plexspaces_actor`]: Actor system and lifecycle
-//! - [`plexspaces_behavior`]: GenServer trait for workflow behavior
+//! - [`plexspaces_actor::behavior`]: GenServer trait for workflow behavior
 //! - [`plexspaces_persistence`]: Journal storage for state durability
 //! - [`plexspaces_proto`]: Proto definitions (workflow.proto)
 //!

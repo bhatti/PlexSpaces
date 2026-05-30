@@ -16,7 +16,6 @@ path = "src/main.rs"
 # PlexSpaces SDK
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }
 
 # Async runtime

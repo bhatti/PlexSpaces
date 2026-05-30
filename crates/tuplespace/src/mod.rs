@@ -458,10 +458,6 @@ impl Default for TupleSpace {
 }
 
 impl TupleSpace {
-    /// Create a new in-memory tuple space with RequestContext
-    ///
-    /// ## Arguments
-    /// * `ctx` - RequestContext for tenant isolation (first parameter)
     /// Create a new in-memory tuple space with specific tenant and namespace
     ///
     /// ## Arguments

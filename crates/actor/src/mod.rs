@@ -44,7 +44,7 @@
 //!        |                                     |
 //!        +---> plexspaces_mailbox              |
 //!        +---> plexspaces_journal              |
-//!        +---> plexspaces_behavior             |
+//!        +---> behavior (GenServer/GenEvent/…)  |
 //!        +---> plexspaces_facet                |
 //!        |                                     |
 //!        +-------------------------------------+
@@ -200,7 +200,6 @@
 
 // Submodules are declared in lib.rs, not here
 
-use std::io::prelude::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
@@ -210,6 +209,7 @@ use crate::resource::{
 };
 
 // Import from external crates
+use crate::actor_registry::ActorRegistrationParams;
 use crate::core::{Actor as ActorTrait, ActorContext, ActorError, ActorId, ExitAction, ExitReason};
 
 /// Parse ExitReason from string representation (used for EXIT messages)
@@ -257,7 +257,6 @@ use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 
 // Observability
-use metrics;
 use tracing::info;
 
 /// Actor state - matches proto ActorState enum exactly
@@ -420,16 +419,30 @@ struct ActorRuntimeHandle {
     facets: Arc<RwLock<FacetContainer>>,
 }
 
+struct StopParams<'a> {
+    actor_id: &'a ActorId,
+    state: &'a Arc<RwLock<ActorState>>,
+    shutdown_tx: &'a Option<mpsc::Sender<()>>,
+    mailbox: &'a Arc<Mailbox>,
+    processor_handle: &'a Option<tokio::task::AbortHandle>,
+    facets: &'a Arc<RwLock<FacetContainer>>,
+    behavior: &'a Arc<RwLock<Box<dyn ActorTrait>>>,
+    context: &'a Arc<ActorContext>,
+}
+
 async fn stop_actor_runtime(
-    actor_id: &ActorId,
-    state: &Arc<RwLock<ActorState>>,
-    shutdown_tx: &Option<mpsc::Sender<()>>,
-    mailbox: &Arc<Mailbox>,
-    processor_handle: &Option<tokio::task::AbortHandle>,
-    facets: &Arc<RwLock<FacetContainer>>,
-    behavior: &Arc<RwLock<Box<dyn ActorTrait>>>,
-    context: &Arc<ActorContext>,
+    p: StopParams<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let StopParams {
+        actor_id,
+        state,
+        shutdown_tx,
+        mailbox,
+        processor_handle,
+        facets,
+        behavior,
+        context,
+    } = p;
     let current_state = state.read().await.clone();
     if current_state == ActorState::Stopping
         || current_state == ActorState::Terminated
@@ -820,12 +833,14 @@ impl ActorInstance {
         registry
             .register_actor(
                 &ctx,
-                self.id.clone(),
-                Arc::new(actor_ref) as Arc<dyn MessageSender>,
-                actor_type,
-                self.context.config.clone(),
-                Some(self.runtime_handle()),
-                Some(behavior_kind),
+                ActorRegistrationParams {
+                    actor_id: self.id.clone(),
+                    sender: Arc::new(actor_ref) as Arc<dyn MessageSender>,
+                    actor_type,
+                    config: self.context.config.clone(),
+                    instance: Some(self.runtime_handle()),
+                    behavior_kind: Some(behavior_kind),
+                },
             )
             .await;
     }
@@ -1151,15 +1166,13 @@ impl ActorInstance {
                                             error_count = facet_exit_errors.len(),
                                             "Some facets failed to handle EXIT signal (continuing with behavior.handle_exit)"
                                         );
-                                    } else {
-                                        if tracing::enabled!(tracing::Level::DEBUG) {
-                                            tracing::debug!(
+                                    } else if tracing::enabled!(tracing::Level::DEBUG) {
+                                        tracing::debug!(
                                             actor_id = %actor_id_for_logging,
                                             from = %from_actor_id,
                                             duration_ms = facet_exit_duration.as_millis(),
                                             "All facets handled EXIT signal successfully"
                                         );
-                                        }
                                     }
                                     metrics::histogram!("plexspaces_facet_exit_duration_seconds",
                                         "actor_id" => actor_id_for_logging.to_string()
@@ -1624,12 +1637,10 @@ impl ActorInstance {
         // Call on_terminate_start() for ALL facets (in priority order, descending)
         // This allows facets to perform cleanup before actor terminates (e.g., cancel timers, flush journal)
         let exit_reason = ExitReason::Shutdown;
-        let mut facet_count = 0_usize;
-        let mut facets_terminate_start_duration_ms = 0_u128;
         let facets_terminate_start_time = std::time::Instant::now();
         {
             let mut facets = self.facets.write().await;
-            facet_count = facets.list_facets().len();
+            let _facet_count = facets.list_facets().len();
             // Convert ExitReason to facet's ExitReason
             // Manual conversion to avoid circular dependency
             let facet_exit_reason = match &exit_reason {
@@ -1675,7 +1686,7 @@ impl ActorInstance {
             }
 
             let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
-            facets_terminate_start_duration_ms = facets_terminate_start_duration.as_millis();
+            let _ = facets_terminate_start_duration.as_millis();
             metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
                 "actor_id" => self.id.to_string()
             )
@@ -1685,7 +1696,6 @@ impl ActorInstance {
         // Step 5: Behavior pre-facet-detachment cleanup (Phase 1: Unified Lifecycle)
         // Call on_facets_detaching() to allow behavior to clean up before facets are detached
         let facets_detaching_start = std::time::Instant::now();
-        let mut facets_detaching_duration_ms = 0_u128;
         {
             let mut behavior = self.behavior.write().await;
             match behavior
@@ -1694,7 +1704,7 @@ impl ActorInstance {
             {
                 Ok(()) => {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
-                    facets_detaching_duration_ms = facets_detaching_duration.as_millis();
+                    let _ = facets_detaching_duration.as_millis();
                     metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
                         "actor_id" => self.id.to_string()
                     )
@@ -1703,7 +1713,7 @@ impl ActorInstance {
                 Err(e) => {
                     // Log error but don't fail shutdown (behavior may have non-critical errors)
                     let facets_detaching_duration = facets_detaching_start.elapsed();
-                    facets_detaching_duration_ms = facets_detaching_duration.as_millis();
+                    let _facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
                         "actor_id" => self.id.to_string(),
                         "error_type" => format!("{:?}", e)
@@ -1757,9 +1767,6 @@ impl ActorInstance {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             actor_id = %self.id,
-                            facet_count,
-                            facets_terminate_start_duration_ms,
-                            facets_detaching_duration_ms,
                             duration_ms = terminate_duration.as_millis(),
                             error = %e,
                             "Actor terminate() completed with non-fatal behavior error"
@@ -1811,8 +1818,6 @@ impl ActorInstance {
                     actor_id = %self.id,
                     detached_facet_count = detached_facets,
                     remaining_facet_count = facets.list_facets().len(),
-                    facets_terminate_start_duration_ms,
-                    facets_detaching_duration_ms,
                     duration_ms = facets_detach_duration.as_millis(),
                     "Actor shutdown lifecycle completed and all facets detached"
                 );
@@ -2136,7 +2141,7 @@ impl ActorInstance {
             tracing::Level::DEBUG,
             "actor.activate",
             actor_id = %actor_id,
-            facet_count = facet_list.is_empty().then_some(0).unwrap_or_else(|| facet_list.split(", ").count()),
+            facet_count = if facet_list.is_empty() { 0 } else { facet_list.split(", ").count() },
             facets = %facet_list
         );
         let _guard = span.enter();
@@ -2272,7 +2277,7 @@ impl ActorInstance {
         self.behavior
             .write()
             .await
-            .handle_message(&*self.context, timer_message)
+            .handle_message(&self.context, timer_message)
             .await
             .map_err(|e| ActorError::BehaviorError(e.to_string()))
     }
@@ -2293,7 +2298,7 @@ impl ActorInstance {
         // RECURSION DETECTION: Track call depth to detect infinite loops
         use std::thread_local;
         thread_local! {
-            static PROCESS_MESSAGE_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
+            static PROCESS_MESSAGE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
 
         let depth = PROCESS_MESSAGE_DEPTH.with(|d| {
@@ -2305,7 +2310,7 @@ impl ActorInstance {
         // Safety check: prevent infinite recursion
         const MAX_RECURSION_DEPTH: usize = 100;
         if depth > MAX_RECURSION_DEPTH {
-            let _ = PROCESS_MESSAGE_DEPTH.with(|d| d.set(0)); // Reset on panic
+            PROCESS_MESSAGE_DEPTH.with(|d| d.set(0)); // Reset on panic
             let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
                 "INFINITE RECURSION DETECTED IN process_message! depth={}, max={}, actor_id={}, sender={:?}, receiver={}, correlation_id={:?}, backtrace={:?}",
@@ -2419,16 +2424,18 @@ impl ActorInstance {
                 // For short-circuited messages, we need to send the facet's result as a reply
                 // Only send reply if there's a correlation_id (ask pattern) and sender_id
                 if !message.correlation_id.is_empty() && !message.sender_id.is_empty() {
-                    let mut reply_msg = Message::default();
-                    // Ensure reply message ID has "res-" prefix
-                    reply_msg.id = format!("res-{}", ulid::Ulid::new().to_string());
-                    reply_msg.payload = result;
-                    reply_msg.message_type = format!("{}_reply", method_name);
-                    reply_msg.sender_id = actor_id_owned.clone();
-                    reply_msg.receiver_id = message.sender_id.clone();
-                    reply_msg.correlation_id = message.correlation_id.clone();
-                    reply_msg.timestamp =
-                        Some(prost_types::Timestamp::from(std::time::SystemTime::now()));
+                    let reply_msg = Message {
+                        id: format!("res-{}", ulid::Ulid::new()),
+                        payload: result,
+                        message_type: format!("{}_reply", method_name),
+                        sender_id: actor_id_owned.clone(),
+                        receiver_id: message.sender_id.clone(),
+                        correlation_id: message.correlation_id.clone(),
+                        timestamp: Some(prost_types::Timestamp::from(
+                            std::time::SystemTime::now(),
+                        )),
+                        ..Default::default()
+                    };
                     if let Err(e) = context
                         .send_reply(
                             Some(&message.correlation_id),
@@ -2465,7 +2472,7 @@ impl ActorInstance {
                         );
                     }
                 }
-                return Ok(());
+                Ok(())
             }
             BeforeInterceptOutcome::CallActor(args) => {
                 // Update message with intercepted args (may have been modified by ReplaceArgs)
@@ -2497,7 +2504,7 @@ impl ActorInstance {
                 drop(behavior);
 
                 // Decrement recursion depth
-                let _ = PROCESS_MESSAGE_DEPTH.with(|d| {
+                PROCESS_MESSAGE_DEPTH.with(|d| {
                     let current = d.get();
                     if current > 0 {
                         d.set(current - 1);
@@ -3945,16 +3952,16 @@ impl crate::core::ActorStateHandle for ActorInstance {
     }
 
     async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        stop_actor_runtime(
-            &self.id,
-            &self.state,
-            &self.shutdown_tx,
-            &self.mailbox,
-            &self.processor_handle,
-            &self.facets,
-            &self.behavior,
-            &self.context,
-        )
+        stop_actor_runtime(StopParams {
+            actor_id: &self.id,
+            state: &self.state,
+            shutdown_tx: &self.shutdown_tx,
+            mailbox: &self.mailbox,
+            processor_handle: &self.processor_handle,
+            facets: &self.facets,
+            behavior: &self.behavior,
+            context: &self.context,
+        })
         .await
     }
 }
@@ -3979,16 +3986,16 @@ impl crate::core::ActorStateHandle for ActorRuntimeHandle {
     }
 
     async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        stop_actor_runtime(
-            &self.id,
-            &self.state,
-            &self.shutdown_tx,
-            &self.mailbox,
-            &self.processor_handle,
-            &self.facets,
-            &self.behavior,
-            &self.context,
-        )
+        stop_actor_runtime(StopParams {
+            actor_id: &self.id,
+            state: &self.state,
+            shutdown_tx: &self.shutdown_tx,
+            mailbox: &self.mailbox,
+            processor_handle: &self.processor_handle,
+            facets: &self.facets,
+            behavior: &self.behavior,
+            context: &self.context,
+        })
         .await
     }
 }

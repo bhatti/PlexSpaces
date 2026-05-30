@@ -227,7 +227,7 @@ message WasmModule {
   // Used for bandwidth estimation and pre-warming decisions.
   uint64 size_bytes = 9;
 
-  // Schema version for forward/backward compatibility
+  // Schema version for forward compatibility
   uint32 version_number = 10;
 }
 

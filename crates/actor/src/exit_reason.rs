@@ -195,36 +195,29 @@ impl ExitReason {
         }
     }
 
-    /// Convert from string representation.
+}
+
+impl std::str::FromStr for ExitReason {
+    type Err = std::convert::Infallible;
+
+    /// Parse a string into an `ExitReason`.
     ///
-    /// ## Purpose
-    /// Converts string exit reasons (from old notify_actor_down API) to ExitReason enum.
-    ///
-    /// ## Arguments
-    /// * `reason_str` - String representation of exit reason
-    ///
-    /// ## Returns
-    /// ExitReason enum value
-    ///
-    /// ## Examples
-    /// - "normal" -> ExitReason::Normal
-    /// - "shutdown" -> ExitReason::Shutdown
-    /// - "killed" -> ExitReason::Killed
-    /// - "error message" -> ExitReason::Error("error message")
-    /// - "linked:actor-id:reason" -> ExitReason::Linked { ... }
-    pub fn from_str(reason_str: &str) -> Self {
-        match reason_str {
+    /// - `"normal"` → `Normal`
+    /// - `"shutdown"` → `Shutdown`
+    /// - `"killed"` → `Killed`
+    /// - `"linked:<actor_id>:<reason>"` → `Linked { … }`
+    /// - anything else → `Error(s.to_string())`
+    fn from_str(reason_str: &str) -> Result<Self, Self::Err> {
+        Ok(match reason_str {
             "normal" => ExitReason::Normal,
             "shutdown" => ExitReason::Shutdown,
             "killed" => ExitReason::Killed,
             s if s.starts_with("linked:") => {
-                // Parse "linked:actor-id:reason" format
                 let parts: Vec<&str> = s.splitn(3, ':').collect();
                 if parts.len() >= 3 {
                     let linked_actor_id = ActorId::from_canonical(parts[1])
                         .unwrap_or_else(|_| unknown_linked_actor_id());
-                    let linked_reason_str = parts[2];
-                    let linked_reason = ExitReason::from_str(linked_reason_str);
+                    let linked_reason = parts[2].parse().unwrap_or(ExitReason::Normal);
                     ExitReason::Linked {
                         actor_id: linked_actor_id,
                         reason: Box::new(linked_reason),
@@ -234,7 +227,7 @@ impl ExitReason {
                 }
             }
             s => ExitReason::Error(s.to_string()),
-        }
+        })
     }
 }
 

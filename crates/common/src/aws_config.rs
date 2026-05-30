@@ -40,16 +40,6 @@ use std::env;
 
 pub use plexspaces_proto::config::v1::{AwsConfig, DlqConfig, DynamoDbConfig, S3Config, SqsConfig};
 
-// Type aliases preserving backwards-compatible names
-/// Alias for [`AwsConfig`] (proto-generated type).
-pub type AWSConfig = AwsConfig;
-/// Alias for [`SqsConfig`] (proto-generated type).
-pub type SQSConfig = SqsConfig;
-/// Alias for [`DlqConfig`] (proto-generated type).
-pub type DLQConfig = DlqConfig;
-/// Alias for [`DynamoDbConfig`] (proto-generated type).
-pub type DynamoDBConfig = DynamoDbConfig;
-
 /// Extension trait for [`AwsConfig`] with environment loading and utility methods.
 pub trait AwsConfigExt {
     /// Load unified AWS configuration from environment variables.

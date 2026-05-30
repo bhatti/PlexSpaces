@@ -34,7 +34,7 @@ use plexspaces_actor::Message;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_actor::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_actor::{ActorRegistry, RequestContext, ServiceLocator};
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{

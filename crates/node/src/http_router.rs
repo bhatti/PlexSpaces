@@ -592,7 +592,6 @@ where
 
 /// Create Axum router for blob HTTP routes (used internally)
 /// Note: This is a helper function but we handle routing in HttpRouterService directly
-#[allow(dead_code)]
 fn create_axum_router(
     blob_service: Arc<plexspaces_blob::BlobService>,
 ) -> Router {
@@ -668,18 +667,18 @@ fn create_axum_router(
         let file_name = file_name.unwrap_or_else(|| "uploaded_file".to_string());
 
         // Upload blob
+        let ctx = plexspaces_actor::RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
         let metadata = blob_service_clone
             .upload_blob(
-                &tenant_id,
-                &namespace,
-                &file_name,
-                file_data,
-                content_type,
-                blob_group,
-                kind,
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-                None,
+                &ctx,
+                plexspaces_blob::UploadBlobParams {
+                    name: file_name,
+                    data: file_data,
+                    content_type,
+                    blob_group,
+                    kind,
+                    ..Default::default()
+                },
             )
             .await
             .map_err(|e| {

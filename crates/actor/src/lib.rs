@@ -64,7 +64,7 @@ pub mod spawn_init_parse;
 pub use spawn_init_parse::legacy_spawn_init_json_to_role_and_args;
 
 pub mod actor_registry;
-pub use actor_registry::{ActorRegistry, ActorRegistryError, TemporarySenderEntry};
+pub use actor_registry::{ActorRegistrationParams, ActorRegistry, ActorRegistryError, TemporarySenderEntry};
 
 pub mod service_trait;
 pub use service_trait::{Service, ServiceName};
@@ -122,7 +122,7 @@ pub use virtual_actor_manager::{
 pub mod virtual_actor_registration;
 pub use virtual_actor_registration::{
     proto_facets_for_registration, register_virtual_actor_definition,
-    register_virtual_actor_type_consistent,
+    register_virtual_actor_type_consistent, VirtualActorTypeSpec,
 };
 
 pub mod actor_state_checker;
@@ -163,6 +163,7 @@ pub use journal_storage::{JournalError, JournalResult, JournalStorage};
 pub mod secret_masker;
 pub use secret_masker::{mask_map_secrets, mask_release_spec, SecretMasker, DEFAULT_MASK};
 
+/// Runtime constants for actor type names and prefixes.
 pub mod constants;
 pub use constants::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};
 
@@ -215,9 +216,9 @@ pub use plexspaces_service_traits::{
 pub mod core;
 
 // ---------------------------------------------------------------------------
-// OTP-style behaviors (merged from plexspaces-behavior)
+// OTP-style behaviors (GenServer, GenEvent, GenStateMachine, Workflow)
 // ---------------------------------------------------------------------------
-/// OTP-style behaviors (merged from plexspaces-behavior)
+/// OTP-style actor behaviors (GenServer, GenEvent, GenStateMachine, Workflow).
 pub mod behavior;
 pub use behavior::*;
 

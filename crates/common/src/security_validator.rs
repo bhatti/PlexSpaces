@@ -19,7 +19,7 @@
 //! Security Configuration Validator
 //!
 //! ## Purpose
-//! Validates security configuration to ensure production-grade security:
+//! Validates security configuration:
 //! - JWT secrets are provided when JWT auth is enabled
 //! - mTLS keys are available when mTLS is enabled
 //! - Supports environment variables for secrets
@@ -43,24 +43,31 @@ use crate::config_manager::{
 /// Security configuration validation errors
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityValidationError {
+    /// JWT auth is enabled but no secret was provided.
     #[error("JWT authentication is enabled but secret is missing. Required: Set PLEXSPACES_JWT_SECRET environment variable, or configure SecurityConfig.jwt.secret in release config")]
     MissingJwtSecret,
 
+    /// mTLS is enabled but the CA certificate path is missing or empty.
     #[error("mTLS is enabled but CA certificate is missing. Required: Set PLEXSPACES_MTLS_CA_CERT environment variable (file path), or configure SecurityConfig.mtls.ca_cert_path in release config. Current value: {0}")]
     MissingCaCertificate(String),
 
+    /// mTLS is enabled but the server certificate path is missing or empty.
     #[error("mTLS is enabled but server certificate is missing. Required: Set PLEXSPACES_MTLS_SERVER_CERT environment variable (file path), or configure SecurityConfig.mtls.server_cert_path in release config. Current value: {0}")]
     MissingServerCertificate(String),
 
+    /// mTLS is enabled but the server private key path is missing or empty.
     #[error("mTLS is enabled but server key is missing. Required: Set PLEXSPACES_MTLS_SERVER_KEY environment variable (file path), or configure SecurityConfig.mtls.server_key_path in release config. Current value: {0}")]
     MissingServerKey(String),
 
+    /// Failed to read a certificate file from disk.
     #[error("Failed to read certificate file {0}: {1}")]
     CertificateReadError(String, std::io::Error),
 
+    /// Failed to create the directory that holds auto-generated certificates.
     #[error("Failed to create certificate directory {0}: {1}. Required: Set PLEXSPACES_MTLS_CERT_DIR environment variable (writable directory path), or configure SecurityConfig.mtls.cert_dir in release config. For testing, set PLEXSPACES_DISABLE_AUTH=1")]
     CertificateDirError(String, std::io::Error),
 
+    /// Auto-generation of mTLS certificates failed.
     #[error("Auto-generation of mTLS certificates failed: {0}")]
     AutoGenerationFailed(String),
 }

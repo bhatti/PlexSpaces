@@ -33,7 +33,7 @@
 //! TimerFacetFactory, ReminderFacetFactory, EventSourcingFacetFactory) are in
 //! the `plexspaces-journaling` crate to avoid circular dependencies.
 
-use crate::{ProcessGroupService, RequestContext, RequestContextExt, ServiceLocator};
+use crate::{ProcessGroupService, RequestContext, ServiceLocator};
 use async_trait::async_trait;
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_proto::locks::prv::{
@@ -42,7 +42,6 @@ use plexspaces_proto::locks::prv::{
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use serde_json::Value;
 use std::sync::Arc;
-use tracing;
 
 /// Factory for creating LockFacet instances
 ///
@@ -511,19 +510,14 @@ impl plexspaces_facet::capabilities::process_groups::ProcessGroupRegistry
 /// Factory for creating KeyValueFacet instances
 ///
 /// ## Purpose
-/// Creates KeyValueFacet instances. KeyValueFacet can use KeyValueStore from ServiceLocator
-/// if configured, otherwise uses in-memory store.
-pub struct KeyValueFacetFactory {
-    service_locator: Arc<dyn ServiceLocator>,
-}
+/// Creates `KeyValueFacet` instances backed by in-memory store.
+/// Pass config with `"type": "redis"` or similar to use an external store.
+pub struct KeyValueFacetFactory;
 
 impl KeyValueFacetFactory {
-    /// Create a new KeyValueFacetFactory
-    ///
-    /// ## Arguments
-    /// * `service_locator` - ServiceLocator to get KeyValueStore from (optional)
-    pub fn new(service_locator: Arc<dyn ServiceLocator>) -> Self {
-        Self { service_locator }
+    /// Create a new KeyValueFacetFactory.
+    pub fn new(_service_locator: Arc<dyn ServiceLocator>) -> Self {
+        Self
     }
 }
 
@@ -714,6 +708,7 @@ mod tests {
     use crate::actor_context::{
         ActorService, ChannelService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
     };
+    use plexspaces_common::RequestContextExt;
     use crate::behavior_factory::BehaviorRegistry;
     use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
     use crate::monitoring::NodeConnectionInfo;

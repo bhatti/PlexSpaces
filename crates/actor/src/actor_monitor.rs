@@ -116,6 +116,7 @@ pub struct ActorMonitor {
 }
 
 impl ActorMonitor {
+    /// Create a new `ActorMonitor` with empty monitor and link tables.
     pub fn new() -> Self {
         Self {
             monitors: Arc::new(RwLock::new(HashMap::new())),

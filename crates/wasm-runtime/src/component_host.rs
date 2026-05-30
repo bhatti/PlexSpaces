@@ -2173,14 +2173,12 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             match blob_service
                 .upload_blob(
                     &request_ctx,
-                    &key, // Use key as name
-                    data.clone(),
-                    content_type.clone(),
-                    None,                             // blob_group
-                    None,                             // kind
-                    std::collections::HashMap::new(), // metadata
-                    std::collections::HashMap::new(), // tags
-                    None,                             // expires_after
+                    plexspaces_blob::UploadBlobParams {
+                        name: key.clone(),
+                        data: data.clone(),
+                        content_type: content_type.clone(),
+                        ..Default::default()
+                    },
                 )
                 .await
             {
@@ -2759,14 +2757,14 @@ impl plexspaces::actor::blob::Host for BlobImpl {
             match blob_service
                 .upload_blob(
                     &request_ctx,
-                    &dest_key,
-                    data,
-                    content_type,
-                    None, // blob_group
-                    None, // kind
-                    source_metadata.metadata.clone(),
-                    source_metadata.tags.clone(),
-                    None, // expires_after
+                    plexspaces_blob::UploadBlobParams {
+                        name: dest_key.clone(),
+                        data,
+                        content_type,
+                        metadata: source_metadata.metadata.clone(),
+                        tags: source_metadata.tags.clone(),
+                        ..Default::default()
+                    },
                 )
                 .await
             {

@@ -10,7 +10,6 @@ description = "SkyPilot-style multi-cloud AI workload orchestration example with
 
 [dependencies]
 plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }

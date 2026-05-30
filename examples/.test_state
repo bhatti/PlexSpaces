@@ -1,4 +1,4 @@
-LAST_KEY=typescript/apps/web_crawl
-LAST_LANG=typescript
-LAST_EXAMPLE=apps/web_crawl
-LAST_STATUS=PASSED
+LAST_KEY=go/apps/data_lake_rag
+LAST_LANG=go
+LAST_EXAMPLE=apps/data_lake_rag
+LAST_STATUS=FAILED

@@ -76,7 +76,7 @@ use std::time::Duration;
 /// 3. **Batching**: Improve write throughput
 /// 4. **Snapshots**: Recovery optimization
 /// 5. **Retention**: Cleanup old data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JournalConfig {
     /// Compression settings
     pub compression: CompressionConfig,
@@ -217,7 +217,7 @@ impl Default for SnapshotConfig {
 }
 
 /// Retention configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RetentionConfig {
     /// Enable retention enforcement
     pub enabled: bool,
@@ -233,30 +233,6 @@ pub struct RetentionConfig {
     /// Alternative to retention_count. Delete snapshots older than this duration.
     /// If both set, keep snapshots that satisfy either condition.
     pub retention_duration: Option<Duration>,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for RetentionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,     // Off by default
-            retention_count: 0, // Keep all
-            retention_duration: None,
-        }
-    }
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for JournalConfig {
-    fn default() -> Self {
-        Self {
-            compression: CompressionConfig::default(),
-            encryption: EncryptionConfig::default(),
-            batching: BatchConfig::default(),
-            snapshot: SnapshotConfig::default(),
-            retention: RetentionConfig::default(),
-        }
-    }
 }
 
 /// Builder for JournalConfig with fluent API

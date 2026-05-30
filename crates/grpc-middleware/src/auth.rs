@@ -28,6 +28,13 @@ use plexspaces_proto::grpc::v1::{
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+/// JWT algorithm pinned to key type — prevents algorithm-confusion attacks.
+#[derive(Clone, Copy)]
+enum JwtKeyType {
+    Hmac, // HS256
+    Rsa,  // RS256
+}
+
 /// JWT Authentication Interceptor
 ///
 /// ## Purpose
@@ -43,13 +50,6 @@ use std::fs;
 /// - Config: `AuthMiddlewareConfig` from proto
 /// - Claims: Maps JWT to proto `JwtClaims`
 /// - RBAC: Uses proto `RbacConfig`
-/// Which JWT algorithm we expect (from key type). Pinned to avoid algorithm-confusion attacks.
-#[derive(Clone, Copy)]
-enum JwtKeyType {
-    Hmac, // HS256
-    Rsa,  // RS256
-}
-
 pub struct AuthInterceptor {
     config: AuthMiddlewareConfig,
     decoding_key: Option<DecodingKey>,
@@ -104,11 +104,8 @@ impl AuthInterceptor {
         };
 
         // Build trusted services set for mTLS
-        let mtls_trusted_services: std::collections::HashSet<String> = config
-            .mtls_trusted_services
-            .iter()
-            .map(|s| s.clone())
-            .collect();
+        let mtls_trusted_services: std::collections::HashSet<String> =
+            config.mtls_trusted_services.iter().cloned().collect();
 
         Ok(Self {
             config,

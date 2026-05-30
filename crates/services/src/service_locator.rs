@@ -2135,12 +2135,8 @@ async fn initialize_services_impl(
         tracing::trace!("✅ JournalStorage registered for durability facets");
     }
 
-    // Create ActorRegistry with ObjectRegistry (ObjectRegistry implements the trait directly)
     let object_registry_trait: Arc<dyn plexspaces_actor::ObjectRegistry> = object_registry.clone();
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait.clone(),
-        node_id_str.clone(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new(node_id_str.clone()));
 
     // Create and register essential services
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());

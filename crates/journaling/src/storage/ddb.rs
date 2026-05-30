@@ -19,7 +19,7 @@
 //! DynamoDB-based JournalStorage implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for journal storage
+//! DynamoDB backend for journal storage
 //! with proper tenant isolation, efficient replay, and comprehensive observability.
 //!
 //! ## Design

@@ -63,8 +63,8 @@
 //! ### Proto-First
 //! All data models defined in `process_groups.proto` first, Rust implements the contract.
 //!
-//! ### Erlang pg2 Compatibility
-//! Matches pg2 semantics: multiple joins, get_members, get_local_members.
+//! ### Group Membership Semantics
+//! Supports multiple joins per actor, get_members (cluster-wide), and get_local_members (node-local).
 //!
 //! ### Test-Driven Development
 //! All features developed with tests first (RED → GREEN → REFACTOR).
@@ -221,7 +221,7 @@ impl ProcessGroupRegistry {
         drop(_guard);
 
         // Check if group already exists
-        if self.storage.get(&ctx, &key).await?.is_some() {
+        if self.storage.get(ctx, &key).await?.is_some() {
             metrics::counter!("plexspaces_process_groups_create_errors_total", "error" => "already_exists").increment(1);
             warn!("Group already exists: {}", group_name);
             return Err(ProcessGroupError::GroupAlreadyExists(group_name));
@@ -244,7 +244,7 @@ impl ProcessGroupRegistry {
 
         // Store in KeyValueStore
         let value = group.encode_to_vec();
-        self.storage.put(&ctx, &key, value).await?;
+        self.storage.put(ctx, &key, value).await?;
 
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_process_groups_create_duration_seconds")
@@ -338,7 +338,7 @@ impl ProcessGroupRegistry {
     /// - `actor_id`: Actor to add to group
     /// - `topics`: Optional topics to subscribe to (empty = all topics)
     ///
-    /// ## Semantics (Erlang pg2-compatible)
+    /// ## Semantics
     /// - Actor can join multiple groups
     /// - Actor can join same group multiple times (join_count tracked)
     /// - Must call leave() equal number of times to fully remove
@@ -406,7 +406,7 @@ impl ProcessGroupRegistry {
             membership.topics = existing_topics.into_iter().collect();
         }
 
-        // Increment join_count (Erlang pg2 semantics)
+        // Increment join_count (multiple joins tracked; must leave equal times to fully remove)
         membership.join_count += 1;
 
         // Store updated membership
@@ -438,7 +438,7 @@ impl ProcessGroupRegistry {
     /// - `tenant_id`: Tenant for isolation
     /// - `actor_id`: Actor to remove from group
     ///
-    /// ## Semantics (Erlang pg2-compatible)
+    /// ## Semantics
     /// - Decrements join_count
     /// - Actor fully removed when join_count reaches 0
     /// - Idempotent if join_count already 0
@@ -802,25 +802,20 @@ impl ProcessGroupRegistry {
         Ok(recipients)
     }
 
-    /// Helper to get group namespace from group metadata
+    /// Returns the namespace for a group.
     ///
     /// ## Arguments
     /// - `ctx`: RequestContext with tenant_id and namespace to search
-    /// - `group_name`: Name of the group
+    /// - `_group_name`: Name of the group (reserved for future namespace lookup)
     ///
     /// ## Returns
-    /// Namespace where the group exists, or error if not found
-    ///
-    /// ## Note
-    /// - If context is admin/internal, searches across common namespaces
-    /// Gets the namespace for a group.
-    ///
-    /// For internal/admin contexts with empty namespace, returns empty namespace (no namespace filtering).
+    /// Namespace where the group exists, or error if not found.
+    /// For admin/internal contexts with empty namespace, returns empty namespace (no namespace filtering).
     /// Otherwise, uses the namespace from the context.
     async fn get_group_namespace(
         &self,
         ctx: &RequestContext,
-        group_name: &str,
+        _group_name: &str,
     ) -> Result<String, ProcessGroupError> {
         // For internal/admin contexts with empty namespace, return empty namespace (no namespace filtering)
         if ctx.should_skip_namespace_filter() {
@@ -1011,7 +1006,7 @@ mod tests {
         assert!(matches!(result, Err(ProcessGroupError::GroupNotFound(_))));
     }
 
-    /// TEST 7: Can join same group multiple times (Erlang pg2 semantics)
+    /// TEST 7: Can join same group multiple times (join_count semantics)
     #[tokio::test]
     async fn test_multiple_joins() {
         let registry = create_test_registry().await;

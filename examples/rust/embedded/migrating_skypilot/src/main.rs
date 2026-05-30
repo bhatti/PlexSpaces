@@ -4,7 +4,7 @@
 // This is the package default run target, so `cargo run` starts the comparison
 // example without needing `--bin skypilot-comparison`.
 
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, RequestContextExt};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;

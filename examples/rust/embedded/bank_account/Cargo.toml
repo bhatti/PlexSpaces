@@ -18,7 +18,6 @@ plexspaces-journaling = { path = "../../../../crates/journaling" }
 # Node and core
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

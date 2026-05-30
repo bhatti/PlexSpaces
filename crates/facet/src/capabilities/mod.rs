@@ -22,8 +22,8 @@
 //! providing a unified extension model for actors.
 //!
 //! ## Design Note
-//! Capabilities are just facets with I/O focus. There's no separate `CapabilityFacet` trait
-//! - all capabilities implement the standard `Facet` trait. If namespace/contract information
+//! Capabilities are just facets with I/O focus. There's no separate `CapabilityFacet` trait;
+//! all capabilities implement the standard `Facet` trait. If namespace/contract information
 //! is needed, it can be stored in facet metadata/config.
 
 pub mod http_client;

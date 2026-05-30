@@ -34,10 +34,10 @@ pub fn merge_client_transport_policy(
 
 fn merge_layer(dst: &mut ClientTransportPolicy, src: &ClientTransportPolicy) {
     if src.connect_timeout.is_some() {
-        dst.connect_timeout = src.connect_timeout.clone();
+        dst.connect_timeout = src.connect_timeout;
     }
     if src.request_timeout.is_some() {
-        dst.request_timeout = src.request_timeout.clone();
+        dst.request_timeout = src.request_timeout;
     }
     if src.retry.is_some() {
         dst.retry = src.retry.clone();

@@ -15,7 +15,6 @@
 ///
 /// Provides a single integration point for dashboards and `Node::metrics()` to read
 /// operational counters that are recorded on hot paths via the `metrics` crate.
-
 pub trait MetricsPrometheusRenderer: Send + Sync {
     /// Returns a Prometheus text exposition snapshot (possibly empty).
     fn render_prometheus_text(&self) -> String;

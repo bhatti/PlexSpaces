@@ -83,7 +83,7 @@ async fn test_spawn_actor_basic() {
 
     // Register a behavior so ActorFactory can create "test_actor" type actors
     use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
-    use plexspaces_behavior::MockBehavior;
+    use plexspaces_actor::behavior::MockBehavior;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
@@ -189,7 +189,7 @@ async fn test_spawn_remote_actor_wrong_node() {
 
     // Register behavior so ActorFactory can create "test_actor" type actors
     use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
-    use plexspaces_behavior::MockBehavior;
+    use plexspaces_actor::behavior::MockBehavior;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
         .register_simple("test_actor", || {
@@ -232,7 +232,7 @@ async fn test_spawn_multiple_remote_actors() {
 
     // Register behavior so ActorFactory can create each actor type
     use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
-    use plexspaces_behavior::MockBehavior;
+    use plexspaces_actor::behavior::MockBehavior;
     let behavior_registry = BehaviorRegistry::new();
     for i in 0..3 {
         let type_name = format!("test_actor_{}", i);
@@ -281,7 +281,7 @@ async fn test_spawn_multiple_remote_actors() {
 #[tokio::test]
 async fn test_spawn_remote_actor_via_grpc() {
     use plexspaces_actor::{behavior_factory::BehaviorRegistry, InitializableServiceLocator};
-    use plexspaces_behavior::MockBehavior;
+    use plexspaces_actor::behavior::MockBehavior;
     use plexspaces_node::NodeBuilder;
     use plexspaces_services::actor_service::ActorServiceImpl;
     use tonic::transport::Server;

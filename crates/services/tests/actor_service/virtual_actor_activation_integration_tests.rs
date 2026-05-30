@@ -17,7 +17,7 @@ use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, Message, RequestContext, RequestContextExt, ServiceLocator,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ActivationStrategy;
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeBuilder, ReleaseSpec};
@@ -1673,39 +1673,41 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,
-        Some(&[
-            plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                config: std::collections::HashMap::from([
-                    ("idle_timeout".to_string(), "1s".to_string()),
-                    ("activation_strategy".to_string(), "lazy".to_string()),
-                ]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "timer".to_string(),
-                config: std::collections::HashMap::from([(
-                    "interval_ms".to_string(),
-                    "250".to_string(),
-                )]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "reminder".to_string(),
-                config: std::collections::HashMap::from([(
-                    "default_due_time".to_string(),
-                    "100ms".to_string(),
-                )]),
-                ..Default::default()
-            },
-        ]),
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"initial_count":3}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,
+            proto_facets: Some(&[
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "1s".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "timer".to_string(),
+                    config: std::collections::HashMap::from([(
+                        "interval_ms".to_string(),
+                        "250".to_string(),
+                    )]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "reminder".to_string(),
+                    config: std::collections::HashMap::from([(
+                        "default_due_time".to_string(),
+                        "100ms".to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            ]),
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"initial_count":3}"#.to_vec()),
+        },
     )
     .await
     .expect("type registration must succeed");
@@ -1816,32 +1818,34 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,
-        Some(&[
-            plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                config: std::collections::HashMap::from([
-                    ("idle_timeout".to_string(), "1s".to_string()),
-                    ("activation_strategy".to_string(), "lazy".to_string()),
-                ]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "durability".to_string(),
-                config: std::collections::HashMap::from([
-                    ("checkpoint_interval".to_string(), "1".to_string()),
-                    ("replay_on_activation".to_string(), "true".to_string()),
-                    ("state_schema_version".to_string(), "1".to_string()),
-                ]),
-                ..Default::default()
-            },
-        ]),
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"initial_count":0}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,
+            proto_facets: Some(&[
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "1s".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "durability".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("checkpoint_interval".to_string(), "1".to_string()),
+                        ("replay_on_activation".to_string(), "true".to_string()),
+                        ("state_schema_version".to_string(), "1".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+            ]),
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"initial_count":0}"#.to_vec()),
+        },
     )
     .await
     .expect("type registration must succeed");
@@ -1975,31 +1979,33 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,
-        Some(&[
-            plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                config: std::collections::HashMap::from([
-                    ("idle_timeout".to_string(), "1s".to_string()),
-                    ("activation_strategy".to_string(), "lazy".to_string()),
-                ]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "process_group".to_string(),
-                config: std::collections::HashMap::from([(
-                    "group".to_string(),
-                    "abstractions-group".to_string(),
-                )]),
-                ..Default::default()
-            },
-        ]),
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"role":"channel","group":"abstractions-group"}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,
+            proto_facets: Some(&[
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "1s".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "process_group".to_string(),
+                    config: std::collections::HashMap::from([(
+                        "group".to_string(),
+                        "abstractions-group".to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            ]),
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"role":"channel","group":"abstractions-group"}"#.to_vec()),
+        },
     )
     .await
     .expect("type registration must succeed");
@@ -2400,32 +2406,34 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,
-        Some(&[
-            plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                config: std::collections::HashMap::from([
-                    ("idle_timeout".to_string(), "1s".to_string()),
-                    ("activation_strategy".to_string(), "lazy".to_string()),
-                ]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "durability".to_string(),
-                config: std::collections::HashMap::from([
-                    ("checkpoint_interval".to_string(), "1".to_string()),
-                    ("replay_on_activation".to_string(), "true".to_string()),
-                    ("state_schema_version".to_string(), "1".to_string()),
-                ]),
-                ..Default::default()
-            },
-        ]),
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"initial_count":0}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,
+            proto_facets: Some(&[
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "1s".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "durability".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("checkpoint_interval".to_string(), "1".to_string()),
+                        ("replay_on_activation".to_string(), "true".to_string()),
+                        ("state_schema_version".to_string(), "1".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+            ]),
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"initial_count":0}"#.to_vec()),
+        },
     )
     .await
     .expect("type registration must succeed");
@@ -2665,39 +2673,41 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,
-        Some(&[
-            plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                config: std::collections::HashMap::from([
-                    ("idle_timeout".to_string(), "5m".to_string()),
-                    ("activation_strategy".to_string(), "lazy".to_string()),
-                ]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "timer".to_string(),
-                config: std::collections::HashMap::from([(
-                    "interval_ms".to_string(),
-                    "250".to_string(),
-                )]),
-                ..Default::default()
-            },
-            plexspaces_proto::common::v1::Facet {
-                r#type: "reminder".to_string(),
-                config: std::collections::HashMap::from([(
-                    "default_due_time".to_string(),
-                    "100ms".to_string(),
-                )]),
-                ..Default::default()
-            },
-        ]),
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"initial_count":5}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,
+            proto_facets: Some(&[
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: std::collections::HashMap::from([
+                        ("idle_timeout".to_string(), "5m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "timer".to_string(),
+                    config: std::collections::HashMap::from([(
+                        "interval_ms".to_string(),
+                        "250".to_string(),
+                    )]),
+                    ..Default::default()
+                },
+                plexspaces_proto::common::v1::Facet {
+                    r#type: "reminder".to_string(),
+                    config: std::collections::HashMap::from([(
+                        "default_due_time".to_string(),
+                        "100ms".to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            ]),
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"initial_count":5}"#.to_vec()),
+        },
     )
     .await
     .expect("type registration must succeed");
@@ -2836,14 +2846,16 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
         service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>;
     let result = plexspaces_actor::register_virtual_actor_type_consistent(
         &sl_dyn,
-        actor_type.to_string(),
-        String::new(), // instance_name — empty when name == type (standalone virtual actors)
-        namespace.to_string(),
-        None,                // No trait-object facets (WASM path)
-        Some(&proto_facets), // Proto facets from app-config.toml
-        None,
-        Some(tenant_id.to_string()),
-        Some(br#"{"initial_count":0}"#.to_vec()),
+        plexspaces_actor::VirtualActorTypeSpec {
+            actor_type: actor_type.to_string(),
+            instance_name: String::new(), // instance_name — empty when name == type (standalone virtual actors)
+            namespace: namespace.to_string(),
+            facets: None,                // No trait-object facets (WASM path)
+            proto_facets: Some(&proto_facets), // Proto facets from app-config.toml
+            actor_config: None,
+            tenant_id: Some(tenant_id.to_string()),
+            init_config_template: Some(br#"{"initial_count":0}"#.to_vec()),
+        },
     )
     .await;
     assert!(result.is_ok(), "registration must succeed: {:?}", result);

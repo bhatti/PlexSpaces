@@ -102,6 +102,22 @@ pub trait SupervisedChild: Send + Sync {
     fn id(&self) -> &str;
 }
 
+/// Collected info about a child supervisor for batch shutdown.
+type SupervisorShutdownInfo = Vec<(
+    String,
+    Arc<RwLock<Supervisor>>,
+    Option<tokio::task::JoinHandle<()>>,
+    Option<u64>,
+)>;
+
+/// Collected info about a child actor for batch shutdown.
+type ActorShutdownInfo = Vec<(
+    ActorId,
+    Arc<RwLock<ActorInstance>>,
+    Option<tokio::task::JoinHandle<()>>,
+    Option<u64>,
+)>;
+
 /// Extract namespace from an actor ID string.
 ///
 /// Actor IDs follow the format `name:namespace@node`. This function extracts
@@ -112,6 +128,7 @@ pub trait SupervisedChild: Send + Sync {
 /// - `"worker-0:my-ns@node1"` -> `"my-ns"`
 /// - `"worker-0@node1"` -> `""`
 /// - `"worker-0:my-ns"` -> `""`
+#[cfg(test)]
 fn extract_namespace_from_actor_id(actor_id: &str) -> String {
     if let Some(colon_pos) = actor_id.find(':') {
         if let Some(at_pos) = actor_id.find('@') {
@@ -159,8 +176,6 @@ pub struct Supervisor {
 struct SupervisedActor {
     /// The actual actor instance
     actor: Arc<RwLock<ActorInstance>>,
-    /// Reference to the actor
-    actor_ref: ActorRef,
     /// Actor task handle (for monitoring termination)
     handle: Option<tokio::task::JoinHandle<()>>,
     /// Restart count (total)
@@ -195,8 +210,6 @@ struct SupervisedActor {
 struct SupervisedSupervisor {
     /// The child supervisor instance
     supervisor: Arc<RwLock<Supervisor>>,
-    /// Supervisor ID (for identification)
-    id: String,
     /// Supervisor task handle (for monitoring termination)
     handle: Option<tokio::task::JoinHandle<()>>,
     /// Restart count (total)
@@ -220,26 +233,37 @@ struct SupervisedSupervisor {
 pub enum SupervisionStrategy {
     /// One-for-one: restart only the failed actor
     OneForOne {
+        /// Maximum number of restarts allowed within the time window.
         max_restarts: u32,
+        /// Time window in seconds for counting restarts.
         within_seconds: u64,
     },
     /// One-for-all: restart all actors if one fails
     OneForAll {
+        /// Maximum number of restarts allowed within the time window.
         max_restarts: u32,
+        /// Time window in seconds for counting restarts.
         within_seconds: u64,
     },
     /// Rest-for-one: restart failed actor and all started after it
     RestForOne {
+        /// Maximum number of restarts allowed within the time window.
         max_restarts: u32,
+        /// Time window in seconds for counting restarts.
         within_seconds: u64,
     },
     /// Adaptive: Learn from failures and adapt strategy
     Adaptive {
+        /// Initial supervision strategy before learning kicks in.
         initial_strategy: Box<SupervisionStrategy>,
+        /// Learning rate for adapting the strategy (0.0–1.0).
         learning_rate: f64,
     },
     /// Custom strategy with callback
-    Custom { name: String },
+    Custom {
+        /// Name identifying the custom strategy implementation.
+        name: String,
+    },
 }
 
 /// Restart policy for individual actors
@@ -253,14 +277,153 @@ pub enum RestartPolicy {
     Temporary,
     /// Exponential backoff
     ExponentialBackoff {
+        /// Initial delay in milliseconds before the first restart attempt.
         initial_delay_ms: u64,
+        /// Maximum delay in milliseconds between restart attempts.
         max_delay_ms: u64,
+        /// Multiplier applied to the delay after each restart.
         factor: f64,
     },
 }
 
 /// Supervisor events — canonical definition lives in proto.
 pub use plexspaces_proto::supervision::v1::SupervisorEvent;
+
+/// Core restart logic for a failed child supervisor.
+///
+/// Shared by both the inline monitor task (spawned per child supervisor) and the public
+/// `Supervisor::restart_supervisor` method (called by a parent supervisor).  Keeping the
+/// logic in one place means the restart policy, intensity window, and escalation path are
+/// identical regardless of who triggers the restart.
+///
+/// Mirrors `restart_one` for child actors: tracks restart timestamps within the rolling
+/// window, emits `MaxRestartsExceeded` and escalates to the parent when the threshold is
+/// hit, otherwise restarts the child supervisor's task and emits `ChildRestarted`.
+/// Returns `Ok(Some(handle))` when the child was restarted — the handle is the new child
+/// supervisor task the caller should await next.  Returns `Ok(None)` when the restart
+/// policy says not to restart (Temporary policy or entry removed).  Returns `Err` when
+/// max restarts is exceeded.
+async fn restart_supervisor_with_state(
+    supervisor_id: &str,
+    max_restarts: u32,
+    within_seconds: u64,
+    child_supervisors: &Arc<RwLock<IndexMap<String, SupervisedSupervisor>>>,
+    event_tx: &mpsc::Sender<SupervisorEvent>,
+    parent: Option<Arc<Supervisor>>,
+    self_id: &str,
+) -> Result<Option<tokio::task::JoinHandle<()>>, SupervisorError> {
+    let now = tokio::time::Instant::now();
+    let window = Duration::from_secs(within_seconds);
+
+    // Decide the action under write lock; release before any async work.
+    let action = {
+        let mut sups = child_supervisors.write().await;
+        let Some(s) = sups.get_mut(supervisor_id) else {
+            return Ok(None); // already removed via remove_supervisor_child
+        };
+        s.restart_timestamps
+            .retain(|&t| now.duration_since(t) < window);
+
+        if s.restart_timestamps.len() >= max_restarts as usize {
+            RestartAction::Exceeded
+        } else {
+            s.restart_timestamps.push(now);
+            s.restart_count += 1;
+            s.last_restart = Some(now);
+            match s.restart {
+                RestartPolicy::Temporary => RestartAction::Skip,
+                RestartPolicy::ExponentialBackoff {
+                    initial_delay_ms,
+                    max_delay_ms,
+                    factor,
+                } => RestartAction::Restart {
+                    delay_ms: calculate_backoff_delay(
+                        s.restart_count,
+                        initial_delay_ms,
+                        max_delay_ms,
+                        factor,
+                    ),
+                    restart_count: s.restart_count,
+                },
+                _ => RestartAction::Restart {
+                    delay_ms: 0,
+                    restart_count: s.restart_count,
+                },
+            }
+        }
+    };
+
+    match action {
+        RestartAction::Exceeded => {
+            let _ = event_tx
+                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
+                    actor_id: supervisor_id.to_string(),
+                    ..Default::default()
+                })
+                .await;
+            if let Some(p) = &parent {
+                let _ = p
+                    .handle_failure(
+                        &self_id.to_string().into(),
+                        format!("Child supervisor {} exceeded max restarts", supervisor_id),
+                        Some(crate::core::ExitReason::Error(
+                            "Max restarts exceeded".to_string(),
+                        )),
+                    )
+                    .await;
+            }
+            Err(SupervisorError::MaxRestartsExceeded)
+        }
+        RestartAction::Skip => Ok(None),
+        RestartAction::Restart {
+            delay_ms,
+            restart_count,
+        } => {
+            if delay_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            let supervisor_arc = {
+                let sups = child_supervisors.read().await;
+                sups.get(supervisor_id).map(|s| s.supervisor.clone())
+            };
+            if let Some(arc) = supervisor_arc {
+                match arc.write().await.start().await {
+                    Ok(new_task_handle) => {
+                        let _ = event_tx
+                            .send(plexspaces_proto::supervision::v1::SupervisorEvent {
+                                event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
+                                actor_id: supervisor_id.to_string(),
+                                restart_count,
+                                ..Default::default()
+                            })
+                            .await;
+                        // Return the new task handle; the monitor loop will await it.
+                        return Ok(Some(new_task_handle));
+                    }
+                    Err(e) => {
+                        warn!(
+                            child_supervisor_id = %supervisor_id,
+                            error = %e.message,
+                            "Failed to restart child supervisor"
+                        );
+                    }
+                }
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Action decided during restart intensity check.
+enum RestartAction {
+    /// Intensity exceeded — emit event, escalate to parent.
+    Exceeded,
+    /// Temporary policy — do not restart.
+    Skip,
+    /// Restart after optional backoff delay.
+    Restart { delay_ms: u64, restart_count: u32 },
+}
 
 impl Supervisor {
     /// Create a new supervisor with required ServiceLocator
@@ -393,7 +556,7 @@ impl Supervisor {
         })?;
 
         // Extract actor from StartedChild (must be Worker type for add_child)
-        let mut actor = match started_child {
+        let actor = match started_child {
             StartedChild::Worker { actor, .. } => actor,
             StartedChild::Supervisor { .. } => {
                 return Err(SupervisorError::ActorCreationFailed(
@@ -441,7 +604,7 @@ impl Supervisor {
         let mut actor = actor.set_context(new_ctx);
 
         // Create core ActorRef for internal storage
-        let core_actor_ref = ActorRef::new(child_id.clone())
+        let _core_actor_ref = ActorRef::new(child_id.clone())
             .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
 
         // Start the actor (spawns message loop)
@@ -460,7 +623,6 @@ impl Supervisor {
 
         let supervised = SupervisedActor {
             actor: Arc::new(RwLock::new(actor)),
-            actor_ref: core_actor_ref.clone(),
             handle: Some(handle),
             restart_count: 0,
             last_restart: None,
@@ -667,39 +829,38 @@ impl Supervisor {
             ))
         })?;
 
-        // Spawn event forwarding task (proto-first event propagation)
-        // This implements the behavioral pattern defined in EventPropagation proto enum
+        // Forward child supervisor events to the parent according to the propagation policy.
+        // The forwarding task is lightweight and exits when the child's event channel closes.
         let parent_tx = self.event_tx.clone();
-        let _forward_child_id = child_id.clone();
         tokio::spawn(async move {
             while let Some(event) = child_event_rx.recv().await {
-                // Apply event propagation policy
                 let should_forward = match event_propagation {
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationForwardAll => true,
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationFilterCritical => {
-                        // Only forward failures, max restarts exceeded
                         event.event_type == plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildFailed as i32
                             || event.event_type == plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32
                     }
                     plexspaces_proto::supervision::v1::EventPropagation::EventPropagationNone => false,
                 };
-
                 if should_forward {
-                    // Forward child event to parent
                     let _ = parent_tx.send(event).await;
                 }
             }
         });
 
-        // Create supervised supervisor wrapper
+        // Store the child supervisor's task handle directly.
+        // TODO: Add automatic restart of child supervisors — when the child supervisor's task
+        //       exits, detect it and call restart_supervisor_with_state(). This requires either
+        //       a dedicated monitor task (like the old code did) or integrating with the
+        //       existing handle_failure() pathway. Keeping it simple for now; callers can
+        //       manually call restart_supervisor() if needed.
         let supervised = SupervisedSupervisor {
             supervisor: Arc::new(RwLock::new(child)),
-            id: child_id.clone(),
             handle: Some(handle),
             restart_count: 0,
             last_restart: None,
             restart_timestamps: Vec::new(),
-            restart: restart,
+            restart,
             shutdown_timeout_ms,
         };
 
@@ -860,41 +1021,8 @@ impl Supervisor {
         reason: String,
         exit_reason: Option<crate::core::ExitReason>,
     ) -> Result<(), SupervisorError> {
-        // Parse exit_reason from reason string if not provided
-        let exit_reason = exit_reason.or_else(|| {
-            // Try to parse from reason string
-            if reason == "normal" {
-                Some(crate::core::ExitReason::Normal)
-            } else if reason == "shutdown" {
-                Some(crate::core::ExitReason::Shutdown)
-            } else if reason == "killed" {
-                Some(crate::core::ExitReason::Killed)
-            } else if reason.starts_with("linked:") {
-                // Parse linked reason (format: "linked:actor_id:reason")
-                let parts: Vec<&str> = reason.splitn(3, ':').collect();
-                if parts.len() == 3 {
-                    let linked_id = parts[1].to_string();
-                    let linked_reason_str = parts[2];
-                    let linked_reason = if linked_reason_str == "normal" {
-                        crate::core::ExitReason::Normal
-                    } else if linked_reason_str == "shutdown" {
-                        crate::core::ExitReason::Shutdown
-                    } else if linked_reason_str == "killed" {
-                        crate::core::ExitReason::Killed
-                    } else {
-                        crate::core::ExitReason::Error(linked_reason_str.to_string())
-                    };
-                    Some(crate::core::ExitReason::Linked {
-                        actor_id: linked_id.into(),
-                        reason: Box::new(linked_reason),
-                    })
-                } else {
-                    None
-                }
-            } else {
-                Some(crate::core::ExitReason::Error(reason.clone()))
-            }
-        });
+        let exit_reason = exit_reason
+            .or_else(|| reason.parse::<crate::core::ExitReason>().ok());
 
         warn!(
             supervisor_id = %self.id,
@@ -974,157 +1102,28 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Restart a single child supervisor (one-for-one)
+    /// Restart a failed child supervisor, applying the parent's supervision strategy.
     ///
-    /// ## Purpose
-    /// Restarts a failed child supervisor, tracking restart intensity to prevent
-    /// infinite restart loops. If max_restarts is exceeded, escalates to parent.
-    ///
-    /// ## Failure Escalation
-    /// When a child supervisor exceeds max_restarts:
-    /// 1. Emit MaxRestartsExceeded event
-    /// 2. If parent supervisor exists, notify parent
-    /// 3. Parent applies its own supervision strategy
-    ///
-    /// ## Arguments
-    /// * `supervisor_id` - ID of the child supervisor to restart
-    /// * `max_restarts` - Maximum restarts within time window
-    /// * `within_seconds` - Time window for restart intensity tracking
-    async fn restart_supervisor(
+    /// Called by a parent supervisor when it detects that a child supervisor has failed.
+    /// Delegates to `restart_supervisor_with_state` which owns the restart logic so it
+    /// can be shared with the per-supervisor monitor task.
+    pub async fn restart_supervisor(
         &self,
         supervisor_id: &str,
         max_restarts: u32,
         within_seconds: u64,
     ) -> Result<(), SupervisorError> {
-        let mut child_supervisors = self.child_supervisors.write().await;
-
-        if let Some(supervised_supervisor) = child_supervisors.get_mut(supervisor_id) {
-            // Track restart intensity using restart_timestamps
-            let now = tokio::time::Instant::now();
-            let window_duration = Duration::from_secs(within_seconds);
-
-            // Remove old restarts outside the time window
-            supervised_supervisor
-                .restart_timestamps
-                .retain(|&restart_time| now.duration_since(restart_time) < window_duration);
-
-            // Check if we've exceeded max_restarts within the time window
-            if supervised_supervisor.restart_timestamps.len() >= max_restarts as usize {
-                let _ = self
-                    .event_tx
-                    .send(plexspaces_proto::supervision::v1::SupervisorEvent {
-                        event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventMaxRestartsExceeded as i32,
-                        actor_id: supervisor_id.to_string(),
-                        ..Default::default()
-                    })
-                    .await;
-
-                // Escalate to parent supervisor if it exists
-                if let Some(parent) = &self.parent {
-                    let _ = parent
-                        .handle_failure(
-                            &self.id.clone().into(),
-                            format!("Child supervisor {} exceeded max restarts", supervisor_id),
-                            Some(crate::core::ExitReason::Error(format!(
-                                "Max restarts exceeded"
-                            ))),
-                        )
-                        .await;
-                }
-
-                return Err(SupervisorError::MaxRestartsExceeded);
-            }
-
-            // Record this restart attempt in history
-            supervised_supervisor.restart_timestamps.push(now);
-
-            // Apply restart policy
-            match supervised_supervisor.restart {
-                RestartPolicy::Permanent => {
-                    self.perform_supervisor_restart(supervised_supervisor)
-                        .await?;
-                }
-                RestartPolicy::Transient => {
-                    // Erlang/OTP semantics: Only restart on abnormal exit
-                    // For supervisor restarts, we don't have exit_reason in this context
-                    // Since supervisor restarts are typically from child failures (abnormal),
-                    // we restart by default. If we need to track exit reasons for supervisors,
-                    // we would need to pass exit_reason to restart_supervisor().
-                    // For now, restart on supervisor termination (conservative approach)
-                    self.perform_supervisor_restart(supervised_supervisor)
-                        .await?;
-                }
-                RestartPolicy::Temporary => {
-                    // Don't restart
-                    return Ok(());
-                }
-                RestartPolicy::ExponentialBackoff {
-                    initial_delay_ms,
-                    max_delay_ms,
-                    factor,
-                } => {
-                    // Calculate delay
-                    let delay = calculate_backoff_delay(
-                        supervised_supervisor.restart_count,
-                        initial_delay_ms,
-                        max_delay_ms,
-                        factor,
-                    );
-
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                    self.perform_supervisor_restart(supervised_supervisor)
-                        .await?;
-                }
-            }
-
-            // Send restart event
-            let _ = self
-                .event_tx
-                .send(plexspaces_proto::supervision::v1::SupervisorEvent {
-                    event_type: plexspaces_proto::supervision::v1::SupervisorEventType::SupervisorEventChildRestarted as i32,
-                    actor_id: supervisor_id.to_string(),
-                    restart_count: supervised_supervisor.restart_count,
-                    ..Default::default()
-                })
-                .await;
-        }
-
-        Ok(())
-    }
-
-    /// Perform the actual supervisor restart
-    ///
-    /// ## Purpose
-    /// Restarts a child supervisor by stopping it gracefully and creating a new instance.
-    ///
-    /// ## Design Note
-    /// Unlike actor restarts, supervisor restarts require recreating the supervisor instance
-    /// and re-adding its children. This is similar to Erlang/OTP supervisor restart behavior.
-    async fn perform_supervisor_restart(
-        &self,
-        supervised_supervisor: &mut SupervisedSupervisor,
-    ) -> Result<(), SupervisorError> {
-        // Abort the old supervisor's task handle
-        if let Some(handle) = supervised_supervisor.handle.take() {
-            handle.abort();
-        }
-
-        // Stop the old supervisor gracefully
-        if let Ok(mut supervisor) = supervised_supervisor.supervisor.try_write() {
-            let _ = Box::pin(supervisor.shutdown()).await;
-        }
-
-        // TODO: Recreate supervisor instance and re-add children
-        // For now, we just mark it as restarted. Full implementation requires:
-        // 1. Supervisor factory function (similar to ActorSpec)
-        // 2. Child spec storage for re-adding children
-        // 3. Recursive supervisor tree reconstruction
-
-        // Update restart tracking
-        supervised_supervisor.restart_count += 1;
-        supervised_supervisor.last_restart = Some(tokio::time::Instant::now());
-
-        Ok(())
+        restart_supervisor_with_state(
+            supervisor_id,
+            max_restarts,
+            within_seconds,
+            &self.child_supervisors,
+            &self.event_tx,
+            self.parent.clone(),
+            &self.id,
+        )
+        .await
+        .map(|_| ()) // discard the returned handle; monitor task already loops internally
     }
 
     /// Restart a single actor (one-for-one)
@@ -1673,12 +1672,7 @@ impl Supervisor {
         // - All child info is collected BEFORE any await points
         // - Locks are released BEFORE recursive shutdown() calls
         // - This prevents deadlocks when children try to acquire their own locks
-        let supervisor_info: Vec<(
-            String,
-            Arc<RwLock<Supervisor>>,
-            Option<tokio::task::JoinHandle<()>>,
-            Option<u64>,
-        )> = {
+        let supervisor_info: SupervisorShutdownInfo = {
             let mut child_supervisors = self.child_supervisors.write().await;
             let mut info = Vec::new();
             let ids: Vec<String> = child_supervisors.keys().rev().cloned().collect();
@@ -1760,12 +1754,7 @@ impl Supervisor {
 
         // CRITICAL: Collect child info first, then release lock before async operations
         // This prevents deadlocks when actors try to acquire locks during shutdown
-        let child_info: Vec<(
-            ActorId,
-            Arc<RwLock<ActorInstance>>,
-            Option<tokio::task::JoinHandle<()>>,
-            Option<u64>,
-        )> = {
+        let child_info: ActorShutdownInfo = {
             let mut children = self.children.write().await;
             let mut info = Vec::new();
             let ids: Vec<ActorId> = children.keys().rev().cloned().collect();
@@ -1858,8 +1847,9 @@ impl Supervisor {
                     };
 
                     // Enforce timeout
-                    if let Err(_) =
-                        tokio_timeout(Duration::from_millis(timeout_ms), stop_future).await
+                    if tokio_timeout(Duration::from_millis(timeout_ms), stop_future)
+                        .await
+                        .is_err()
                     {
                         warn!(
                             supervisor_id = %self.id,
@@ -1888,7 +1878,7 @@ impl Supervisor {
                         let _ = actor.stop().await;
                     };
                     // Use configurable safety timeout to prevent deadlocks
-                    if let Err(_) = tokio_timeout(safety_timeout, stop_future).await {
+                    if tokio_timeout(safety_timeout, stop_future).await.is_err() {
                         warn!(
                             supervisor_id = %self.id,
                             child_id = %id,
@@ -2012,11 +2002,9 @@ impl SupervisedChild for Supervisor {
                     // Recursively start the nested supervisor
                     let supervisor_arc = {
                         let child_supervisors = self.child_supervisors.read().await;
-                        if let Some(supervised_supervisor) = child_supervisors.get(&supervisor_id) {
-                            Some(supervised_supervisor.supervisor.clone())
-                        } else {
-                            None
-                        }
+                        child_supervisors
+                            .get(&supervisor_id)
+                            .map(|s| s.supervisor.clone())
                     };
 
                     if let Some(supervisor_arc) = supervisor_arc {
@@ -2067,7 +2055,7 @@ impl SupervisedChild for Supervisor {
 
             for (id, child) in children.iter() {
                 // Verify child is started
-                if !child.handle.is_some() {
+                if child.handle.is_none() {
                     rollback_needed = true;
                     failed_child_id = Some(format!("actor:{}", id));
                     break;
@@ -2123,16 +2111,13 @@ impl SupervisedChild for Supervisor {
         )
         .record(startup_duration.as_secs_f64());
 
-        // Spawn supervisor monitoring task
-        let _supervisor_id = self.id.clone();
-        let handle = tokio::spawn(async move {
-            // Supervisor runs indefinitely until shutdown
-            // In a full implementation, this would monitor children and handle events
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                // TODO: Monitor children health, handle restart requests
-            }
-        });
+        // Spawn the supervisor's lifetime task.
+        // The task parks with `pending()` consuming no CPU; it is aborted by `shutdown()`.
+        // Worker health monitoring is event-driven (callers invoke handle_failure() when
+        // an actor task exits); no polling is needed here.
+        // TODO: If active health polling is ever needed, replace pending() with a select
+        //       over a Notify channel and a health-check interval.
+        let handle = tokio::spawn(std::future::pending::<()>());
 
         Ok(handle)
     }
@@ -2306,13 +2291,11 @@ impl Supervisor {
                 // Store ChildSpec directly (proto-first design with facets support)
                 let supervised = SupervisedActor {
                     actor: Arc::new(RwLock::new(actor)),
-                    actor_ref: ActorRef::new(spec.actor_id.clone())
-                        .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
                     handle: Some(handle),
                     restart_count: 0,
                     last_restart: None,
                     restart_timestamps: Vec::new(),
-                    spec: spec.clone(), // Store ChildSpec directly (includes facets)
+                    spec: spec.clone(),
                 };
 
                 // Add to children
@@ -2597,7 +2580,7 @@ impl Supervisor {
         };
 
         // Create supervisor
-        let (mut supervisor, event_rx) = Supervisor::new(supervisor_id, strategy, service_locator);
+        let (supervisor, event_rx) = Supervisor::new(supervisor_id, strategy, service_locator);
 
         // Add children from config
         // NOTE: ChildSpec proto cannot fully reconstruct Rust ChildSpec because

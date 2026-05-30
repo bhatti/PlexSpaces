@@ -119,22 +119,6 @@ where
         }
     }
 
-    fn cleanup_expired(&mut self) {
-        let now = SystemTime::now();
-        let expired_keys: Vec<K> = self
-            .map
-            .iter()
-            .filter(|(_, (_, timestamp))| {
-                now.duration_since(*timestamp).unwrap_or_default() >= self.ttl
-            })
-            .map(|(key, _)| key.clone())
-            .collect();
-
-        for key in expired_keys {
-            self.remove(&key);
-        }
-    }
-
     fn remove_matching<F>(&mut self, predicate: F) -> usize
     where
         F: Fn(&K) -> bool,
@@ -157,9 +141,9 @@ where
 /// Global discovery cache (shared across all discovery operations)
 /// Cache key format: "{object_type}:{category}:{tenant_id}:{namespace}" (e.g., "node:cluster:tenant1:prod", "application:myapp:tenant1:default")
 type CacheKey = String;
-static DISCOVERY_CACHE: once_cell::sync::Lazy<
-    Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>,
-> = once_cell::sync::Lazy::new(|| {
+type DiscoveryCacheStore = Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>;
+static DISCOVERY_CACHE: once_cell::sync::Lazy<DiscoveryCacheStore> =
+    once_cell::sync::Lazy::new(|| {
     Arc::new(RwLock::new(DiscoveryCache::new(
         1000,                    // capacity
         Duration::from_secs(60), // 60 second TTL
@@ -211,7 +195,7 @@ pub async fn register_node<T: ObjectRegistryTrait + ?Sized>(
         tenant_id: ctx.tenant_id().to_string(),
         namespace: ctx.namespace().to_string(),
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         labels: cluster_name
             .map(|c| vec![c.to_string()])
@@ -280,7 +264,7 @@ pub async fn register_outbound_service_link<T: ObjectRegistryTrait + ?Sized>(
         namespace: ctx.namespace().to_string(),
         capabilities: vec![cap.to_string()],
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         metadata: Some(Metadata {
             labels,
@@ -335,7 +319,7 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
         tenant_id: ctx.tenant_id().to_string(),
         namespace: ctx.namespace().to_string(),
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         ..Default::default()
     };
@@ -381,10 +365,8 @@ pub async fn unregister_application<T: ObjectRegistryTrait + ?Sized>(
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -426,7 +408,7 @@ pub async fn register_workflow<T: ObjectRegistryTrait + ?Sized>(
         tenant_id: ctx.tenant_id().to_string(),
         namespace: ctx.namespace().to_string(),
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         ..Default::default()
     };
@@ -638,18 +620,23 @@ pub fn build_actor_alias(
     format!("{}:{}:{}:{}", actor_type, name, namespace, tenant_id)
 }
 
+/// Parameters for [`register_actor`].
+pub struct RegisterActorParams<'a> {
+    /// Actor identifier string (e.g. `"name@type@ns@node"`)
+    pub actor_id: &'a str,
+    /// Actor type slug (e.g. `"counter"`)
+    pub actor_type: &'a str,
+    /// Actor instance name
+    pub actor_name: &'a str,
+    /// Node where the actor is running
+    pub node_id: &'a str,
+    /// Node's gRPC address
+    pub grpc_address: &'a str,
+    /// If `true`, reject spawn when another active instance with the same identity alias already exists.
+    pub enforce_unique: bool,
+}
+
 /// Register an actor in the object registry.
-///
-/// ## Arguments
-/// * `object_registry` - ObjectRegistry instance
-/// * `ctx` - RequestContext for tenant isolation
-/// * `actor_id` - Actor identifier string (e.g. `"name@type@ns@node"`)
-/// * `actor_type` - Actor type slug (e.g. `"counter"`)
-/// * `actor_name` - Actor instance name
-/// * `node_id` - Node where the actor is running
-/// * `grpc_address` - Node's gRPC address
-/// * `enforce_unique` - If `true`, reject spawn when another active instance with
-///   the same identity alias already exists
 ///
 /// ## Returns
 /// `RegisterResult::Registered` on success or
@@ -658,13 +645,16 @@ pub fn build_actor_alias(
 pub async fn register_actor<T: ObjectRegistryTrait + ?Sized>(
     object_registry: &Arc<T>,
     ctx: &RequestContext,
-    actor_id: &str,
-    actor_type: &str,
-    actor_name: &str,
-    node_id: &str,
-    grpc_address: &str,
-    enforce_unique: bool,
+    params: RegisterActorParams<'_>,
 ) -> Result<RegisterResult, Box<dyn std::error::Error + Send + Sync>> {
+    let RegisterActorParams {
+        actor_id,
+        actor_type,
+        actor_name,
+        node_id,
+        grpc_address,
+        enforce_unique,
+    } = params;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
@@ -687,7 +677,7 @@ pub async fn register_actor<T: ObjectRegistryTrait + ?Sized>(
         health_status: HealthStatus::HealthStatusHealthy as i32,
         alias,
         max_heartbeat_failures: 3,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         ..Default::default()
     };
@@ -730,10 +720,8 @@ pub async fn unregister_actor<T: ObjectRegistryTrait + ?Sized>(
         .unregister(ctx, ObjectType::ObjectTypeActor, actor_id)
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -846,12 +834,14 @@ mod tests {
         register_actor(
             &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
             &ctx,
-            "actor-1@node1",
-            "Counter",
-            "worker-1",
-            "node1",
-            "http://node1:8000",
-            false,
+            RegisterActorParams {
+                actor_id: "actor-1@node1",
+                actor_type: "Counter",
+                actor_name: "worker-1",
+                node_id: "node1",
+                grpc_address: "http://node1:8000",
+                enforce_unique: false,
+            },
         )
         .await
         .unwrap();
@@ -877,12 +867,14 @@ mod tests {
         register_actor(
             &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
             &ctx,
-            "actor-2@node1",
-            "Counter",
-            "worker-2",
-            "node1",
-            "http://node1:8000",
-            false,
+            RegisterActorParams {
+                actor_id: "actor-2@node1",
+                actor_type: "Counter",
+                actor_name: "worker-2",
+                node_id: "node1",
+                grpc_address: "http://node1:8000",
+                enforce_unique: false,
+            },
         )
         .await
         .unwrap();
@@ -918,12 +910,14 @@ mod tests {
         register_actor(
             &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
             &ctx,
-            "actor-3@node1",
-            "Counter",
-            "worker-3",
-            "node1",
-            "http://node1:8000",
-            false,
+            RegisterActorParams {
+                actor_id: "actor-3@node1",
+                actor_type: "Counter",
+                actor_name: "worker-3",
+                node_id: "node1",
+                grpc_address: "http://node1:8000",
+                enforce_unique: false,
+            },
         )
         .await
         .unwrap();
@@ -968,12 +962,14 @@ mod tests {
         register_actor(
             &(reg.clone() as Arc<dyn ObjectRegistryTrait>),
             &ctx,
-            "actor-5@node1",
-            "Counter",
-            "worker-5",
-            "node1",
-            "http://node1:8000",
-            false,
+            RegisterActorParams {
+                actor_id: "actor-5@node1",
+                actor_type: "Counter",
+                actor_name: "worker-5",
+                node_id: "node1",
+                grpc_address: "http://node1:8000",
+                enforce_unique: false,
+            },
         )
         .await
         .unwrap();

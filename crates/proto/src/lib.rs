@@ -20,10 +20,11 @@
 //!
 //! Generated protobuf definitions for PlexSpaces
 
-// Allow clippy warnings for generated code
+// Allow clippy warnings that fire on generated code
 #![allow(clippy::doc_lazy_continuation)]
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::large_enum_variant)]
+#![allow(clippy::empty_docs)]
 
 // Re-export prost_types for test usage
 pub use prost_types;
@@ -59,9 +60,6 @@ pub mod tuplespace {
         include!("generated/plexspaces.tuplespace.v1.rs");
     }
 }
-
-// NOTE: tuplespace_registry and registry modules removed - use object_registry instead
-// See: plexspaces_proto::object_registry::v1
 
 pub mod processgroups {
     pub mod v1 {
@@ -202,13 +200,6 @@ pub mod security {
     }
 }
 
-// service_registry module removed - replaced by object_registry
-// pub mod service_registry {
-//     pub mod v1 {
-//         include!("generated/plexspaces.service_registry.v1.rs");
-//     }
-// }
-
 pub mod object_registry {
     pub mod v1 {
         include!("generated/plexspaces.object_registry.v1.rs");
@@ -241,8 +232,6 @@ pub mod v1 {
     pub use super::timer::v1 as timer;
     pub use super::wasm::v1 as wasm;
     pub use super::workflow::v1 as workflow;
-    // service_registry removed - use object_registry instead
-    // pub use super::service_registry::v1 as service_registry;
     pub use super::keyvalue::v1 as keyvalue;
     pub use super::scheduling::v1 as scheduling;
     pub use super::storage::v1 as storage;

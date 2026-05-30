@@ -154,20 +154,9 @@ where
         }
     }
 
-    /// Get current size (number of entries)
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
-    }
-
-    /// Check if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    /// Clear all entries
-    pub fn clear(&mut self) {
-        self.map.clear();
-        self.queue.clear();
     }
 }
 

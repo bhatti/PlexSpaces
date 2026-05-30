@@ -347,11 +347,6 @@ pub async fn create_channel(config: ChannelConfig) -> ChannelResult<Box<dyn Chan
         ChannelProvider::ChannelProviderCustom => Err(ChannelError::InvalidConfiguration(
             "Custom backend requires manual instantiation".to_string(),
         )),
-        // Handle unspecified backend (default enum value 0 conflicts with InMemory)
-        // For any other/unknown backends, return error
-        _ => Err(ChannelError::InvalidConfiguration(
-            "Unknown or unsupported channel backend".to_string(),
-        )),
     }
 }
 

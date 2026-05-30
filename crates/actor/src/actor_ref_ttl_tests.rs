@@ -156,12 +156,14 @@ mod tests {
             registry
                 .register_actor(
                     &tell_ctx,
-                    actor_id,
-                    sender,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    crate::ActorRegistrationParams {
+                        actor_id,
+                        sender,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }

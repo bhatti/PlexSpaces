@@ -162,9 +162,13 @@ impl Default for ObservabilityManager {
 /// Log levels
 #[derive(Debug, Clone, Copy)]
 pub enum LogLevel {
+    /// Detailed diagnostic information
     Debug,
+    /// General operational events
     Info,
+    /// Non-critical issues that may need attention
     Warn,
+    /// Critical failures requiring immediate action
     Error,
 }
 

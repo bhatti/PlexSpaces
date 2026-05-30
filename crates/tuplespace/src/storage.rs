@@ -82,7 +82,6 @@ pub mod ddb;
 pub use ddb::DynamoDBStorage;
 
 use async_trait::async_trait;
-#[allow(unused_imports)]
 use plexspaces_proto::tuplespace::v1::StorageStats;
 
 /// Memory storage configuration (used for SQLite :memory: backend)
@@ -97,9 +96,6 @@ pub struct MemoryStorageConfig {
 use crate::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
 
-// Re-export for serialization
-#[allow(unused_imports)]
-use serde::{Deserialize, Serialize};
 
 /// Watch event message for distributed notifications
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

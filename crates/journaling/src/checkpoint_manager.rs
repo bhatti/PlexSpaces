@@ -348,7 +348,7 @@ impl CheckpointManager {
         stats.avg_checkpoint_duration = Some(new_avg);
 
         stats.last_checkpoint_size = checkpoint.state_data.len() as u64;
-        stats.last_checkpoint_at = checkpoint.timestamp.clone();
+        stats.last_checkpoint_at = checkpoint.timestamp;
         drop(stats);
 
         // Auto-truncate old entries if enabled
@@ -398,7 +398,7 @@ impl CheckpointManager {
         let mut stats = self.stats.write().await;
         stats.checkpoints_created += 1;
         stats.last_checkpoint_size = checkpoint.state_data.len() as u64;
-        stats.last_checkpoint_at = checkpoint.timestamp.clone();
+        stats.last_checkpoint_at = checkpoint.timestamp;
         stats.avg_checkpoint_duration = Some(prost_types::Duration {
             seconds: checkpoint_duration.as_secs() as i64,
             nanos: checkpoint_duration.subsec_nanos() as i32,

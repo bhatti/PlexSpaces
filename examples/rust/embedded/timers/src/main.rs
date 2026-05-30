@@ -45,7 +45,6 @@ use tracing::info;
 use anyhow::Result;
 
 // Required for macro-generated code
-extern crate plexspaces_behavior;
 
 
 // =============================================================================

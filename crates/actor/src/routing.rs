@@ -50,6 +50,9 @@ use prost_types;
 
 use crate::ActorRefError;
 
+/// Return type for all routing dispatch functions.
+type RoutingFuture = Pin<Box<dyn Future<Output = Result<(String, Option<Message>), ActorRefError>> + Send>>;
+
 /// Determine if an actor is local by comparing node_id from actor_id with local_node_id.
 ///
 /// ## Purpose
@@ -78,11 +81,11 @@ pub async fn is_actor_local(
     // Get local_node_id from NodeConfig (primary source, always available in production)
     let local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
         Some(node_config.id)
-    } else if let Some(registry) = service_locator.actor_registry().await {
-        // Fallback to ActorRegistry for testing (when NodeConfig not registered)
-        Some(registry.local_node_id().to_string())
     } else {
-        None
+        service_locator
+            .actor_registry()
+            .await
+            .map(|registry| registry.local_node_id().to_string())
     };
 
     if let Some(local_id) = local_node_id {
@@ -281,10 +284,10 @@ pub fn route_local(
     ctx: RequestContext,
     service_locator: Arc<dyn ServiceLocatorTrait>,
     actor_id: String,
-    mut message: Message,
+    message: Message,
     wait_for_response: bool,
     timeout: Option<Duration>,
-) -> Pin<Box<dyn Future<Output = Result<(String, Option<Message>), ActorRefError>> + Send>> {
+) -> RoutingFuture {
     Box::pin(async move {
         let start = std::time::Instant::now();
         let message_id = message.id.clone();
@@ -419,10 +422,9 @@ pub fn route_remote(
     message: Message,
     wait_for_response: bool,
     timeout: Option<Duration>,
-) -> Pin<Box<dyn Future<Output = Result<(String, Option<Message>), ActorRefError>> + Send>> {
+) -> RoutingFuture {
     Box::pin(async move {
         let start = std::time::Instant::now();
-        let message_id = message.id.clone();
 
         let local_node_id = service_locator
             .get_node_config()
@@ -618,12 +620,12 @@ pub fn route_message(
     message: Message,
     wait_for_response: bool,
     timeout: Option<Duration>,
-) -> Pin<Box<dyn Future<Output = Result<(String, Option<Message>), ActorRefError>> + Send>> {
+) -> RoutingFuture {
     Box::pin(async move {
         let target_actor_id = parse_target_actor_id(&actor_id)?;
 
-        // Get local node ID
-        let local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
+        // Verify we can determine local node ID (required for routing decisions)
+        let _local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
             node_config.id
         } else if let Some(registry) = service_locator.actor_registry().await {
             registry.local_node_id().to_string()

@@ -309,6 +309,7 @@ pub struct RequestReplyBehavior<H> {
 }
 
 impl<H> RequestReplyBehavior<H> {
+    /// Create a `RequestReplyBehavior` backed by the given handler.
     pub fn new(handler: H) -> Self {
         RequestReplyBehavior { handler }
     }

@@ -183,9 +183,6 @@ pub trait Facet: Send + Sync + Any {
     /// Get facet priority
     fn get_priority(&self) -> i32;
 
-    /// Check if this facet requires actor_ref and actor_service configuration.
-    ///
-
     /// Called when actor receives EXIT signal from linked actor
     /// Only called if actor has trap_exit=true
     ///
@@ -382,7 +379,7 @@ impl FacetContainer {
     /// Attach a facet (config and priority are extracted from facet)
     pub async fn attach(
         &mut self,
-        mut facet: Box<dyn Facet>,
+        facet: Box<dyn Facet>,
         actor_id: &str,
     ) -> Result<String, FacetError> {
         self.attach_with_tenant_context(facet, actor_id, None, None)
@@ -501,9 +498,9 @@ impl FacetContainer {
             facet_type.clone(),
             FacetMetadata {
                 facet_type: facet_type.clone(),
-                priority: priority,
+                priority,
                 attached_at: std::time::Instant::now(),
-                config: config,
+                config,
             },
         );
 
@@ -668,6 +665,7 @@ impl FacetContainer {
         self.facets.len()
     }
 
+    /// List all attached facet types
     pub fn list_facets(&self) -> Vec<String> {
         self.metadata.keys().cloned().collect()
     }
@@ -1001,16 +999,79 @@ impl Facet for LoggingFacet {
     }
 }
 
-/// Caching facet - caches method results
+/// LRU cache entry: value bytes and insertion timestamp
+struct LruEntry {
+    value: Vec<u8>,
+    inserted_at: std::time::Instant,
+}
+
+/// Bounded LRU cache with TTL expiry. Interior-mutable via `Mutex` so `&self` methods can write.
+struct LruCache {
+    /// Ordered from oldest (front) to newest (back)
+    order: std::collections::VecDeque<String>,
+    entries: HashMap<String, LruEntry>,
+    capacity: usize,
+}
+
+impl LruCache {
+    fn new(capacity: usize) -> Self {
+        LruCache {
+            order: std::collections::VecDeque::with_capacity(capacity),
+            entries: HashMap::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&mut self, key: &str, ttl: std::time::Duration) -> Option<Vec<u8>> {
+        let entry = self.entries.get(key)?;
+        if entry.inserted_at.elapsed() >= ttl {
+            self.remove(key);
+            return None;
+        }
+        // Move to back (most recently used)
+        self.order.retain(|k| k != key);
+        self.order.push_back(key.to_string());
+        Some(entry.value.clone())
+    }
+
+    fn insert(&mut self, key: String, value: Vec<u8>) {
+        if self.entries.contains_key(&key) {
+            self.order.retain(|k| k != &key);
+        } else if self.entries.len() >= self.capacity {
+            // Evict LRU (oldest)
+            if let Some(lru_key) = self.order.pop_front() {
+                self.entries.remove(&lru_key);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, LruEntry { value, inserted_at: std::time::Instant::now() });
+    }
+
+    fn remove(&mut self, key: &str) {
+        self.entries.remove(key);
+        self.order.retain(|k| k != key);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+}
+
+/// Caching facet - LRU cache with TTL-based expiry and capacity-based eviction
 pub struct CachingFacet {
     config: Value,
     priority: i32,
-    cache: HashMap<String, Vec<u8>>,
+    /// Interior mutability so `&self` methods (`before_method`, `after_method`) can write.
+    cache: std::sync::Mutex<LruCache>,
     ttl: std::time::Duration,
 }
 
 /// Default priority for CachingFacet
 pub const CACHING_FACET_DEFAULT_PRIORITY: i32 = 40;
+
+/// Default maximum entries in CachingFacet LRU cache
+pub const CACHING_FACET_DEFAULT_CAPACITY: usize = 1000;
 
 impl CachingFacet {
     /// Create a new caching facet
@@ -1018,12 +1079,17 @@ impl CachingFacet {
         let ttl = config
             .get("ttl_seconds")
             .and_then(|v| v.as_u64())
-            .map(|s| std::time::Duration::from_secs(s))
+            .map(std::time::Duration::from_secs)
             .unwrap_or(std::time::Duration::from_secs(300));
+        let capacity = config
+            .get("max_entries")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(CACHING_FACET_DEFAULT_CAPACITY);
         CachingFacet {
             config,
             priority,
-            cache: HashMap::new(),
+            cache: std::sync::Mutex::new(LruCache::new(capacity)),
             ttl,
         }
     }
@@ -1049,7 +1115,7 @@ impl Facet for CachingFacet {
     }
 
     async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
-        self.cache.clear();
+        self.cache.lock().unwrap_or_else(|p| p.into_inner()).clear();
         Ok(())
     }
 
@@ -1059,17 +1125,18 @@ impl Facet for CachingFacet {
         args: &[u8],
         _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
-        // Create cache key
         let key = format!("{}:{}", method, hex::encode(args));
-
-        // Check cache
-        if let Some(cached) = self.cache.get(&key) {
+        if let Some(value) = self
+            .cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&key, self.ttl)
+        {
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(method = %method, "Cache hit");
             }
-            return Ok(InterceptResult::ShortCircuit(cached.clone()));
+            return Ok(InterceptResult::ShortCircuit(value));
         }
-
         Ok(InterceptResult::Continue)
     }
 
@@ -1077,14 +1144,14 @@ impl Facet for CachingFacet {
         &self,
         method: &str,
         args: &[u8],
-        _result: &[u8],
+        result: &[u8],
         _headers: &std::collections::HashMap<String, String>,
     ) -> Result<InterceptResult, FacetError> {
-        // Cache the result
-        let _key = format!("{}:{}", method, hex::encode(args));
-        // In real implementation, we'd need mutable self or interior mutability
-        // self.cache.insert(key, result.to_vec());
-
+        let key = format!("{}:{}", method, hex::encode(args));
+        self.cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, result.to_vec());
         Ok(InterceptResult::Continue)
     }
 

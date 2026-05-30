@@ -5,7 +5,7 @@
 
 use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_actor::{ActorId, ActorRef};
-use plexspaces_behavior::MockBehavior;
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_mailbox::{mailbox_config_default, Mailbox};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;

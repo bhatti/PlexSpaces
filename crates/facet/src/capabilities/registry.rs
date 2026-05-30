@@ -51,7 +51,9 @@ use tracing::{debug, error, instrument, warn};
 /// This avoids circular dependency with plexspaces-core
 #[async_trait::async_trait]
 pub trait ServiceLocatorTrait: Send + Sync {
+    /// Returns true if authentication is disabled
     async fn is_auth_disabled(&self) -> bool;
+    /// Returns the current node configuration, if available
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig>;
 }
 
@@ -74,6 +76,7 @@ impl Default for RegistryConfig {
 }
 
 /// Trait for object registry implementations (to avoid circular dependency with plexspaces-core)
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait ObjectRegistry: Send + Sync {
     /// Register an object
@@ -294,14 +297,12 @@ impl RegistryFacet {
                 });
 
                 // Convert metadata HashMap to Metadata proto struct
-                let metadata_proto = if let Some(meta_map) = args.metadata {
-                    Some(plexspaces_proto::common::v1::Metadata {
+                let metadata_proto = args.metadata.map(|meta_map| {
+                    plexspaces_proto::common::v1::Metadata {
                         labels: meta_map,
                         ..Default::default()
-                    })
-                } else {
-                    None
-                };
+                    }
+                });
 
                 let registration = ObjectRegistration {
                     object_id: args.object_id.clone(),

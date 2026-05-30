@@ -71,20 +71,18 @@
 //! ```
 
 use async_trait::async_trait;
-use metrics;
 use plexspaces_common::RequestContextExt;
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState};
-use plexspaces_service_traits::{ActorId, ActorService, JournalStorage, ServiceLocatorBase};
+use plexspaces_service_traits::{ActorId, JournalStorage, ServiceLocatorBase};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing;
 
 // Re-export ReminderFired from proto
 pub use plexspaces_proto::timer::v1::ReminderFired;
@@ -226,7 +224,7 @@ impl ReminderFacet {
             .read()
             .await
             .clone()
-            .ok_or_else(|| ReminderError::NotAttached)?;
+            .ok_or(ReminderError::NotAttached)?;
 
         // Validate registration
         if registration.reminder_name.is_empty() {
@@ -259,7 +257,7 @@ impl ReminderFacet {
         let first_fire_time = registration
             .first_fire_time
             .as_ref()
-            .map(|t| proto_timestamp_to_system_time(t))
+            .map(proto_timestamp_to_system_time)
             .unwrap_or(now);
 
         // If first_fire_time is in the past, fire immediately
@@ -310,7 +308,7 @@ impl ReminderFacet {
                 .read()
                 .await
                 .clone()
-                .ok_or_else(|| ReminderError::NotAttached)?;
+                .ok_or(ReminderError::NotAttached)?;
 
             self.storage
                 .unregister_reminder(&actor_id, reminder_name)
@@ -364,10 +362,8 @@ impl ReminderFacet {
                 let due_reminders = storage.query_due_reminders(now).await.unwrap_or_default();
 
                 // Debug: Log if we found due reminders (only in debug mode)
-                if !due_reminders.is_empty() {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!("Found {} due reminders", due_reminders.len());
-                    }
+                if !due_reminders.is_empty() && tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("Found {} due reminders", due_reminders.len());
                 }
 
                 // Fire due reminders
@@ -422,7 +418,7 @@ impl ReminderFacet {
                         let mut headers = std::collections::HashMap::new();
                         headers.insert("type".to_string(), "ReminderFired".to_string());
                         headers.insert("reminder_name".to_string(), reg.reminder_name.clone());
-                        let mut message = Message {
+                        let message = Message {
                             id: ulid::Ulid::new().to_string(),
                             payload,
                             message_type: "ReminderFired".to_string(),
@@ -455,7 +451,7 @@ impl ReminderFacet {
                     // Check if max_occurrences reached
                     if let Some(reg) = updated_reminder.registration.as_ref() {
                         if reg.max_occurrences > 0
-                            && updated_reminder.fire_count >= reg.max_occurrences as i32
+                            && updated_reminder.fire_count >= reg.max_occurrences
                         {
                             // Auto-delete reminder
                             updated_reminder.is_active = false;
@@ -623,14 +619,12 @@ impl Facet for ReminderFacet {
                         error = %e,
                         "Failed to persist paused reminder state"
                     );
-                } else {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %actor_id,
-                            reminder_name = %reminder_name,
-                            "Paused reminder on EXIT signal"
-                        );
-                    }
+                } else if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        reminder_name = %reminder_name,
+                        "Paused reminder on EXIT signal"
+                    );
                 }
             }
         }

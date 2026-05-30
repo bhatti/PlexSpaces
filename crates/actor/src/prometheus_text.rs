@@ -270,6 +270,7 @@ pub fn actor_metrics_from_exposition_for_namespace(
     }
 }
 
+/// Populate `NodeMetrics` operational counters by parsing a Prometheus text exposition.
 pub fn overlay_node_operational_counters_from_exposition(
     exposition: &str,
     node_id: &str,

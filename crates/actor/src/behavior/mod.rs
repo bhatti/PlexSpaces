@@ -24,7 +24,7 @@
 //! - GenStateMachine: Finite state machines
 //! - Workflow: Restate-inspired durable workflows
 
-// Main behavior implementations (was mod.rs in plexspaces-behavior crate)
+// Main behavior implementations
 mod behaviors;
 pub use behaviors::*;
 

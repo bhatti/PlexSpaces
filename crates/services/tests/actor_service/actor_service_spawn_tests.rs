@@ -169,14 +169,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "local-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("local-node".to_string()));
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
@@ -283,14 +276,7 @@ async fn test_spawn_actor_rejects_remote_node_id() {
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "local-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("local-node".to_string()));
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
@@ -341,14 +327,7 @@ async fn test_spawn_actor_design_principle() {
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "node1".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("node1".to_string()));
 
     // Create ServiceLocator and register services
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
@@ -415,14 +394,7 @@ async fn test_spawn_actor_with_callback() {
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "test-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
 
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;

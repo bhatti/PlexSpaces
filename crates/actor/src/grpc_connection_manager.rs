@@ -110,6 +110,7 @@ impl GrpcConnectionManager {
         pool.get()
     }
 
+    /// Get a channel for the ActorService on the given node.
     pub async fn get_actor_service_connection(
         &self,
         node_id: &str,
@@ -119,6 +120,7 @@ impl GrpcConnectionManager {
             .await
     }
 
+    /// Get a channel for the ApplicationService on the given node.
     pub async fn get_application_service_connection(
         &self,
         node_id: &str,
@@ -132,6 +134,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Get a channel for the TupleSpaceService on the given node.
     pub async fn get_tuplespace_service_connection(
         &self,
         node_id: &str,
@@ -145,6 +148,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Get a channel for the ProcessGroupService on the given node.
     pub async fn get_process_group_service_connection(
         &self,
         node_id: &str,
@@ -158,6 +162,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Get a channel for the NodeService on the given node.
     pub async fn get_node_service_connection(
         &self,
         node_id: &str,
@@ -167,6 +172,7 @@ impl GrpcConnectionManager {
             .await
     }
 
+    /// Get a channel for the KeyValueService on the given node.
     pub async fn get_key_value_service_connection(
         &self,
         node_id: &str,
@@ -176,6 +182,7 @@ impl GrpcConnectionManager {
             .await
     }
 
+    /// Get a channel for the BlobService on the given node.
     pub async fn get_blob_service_connection(
         &self,
         node_id: &str,
@@ -185,6 +192,7 @@ impl GrpcConnectionManager {
             .await
     }
 
+    /// Get a channel for the ServiceLinkService on the given node.
     pub async fn get_service_link_service_connection(
         &self,
         node_id: &str,
@@ -198,6 +206,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Get a channel for the MetricsService on the given node.
     pub async fn get_metrics_service_connection(
         &self,
         node_id: &str,
@@ -211,6 +220,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Get a channel for the ObjectRegistry service on the given node.
     pub async fn get_object_registry_service_connection(
         &self,
         node_id: &str,
@@ -224,6 +234,7 @@ impl GrpcConnectionManager {
         .await
     }
 
+    /// Drop all pooled channels and close all connections.
     pub async fn shutdown(&self) {
         self.pools.write().await.clear();
     }

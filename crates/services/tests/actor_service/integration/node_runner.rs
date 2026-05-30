@@ -188,15 +188,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("Failed to create object registry repository: {}", e))?,
     );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(repo));
-    let object_registry: Arc<dyn CoreObjectRegistry> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl.clone(),
-    });
-
     // Register this node for discovery
     register_node(&object_registry_impl, node_id, port).await?;
 
-    // Create ActorRegistry (composes ObjectRegistry)
-    let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
+    let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
 
     // Create ServiceLocator and register services manually
     // Note: For binaries, we can't use create_default_service_locator from node crate

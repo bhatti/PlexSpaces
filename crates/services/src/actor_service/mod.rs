@@ -4964,21 +4964,9 @@ mod tests {
         }
     }
 
-    /// Helper to create a test ActorRegistry (async because SqliteObjectRegistryRepository::new is async)
+    /// Helper to create a test ActorRegistry
     async fn create_test_registry(local_node_id: &str) -> Arc<ActorRegistry> {
-        let object_repo = Arc::new(
-            SqliteObjectRegistryRepository::new(":memory:")
-                .await
-                .unwrap(),
-        );
-        let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-            inner: object_registry_impl,
-        });
-        Arc::new(ActorRegistry::new(
-            object_registry,
-            local_node_id.to_string(),
-        ))
+        Arc::new(ActorRegistry::new(local_node_id.to_string()))
     }
 
     /// Helper to create ActorServiceImpl with proper ServiceLocator setup for tests
@@ -5068,12 +5056,14 @@ mod tests {
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id,
-                sender,
-                actor_type.to_string(),
-                None,
-                None,
-                None,
+                plexspaces_actor::ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: actor_type.to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
     }
@@ -5112,13 +5102,7 @@ mod tests {
             .await
             .unwrap();
 
-        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-            inner: object_registry_impl,
-        });
-        Arc::new(ActorRegistry::new(
-            object_registry,
-            local_node_id.to_string(),
-        ))
+        Arc::new(ActorRegistry::new(local_node_id.to_string()))
     }
 
     #[tokio::test]

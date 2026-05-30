@@ -37,6 +37,8 @@ use tokio::sync::RwLock;
 
 use crate::FacetContainer;
 
+type FacetStorage = Arc<RwLock<HashMap<String, Arc<RwLock<FacetContainer>>>>>;
+
 /// Facet Manager - manages actor facets
 ///
 /// ## Purpose
@@ -44,8 +46,7 @@ use crate::FacetContainer;
 /// This allows ActorFactory to manage facets without depending on Node.
 pub struct FacetManager {
     /// Facet storage: actor_id -> FacetContainer
-    /// Stores facets for all actors (normal and virtual) for facet access
-    facet_storage: Arc<RwLock<HashMap<String, Arc<RwLock<FacetContainer>>>>>,
+    facet_storage: FacetStorage,
 }
 
 impl FacetManager {
@@ -105,12 +106,13 @@ impl FacetManager {
     /// This method uses dynamic downcasting via Any trait to avoid the dependency.
     /// The actual setup is done by the caller (Node) which has access to journaling crate.
     ///
+    /// Setup facets for an actor after spawn
+    ///
     /// ## Arguments
     /// * `actor_id` - Actor ID
     /// * `actor_ref` - ActorRef for the actor
     /// * `node_id` - Node ID
     /// * `actor_service` - ActorService for sending messages
-    /// Setup facets for an actor after spawn
     ///
     /// ## Purpose
     /// Configures facets that need actor_ref, node_id, or actor_service after actor is spawned.
@@ -172,11 +174,7 @@ impl FacetManager {
     }
 
     /// Get facet storage (for internal access)
-    ///
-    /// ## Note
-    /// This is exposed for backward compatibility during migration.
-    /// Prefer using the public methods above.
-    pub fn facet_storage(&self) -> &Arc<RwLock<HashMap<String, Arc<RwLock<FacetContainer>>>>> {
+    pub fn facet_storage(&self) -> &FacetStorage {
         &self.facet_storage
     }
 }

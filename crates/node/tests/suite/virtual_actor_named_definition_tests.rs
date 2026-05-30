@@ -15,7 +15,7 @@ use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType,
     InitializableServiceLocator, Message, RequestContextExt, ServiceLocator,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;

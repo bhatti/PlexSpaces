@@ -83,7 +83,6 @@ dashboard = ["plexspaces-dashboard"]
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
-plexspaces-behavior = { workspace = true }
 plexspaces-persistence = { workspace = true }
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
 futures = { workspace = true }

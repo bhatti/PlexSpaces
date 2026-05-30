@@ -57,7 +57,7 @@
 //! ```
 
 use plexspaces_actor::RequestContextExt;
-use plexspaces_behavior::MockBehavior;
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::ActorLifecycleEvent;
 use std::sync::atomic::{AtomicU64, Ordering};

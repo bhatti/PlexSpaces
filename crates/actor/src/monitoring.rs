@@ -130,7 +130,6 @@ pub trait NodeConnectionInfo: Send + Sync {
 ///
 /// Must stay aligned with `plexspaces_services::metrics_service::record_message_routing_red`
 /// (core cannot depend on services, so names and labels are duplicated intentionally).
-#[allow(unused_variables)]
 pub fn record_message_routing_metrics(
     actor_id: &str,
     namespace: &str,
@@ -166,73 +165,24 @@ pub fn record_message_routing_metrics(
         .record(dur);
     }
 
-    #[cfg(feature = "tracing")]
-    {
-        if success {
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    actor_id = %actor_id,
-                    duration_ms = duration.as_millis(),
-                    "Message routed successfully"
-                );
-            }
-        } else {
-            tracing::error!(
+    if success {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 actor_id = %actor_id,
                 duration_ms = duration.as_millis(),
-                error_type = error_type.unwrap_or("unknown"),
-                "Message routing failed"
+                "Message routed successfully"
             );
         }
-    }
-}
-
-/// Record actor activation R.E.D. metrics (aligned with MetricsService `RecordActorActivation`).
-#[allow(unused_variables)]
-pub fn record_actor_activation_metrics(
-    actor_id: &str,
-    namespace: &str,
-    activation_type: &str,
-    duration: Duration,
-    success: bool,
-) {
-    let ns = if namespace.is_empty() {
-        "default".to_string()
     } else {
-        namespace.to_string()
-    };
-    let at = activation_type.to_string();
-    metrics::counter!(
-        "plexspaces_actor_activations_total",
-        "namespace" => ns.clone(),
-        "activation_type" => at.clone(),
-    )
-    .increment(1);
-    if !success {
-        metrics::counter!(
-            "plexspaces_actor_activation_errors_total",
-            "namespace" => ns.clone(),
-        )
-        .increment(1);
-    }
-    metrics::histogram!(
-        "plexspaces_actor_activation_duration_seconds",
-        "namespace" => ns,
-        "activation_type" => at,
-    )
-    .record(duration.as_secs_f64());
-
-    #[cfg(feature = "tracing")]
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
+        tracing::error!(
             actor_id = %actor_id,
-            activation_type = %activation_type,
             duration_ms = duration.as_millis(),
-            success = success,
-            "Actor activation"
+            error_type = error_type.unwrap_or("unknown"),
+            "Message routing failed"
         );
     }
 }
+
 
 /// Record connection metrics
 ///
@@ -265,7 +215,6 @@ pub fn record_connection_metrics(
         .record(dur.as_secs_f64());
     }
 
-    #[cfg(feature = "tracing")]
     tracing::info!(
         node_id = %node_id,
         remote_node_id = %remote_node_id,

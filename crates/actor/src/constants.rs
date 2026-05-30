@@ -3,9 +3,8 @@
 //
 // Constants used across PlexSpaces
 
-/// Temporary sender ID prefix for ask() pattern
+/// Temporary sender ID prefix for ask() pattern.
 /// Format: "{TEMP_SENDER_PREFIX}_{correlation_id}" in ActorId.name().
-
 pub const TEMP_SENDER_PREFIX: &str = "ask";
 
 /// Internal actor type for temporary senders used by ask/reply routing.

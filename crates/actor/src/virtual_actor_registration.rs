@@ -29,7 +29,6 @@
 //!   registration data from SDK facets + proto facets rather than a fully-formed spec.
 //! - Idempotent (safe to call multiple times).
 
-use plexspaces_facet::facet_helpers::extract_facet_config_for_registration;
 use plexspaces_facet::Facet;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
@@ -78,42 +77,50 @@ fn value_to_proto_config(value: &serde_json::Value) -> HashMap<String, String> {
     config
 }
 
+/// Parameters for [`register_virtual_actor_type_consistent`].
+#[derive(Default)]
+pub struct VirtualActorTypeSpec<'a> {
+    /// Behavior class (VirtualActorManager key, BehaviorRegistry key).
+    pub actor_type: String,
+    /// Declaration-time name; empty for type-only registration.
+    pub instance_name: String,
+    /// Namespace for isolation.
+    pub namespace: String,
+    /// Optional SDK trait-object facets (from Rust SDK annotations).
+    pub facets: Option<&'a [Box<dyn plexspaces_facet::Facet>]>,
+    /// Optional proto facets (from WASM app-config.toml).
+    pub proto_facets: Option<&'a [ProtoFacet]>,
+    /// Optional actor runtime configuration.
+    pub actor_config: Option<ActorConfig>,
+    /// Optional tenant ID; defaults to empty for type-level registration.
+    pub tenant_id: Option<String>,
+    /// Optional JSON init-config template (`{"args": {…}}` or flat `{"k": "v"}`).
+    pub init_config_template: Option<Vec<u8>>,
+}
+
 /// Register a virtual actor type consistently across all entry points.
 ///
-/// ## Purpose
-/// Convenience wrapper for callers that build registration data from SDK facets +
-/// proto facets. Constructs an `ActorSpawnSpec` and delegates to
-/// `register_virtual_actor_definition`.
-///
-/// ## Arguments
-/// * `service_locator` - ServiceLocator for accessing VirtualActorManager
-/// * `actor_type` - Behavior class (VirtualActorManager key, BehaviorRegistry key)
-/// * `instance_name` - Declaration-time name (reverse index key); empty for type-only registration
-/// * `namespace` - Namespace for isolation
-/// * `facets` - Optional SDK trait-object facets (from Rust SDK annotations)
-/// * `proto_facets` - Optional proto facets (from WASM app-config.toml)
-/// * `actor_config` - Optional actor runtime configuration
-/// * `tenant_id` - Optional tenant ID (defaults to empty for type-level registration)
-/// * `init_config_template` - Optional JSON bytes carrying initial args
-///   (`{"args": {"k": "v"}}` or flat `{"k": "v"}`). Decoded into `spec.args` so
-///   `wasm_init_payload` can derive the init payload at activation time without
-///   any further JSON round-trips.
+/// Convenience wrapper that constructs an `ActorSpawnSpec` from [`VirtualActorTypeSpec`]
+/// and delegates to `register_virtual_actor_definition`.
 pub async fn register_virtual_actor_type_consistent(
     service_locator: &std::sync::Arc<dyn crate::ServiceLocator>,
-    actor_type: String,
-    instance_name: String,
-    namespace: String,
-    facets: Option<&[Box<dyn Facet>]>,
-    proto_facets: Option<&[ProtoFacet]>,
-    actor_config: Option<ActorConfig>,
-    tenant_id: Option<String>,
-    init_config_template: Option<Vec<u8>>,
+    spec: VirtualActorTypeSpec<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let VirtualActorTypeSpec {
+        actor_type,
+        instance_name,
+        namespace,
+        facets,
+        proto_facets,
+        actor_config,
+        tenant_id,
+        init_config_template,
+    } = spec;
     let effective_proto_facets = proto_facets_for_registration(facets, proto_facets);
     let args = extract_args_from_template(init_config_template.as_deref());
     // behavior_kind is not known at this call site — callers that know it should call
     // register_virtual_actor_definition directly with a fully-formed ActorSpawnSpec.
-    let spec = ActorSpawnSpec {
+    let spawn_spec = ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: instance_name,
             actor_type,
@@ -129,7 +136,7 @@ pub async fn register_virtual_actor_type_consistent(
         visibility: 0,
         ..Default::default()
     };
-    register_virtual_actor_definition(service_locator, spec).await
+    register_virtual_actor_definition(service_locator, spawn_spec).await
 }
 
 /// Extract `HashMap<String,String>` args from a JSON init-config template.
@@ -212,7 +219,7 @@ pub async fn register_virtual_actor_definition(
                 error = %e,
                 "Failed to register virtual actor type (actor will still work, but auto-activation may fail)"
             );
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
 

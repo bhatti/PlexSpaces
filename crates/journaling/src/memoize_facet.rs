@@ -43,7 +43,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing;
 
 /// Default priority for MemoizeFacet — between metrics (800) and domain (~100-500)
 pub const MEMOIZE_FACET_DEFAULT_PRIORITY: i32 = 700;
@@ -268,7 +267,7 @@ fn hex_encode(b: &[u8]) -> String {
 
 /// Decode lowercase hex string to bytes.
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())

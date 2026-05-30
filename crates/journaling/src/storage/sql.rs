@@ -68,7 +68,6 @@
 use crate::storage::{ReminderRegistration, ReminderState};
 use crate::{ActorEvent, ActorHistory, Checkpoint, JournalEntry, JournalStats};
 use async_trait::async_trait;
-use plexspaces_common::ServiceNameExt;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::prost_types;
 use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
@@ -1129,7 +1128,7 @@ impl JournalStorage for SqliteJournalStorage {
         let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp page_size (1-1000)
-        let page_size = page_request.limit.max(1).min(1000) as i64;
+        let page_size = page_request.limit.clamp(1, 1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
         // First filter by from_sequence, then skip offset events, then take page_size + 1
@@ -1210,9 +1209,9 @@ impl JournalStorage for SqliteJournalStorage {
 
             let timestamp = unix_ms_to_proto_timestamp(row.get::<i64, _>("timestamp"));
             if created_at.is_none() {
-                created_at = timestamp.clone();
+                created_at = timestamp;
             }
-            updated_at = timestamp.clone();
+            updated_at = timestamp;
 
             let sequence = row.get::<i64, _>("sequence") as u64;
             latest_sequence = latest_sequence.max(sequence);
@@ -1251,7 +1250,7 @@ impl JournalStorage for SqliteJournalStorage {
         let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp limit (1-1000)
-        let page_size = page_request.limit.max(1).min(1000) as i64;
+        let page_size = page_request.limit.clamp(1, 1000) as i64;
 
         // Get latest sequence for history metadata
         let latest_row = sqlx::query(
@@ -2326,7 +2325,7 @@ impl JournalStorage for PostgresJournalStorage {
         let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp page_size (1-1000)
-        let page_size = page_request.limit.max(1).min(1000) as i64;
+        let page_size = page_request.limit.clamp(1, 1000) as i64;
 
         // Fetch page_size + 1 to check if there's more
         // First filter by from_sequence, then skip offset events, then take page_size + 1
@@ -2418,9 +2417,9 @@ impl JournalStorage for PostgresJournalStorage {
             });
 
             if created_at.is_none() {
-                created_at = timestamp.clone();
+                created_at = timestamp;
             }
-            updated_at = timestamp.clone();
+            updated_at = timestamp;
 
             let sequence = row.get::<i64, _>("sequence") as u64;
             latest_sequence = latest_sequence.max(sequence);
@@ -2459,7 +2458,7 @@ impl JournalStorage for PostgresJournalStorage {
         let skip_count = page_request.offset.max(0) as i64;
 
         // Validate and clamp limit (1-1000)
-        let page_size = page_request.limit.max(1).min(1000) as i64;
+        let page_size = page_request.limit.clamp(1, 1000) as i64;
 
         // Get latest sequence for history metadata
         let latest_row = sqlx::query(

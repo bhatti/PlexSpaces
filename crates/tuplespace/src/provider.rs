@@ -209,16 +209,8 @@ pub trait TupleSpaceProvider: Send + Sync {
         // Default implementation: use wildcard pattern to take all tuples
         // This is inefficient but works for all providers
         let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
-        loop {
-            match self.take(&wildcard_pattern).await? {
-                Some(_) => {
-                    // Continue taking until no more tuples
-                }
-                None => {
-                    // No more tuples
-                    break;
-                }
-            }
+        while self.take(&wildcard_pattern).await?.is_some() {
+            // Continue taking until no more tuples
         }
         Ok(())
     }

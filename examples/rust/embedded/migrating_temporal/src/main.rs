@@ -4,7 +4,7 @@
 // This is the package default run target, so `cargo run` starts the comparison
 // example without needing `--bin temporal-comparison`.
 
-use plexspaces_behavior::Workflow;
+use plexspaces_actor::behavior::Workflow;
 use plexspaces_actor::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContextExt};
 use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 use plexspaces_node::NodeBuilder;

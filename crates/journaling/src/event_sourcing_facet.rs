@@ -171,7 +171,7 @@ impl<S: JournalStorage + Clone + 'static> EventSourcingFacet<S> {
         }
     }
 
-    /// Legacy constructor for backward compatibility
+    /// Constructor accepting an `EventSourcingConfig` directly.
     pub fn with_config(storage: Arc<S>, config: EventSourcingConfig) -> Self {
         // Convert EventSourcingConfig to Value manually
         let config_value = serde_json::json!({

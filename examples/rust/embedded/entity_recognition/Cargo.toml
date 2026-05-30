@@ -17,7 +17,6 @@ default-run = "entity-recognition-app"
 # PlexSpaces crates
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-proto = { path = "../../../../crates/proto" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-application = { path = "../../../../crates/application" }
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }

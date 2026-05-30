@@ -306,7 +306,7 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ctx: &plexspaces_actor::ActorContext,
                 msg: plexspaces_actor::Message,
             ) -> Result<(), plexspaces_actor::BehaviorError> {
-                <Self as plexspaces_behavior::GenServer>::route_message(self, ctx, msg).await
+                <Self as plexspaces_actor::behavior::GenServer>::route_message(self, ctx, msg).await
             }
         }
     };
@@ -380,7 +380,7 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> Result<(), plexspaces_actor::BehaviorError> {
                 // GenEvent: dispatch to handlers, no reply expected
                 // Use #[plexspaces_handlers(event)] to generate dispatch
-                <Self as plexspaces_behavior::EventHandler>::handle_event(self, ctx, msg).await
+                <Self as plexspaces_actor::behavior::EventHandler>::handle_event(self, ctx, msg).await
             }
         }
     };
@@ -572,7 +572,7 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ctx: &plexspaces_actor::ActorContext,
                 msg: plexspaces_actor::Message,
             ) -> Result<(), plexspaces_actor::BehaviorError> {
-                <Self as plexspaces_behavior::Workflow>::route_workflow_message(self, ctx, msg).await
+                <Self as plexspaces_actor::behavior::Workflow>::route_workflow_message(self, ctx, msg).await
             }
         }
     };
@@ -1082,7 +1082,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             #init_call
 
             #[plexspaces_sdk::async_trait]
-            impl plexspaces_behavior::Workflow for #self_ty {
+            impl plexspaces_actor::behavior::Workflow for #self_ty {
                 async fn run(
                     &mut self,
                     ctx: &plexspaces_actor::ActorContext,
@@ -1241,7 +1241,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     let gen_server_impl = if is_gen_server {
         quote! {
             #[plexspaces_sdk::async_trait]
-            impl plexspaces_behavior::GenServer for #self_ty {
+            impl plexspaces_actor::behavior::GenServer for #self_ty {
                 async fn handle_request(
                     &mut self,
                     ctx: &plexspaces_actor::ActorContext,
@@ -1285,7 +1285,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         // GenEvent: implement EventHandler trait
         quote! {
             #[plexspaces_sdk::async_trait]
-            impl plexspaces_behavior::EventHandler for #self_ty {
+            impl plexspaces_actor::behavior::EventHandler for #self_ty {
                 async fn handle_event(
                     &mut self,
                     ctx: &plexspaces_actor::ActorContext,

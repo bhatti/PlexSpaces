@@ -30,22 +30,16 @@ use plexspaces_proto::grpc::v1::{
 };
 use std::{num::NonZeroU32, sync::Arc};
 
+type BucketLimiter = Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>>;
+
 /// Rate limiting interceptor using token bucket algorithm
 pub struct RateLimitInterceptor {
     /// Global rate limiter (if per_client = false)
-    global_limiter:
-        Option<Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>>>,
+    global_limiter: Option<BucketLimiter>,
 
     /// Per-client rate limiters (if per_client = true)
     /// Key: client IP address
-    client_limiters: Arc<
-        tokio::sync::RwLock<
-            std::collections::HashMap<
-                String,
-                Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>>,
-            >,
-        >,
-    >,
+    client_limiters: Arc<tokio::sync::RwLock<std::collections::HashMap<String, BucketLimiter>>>,
 
     /// Configuration
     config: RateLimitMiddlewareConfig,
@@ -58,8 +52,8 @@ impl RateLimitInterceptor {
             // Create global rate limiter
             let burst_size = config.burst_size.max(1);
 
-            let quota = Quota::per_second(NonZeroU32::new(burst_size as u32).unwrap())
-                .allow_burst(NonZeroU32::new(burst_size as u32).unwrap());
+            let quota = Quota::per_second(NonZeroU32::new(burst_size).unwrap())
+                .allow_burst(NonZeroU32::new(burst_size).unwrap());
 
             Some(Arc::new(RateLimiter::direct(quota)))
         } else {
@@ -74,10 +68,7 @@ impl RateLimitInterceptor {
     }
 
     /// Get or create rate limiter for a client IP
-    async fn get_client_limiter(
-        &self,
-        client_ip: &str,
-    ) -> Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>> {
+    async fn get_client_limiter(&self, client_ip: &str) -> BucketLimiter {
         // Check if limiter exists
         {
             let limiters = self.client_limiters.read().await;
@@ -89,8 +80,8 @@ impl RateLimitInterceptor {
         // Create new limiter for this client
         let burst_size = self.config.burst_size.max(1);
 
-        let quota = Quota::per_second(NonZeroU32::new(burst_size as u32).unwrap())
-            .allow_burst(NonZeroU32::new(burst_size as u32).unwrap());
+        let quota = Quota::per_second(NonZeroU32::new(burst_size).unwrap())
+            .allow_burst(NonZeroU32::new(burst_size).unwrap());
 
         let limiter = Arc::new(RateLimiter::direct(quota));
 
@@ -104,10 +95,7 @@ impl RateLimitInterceptor {
     }
 
     /// Check if request should be rate limited
-    fn check_rate_limit(
-        &self,
-        limiter: &RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>,
-    ) -> Result<(), InterceptorError> {
+    fn check_rate_limit(&self, limiter: &BucketLimiter) -> Result<(), InterceptorError> {
         // Try to acquire a token (non-blocking)
         limiter.check().map_err(|_| {
             InterceptorError::RateLimitExceeded(format!(

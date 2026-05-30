@@ -37,7 +37,7 @@ use super::test_helpers::{spawn_actor_helper, test_runtime_actor_id};
 use plexspaces_actor::ActorId;
 use plexspaces_actor::ActorInstance as Actor;
 use plexspaces_actor::{RequestContextExt, ServiceLocator, ServiceLocatorBase};
-use plexspaces_behavior::MockBehavior;
+use plexspaces_actor::behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_persistence::MemoryJournal;
@@ -576,7 +576,7 @@ async fn test_lifecycle_event_unsubscribe() {
 #[tokio::test]
 async fn test_remote_actor_termination_with_lifecycle_events() {
     use plexspaces_actor::ActorInstance as Actor;
-    use plexspaces_behavior::MockBehavior;
+    use plexspaces_actor::behavior::MockBehavior;
     use plexspaces_persistence::MemoryJournal;
     use plexspaces_proto::ActorServiceServer;
     use plexspaces_services::actor_service::ActorServiceImpl;

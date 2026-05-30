@@ -179,7 +179,7 @@ pub trait GenServer: Actor {
 
         // RECURSION DETECTION: Track call depth to detect infinite loops
         thread_local! {
-            static ROUTE_MESSAGE_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
+            static ROUTE_MESSAGE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
 
         let depth = ROUTE_MESSAGE_DEPTH.with(|d| {
@@ -227,30 +227,17 @@ pub trait GenServer: Actor {
                     depth, msg.id, msg.sender_id, target_actor_id, msg_type, msg.message_type, msg.correlation_id
                 );
             }
-        } else {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    "[ROUTE_MESSAGE] START: depth={}, message_id={}, No sender (fire-and-forget), target_actor_id={}, message_type={:?}, message_type_str={}",
-                    depth, msg.id, target_actor_id, msg_type, msg.message_type
-                );
-            }
+        } else if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "[ROUTE_MESSAGE] START: depth={}, message_id={}, No sender (fire-and-forget), target_actor_id={}, message_type={:?}, message_type_str={}",
+                depth, msg.id, target_actor_id, msg_type, msg.message_type
+            );
         }
 
         match msg_type {
             MessageType::Call => {
-                // DEBUG: Check if sender is temporary sender
-                use crate::core::TEMP_SENDER_PREFIX;
-                let sender_is_temp = !msg.sender_id.is_empty()
-                    && msg
-                        .sender_id
-                        .starts_with(&format!("{}-", TEMP_SENDER_PREFIX))
-                    && msg.sender_id.contains('@');
-
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
-                let message_type = msg.message_type.clone();
-                let sender_id = msg.sender_id.clone();
-                let receiver_id = msg.receiver_id.clone();
                 let correlation_id = msg.correlation_id.clone();
 
                 // Log route_message at debug level (consolidated to reduce noise, guarded)
@@ -422,11 +409,13 @@ impl Actor for GenEventBehavior {
     }
 }
 
+/// State transition function for `GenStateMachineBehavior`.
+type TransitionFn<S, E> = Box<dyn Fn(&S, &E) -> Option<S> + Send + Sync>;
+
 /// GenStateMachine-like FSM behavior
-#[allow(clippy::type_complexity)]
 pub struct GenStateMachineBehavior<S, E> {
     current_state: S,
-    transition_fn: Box<dyn Fn(&S, &E) -> Option<S> + Send + Sync>,
+    transition_fn: TransitionFn<S, E>,
     state_handlers: std::collections::HashMap<String, Box<dyn StateHandler<S, E>>>,
 }
 
@@ -438,7 +427,7 @@ where
     /// Create new FSM behavior with initial state and transition function
     pub fn new(
         initial_state: S,
-        transition_fn: Box<dyn Fn(&S, &E) -> Option<S> + Send + Sync>,
+        transition_fn: TransitionFn<S, E>,
     ) -> Self {
         GenStateMachineBehavior {
             current_state: initial_state,
@@ -741,7 +730,7 @@ pub trait Workflow: Actor {
                         ctx.tenant_id.clone(),
                         ctx.namespace.clone(),
                     );
-                    actor_service.send(&reply_ctx, &target_id.to_string(), reply_msg).await
+                    actor_service.send(&reply_ctx, target_id.as_ref(), reply_msg).await
                         .map_err(|e| {
                             metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "run").increment(1);
                             tracing::error!(error = %e, "Failed to send workflow run reply");
@@ -845,7 +834,7 @@ pub trait Workflow: Actor {
                         ctx.tenant_id.clone(),
                         ctx.namespace.clone(),
                     );
-                    actor_service.send(&reply_ctx, &target_id.to_string(), reply_msg).await
+                    actor_service.send(&reply_ctx, target_id.as_ref(), reply_msg).await
                         .map_err(|e| {
                         metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "query").increment(1);
                         tracing::error!(error = %e, query_name = %name, "Failed to send workflow query reply");

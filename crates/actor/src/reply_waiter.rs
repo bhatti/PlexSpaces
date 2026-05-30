@@ -308,15 +308,13 @@ impl ReplyWaiterRegistry {
                     );
                 }
             }
-        } else {
-            if tracing::enabled!(tracing::Level::TRACE) {
-                let available_ids: Vec<String> = waiters.keys().cloned().collect();
-                tracing::trace!(
-                    "[REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
-                    correlation_id,
-                    available_ids
-                );
-            }
+        } else if tracing::enabled!(tracing::Level::TRACE) {
+            let available_ids: Vec<String> = waiters.keys().cloned().collect();
+            tracing::trace!(
+                "[REPLY_WAITER_REGISTRY] No waiter found for correlation_id={}, available_ids={:?}",
+                correlation_id,
+                available_ids
+            );
         }
         false
     }

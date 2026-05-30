@@ -14,7 +14,7 @@ use plexspaces_actor::{
     FacetManager, InitializableServiceLocator, Message, MessageSender, ReplyWaiterRegistry,
     RequestContext, RequestContextExt, VirtualActorManager,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_proto::actor::v1::{
@@ -190,14 +190,7 @@ async fn create_test_registry_with_remote_actors(
         }
     }
 
-    let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry,
-        local_node_id.to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new(local_node_id.to_string()));
     use plexspaces_node::create_default_service_locator;
     let service_locator =
         create_default_service_locator(Some(local_node_id.to_string()), None).await;

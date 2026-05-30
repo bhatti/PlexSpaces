@@ -9,7 +9,7 @@ use plexspaces_actor::{
     Message, MessageSender, RequestContextExt,
 };
 use plexspaces_actor::{ActorBuilder, ActorRef};
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::{actor_service_server::ActorServiceServer, ActorVisibility};
@@ -324,13 +324,7 @@ async fn create_test_registry_with_node(
         .await
         .unwrap();
 
-    let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    Arc::new(ActorRegistry::new(
-        object_registry,
-        local_node_id.to_string(),
-    ))
+    Arc::new(ActorRegistry::new(local_node_id.to_string()))
 }
 
 /// Helper to create ActorServiceImpl with proper ServiceLocator setup

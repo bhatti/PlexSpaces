@@ -31,7 +31,6 @@ use plexspaces_sdk::{
     call_message, gen_server_actor, json, plexspaces_handlers, spawn, ActorRef,
 };
 
-extern crate plexspaces_behavior;
 
 // =============================================================================
 // Domain types

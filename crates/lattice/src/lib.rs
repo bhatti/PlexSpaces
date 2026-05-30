@@ -23,24 +23,24 @@
 //!
 //! ## Lattice Types
 //!
-//! - **LWWLattice**: Last-Writer-Wins for simple values
-//! - **SetLattice**: Add-only or add-remove set (OR-Set)
-//! - **MaxLattice**: Maximum value lattice
-//! - **MinLattice**: Minimum value lattice
-//! - **MapLattice**: Map with lattice values
-//! - **VectorClock**: Causal ordering
+//! - [`LWWLattice`]: Last-Writer-Wins for simple values
+//! - [`SetLattice`]: Add-only monotonic set
+//! - [`OrSetLattice`]: Observed-Remove set (add and remove)
+//! - [`CounterLattice`]: Distributed vector-clock counter
+//! - [`MaxLattice`]: Maximum value lattice
+//! - [`MinLattice`]: Minimum value lattice
+//! - [`MapLattice`]: Map with lattice values
+//! - [`VectorClock`]: Causal ordering
+//! - [`PairLattice`]: Combines two independent lattices
 //!
 //! ## Independence
 //!
-//! This module has **NO dependencies** on other PlexSpaces modules.
+//! This crate has **no dependencies** on other PlexSpaces crates.
 //! It only uses standard Rust types and serde for serialization.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-// Export the lattice module
+pub mod crdt;
 
-mod r#mod;
-
-// Re-export all public items
-pub use r#mod::*;
+pub use crdt::*;

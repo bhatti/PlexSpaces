@@ -19,7 +19,7 @@
 //! DynamoDB-based TupleSpaceStorage implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for TupleSpace storage
+//! Provides a DynamoDB backend for TupleSpace storage
 //! with proper pattern matching, lease management, and comprehensive observability.
 //!
 //! ## Design
@@ -27,7 +27,7 @@
 //! - **Auto-table creation**: Creates tables with proper schema on initialization
 //! - **GSI for queries**: For efficient pattern-based queries
 //! - **TTL for leases**: Automatic expiration cleanup
-//! - **Production-grade**: Full observability (metrics, tracing, structured logging)
+//! - Full observability (metrics, tracing, structured logging)
 //!
 //! ## Table Schema
 //!

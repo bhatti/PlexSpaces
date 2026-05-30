@@ -63,7 +63,6 @@
 //! ```
 
 use async_trait::async_trait;
-use metrics;
 use plexspaces_common::{from_config_str, ActivationStrategy};
 use plexspaces_facet::VirtualActorLifecycleFacet as VirtualActorLifecycleFacetTrait;
 use plexspaces_facet::VirtualActorLifecycleState;
@@ -72,7 +71,6 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use tracing;
 
 /// Virtual Actor Facet for automatic activation/deactivation
 ///
@@ -133,7 +131,7 @@ impl VirtualActorFacet {
         let idle_timeout = config
             .get("idle_timeout")
             .and_then(|v| v.as_str())
-            .and_then(|s| parse_duration(s))
+            .and_then(parse_duration)
             .unwrap_or(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
 
         let activation_strategy = config
@@ -299,41 +297,6 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
 
     async fn update_access_time(&self) {
         *self.last_accessed.write().await = Some(SystemTime::now());
-    }
-}
-
-/// Convert a Facet to VirtualActorLifecycleFacet trait object
-///
-/// ## Purpose
-/// Helper function to convert `Box<dyn Facet>` to `Box<dyn VirtualActorLifecycleFacet>`
-/// by downcasting to `VirtualActorFacet` (which implements both traits).
-///
-/// ## Returns
-/// `Some(Box<dyn VirtualActorLifecycleFacet>)` if facet is a VirtualActorFacet,
-/// `None` otherwise.
-///
-/// ## Usage
-/// This helper is used when registering virtual actors to convert from the generic
-/// `Facet` trait to the specific `VirtualActorLifecycleFacet` trait required by
-/// `VirtualActorManager`.
-pub fn facet_to_lifecycle_facet(
-    facet: Box<dyn plexspaces_facet::Facet>,
-) -> Option<Box<dyn plexspaces_facet::VirtualActorLifecycleFacet>> {
-    // Check if facet is VirtualActorFacet by checking facet_type
-    if facet.facet_type() != "virtual_actor" {
-        return None;
-    }
-
-    // Downcast to VirtualActorFacet using as_any()
-    if let Some(virtual_facet_ref) = facet.as_any().downcast_ref::<VirtualActorFacet>() {
-        // We can't directly convert &VirtualActorFacet to Box<dyn VirtualActorLifecycleFacet>
-        // because we don't own the facet. We need to clone or recreate it.
-        // However, since VirtualActorFacet contains Arc<RwLock<>> internally, we can't easily clone.
-        // The best approach is to require callers to pass VirtualActorFacet directly.
-        // For now, return None and update call sites to pass VirtualActorFacet directly.
-        None
-    } else {
-        None
     }
 }
 
@@ -518,12 +481,12 @@ fn parse_duration(s: &str) -> Option<Duration> {
         return None;
     }
 
-    let (num_str, unit) = if s.ends_with('s') {
-        (&s[..s.len() - 1], "s")
-    } else if s.ends_with('m') {
-        (&s[..s.len() - 1], "m")
-    } else if s.ends_with('h') {
-        (&s[..s.len() - 1], "h")
+    let (num_str, unit) = if let Some(n) = s.strip_suffix('s') {
+        (n, "s")
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, "m")
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, "h")
     } else {
         return None;
     };

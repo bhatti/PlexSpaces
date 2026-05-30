@@ -23,7 +23,7 @@ use plexspaces_actor::{
     ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
     RequestContext, RequestContextExt, ServiceLocator,
 };
-use plexspaces_behavior::GenServer;
+use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
@@ -86,16 +86,7 @@ async fn create_test_actor_service(
     use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_node::create_default_service_locator;
 
-    let object_repo = Arc::new(
-        SqliteObjectRegistryRepository::new(":memory:")
-            .await
-            .unwrap(),
-    );
-    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-    let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
+    let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
 
     let service_locator = create_default_service_locator(Some(node_id.to_string()), None).await;
     service_locator

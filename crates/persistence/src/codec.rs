@@ -357,7 +357,6 @@ mod tests {
         // Snappy
         let snappy = compress(&data, CompressionType::Snappy).unwrap();
         let snappy_ratio = data.len() as f64 / snappy.len() as f64;
-        println!("Snappy compression ratio: {:.2}x", snappy_ratio);
         assert!(
             snappy_ratio >= 1.5,
             "Snappy should achieve at least 1.5x on repeated data"
@@ -366,7 +365,6 @@ mod tests {
         // Zstd
         let zstd = compress(&data, CompressionType::Zstd).unwrap();
         let zstd_ratio = data.len() as f64 / zstd.len() as f64;
-        println!("Zstd compression ratio: {:.2}x", zstd_ratio);
         assert!(
             zstd_ratio >= 3.0,
             "Zstd should achieve at least 3x on repeated data"

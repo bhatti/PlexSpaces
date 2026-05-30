@@ -155,13 +155,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
         }
     }
 
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
-        inner: object_registry_impl,
-    });
-    let actor_registry = Arc::new(ActorRegistry::new(
-        object_registry_trait,
-        "test-node".to_string(),
-    ));
+    let actor_registry = Arc::new(ActorRegistry::new("test-node".to_string()));
 
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_actor::ReplyWaiterRegistry::new());

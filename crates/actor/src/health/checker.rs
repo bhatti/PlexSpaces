@@ -5,8 +5,6 @@
 
 //! Health checker implementations (trait lives in `plexspaces-service-traits`).
 
-use plexspaces_proto::system::v1::HealthStatus;
-
 pub use plexspaces_service_traits::health::{
     run_health_check, HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
 };
@@ -35,6 +33,7 @@ pub struct ShutdownChecker {
 }
 
 impl ShutdownChecker {
+    /// Creates a new ShutdownChecker from a watch channel receiver.
     pub fn new(shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Self {
         Self {
             shutdown_tx: shutdown_rx,
@@ -66,6 +65,7 @@ impl HealthChecker for ShutdownChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_proto::system::v1::HealthStatus;
 
     #[tokio::test]
     async fn test_ping_checker() {

@@ -97,7 +97,7 @@ pub use crate::virtual_actor_manager::{
 };
 pub use crate::virtual_actor_registration::{
     proto_facets_for_registration, register_virtual_actor_definition,
-    register_virtual_actor_type_consistent,
+    register_virtual_actor_type_consistent, VirtualActorTypeSpec,
 };
 
 // Sub-module paths needed by callers

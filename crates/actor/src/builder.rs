@@ -701,7 +701,6 @@ mod tests {
     use super::*;
     use crate::core::{Actor, BehaviorType};
     use async_trait::async_trait;
-    use std::sync::Arc;
 
     struct TestBehavior;
 

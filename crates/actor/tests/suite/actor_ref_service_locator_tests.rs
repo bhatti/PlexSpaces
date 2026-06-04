@@ -92,25 +92,10 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn discover(
         &self,
         ctx: &plexspaces_actor::RequestContext,
-        object_type: Option<ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        limit: usize,
-        offset: usize,
+        opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .discover(
-                ctx,
-                object_type,
-                object_category,
-                capabilities,
-                labels,
-                health_status,
-                limit,
-                offset,
-            )
+            .discover(ctx, opts)
             .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -363,7 +348,7 @@ async fn test_actor_ref_local_unchanged() {
     assert_eq!(actor_ref.id(), &actor_id);
 
     // Register actor before calling tell()
-    use plexspaces_actor::{ActorRegistry, RequestContext};
+    use plexspaces_actor::{ActorRegistry, ActorRegistrationParams, RequestContext};
     let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
         let actor_id = actor_ref.id().clone();
@@ -371,12 +356,14 @@ async fn test_actor_ref_local_unchanged() {
         registry
             .register_actor(
                 &tell_ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
     }

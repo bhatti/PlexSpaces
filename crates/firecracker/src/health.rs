@@ -281,7 +281,7 @@ impl VmHealthMonitor {
 
                 // Emit health events via callback if registered and status changed
                 if status_changed {
-                    if let Some(ref callback) = health_event_callback.read().await.as_ref() {
+                    if let Some(callback) = health_event_callback.read().await.as_ref() {
                         let previous_status = {
                             let last_status = last_health_status.read().await;
                             last_status.clone()

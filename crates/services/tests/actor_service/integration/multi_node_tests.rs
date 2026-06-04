@@ -8,11 +8,12 @@
 //! to simulate multi-node scenarios without spawning real processes.
 
 use async_trait::async_trait;
+use plexspaces_common::RequestContextExt;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_actor::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
     FacetManager, InitializableServiceLocator, Message, MessageSender, ReplyWaiterRegistry,
-    RequestContext, RequestContextExt, VirtualActorManager,
+    RequestContext, VirtualActorManager,
 };
 use plexspaces_actor::behavior::GenServer;
 use plexspaces_object_registry::ObjectRegistry;
@@ -83,8 +84,9 @@ async fn create_test_registry_with_remote_actors(
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
+    let _object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
+    #[allow(dead_code)]
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistry>,
     }
@@ -144,13 +146,7 @@ async fn create_test_registry_with_remote_actors(
         async fn discover(
             &self,
             _ctx: &RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _name: Option<String>,
-            _labels: Option<Vec<String>>,
-            _exclude_labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _limit: usize,
-            _offset: usize,
+            _opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
@@ -263,12 +259,14 @@ async fn create_test_registry_with_remote_actors(
         actor_registry
             .register_actor(
                 &ctx,
-                local_actor_id.clone(),
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                plexspaces_actor::ActorRegistrationParams {
+                    actor_id: local_actor_id.clone(),
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
 
@@ -277,12 +275,14 @@ async fn create_test_registry_with_remote_actors(
             actor_registry
                 .register_actor(
                     &ctx,
-                    alias_actor_id,
-                    sender_clone,
-                    "test_actor".to_string(),
-                    None,
-                    None,
-                    None,
+                    plexspaces_actor::ActorRegistrationParams {
+                        actor_id: alias_actor_id,
+                        sender: sender_clone,
+                        actor_type: "test_actor".to_string(),
+                        config: None,
+                        instance: None,
+                        behavior_kind: None,
+                    },
                 )
                 .await;
         }

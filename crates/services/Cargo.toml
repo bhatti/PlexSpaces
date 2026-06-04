@@ -89,6 +89,11 @@ plexspaces-node = { path = "../node" }
 default = ["sqlite-backend"]
 sqlite-backend = ["plexspaces-locks/sqlite-backend"]
 firecracker = ["plexspaces-firecracker"]
+wasm-runtime = []
+presigned-urls = []
+postgres-backend = []
+redis-backend = []
+kafka-backend = []
 
 [lib]
 name = "plexspaces_services"

@@ -41,12 +41,15 @@ use toml;
 /// Configuration loading error
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// IO error while reading configuration
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// TOML parse error in configuration file
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    /// Environment variable error
     #[error("Environment variable error: {0}")]
     Env(String),
 

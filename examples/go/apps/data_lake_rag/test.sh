@@ -27,7 +27,11 @@ fi
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
-  NODES="localhost:$1"
+  # All-numeric args are bare ports: "8091 8094" → "localhost:8091 localhost:8094"
+  NODES=""
+  for _port in "$@"; do
+    NODES="${NODES:+$NODES }localhost:$_port"
+  done
 else
   NODES="$*"
   NODES="${NODES//,/ }"
@@ -100,7 +104,12 @@ fi
 for node in "${NODE_LIST[@]}"; do
   host="${node%%:*}"
   port="${node##*:}"
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://${host}:${port}/" 2>/dev/null) || http_code="000"
+  http_code="000"
+  for _i in 1 2 3; do
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://${host}:${port}/" 2>/dev/null) || http_code="000"
+    [ "$http_code" != "000" ] && break
+    sleep 2
+  done
   if [ "$http_code" = "000" ]; then
     echo -e "${RED}Cannot reach node at ${host}:${port}${NC}"
     exit 1
@@ -114,7 +123,41 @@ echo "Step 1: Undeploy existing app from all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
 sleep 2
 
-echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
+echo "Step 1: Deploy to all nodes (non-entry nodes first, entry node last)"
+# Deploy to non-entry nodes first so behaviors are registered before
+# the entry node starts the leader (which triggers CreateShardGroup immediately).
+for node in "${NODE_LIST[@]}"; do
+  if [ "$node" = "$ENTRY_NODE" ]; then
+    continue
+  fi
+  host="${node%%:*}"
+  port="${node##*:}"
+  echo "  Deploying to ${host}:${port} (worker node)..."
+  _deployed=0
+  for _attempt in 1 2 3; do
+    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1)
+    http_code=$(echo "$deploy_output" | tail -n1)
+    response=$(echo "$deploy_output" | sed '$d')
+    if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+      _deployed=1
+      break
+    fi
+    echo "    Deploy attempt $_attempt failed, retrying in 3s..."
+    sleep 3
+  done
+  if [ "$_deployed" -eq 0 ]; then
+    echo -e "${RED}Deploy to ${host}:${port} failed: $response${NC}"
+    exit 1
+  fi
+  echo -e "  ${GREEN}Deployed to ${host}:${port}${NC}"
+done
+# Deploy to entry node last (starts leader which triggers CreateShardGroup)
+echo "  Deploying to ${ENTRY_HOST}:${ENTRY_PORT} (entry node)..."
 _deployed=0
 for _attempt in 1 2 3; do
   deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
@@ -133,10 +176,10 @@ for _attempt in 1 2 3; do
   sleep 3
 done
 if [ "$_deployed" -eq 0 ]; then
-  echo -e "${RED}Deploy failed: $response${NC}"
+  echo -e "${RED}Deploy to ${ENTRY_HOST}:${ENTRY_PORT} failed: $response${NC}"
   exit 1
 fi
-echo -e "  ${GREEN}Deployed${NC}"
+echo -e "  ${GREEN}Deployed to ${ENTRY_HOST}:${ENTRY_PORT}${NC}"
 # SWIM + async seed ping need time so each node's registry lists peers (not only self).
 # Override with DATA_LAKE_RAG_POST_DEPLOY_SECS if your cluster is slower.
 sleep "${DATA_LAKE_RAG_POST_DEPLOY_SECS:-5}"

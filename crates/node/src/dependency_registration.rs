@@ -549,7 +549,7 @@ fn parse_postgres_url(conn_str: &str) -> Result<(String, u16), HealthCheckError>
     })?;
 
     // Remove user:pass@ if present
-    let host_port = host_port.split('@').last().unwrap_or(host_port);
+    let host_port = host_port.split('@').next_back().unwrap_or(host_port);
 
     parse_host_port(host_port, 5432)
 }

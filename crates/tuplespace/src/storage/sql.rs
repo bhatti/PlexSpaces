@@ -71,16 +71,22 @@ use std::time::Duration;
 #[cfg(feature = "sql-backend")]
 #[derive(Debug, Clone)]
 pub struct SqliteConfig {
+    /// Path to the SQLite database file (use `:memory:` for in-memory)
     pub database_path: String,
+    /// Enable WAL mode for better concurrent read performance
     pub enable_wal: bool,
+    /// Cache size in kilobytes
     pub cache_size_kb: u32,
 }
 
 #[cfg(feature = "sql-backend")]
 #[derive(Debug, Clone)]
 pub struct PostgresConfig {
+    /// PostgreSQL connection string
     pub connection_string: String,
+    /// Connection pool size
     pub pool_size: u32,
+    /// Table name for tuple storage
     pub table_name: String,
 }
 
@@ -151,6 +157,7 @@ pub struct SqlStorage {
     db_type: SqlDatabaseType,
 
     /// When true, schema was created inline (:memory:); when false, schema from unified db/migrations.
+    #[allow(dead_code)]
     is_memory: bool,
 
     /// Operation statistics (for metrics)

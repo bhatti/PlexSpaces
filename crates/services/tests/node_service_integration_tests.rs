@@ -6,8 +6,9 @@
 
 use plexspaces_actor::{
     InitializableServiceLocator, NodeRegistryTrait, ObjectRegistry as CoreObjectRegistry,
-    RequestContextExt, ServiceLocator,
+    ServiceLocator,
 };
+use plexspaces_common::RequestContextExt;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, ConnectNodesRequest, DisconnectNodesRequest,

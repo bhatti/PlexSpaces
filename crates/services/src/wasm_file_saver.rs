@@ -41,7 +41,7 @@ use plexspaces_proto::application::v1::ApplicationSpec;
 use plexspaces_proto::supervision::v1::{RestartPolicy, SupervisionStrategy};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Save WASM module and ApplicationSpec to apps directory atomically
 ///
@@ -81,7 +81,7 @@ pub fn save_wasm_app_atomically(
     let base_path = Path::new(wasm_apps_dir);
 
     // Ensure base directory exists
-    if let Err(e) = fs::create_dir_all(&base_path) {
+    if let Err(e) = fs::create_dir_all(base_path) {
         return Err(format!(
             "Failed to create apps directory {}: {}",
             base_path.display(),

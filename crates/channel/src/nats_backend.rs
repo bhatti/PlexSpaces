@@ -67,6 +67,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct NatsChannel {
     config: ChannelConfig,
+    #[allow(dead_code)]
     nats_config: NatsConfig,
     client: Arc<async_nats::Client>,
     subject: String,
@@ -135,7 +136,7 @@ impl NatsChannel {
         }
 
         // Connect to NATS
-        let client = async_nats::connect(&servers)
+        let client = opts.connect(&servers)
             .await
             .map_err(|e| ChannelError::BackendError(format!("Failed to connect to NATS: {}", e)))?;
 

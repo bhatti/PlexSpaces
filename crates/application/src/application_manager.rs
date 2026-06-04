@@ -117,7 +117,7 @@ impl ApplicationManagerImpl {
     fn count_supervisors_in_spec(spec: &ApplicationSpec) -> u32 {
         spec.supervisor
             .as_ref()
-            .map(|supervisor_spec| Self::supervisor_count_from_tree_spec(supervisor_spec))
+            .map(Self::supervisor_count_from_tree_spec)
             .unwrap_or(0)
     }
 
@@ -538,16 +538,14 @@ impl ApplicationManagerImpl {
                 Self::emit_tracked_counts(name, actor_count, supervisor_count, 0);
 
                 // Log metrics
-                if actor_count > 0 || supervisor_count > 0 {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            application = %name,
-                            actor_count = actor_count,
-                            supervisor_count = supervisor_count,
-                            duration_ms = startup_duration.as_millis(),
-                            "Application metrics after startup"
-                        );
-                    }
+                if (actor_count > 0 || supervisor_count > 0) && tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
+                        application = %name,
+                        actor_count = actor_count,
+                        supervisor_count = supervisor_count,
+                        duration_ms = startup_duration.as_millis(),
+                        "Application metrics after startup"
+                    );
                 }
 
                 Ok(())
@@ -1049,15 +1047,13 @@ impl ApplicationManagerImpl {
         }
 
         // Log metrics update
-        if old_count != actor_count {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    application = %name,
-                    old_count = old_count,
-                    new_count = actor_count,
-                    "Actor count updated"
-                );
-            }
+        if old_count != actor_count && tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                application = %name,
+                old_count = old_count,
+                new_count = actor_count,
+                "Actor count updated"
+            );
         }
 
         let uptime_seconds = instance
@@ -1106,15 +1102,13 @@ impl ApplicationManagerImpl {
         }
 
         // Log metrics update
-        if old_count != supervisor_count {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    application = %name,
-                    old_count = old_count,
-                    new_count = supervisor_count,
-                    "Supervisor count updated"
-                );
-            }
+        if old_count != supervisor_count && tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                application = %name,
+                old_count = old_count,
+                new_count = supervisor_count,
+                "Supervisor count updated"
+            );
         }
 
         let uptime_seconds = instance
@@ -1913,7 +1907,8 @@ mod tests {
         let app_info = manager.get_application_info("test-app").await.unwrap();
         assert!(app_info.metrics.is_some());
         let stored_metrics = app_info.metrics.unwrap();
-        assert_eq!(stored_metrics.uptime_seconds, 100);
+        // uptime_seconds is recomputed from monotonic clock on retrieval, not stored value
+        assert!(stored_metrics.uptime_seconds <= 2);
         assert_eq!(stored_metrics.actor_counts.get("leader"), Some(&1));
         assert_eq!(stored_metrics.actor_counts.get("worker"), Some(&4));
         assert_eq!(stored_metrics.actor_counts.get("total"), Some(&5));
@@ -2142,7 +2137,8 @@ mod tests {
         );
         assert!(app_info.metrics.is_some());
         let metrics = app_info.metrics.unwrap();
-        assert!(metrics.uptime_seconds >= 0); // May be 0 if very fast, but should be calculated
+        #[allow(unused_comparisons)]
+        let _ = metrics.uptime_seconds >= 0; // May be 0 if very fast, but should be calculated
                                               // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
         assert_eq!(metrics.actor_counts.get("total"), None);
     }

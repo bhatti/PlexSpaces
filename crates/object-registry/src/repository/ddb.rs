@@ -19,7 +19,7 @@
 //! DynamoDB-based Object Registry Repository implementation
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for object registrations
+//! Provides a scalable DynamoDB backend for object registrations
 //! with proper tenant isolation, GSI support for fast queries, and comprehensive observability.
 //!
 //! ## Design
@@ -68,12 +68,12 @@ use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, Ob
 use prost::Message;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, instrument};
 
 /// DynamoDB Object Registry Repository
 ///
 /// ## Purpose
-/// Provides production-grade DynamoDB storage with GSI support for efficient queries.
+/// Provides scalable DynamoDB storage with GSI support for efficient queries.
 #[derive(Debug, Clone)]
 pub struct DynamoDBObjectRegistryRepository {
     /// DynamoDB client
@@ -95,13 +95,13 @@ impl DynamoDBObjectRegistryRepository {
         endpoint_url: Option<String>,
     ) -> RepositoryResult<Self> {
         let config = if let Some(ref endpoint) = endpoint_url {
-            aws_config::from_env()
+            aws_config::defaults(aws_config::BehaviorVersion::latest())
                 .region(aws_config::Region::new(region))
                 .endpoint_url(endpoint)
                 .load()
                 .await
         } else {
-            aws_config::from_env()
+            aws_config::defaults(aws_config::BehaviorVersion::latest())
                 .region(aws_config::Region::new(region))
                 .load()
                 .await
@@ -569,20 +569,18 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         let tenant_namespace = Self::make_tenant_namespace(ctx.tenant_id(), ctx.namespace());
 
         // Choose index based on filter
-        let (index_name, key_condition) = if let Some(ref obj_type) = filter.object_type {
-            // Use type_index GSI
-            let type_prefix = format!("{}#", obj_type.clone() as i32);
+        let (index_name, key_condition) = if filter.object_type.is_some() {
             (
                 Some("type_index"),
-                format!("tenant_namespace = :tn AND begins_with(object_type_id, :tp)"),
+                "tenant_namespace = :tn AND begins_with(object_type_id, :tp)".to_string(),
             )
         } else if filter.last_heartbeat_before.is_some() || filter.last_heartbeat_after.is_some() {
             // Use heartbeat_index GSI
             let mut cond = "tenant_namespace = :tn".to_string();
-            if let Some(before) = filter.last_heartbeat_before {
+            if filter.last_heartbeat_before.is_some() {
                 cond.push_str(" AND last_heartbeat < :hb_before");
             }
-            if let Some(after) = filter.last_heartbeat_after {
+            if filter.last_heartbeat_after.is_some() {
                 cond.push_str(" AND last_heartbeat > :hb_after");
             }
             (Some("heartbeat_index"), cond)

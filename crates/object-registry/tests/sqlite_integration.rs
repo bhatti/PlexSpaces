@@ -7,7 +7,7 @@
 #[cfg(feature = "sql-backend")]
 mod tests {
     use plexspaces_common::{RequestContext, RequestContextExt};
-    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+    use plexspaces_object_registry::{DiscoverOptions, ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
     use std::sync::Arc;
 
@@ -68,13 +68,11 @@ mod tests {
         let actors = registry1
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeActor),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -86,13 +84,11 @@ mod tests {
         let tuplespaces = registry2
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeTuplespace),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeTuplespace),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -157,13 +153,11 @@ mod tests {
         let actors = registry
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeActor),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -249,13 +243,11 @@ mod tests {
         let all_actors = registry
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeActor),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -294,13 +286,11 @@ mod tests {
         let default_actors = registry
             .discover(
                 &default_ctx,
-                Some(ObjectType::ObjectTypeActor),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -375,13 +365,11 @@ mod tests {
         let unhealthy = registry
             .discover(
                 &ctx,
-                None,
-                None,
-                None,
-                None,
-                Some(HealthStatus::HealthStatusDead),
-                0,
-                100,
+                DiscoverOptions {
+                    health_status: Some(HealthStatus::HealthStatusDead),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();

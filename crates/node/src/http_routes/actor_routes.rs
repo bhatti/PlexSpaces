@@ -79,6 +79,7 @@ fn effective_tenant_id(
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_ask(
     State(s): State<ActorRouteState>,
     jwt: Option<axum::extract::Extension<JwtClaims>>,

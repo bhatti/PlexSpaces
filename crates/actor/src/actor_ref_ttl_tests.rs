@@ -22,9 +22,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::actor_ref::{ActorRef, ActorRefError};
-    use crate::core::{ActorId, Message, RequestContextExt, ServiceLocator};
-    use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
+    use crate::actor_ref::ActorRef;
+    use crate::core::{ActorId, Message, ServiceLocator};
+    use plexspaces_mailbox::{mailbox_config_default, Mailbox};
     use plexspaces_proto::actor::v1::ActorVisibility;
     use std::sync::Arc;
     use std::time::Duration;
@@ -148,7 +148,8 @@ mod tests {
         );
 
         // Register actor before calling tell()
-        use crate::core::{ActorRegistry, RequestContext};
+        use crate::core::RequestContext;
+        use plexspaces_common::RequestContextExt;
         let tell_ctx =
             RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         if let Some(registry) = service_locator.actor_registry().await {

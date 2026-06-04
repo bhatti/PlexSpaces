@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
             document_id: document_id.clone(),
         };
         let load_msg = cast_message(serde_json::to_value(&load_request)?);
-        loader_ref.tell(load_msg).await?;
+        loader_ref.tell(&ctx, load_msg).await?;
         info!("Sent document {} to loader", document_id);
         
         // Small delay to prevent mailbox overflow

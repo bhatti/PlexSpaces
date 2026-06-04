@@ -426,7 +426,7 @@ mod tests {
     async fn test_ctx_sleep() {
         let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
-        let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
+        let _ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
         // Test sleep in replay mode (should not actually sleep)
         let mut ctx_replay = ExecutionContext::new(actor_id.clone(), journal.clone());

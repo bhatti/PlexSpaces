@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
+use plexspaces_proto::v1::application::HealthStatus;
 use std::sync::Arc;
 
 struct MockNode {

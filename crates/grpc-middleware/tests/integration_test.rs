@@ -15,7 +15,7 @@
 
 use plexspaces_grpc_middleware::chain::InterceptorChain;
 use plexspaces_proto::grpc::v1::{
-    AuthMethod, AuthMiddlewareConfig, InterceptorDecision, InterceptorRequest, MiddlewareConfig,
+    AuthMethod, AuthMiddlewareConfig, InterceptorRequest, MiddlewareConfig,
     MiddlewareSpec, MiddlewareType,
 };
 

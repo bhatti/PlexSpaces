@@ -738,7 +738,6 @@ fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemT
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_actor::ServiceLocator;
     use plexspaces_service_traits::{ActorId, ActorRef, ActorService};
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;

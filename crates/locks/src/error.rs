@@ -34,6 +34,10 @@ pub enum LockError {
     #[error("Lock already held by: {0}")]
     LockAlreadyHeld(String),
 
+    /// Lock not held by the specified holder (release/renew of unowned lock)
+    #[error("Lock not held: {0}")]
+    LockNotHeld(String),
+
     /// Lock expired
     #[error("Lock expired: {0}")]
     LockExpired(String),

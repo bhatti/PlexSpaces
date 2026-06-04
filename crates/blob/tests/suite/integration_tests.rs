@@ -131,14 +131,12 @@ async fn test_upload_and_download_blob() {
     let metadata = service
         .upload_blob(
             &ctx,
-            "test.txt",
-            data.clone(),
-            Some("text/plain".to_string()),
-            None,
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
+            UploadBlobParams {
+                name: "test.txt".to_string(),
+                data: data.clone(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -160,16 +158,24 @@ async fn test_deduplication() {
 
     let metadata1 = service
         .upload_blob(
-            &ctx, "file1.txt", data.clone(), None, None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx,
+            UploadBlobParams {
+                name: "file1.txt".to_string(),
+                data: data.clone(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
 
     let metadata2 = service
         .upload_blob(
-            &ctx, "file2.txt", data.clone(), None, None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx,
+            UploadBlobParams {
+                name: "file2.txt".to_string(),
+                data: data.clone(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -187,10 +193,11 @@ async fn test_list_and_delete() {
         service
             .upload_blob(
                 &ctx,
-                &format!("file{}.txt", i),
-                format!("content{}", i).into_bytes(),
-                None, None, None,
-                std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+                UploadBlobParams {
+                    name: format!("file{}.txt", i),
+                    data: format!("content{}", i).into_bytes(),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -214,16 +221,24 @@ async fn test_multi_tenancy_isolation() {
 
     let metadata1 = service
         .upload_blob(
-            &ctx1, "file.txt", b"tenant1".to_vec(), None, None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx1,
+            UploadBlobParams {
+                name: "file.txt".to_string(),
+                data: b"tenant1".to_vec(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
 
     let metadata2 = service
         .upload_blob(
-            &ctx2, "file.txt", b"tenant2".to_vec(), None, None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx2,
+            UploadBlobParams {
+                name: "file.txt".to_string(),
+                data: b"tenant2".to_vec(),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -246,9 +261,13 @@ async fn test_presigned_url_get() {
     let data = b"Test content for presigned URL".to_vec();
     let metadata = service
         .upload_blob(
-            &ctx, "presigned-test.txt", data.clone(),
-            Some("text/plain".to_string()), None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx,
+            UploadBlobParams {
+                name: "presigned-test.txt".to_string(),
+                data: data.clone(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -277,9 +296,13 @@ async fn test_presigned_url_invalid_operation() {
 
     let metadata = service
         .upload_blob(
-            &ctx, "invalid-op-test.txt", b"Test invalid operation".to_vec(),
-            Some("text/plain".to_string()), None, None,
-            std::collections::HashMap::new(), std::collections::HashMap::new(), None,
+            &ctx,
+            UploadBlobParams {
+                name: "invalid-op-test.txt".to_string(),
+                data: b"Test invalid operation".to_vec(),
+                content_type: Some("text/plain".to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

@@ -37,7 +37,7 @@ use tonic::{Request, Response, Status};
 use plexspaces_actor::{
     actor_metrics_from_exposition_for_namespace, max_histogram_bucket_upper_bound_for_labels,
     sum_counter_for_labels, sum_sample_values_for_labels, ActorId, ActorRegistry,
-    ProcessResourceSampler, RequestContext, RequestContextExt,
+    DiscoverOptions, ProcessResourceSampler, RequestContext, RequestContextExt,
     ServiceLocator as ServiceLocatorTrait, ServiceLocator,
 };
 use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
@@ -454,7 +454,7 @@ impl DashboardServiceImpl {
     fn page_window(page_request: Option<&PageRequest>) -> (usize, usize) {
         let offset = page_request.map(|p| p.offset.max(0) as usize).unwrap_or(0);
         let limit = page_request
-            .map(|p| p.limit.max(1).min(1000) as usize)
+            .map(|p| p.limit.clamp(1, 1000) as usize)
             .unwrap_or(50);
         (offset, limit)
     }
@@ -591,13 +591,12 @@ impl DashboardServiceImpl {
             let registrations = object_registry
                 .discover(
                     &ctx,
-                    Some(ObjectType::ObjectTypeApplication),
-                    None,
-                    None,
-                    None,
-                    None,
-                    registry_offset,
-                    batch_size,
+                    DiscoverOptions {
+                        object_type: Some(ObjectType::ObjectTypeApplication),
+                        offset: registry_offset,
+                        limit: batch_size,
+                        ..Default::default()
+                    },
                 )
                 .await
                 .map_err(|e| Status::internal(format!("Failed to list applications: {e}")))?;
@@ -618,7 +617,7 @@ impl DashboardServiceImpl {
                     tenant_id: registration.tenant_id.clone(),
                     version: registration.version.clone(),
                     status: ApplicationStatus::ApplicationStatusRunning as i32,
-                    deployed_at: registration.created_at.clone(),
+                    deployed_at: registration.created_at,
                     metrics: None,
                 };
 
@@ -757,8 +756,8 @@ impl DashboardServiceImpl {
                 status: reg.status,
                 capabilities: None,
                 metadata: None,
-                created_at: reg.registered_at.clone(),
-                last_heartbeat: reg.last_heartbeat.clone(),
+                created_at: reg.registered_at,
+                last_heartbeat: reg.last_heartbeat,
                 metrics: None,
                 mtls_identity: None,
                 public_certificate: vec![],
@@ -797,7 +796,7 @@ impl DashboardServiceImpl {
         };
 
         let local_id = cfg.id.clone();
-        let matches_cluster = cluster_id.as_ref().map_or(true, |cid| {
+        let matches_cluster = cluster_id.as_ref().is_none_or(|cid| {
             !cfg.cluster_name.is_empty() && cfg.cluster_name == *cid
         });
 
@@ -1369,10 +1368,9 @@ impl DashboardService for DashboardServiceImpl {
         let mut candidates: Vec<ActorCandidate> = Vec::new();
         for (entry_tenant_id, entry_namespace, actor_id) in registered_entries {
             // Apply filters (proto fields are String, not Option<String>, so check if empty)
-            if !req.actor_id_pattern.is_empty() {
-                if !actor_id.contains(&req.actor_id_pattern) {
+            if !req.actor_id_pattern.is_empty()
+                && !actor_id.contains(&req.actor_id_pattern) {
                     continue;
-                }
             }
 
             if !req.node_id.is_empty() {
@@ -1386,9 +1384,12 @@ impl DashboardService for DashboardServiceImpl {
                     .map(|c| c.id)
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "unknown".to_string());
-                if parts.len() == 2 && parts[1] != &req.node_id {
-                    continue;
-                } else if parts.len() != 2 && &req.node_id != &local_node_id {
+                let node_matches = if parts.len() == 2 {
+                    parts[1] == req.node_id
+                } else {
+                    req.node_id == local_node_id
+                };
+                if !node_matches {
                     continue;
                 }
             }
@@ -1406,10 +1407,9 @@ impl DashboardService for DashboardServiceImpl {
                 found_type.unwrap_or_else(|| "unknown".to_string())
             };
 
-            if !req.actor_type.is_empty() {
-                if &actor_type != &req.actor_type {
+            if !req.actor_type.is_empty()
+                && actor_type != req.actor_type {
                     continue;
-                }
             }
 
             let behavior_kind = actor_registry
@@ -1429,10 +1429,9 @@ impl DashboardService for DashboardServiceImpl {
                 continue;
             }
 
-            if !req.namespace.is_empty() {
-                if entry_namespace != req.namespace {
+            if !req.namespace.is_empty()
+                && entry_namespace != req.namespace {
                     continue;
-                }
             }
 
             if !is_admin
@@ -1754,7 +1753,7 @@ impl DashboardServiceImpl {
             .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
 
         let reg = node_registry
-            .lookup_node(&ctx, node_id)
+            .lookup_node(ctx, node_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
@@ -1765,8 +1764,8 @@ impl DashboardServiceImpl {
             status: reg.status,
             capabilities: None,
             metadata: None,
-            created_at: reg.registered_at.clone(),
-            last_heartbeat: reg.last_heartbeat.clone(),
+            created_at: reg.registered_at,
+            last_heartbeat: reg.last_heartbeat,
             metrics: None,
             mtls_identity: None,
             public_certificate: vec![],
@@ -1940,7 +1939,6 @@ impl DashboardServiceImpl {
         node_id: &str,
         service_type: plexspaces_actor::grpc_connection_manager::ServiceType,
     ) -> Result<tonic::transport::Channel, Status> {
-        use plexspaces_actor::grpc_connection_manager::ServiceType;
         let node_registry = self
             .service_locator
             .get_node_registry()
@@ -2018,13 +2016,13 @@ impl DashboardServiceImpl {
             let registrations = registry
                 .discover(
                     &ctx,
-                    object_type,
-                    None,
-                    None,
-                    None,
-                    health_status,
-                    offset,
-                    fetch_limit,
+                    DiscoverOptions {
+                        object_type,
+                        health_status,
+                        offset,
+                        limit: fetch_limit,
+                        ..Default::default()
+                    },
                 )
                 .await
                 .map_err(|e| Status::internal(format!("Object registry query failed: {e}")))?;
@@ -2039,7 +2037,7 @@ impl DashboardServiceImpl {
                     plexspaces_proto::object_registry::v1::ObjectRegistration {
                         object_id: r.object_id,
                         object_name: r.object_name,
-                        object_type: r.object_type as i32,
+                        object_type: r.object_type,
                         version: r.version,
                         tenant_id: r.tenant_id,
                         namespace: r.namespace,
@@ -2048,7 +2046,7 @@ impl DashboardServiceImpl {
                         object_category: r.object_category,
                         capabilities: r.capabilities,
                         metadata: None,
-                        health_status: r.health_status as i32,
+                        health_status: r.health_status,
                         last_heartbeat: r.last_heartbeat,
                         created_at: r.created_at,
                         ..Default::default()
@@ -2183,7 +2181,6 @@ impl DashboardServiceImpl {
             let list_req = plexspaces_proto::keyvalue::v1::ListRequest {
                 prefix: req.prefix,
                 namespace: req.namespace,
-                ..Default::default()
             };
             let mut remote_req = tonic::Request::new(list_req);
             *remote_req.metadata_mut() = metadata;
@@ -2536,7 +2533,6 @@ impl DashboardServiceImpl {
             let get_req = plexspaces_proto::metrics::v1::GetMetricsRequest {
                 name_pattern: req.name_pattern,
                 label_filter: req.label_filter,
-                ..Default::default()
             };
             let mut remote_req = tonic::Request::new(get_req);
             *remote_req.metadata_mut() = metadata;
@@ -2556,13 +2552,7 @@ impl DashboardServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Node types only needed in tests - can be conditionally compiled if needed
-    // For now, tests are disabled since dashboard doesn't depend on node
-    // use plexspaces_node::{Node, NodeBuilder};
-    use chrono::{DateTime, Utc};
-    use plexspaces_actor::ServiceLocator;
-    use std::sync::Arc;
-    use tonic::Request;
+    use chrono::DateTime;
 
     // Tests disabled - dashboard no longer depends on node to break cyclic dependency
     // Tests can be re-enabled by making node a dev-dependency if needed

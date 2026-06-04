@@ -10,6 +10,26 @@ use plexspaces_common::RequestContext;
 
 pub type ObjectRegistration = plexspaces_proto::object_registry::v1::ObjectRegistration;
 pub type HealthStatus = plexspaces_proto::object_registry::v1::HealthStatus;
+pub type ObjectType = plexspaces_proto::object_registry::v1::ObjectType;
+
+/// Parameters for object discovery queries
+#[derive(Debug, Default)]
+pub struct DiscoverOptions {
+    /// Filter by object type
+    pub object_type: Option<ObjectType>,
+    /// Filter by object category
+    pub object_category: Option<String>,
+    /// Filter by required capabilities
+    pub capabilities: Option<Vec<String>>,
+    /// Filter by required labels
+    pub labels: Option<Vec<String>>,
+    /// Filter by health status
+    pub health_status: Option<HealthStatus>,
+    /// Pagination offset
+    pub offset: usize,
+    /// Page size limit
+    pub limit: usize,
+}
 
 /// Result of a `register_with_unique_alias` call.
 #[derive(Debug, Clone)]
@@ -26,9 +46,6 @@ pub enum RegisterResult {
 }
 
 /// Trait for object registry (service discovery).
-// TODO(crate-21): Replace the 7-arg discover() signature with a DiscoverOptions struct.
-// The allow below is temporary until that refactor is done across all 14 implementations.
-#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait ObjectRegistry: Send + Sync {
     async fn lookup(
@@ -54,13 +71,7 @@ pub trait ObjectRegistry: Send + Sync {
     async fn discover(
         &self,
         ctx: &RequestContext,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        offset: usize,
-        limit: usize,
+        opts: DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
 
     async fn list_tenant_ids_by_object_type(
@@ -71,7 +82,7 @@ pub trait ObjectRegistry: Send + Sync {
         limit: usize,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, Some(object_type), None, None, None, None, 0, 10_000)
+            .discover(ctx, DiscoverOptions { object_type: Some(object_type), limit: 10_000, ..Default::default() })
             .await?;
         let mut tenant_ids = std::collections::BTreeSet::new();
         for registration in registrations {
@@ -88,7 +99,7 @@ pub trait ObjectRegistry: Send + Sync {
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, Some(object_type), None, None, None, None, 0, 10_000)
+            .discover(ctx, DiscoverOptions { object_type: Some(object_type), limit: 10_000, ..Default::default() })
             .await?;
         let mut tenant_ids = std::collections::BTreeSet::new();
         for registration in registrations {
@@ -111,7 +122,7 @@ pub trait ObjectRegistry: Send + Sync {
         ctx: &RequestContext,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let registrations = self
-            .discover(ctx, None, None, None, None, None, 0, 10_000)
+            .discover(ctx, DiscoverOptions { limit: 10_000, ..Default::default() })
             .await?;
         let mut removed = 0_u64;
         for registration in registrations {

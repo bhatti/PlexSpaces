@@ -58,7 +58,7 @@ use aws_sdk_sqs::{
     Client as SqsClient,
 };
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
+use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelStats};
 use plexspaces_proto::common::v1::Message as ChannelMessage;
 use plexspaces_proto::config::v1::{DlqConfig, SqsConfig};
 use std::collections::HashMap;
@@ -155,6 +155,7 @@ pub struct SQSChannel {
     sqs_config: SqsConfig,
     client: SqsClient,
     queue_url: String,
+    #[allow(dead_code)]
     dlq_url: Option<String>,
     stats: Arc<ChannelStatsData>,
     closed: Arc<AtomicBool>,

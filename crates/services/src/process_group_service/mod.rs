@@ -61,7 +61,9 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
 use plexspaces_actor::actor_context::{ObjectRegistry, ProcessGroupService};
-use plexspaces_actor::{RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_actor::{
+    DiscoverOptions, RequestContext, RequestContextExt, ServiceLocator as ServiceLocatorTrait,
+};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 
@@ -552,13 +554,12 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         let registrations = object_registry
             .discover(
                 ctx,
-                Some(ObjectType::ObjectTypeProcessGroup),
-                Some("membership".to_string()),
-                None,  // no capability filter
-                None,  // no label filter
-                None,  // no health filter
-                0,     // offset
-                10000, // limit (large enough for all members)
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeProcessGroup),
+                    object_category: Some("membership".to_string()),
+                    limit: 10000,
+                    ..Default::default()
+                },
             )
             .await?;
 
@@ -628,13 +629,12 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         let registrations = object_registry
             .discover(
                 ctx,
-                Some(ObjectType::ObjectTypeProcessGroup),
-                Some("pubsub".to_string()), // Groups have category "pubsub"
-                None,                       // no capability filter
-                None,                       // no label filter
-                None,                       // no health filter
-                0,                          // offset
-                10000,                      // limit
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeProcessGroup),
+                    object_category: Some("pubsub".to_string()),
+                    limit: 10000,
+                    ..Default::default()
+                },
             )
             .await?;
 

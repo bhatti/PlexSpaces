@@ -37,7 +37,7 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -49,7 +49,7 @@ use tracing::{debug, info, trace, warn};
 
 use plexspaces_actor::{
     mask_release_spec, overlay_node_operational_counters_from_exposition, ConnectNodesResult,
-    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext, RequestContextExt,
+    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext,
     ServiceLocator,
 };
 use plexspaces_proto::node::v1::{
@@ -603,7 +603,7 @@ impl NodeServiceTrait for NodeServiceImpl {
                     name: info.name,
                     version: info.version,
                     status: status_str,
-                    started_at: info.deployed_at.clone(), // Use deployed_at as started_at
+                    started_at: info.deployed_at, // Use deployed_at as started_at
                     actor_count: info
                         .metrics
                         .as_ref()
@@ -813,11 +813,9 @@ impl NodeServiceTrait for NodeServiceImpl {
         metrics::counter!("plexspaces_swim_syncs_received").increment(1);
 
         // Process incoming membership updates
-        let mut updates_applied = 0i32;
-
         // In full implementation, would merge req.members with local SWIM state
         // For now, just acknowledge receipt
-        updates_applied = req.members.len() as i32;
+        let updates_applied = req.members.len() as i32;
 
         // Get our full membership state to return
         let members = Vec::new(); // Would get from SWIM protocol in full impl
@@ -850,7 +848,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         &self,
         request: Request<ConnectNodesRequest>,
     ) -> Result<Response<ConnectNodesResponse>, Status> {
-        let ctx = self.extract_context(&request).await?;
+        let _ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
         let start_time = Instant::now();
 
@@ -883,7 +881,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         let result = self
             .connect_to_nodes_impl(req.node_addresses, timeout_secs)
             .await
-            .map_err(|e| Status::internal(e))?;
+            .map_err(Status::internal)?;
 
         let elapsed = start_time.elapsed();
         metrics::histogram!(
@@ -1133,8 +1131,7 @@ impl NodeServiceImpl {
     ) -> Result<ConnectNodesResult, String> {
         let n = node_addresses.len() as u64;
         let timeout_secs = (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
-            .max(Self::CONNECT_TIMEOUT_MIN_SECS)
-            .min(Self::CONNECT_TIMEOUT_MAX_SECS);
+            .clamp(Self::CONNECT_TIMEOUT_MIN_SECS, Self::CONNECT_TIMEOUT_MAX_SECS);
         self.connect_to_nodes_impl(node_addresses, timeout_secs)
             .await
     }
@@ -1326,8 +1323,7 @@ impl NodeConnectivity for NodeServiceImpl {
         let timeout = timeout_secs.unwrap_or_else(|| {
             let n = node_addresses.len() as u64;
             (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
-                .max(Self::CONNECT_TIMEOUT_MIN_SECS)
-                .min(Self::CONNECT_TIMEOUT_MAX_SECS)
+                .clamp(Self::CONNECT_TIMEOUT_MIN_SECS, Self::CONNECT_TIMEOUT_MAX_SECS)
         });
         self.connect_to_nodes_impl(node_addresses, timeout).await
     }
@@ -1337,9 +1333,11 @@ impl NodeConnectivity for NodeServiceImpl {
 mod tests {
     use super::*;
     use plexspaces_actor::InitializableServiceLocator;
+    use plexspaces_common::RequestContextExt;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::node::v1::ReleaseSpec;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_node_service_impl_new() {
@@ -1454,7 +1452,8 @@ mod tests {
         assert!(total.cpu_cores > 0.0);
         assert!(total.memory_bytes > 0);
         assert!(available.cpu_cores >= 0.0);
-        assert!(available.memory_bytes >= 0);
+        #[allow(unused_comparisons)]
+        { assert!(available.memory_bytes >= 0); }
     }
 
     #[tokio::test]

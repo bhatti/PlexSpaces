@@ -24,14 +24,13 @@
 
 use crate::{BlobError, BlobService};
 use axum::{
-    extract::{Multipart, Path, Request},
+    extract::{Multipart, Path},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use plexspaces_actor::{RequestContext, RequestContextExt};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Create Axum router for blob HTTP endpoints
@@ -83,7 +82,7 @@ async fn handle_upload(
 ) -> Result<impl IntoResponse, BlobError> {
     // Try to extract context from headers first (JWT middleware)
     // Fallback to form fields if headers not available (for backward compatibility)
-    let mut ctx_opt = extract_context_from_headers(&headers).ok();
+    let ctx_opt = extract_context_from_headers(&headers).ok();
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
     let mut tenant_id: Option<String> = None;
@@ -185,14 +184,14 @@ async fn handle_upload(
     let metadata = blob_service
         .upload_blob(
             &ctx,
-            &file_name,
-            file_data,
-            content_type,
-            blob_group,
-            kind,
-            HashMap::new(),
-            HashMap::new(),
-            None,
+            crate::UploadBlobParams {
+                name: file_name,
+                data: file_data,
+                content_type,
+                blob_group,
+                kind,
+                ..Default::default()
+            },
         )
         .await?;
 

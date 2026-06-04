@@ -5,8 +5,8 @@
 // Tests all scenarios: outside sender, local actor, remote actor, chained asks
 
 use plexspaces_actor::{
-    Actor, ActorContext, ActorId, ActorRegistry, ActorService, BehaviorError, BehaviorType,
-    Message, MessageSender, RequestContextExt,
+    Actor, ActorContext, ActorId, ActorRegistry, ActorRegistrationParams, ActorService,
+    BehaviorError, BehaviorType, Message, MessageSender, RequestContextExt,
 };
 use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_actor::behavior::GenServer;
@@ -234,25 +234,10 @@ async fn create_test_registry_with_node(
         async fn discover(
             &self,
             ctx: &plexspaces_actor::RequestContext,
-            object_type: Option<ObjectType>,
-            object_category: Option<String>,
-            capabilities: Option<Vec<String>>,
-            labels: Option<Vec<String>>,
-            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            limit: usize,
-            offset: usize,
+            opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .discover(
-                    ctx,
-                    object_type,
-                    object_category,
-                    capabilities,
-                    labels,
-                    health_status,
-                    limit,
-                    offset,
-                )
+                .discover(ctx, opts)
                 .await
                 .map_err(|e| {
                     Box::new(std::io::Error::new(
@@ -361,12 +346,14 @@ async fn register_test_actor(
     actor_registry
         .register_actor(
             &ctx,
-            actor_id,
-            sender,
-            "test_actor".to_string(),
-            None,
-            None,
-            None,
+            ActorRegistrationParams {
+                actor_id,
+                sender,
+                actor_type: "test_actor".to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 }
@@ -620,12 +607,14 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
     actor_registry1
         .register_actor(
             &ctx,
-            counter_id.clone(),
-            sender_counter,
-            "test_actor".to_string(),
-            None,
-            None,
-            None,
+            ActorRegistrationParams {
+                actor_id: counter_id.clone(),
+                sender: sender_counter,
+                actor_type: "test_actor".to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 
@@ -770,12 +759,14 @@ async fn test_chained_asks_multi_node() {
     actor_registry1
         .register_actor(
             &ctx,
-            counter_id.clone(),
-            sender_counter,
-            "test_actor".to_string(),
-            None,
-            None,
-            None,
+            ActorRegistrationParams {
+                actor_id: counter_id.clone(),
+                sender: sender_counter,
+                actor_type: "test_actor".to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 
@@ -918,12 +909,14 @@ async fn test_concurrent_asks_multi_node() {
     actor_registry1
         .register_actor(
             &ctx,
-            counter_id.clone(),
-            sender_counter,
-            "test_actor".to_string(),
-            None,
-            None,
-            None,
+            ActorRegistrationParams {
+                actor_id: counter_id.clone(),
+                sender: sender_counter,
+                actor_type: "test_actor".to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 

@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
         metrics_tracker.start_compute();
         
         let result_start = Instant::now();
-        let result: serde_json::Value = worker_ref.call("compute_rows", &work_request).await
+        let result: serde_json::Value = worker_ref.call(&ctx, "compute_rows", &work_request).await
             .map_err(|e| anyhow::anyhow!("compute_rows failed for worker {}: {}", i, e))?;
         let result_time = result_start.elapsed();
         

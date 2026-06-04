@@ -471,12 +471,14 @@ async fn test_node_route_local_message() {
     actor_registry
         .register_actor(
             &ctx,
-            actor_id.clone(),
-            wrapper,
-            "gen_server".to_string(),
-            None,
-            None,
-            None,
+            plexspaces_actor::ActorRegistrationParams {
+                actor_id: actor_id.clone(),
+                sender: wrapper,
+                actor_type: "gen_server".to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 

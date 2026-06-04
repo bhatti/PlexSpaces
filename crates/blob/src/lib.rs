@@ -41,7 +41,7 @@ pub mod node_startup;
 #[cfg(feature = "presigned-urls")]
 pub mod presigned;
 #[cfg(not(feature = "presigned-urls"))]
-mod presigned {
+pub mod presigned {
     // Stub module when presigned-urls feature is disabled
     use chrono::Duration;
     pub async fn generate_presigned_url(

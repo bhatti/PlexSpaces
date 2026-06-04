@@ -54,7 +54,7 @@ use tokio::task::JoinHandle;
 
 // Optional dependency for distributed locking
 #[cfg(feature = "locks")]
-use plexspaces_locks::{AcquireLockOptions, LockManager, LockResult, ReleaseLockOptions};
+use plexspaces_locks::{AcquireLockOptions, LockManager, ReleaseLockOptions};
 
 // Re-export timer types from proto (TimerRegistration is re-exported in lib.rs)
 use plexspaces_proto::timer::v1::TimerRegistration;
@@ -723,7 +723,7 @@ fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Dur
 mod tests {
     use super::*;
     use plexspaces_actor::ServiceLocator;
-    use plexspaces_service_traits::{ActorRef, ActorService};
+    use plexspaces_service_traits::ActorService;
     use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;

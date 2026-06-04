@@ -102,7 +102,7 @@ impl MockChannel {
     }
 
     /// Set failure rate for testing (0.0 = never fail, 1.0 = always fail)
-    pub async fn set_failure_rate(&self, rate: f64) {
+    pub async fn set_failure_rate(&self, _rate: f64) {
         // Store in config metadata for now (could add to ChannelConfig if needed)
         // For testing, we'll use a separate field
     }

@@ -840,7 +840,7 @@ impl PostgreSQLKVStore {
         // Mask credentials in connection string for logging
         let display_url = connection_string
             .split('@')
-            .last()
+            .next_back()
             .unwrap_or("(hidden)")
             .to_string();
 

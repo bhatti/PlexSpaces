@@ -10,11 +10,11 @@
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod sqlite_tests {
-    use plexspaces_facet::Facet;
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_facet::Facet;
     use plexspaces_journaling::*;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;
@@ -36,7 +36,7 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        let mut value = serde_json::json!({
+        let value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

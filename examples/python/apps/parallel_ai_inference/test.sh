@@ -8,7 +8,10 @@ CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
-  NODES="localhost:$1"
+  NODES=""
+  for _port in "$@"; do
+    NODES="${NODES:+$NODES }localhost:$_port"
+  done
 else
   NODES="$*"
   NODES="${NODES//,/ }"
@@ -149,9 +152,39 @@ TEMP_CONFIG="$(mktemp -t python-parallel-ai-inference-app-config)"
 render_config "$TEMP_CONFIG"
 
 # ─── Step 1: Deploy ───────────────────────────────────────────────────────────
-echo "Step 1: Undeploy from all nodes, then deploy to entry node"
+echo "Step 1: Undeploy from all nodes, then deploy to all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
 sleep 2
+# Deploy to non-entry nodes first, entry node last (entry starts leader immediately)
+for node in "${NODE_LIST[@]}"; do
+  if [ "$node" = "$ENTRY_NODE" ]; then
+    continue
+  fi
+  host="${node%%:*}"
+  port="${node##*:}"
+  _deployed=0
+  for _attempt in 1 2 3; do
+    response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
+      "http://${host}:${port}/api/v1/applications/deploy" \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1)
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+    if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+      _deployed=1
+      break
+    fi
+    echo "  Deploy attempt $_attempt to ${host}:${port} failed, retrying in 3s..."
+    sleep 3
+  done
+  if [ "$_deployed" -eq 0 ]; then
+    echo -e "${RED}Deploy to ${host}:${port} failed: $body${NC}"
+    exit 1
+  fi
+done
 _deployed=0
 for _attempt in 1 2 3; do
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \

@@ -389,8 +389,9 @@ mod tests {
         );
         assert!(!response.request_id.is_empty());
 
-        // Verify request was stored - use node-config defaults
-        let ctx = service.default_context();
+        // Verify request was stored using the same tenant/namespace it was created with
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         let stored = state_store
             .get_request(&ctx, &response.request_id)
             .await
@@ -420,7 +421,6 @@ mod tests {
     async fn test_get_scheduling_status() {
         let (service, state_store, _) = create_test_service().await;
 
-        // Create and store a request
         let request_id = "test-request-1".to_string();
         let scheduling_request = SchedulingRequest {
             request_id: request_id.clone(),
@@ -441,8 +441,8 @@ mod tests {
                     affinity_labels: HashMap::new(),
                 }),
             }),
-            namespace: String::new(), // Empty for test
-            tenant_id: String::new(), // Empty for test
+            namespace: "test-ns".to_string(),
+            tenant_id: "test-tenant".to_string(),
             status: SchedulingStatus::SchedulingStatusScheduled as i32,
             selected_node_id: "node-1".to_string(),
             actor_id: "actor-1".to_string(),
@@ -452,20 +452,23 @@ mod tests {
             completed_at: Some(prost_types::Timestamp::from(SystemTime::now())),
         };
 
-        // Use node-config defaults for test
-        let ctx = service.default_context();
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "test-ns".to_string());
         state_store
             .store_request(&ctx, scheduling_request.clone())
             .await
             .unwrap();
 
-        // Get status
         let req = GetSchedulingStatusRequest {
             request_id: request_id.clone(),
         };
         let mut request = Request::new(req);
-        // Use empty tenant/namespace for test (metadata will be empty)
-        // request.metadata_mut().insert("x-tenant-id", ...) - not needed for test
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", "test-tenant".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", "test-ns".parse().unwrap());
         let response = service
             .get_scheduling_status(request)
             .await
@@ -490,8 +493,12 @@ mod tests {
             request_id: "non-existent".to_string(),
         };
         let mut request = Request::new(req);
-        // Use empty tenant/namespace for test (metadata will be empty)
-        // request.metadata_mut().insert("x-tenant-id", ...) - not needed for test
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", "test-tenant".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", "test-ns".parse().unwrap());
         let result = service.get_scheduling_status(request).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);

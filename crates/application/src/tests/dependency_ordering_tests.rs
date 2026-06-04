@@ -89,6 +89,7 @@ impl MockApp {
         self
     }
 
+    #[allow(dead_code)]
     fn with_stop_failure(mut self) -> Self {
         self.should_fail_stop = true;
         self

@@ -102,17 +102,6 @@ fn parse_behavior_kind(s: Option<&str>) -> plexspaces_actor::BehaviorType {
     }
 }
 
-fn wasm_config_for_child_spec(
-    child_spec: &plexspaces_proto::supervision::v1::ChildSpec,
-) -> plexspaces_wasm_runtime::WasmConfig {
-    let mut config = plexspaces_wasm_runtime::WasmConfig::default();
-    config.durability_enabled = child_spec
-        .facets
-        .iter()
-        .any(|facet| facet.r#type == "durability");
-    config
-}
-
 /// - Wraps a WasmInstance (which holds the WASM module and state)
 /// - Forwards handle_message calls to WASM instance
 /// - Handles serialization/deserialization of messages
@@ -309,7 +298,7 @@ pub struct WasmApplication {
     /// WASM runtime for instantiating actors
     runtime: Arc<dyn plexspaces_actor::WasmRuntimeTrait>,
     /// Deployment service for module management
-    deployment_service: Arc<WasmDeploymentService>,
+    _deployment_service: Arc<WasmDeploymentService>,
     /// Whether the application is running
     is_running: Arc<RwLock<bool>>,
     /// Application specification (if available)
@@ -355,7 +344,7 @@ impl WasmApplication {
             version,
             module_hash,
             runtime,
-            deployment_service,
+            _deployment_service: deployment_service,
             is_running: Arc::new(RwLock::new(false)),
             root_supervisor: Arc::new(RwLock::new(None)),
             spec,
@@ -428,6 +417,7 @@ impl WasmApplication {
     ///
     /// ## Returns
     /// WasmInstance ready for use in WasmActorBehavior
+    #[allow(clippy::too_many_arguments)]
     async fn create_wasm_instance_for_behavior(
         node: Arc<dyn ApplicationNode>,
         spec: &plexspaces_proto::actor::v1::ActorSpawnSpec,
@@ -605,10 +595,7 @@ impl WasmApplication {
                         .map_err(|e| {
                             ApplicationError::Other(format!("Failed to extract WASM module: {}", e))
                         })?;
-                match self.call_get_supervisor_tree(&module).await {
-                    Ok(spec) => Some(spec),
-                    Err(_) => None,
-                }
+                self.call_get_supervisor_tree(&module).await.ok()
             } else {
                 None
             }
@@ -648,7 +635,7 @@ impl WasmApplication {
         // Register each child spec as a behavior
         let module_hash = self.module_hash.clone();
         let runtime = self.runtime.clone();
-        let node_id = node.id().to_string();
+        let _node_id = node.id().to_string();
         // Namespace is required so spawned actors get canonical ActorIds scoped to the app.
         let namespace = self.namespace.read().await.clone();
         let tenant_id = self.tenant_id.read().await.clone();
@@ -1304,7 +1291,7 @@ impl WasmApplication {
         let runtime_clone = runtime.clone();
         let tenant_id_clone = tenant_id.clone();
         let namespace_clone = namespace.clone();
-        let actor_id_string_clone = actor_id_string.clone();
+        let _actor_id_string_clone = actor_id_string.clone();
 
         // Create factory using runtime ChildSpec::worker(child_actor_id, start_fn)
         let factory: plexspaces_actor::StartFn = Arc::new(move || {
@@ -1499,9 +1486,8 @@ impl WasmApplication {
         // Attach facets from ChildSpec (e.g., LockFacet, RegistryFacet, ProcessGroupFacet, VirtualActorFacet)
         // Facets are attached BEFORE actor.start() so lifecycle hooks work correctly
         let mut has_virtual_actor_facet = false;
-        let mut virtual_actor_registered = false;
         let mut attached_facet_types: Vec<String> = Vec::new();
-        let mut virtual_facet_config = serde_json::Value::Null;
+        let mut _virtual_facet_config = serde_json::Value::Null;
         if !child_spec.facets.is_empty() {
             if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                 let facet_registry = facet_registry_wrapper.inner_clone();
@@ -1532,7 +1518,7 @@ impl WasmApplication {
 
                 // Extract ALL facet configs from ChildSpec using facet helpers
                 // Store all facet configs (virtual_actor, durability, timer, reminder, etc.) for virtual actor type registration
-                use plexspaces_facet::{extract_facet_config, has_facet_type};
+                use plexspaces_facet::extract_facet_config;
 
                 // Build facet_config JSON object with all facets (for virtual actor type registration)
                 let mut all_facet_configs = serde_json::Map::new();
@@ -1546,7 +1532,7 @@ impl WasmApplication {
 
                 // Use combined config with all facets
                 if !all_facet_configs.is_empty() {
-                    virtual_facet_config = serde_json::Value::Object(all_facet_configs);
+                    _virtual_facet_config = serde_json::Value::Object(all_facet_configs);
                 }
             } else {
                 tracing::warn!(
@@ -1585,7 +1571,7 @@ impl WasmApplication {
             },
         )
         .await;
-        virtual_actor_registered = true;
+        let virtual_actor_registered = true;
 
         let attached_facet_list = if attached_facet_types.is_empty() {
             "none".to_string()
@@ -1955,15 +1941,13 @@ impl Application for WasmApplication {
 
         // Log environment variables if available
         if let Some(spec) = &self.spec {
-            if !spec.env.is_empty() {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        application = %self.name,
-                        env_var_count = spec.env.len(),
-                        env_vars = ?spec.env.keys().collect::<Vec<_>>(),
-                        "WASM application environment variables available"
-                    );
-                }
+            if !spec.env.is_empty() && tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    application = %self.name,
+                    env_var_count = spec.env.len(),
+                    env_vars = ?spec.env.keys().collect::<Vec<_>>(),
+                    "WASM application environment variables available"
+                );
             }
         }
 
@@ -2761,6 +2745,7 @@ mod tests {
 
         // Mock node that tracks spawned actors
         struct TrackingMockNode {
+            #[allow(dead_code)]
             spawned_actors: Arc<tokio::sync::Mutex<Vec<String>>>,
         }
 
@@ -2854,6 +2839,7 @@ mod tests {
 
         // Mock node that tracks stopped actors
         struct StopTrackingMockNode {
+            #[allow(dead_code)]
             stopped_actors: Arc<tokio::sync::Mutex<Vec<String>>>,
         }
 
@@ -3001,45 +2987,6 @@ mod tests {
         // 5. Other actors should continue running
     }
 
-    #[test]
-    fn test_wasm_config_for_child_spec_enables_durability_from_facets() {
-        let child_spec = plexspaces_proto::supervision::v1::ChildSpec {
-            facets: vec![plexspaces_proto::common::v1::Facet {
-                r#type: "durability".to_string(),
-                priority: 90,
-                config: std::collections::HashMap::from([(
-                    "checkpoint_interval".to_string(),
-                    "5".to_string(),
-                )]),
-                metadata: None,
-                state: std::collections::HashMap::new(),
-            }],
-            ..Default::default()
-        };
-
-        let config = super::wasm_config_for_child_spec(&child_spec);
-        assert!(config.durability_enabled);
-    }
-
-    #[test]
-    fn test_wasm_config_for_child_spec_keeps_non_durable_actor_fresh() {
-        let child_spec = plexspaces_proto::supervision::v1::ChildSpec {
-            facets: vec![plexspaces_proto::common::v1::Facet {
-                r#type: "virtual_actor".to_string(),
-                priority: 100,
-                config: std::collections::HashMap::from([(
-                    "activation_strategy".to_string(),
-                    "lazy".to_string(),
-                )]),
-                metadata: None,
-                state: std::collections::HashMap::new(),
-            }],
-            ..Default::default()
-        };
-
-        let config = super::wasm_config_for_child_spec(&child_spec);
-        assert!(!config.durability_enabled);
-    }
 
     /// Test: initialize_supervisor_tree creates proper supervisor with add_child
     #[tokio::test]

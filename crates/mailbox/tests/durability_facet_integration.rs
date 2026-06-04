@@ -41,7 +41,7 @@ mod tests {
     use plexspaces_journaling::{
         CompressionType, DurabilityConfig, DurabilityFacet, JournalStorage,
     };
-    use plexspaces_mailbox::{Mailbox, MailboxBuilder, Message};
+    use plexspaces_mailbox::{Mailbox, MailboxBuilder};
     use std::sync::Arc;
     use tempfile::TempDir;
 

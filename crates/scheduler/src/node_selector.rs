@@ -100,13 +100,9 @@ impl NodeSelector {
         let placement = requirements.placement.as_ref();
 
         // Validate resource requirements from placement
-        if let Some(ref p) = placement {
-            if let Some(ref resources) = p.resource_requirements {
-                if resources.cpu_cores < 0.0
-                    || resources.memory_bytes < 0
-                    || resources.disk_bytes < 0
-                    || resources.gpu_count < 0
-                {
+        if let Some(p) = placement {
+            if let Some(resources) = p.resource_requirements.as_ref() {
+                if resources.cpu_cores < 0.0 {
                     return Err(NodeSelectionError::InvalidRequirements(
                         "Resource values must be non-negative".to_string(),
                     ));
@@ -171,7 +167,7 @@ impl NodeSelector {
         // All required labels must be present and match
         required_labels
             .iter()
-            .all(|(key, value)| node_labels.get(key).map_or(false, |v| v == value))
+            .all(|(key, value)| node_labels.get(key) == Some(value))
     }
 
     /// Check if node has sufficient resources
@@ -205,7 +201,7 @@ impl NodeSelector {
     /// - Resource balance: Prefer nodes with balanced resource usage
     fn calculate_score(placement: Option<&NodePlacement>, capacity: &NodeCapacity) -> f64 {
         let required = placement.and_then(|p| p.resource_requirements.as_ref());
-        if let (Some(ref required), Some(ref total), Some(ref allocated)) = (
+        if let (Some(required), Some(total), Some(allocated)) = (
             required,
             capacity.total.as_ref(),
             capacity.allocated.as_ref(),

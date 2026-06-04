@@ -256,19 +256,16 @@ impl BlobRepository for SqlBlobRepository {
 
         let expires_at = metadata
             .expires_at
-            .as_ref()
-            .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
+            .and_then(|ts| timestamp_to_datetime(Some(ts)))
             .map(|dt| dt.to_rfc3339());
         let created_at = metadata
             .created_at
-            .as_ref()
-            .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
+            .and_then(|ts| timestamp_to_datetime(Some(ts)))
             .unwrap_or_else(Utc::now)
             .to_rfc3339();
         let updated_at = metadata
             .updated_at
-            .as_ref()
-            .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
+            .and_then(|ts| timestamp_to_datetime(Some(ts)))
             .unwrap_or_else(Utc::now)
             .to_rfc3339();
 
@@ -293,7 +290,7 @@ impl BlobRepository for SqlBlobRepository {
         .bind(&metadata.kind)
         .bind(&metadata_json)
         .bind(&tags_json)
-        .bind(expires_at.as_ref().map(|s| s.as_str()))
+        .bind(expires_at.as_deref())
         .bind(&created_at)
         .bind(&updated_at)
         .execute(&*self.pool)
@@ -325,8 +322,7 @@ impl BlobRepository for SqlBlobRepository {
 
         let expires_at = metadata
             .expires_at
-            .as_ref()
-            .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
+            .and_then(|ts| timestamp_to_datetime(Some(ts)))
             .map(|dt| dt.to_rfc3339());
 
         sqlx::query(
@@ -347,7 +343,7 @@ impl BlobRepository for SqlBlobRepository {
         .bind(&metadata.kind)
         .bind(&metadata_json)
         .bind(&tags_json)
-        .bind(expires_at.as_ref().map(|s| s.as_str()))
+        .bind(expires_at.as_deref())
         .bind(&updated_at)
         .bind(ctx.tenant_id())
         .bind(ctx.namespace())

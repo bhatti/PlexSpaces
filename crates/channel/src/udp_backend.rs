@@ -48,7 +48,7 @@ use plexspaces_proto::channel::v1::{
     channel_config, ChannelConfig, ChannelProvider, ChannelStats, UdpConfig,
 };
 use plexspaces_proto::common::v1::Message;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -71,6 +71,7 @@ use tracing::{debug, info};
 #[derive(Clone)]
 pub struct UdpChannel {
     config: ChannelConfig,
+    #[allow(dead_code)]
     udp_config: UdpConfig,
     socket: Arc<TokioUdpSocket>,
     multicast_addr: SocketAddr,

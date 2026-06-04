@@ -21,9 +21,13 @@ const MAX_WASM_BODY_SIZE: usize = 100 * 1024 * 1024; // 100MB
 /// State shared across deploy HTTP handlers.
 #[derive(Clone)]
 pub struct DeployRouteState {
+    /// Service locator for accessing node services
     pub service_locator: Arc<dyn ServiceLocator>,
+    /// Node connectivity interface
     pub node_connectivity: Arc<dyn NodeConnectivity>,
+    /// Whether authentication is disabled
     pub auth_disabled: bool,
+    /// JWT secret for token validation
     pub jwt_secret: Option<String>,
 }
 

@@ -34,15 +34,16 @@
 //! - **ULID for tuple IDs**: Sortable, time-based identifiers
 //! - **Error mapping**: gRPC status codes from TupleSpace errors
 
-use chrono::Utc;
 use plexspaces_proto::{
     tuplespace::v1::{
-        tuple_field::Value as ProtoValue, tuple_space_service_server::TupleSpaceService,
+        tuple_space_service_server::TupleSpaceService,
         CountRequest, CountResponse, ExistsRequest, ExistsResponse, ReadRequest, ReadResponse,
         Tuple as ProtoTuple, TupleField as ProtoTupleField, WriteRequest, WriteResponse,
     },
     v1::common::Empty,
 };
+#[cfg(test)]
+use plexspaces_proto::tuplespace::v1::tuple_field::Value as ProtoValue;
 use plexspaces_tuplespace::{
     proto_field_to_tuple_field, proto_template_to_pattern, proto_tuple_to_tuple,
     tuple_field_to_proto_field, tuple_to_proto_tuple, Pattern, Tuple, TupleField, TupleSpaceError,
@@ -59,20 +60,11 @@ pub struct TupleSpaceServiceImpl {
 }
 
 /// Internal stats tracking for TupleSpace operations
+#[derive(Default)]
 struct TupleSpaceOperationStats {
     write_operations: u64,
     read_operations: u64,
     take_operations: u64,
-}
-
-impl Default for TupleSpaceOperationStats {
-    fn default() -> Self {
-        Self {
-            write_operations: 0,
-            read_operations: 0,
-            take_operations: 0,
-        }
-    }
 }
 
 impl TupleSpaceServiceImpl {
@@ -85,6 +77,7 @@ impl TupleSpaceServiceImpl {
     }
 
     /// Convert proto TupleField to internal TupleField
+    #[allow(dead_code)]
     fn convert_proto_field_to_internal(
         proto_field: &ProtoTupleField,
     ) -> Result<TupleField, Status> {
@@ -104,6 +97,7 @@ impl TupleSpaceServiceImpl {
     }
 
     /// Convert internal TupleField to proto TupleField
+    #[allow(dead_code)]
     fn convert_internal_field_to_proto(field: &TupleField) -> ProtoTupleField {
         tuple_field_to_proto_field(field)
     }
@@ -181,7 +175,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             tuplespace_provider
                 .write(tuple)
                 .await
-                .map_err(|e| Self::tuplespace_error_to_status(e))?;
+                .map_err(Self::tuplespace_error_to_status)?;
             // Use ID from proto tuple if provided, otherwise generate new one
             let tuple_id = if !proto_tuple.id.is_empty() {
                 proto_tuple.id.clone()
@@ -241,7 +235,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let tuples = tuplespace_provider
             .read(&pattern)
             .await
-            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+            .map_err(Self::tuplespace_error_to_status)?;
 
         // Update stats
         {
@@ -252,7 +246,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // Convert to proto
         let proto_tuples: Vec<ProtoTuple> = tuples
             .iter()
-            .map(|t| Self::convert_internal_tuple_to_proto(t))
+            .map(Self::convert_internal_tuple_to_proto)
             .collect();
 
         Ok(Response::new(ReadResponse {
@@ -298,7 +292,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let tuple = tuplespace_provider
             .take(&pattern)
             .await
-            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+            .map_err(Self::tuplespace_error_to_status)?;
 
         // Update stats
         {
@@ -359,7 +353,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let count = tuplespace_provider
             .count(&pattern)
             .await
-            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+            .map_err(Self::tuplespace_error_to_status)?;
 
         Ok(Response::new(CountResponse {
             count: count as i64,
@@ -406,7 +400,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let count = tuplespace_provider
             .count(&pattern)
             .await
-            .map_err(|e| Self::tuplespace_error_to_status(e))?;
+            .map_err(Self::tuplespace_error_to_status)?;
 
         Ok(Response::new(ExistsResponse { exists: count > 0 }))
     }
@@ -488,20 +482,13 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // Clear all tuples using wildcard pattern
         use plexspaces_tuplespace::{Pattern, PatternField};
         let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
-        loop {
-            match tuplespace_provider
-                .take(&wildcard_pattern)
-                .await
-                .map_err(|e| Self::tuplespace_error_to_status(e))?
-            {
-                Some(_) => {
-                    // Continue taking until no more tuples
-                }
-                None => {
-                    // No more tuples
-                    break;
-                }
-            }
+        while tuplespace_provider
+            .take(&wildcard_pattern)
+            .await
+            .map_err(Self::tuplespace_error_to_status)?
+            .is_some()
+        {
+            // Continue taking until no more tuples
         }
 
         Ok(Response::new(Empty {}))
@@ -559,7 +546,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let tuple_count = tuplespace_provider
             .count(&wildcard_pattern)
             .await
-            .map_err(|e| Self::tuplespace_error_to_status(e))? as u64;
+            .map_err(Self::tuplespace_error_to_status)? as u64;
 
         // Get operation stats from service
         let op_stats = self.stats.read().await;
@@ -575,7 +562,6 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
                 take_operations: op_stats.take_operations,
                 total_operations,
                 avg_latency_ms: 0.0,
-                ..Default::default()
             }),
         }))
     }
@@ -1005,7 +991,7 @@ mod tests {
     async fn make_test_service() -> TupleSpaceServiceImpl {
         use crate::service_locator::ServiceLocatorImpl;
         use plexspaces_actor::{
-            service_wrappers::TupleSpaceProviderWrapper, RequestContextExt, ServiceLocator,
+            service_wrappers::TupleSpaceProviderWrapper, RequestContextExt,
         };
 
         let sl = Arc::new(ServiceLocatorImpl::new());

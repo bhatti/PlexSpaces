@@ -97,7 +97,7 @@ impl WorkflowRecoveryService {
         let all_interrupted = self
             .storage
             .list_executions_by_status(
-                vec![ExecutionStatus::Running, ExecutionStatus::Pending],
+                vec![ExecutionStatus::ExecutionStatusRunning, ExecutionStatus::ExecutionStatusPending],
                 None, // Get all, not just owned by this node
             )
             .await?;
@@ -109,7 +109,7 @@ impl WorkflowRecoveryService {
             .storage
             .list_stale_executions(
                 self.stale_threshold.as_secs(),
-                vec![ExecutionStatus::Running, ExecutionStatus::Pending],
+                vec![ExecutionStatus::ExecutionStatusRunning, ExecutionStatus::ExecutionStatusPending],
             )
             .await?;
 
@@ -123,15 +123,15 @@ impl WorkflowRecoveryService {
         // Step 3: Claim ownership and recover workflows
         // Process in order: owned by this node first, then stale, then unowned
         for execution in &all_interrupted {
-            let is_owned = execution.node_id.as_ref() == Some(&self.node_id);
+            let is_owned = execution.node_id == self.node_id;
             let is_stale = stale.iter().any(|s| s.execution_id == execution.execution_id);
 
             // Skip if already owned by this node and not stale
             if is_owned && !is_stale {
                 // Already owned - just recover (but still update heartbeat to claim)
                 info!(
-                    "Recovering owned workflow: {} (status: {:?}, version: {})",
-                    execution.execution_id, execution.status, execution.version
+                    "Recovering owned workflow: {} (status: {:?})",
+                    execution.execution_id, execution.status
                 );
 
                 // Update heartbeat first (claims ownership and indicates we're alive)
@@ -165,8 +165,8 @@ impl WorkflowRecoveryService {
 
             // Need to claim ownership (node-id changed, stale, or unowned)
             info!(
-                "Claiming ownership of workflow: {} (current owner: {:?}, version: {})",
-                execution.execution_id, execution.node_id, execution.version
+                "Claiming ownership of workflow: {} (current owner: {:?})",
+                execution.execution_id, execution.node_id
             );
 
             // Claim ownership with optimistic locking (prevents race conditions)
@@ -175,7 +175,7 @@ impl WorkflowRecoveryService {
                 .transfer_ownership(
                     &execution.execution_id,
                     &self.node_id,
-                    execution.version,
+                    0, // Version not exposed on proto WorkflowExecution
                 )
                 .await
             {
@@ -241,9 +241,9 @@ impl WorkflowRecoveryService {
         execution: &WorkflowExecution,
     ) -> Result<(), WorkflowError> {
         // Update heartbeat before recovery (indicates we're alive)
-        if let Some(ref node_id) = execution.node_id {
+        if !execution.node_id.is_empty() {
             self.storage
-                .update_heartbeat(&execution.execution_id, node_id)
+                .update_heartbeat(&execution.execution_id, &execution.node_id)
                 .await?;
         }
 
@@ -260,7 +260,7 @@ impl WorkflowRecoveryService {
         let owned = self
             .storage
             .list_executions_by_status(
-                vec![ExecutionStatus::Running, ExecutionStatus::Pending],
+                vec![ExecutionStatus::ExecutionStatusRunning, ExecutionStatus::ExecutionStatusPending],
                 Some(&self.node_id),
             )
             .await?;
@@ -296,7 +296,7 @@ impl WorkflowRecoveryService {
             .storage
             .list_stale_executions(
                 self.stale_threshold.as_secs(),
-                vec![ExecutionStatus::Running], // Only check RUNNING workflows
+                vec![ExecutionStatus::ExecutionStatusRunning], // Only check RUNNING workflows
             )
             .await?;
 

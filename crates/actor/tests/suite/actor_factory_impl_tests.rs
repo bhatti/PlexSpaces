@@ -31,9 +31,9 @@ use plexspaces_actor::{
     actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
 };
 use plexspaces_actor::{
-    Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
-    FacetManager, MessageSender, RequestContext, RequestContextExt, ServiceLocator,
-    VirtualActorManager,
+    Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, ActorRegistrationParams,
+    BehaviorError, BehaviorType, FacetManager, MessageSender, RequestContext, RequestContextExt,
+    ServiceLocator, VirtualActorManager,
 };
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -200,28 +200,13 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryAdapter {
     async fn discover(
         &self,
         ctx: &RequestContext,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        limit: usize,
-        offset: usize,
+        opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<
         Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
         self.inner
-            .discover(
-                ctx,
-                object_type,
-                object_category,
-                capabilities,
-                labels,
-                health_status,
-                limit,
-                offset,
-            )
+            .discover(ctx, opts)
             .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -402,12 +387,14 @@ async fn test_activate_virtual_actor_already_active() {
     registry
         .register_actor(
             &ctx,
-            actor_id.clone(),
-            wrapper,
-            "test_actor".to_string(),
-            None,
-            Some(Arc::new(actor) as Arc<dyn plexspaces_actor::ActorStateHandle>),
-            None,
+            ActorRegistrationParams {
+                actor_id: actor_id.clone(),
+                sender: wrapper,
+                actor_type: "test_actor".to_string(),
+                config: None,
+                instance: Some(Arc::new(actor) as Arc<dyn plexspaces_actor::ActorStateHandle>),
+                behavior_kind: None,
+            },
         )
         .await;
     manager.mark_activated(&actor_id).await.unwrap();

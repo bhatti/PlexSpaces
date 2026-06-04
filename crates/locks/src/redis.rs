@@ -32,7 +32,7 @@ use crate::{
     RenewLockOptions,
 };
 use async_trait::async_trait;
-use plexspaces_common::RequestContext;
+use plexspaces_common::{RequestContext, RequestContextExt};
 use std::time::SystemTime;
 use ulid::Ulid;
 
@@ -57,13 +57,13 @@ impl RedisLockManager {
         let client = redis::Client::open(redis_url)
             .map_err(|e| LockError::BackendError(format!("failed to create redis client: {e}")))?;
         let conn = client
-            .get_tokio_connection_manager()
+            .get_connection_manager()
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect redis: {e}")))?;
 
         let display_url = redis_url
             .split('@')
-            .last()
+            .next_back()
             .map(|s| format!("redis://...@{s}"))
             .unwrap_or_else(|| redis_url.to_string());
         tracing::info!(url = %display_url, backend = "Redis", "Locks storage initialized");
@@ -73,10 +73,6 @@ impl RedisLockManager {
 
     fn redis_key(ctx: &RequestContext, lock_key: &str) -> String {
         format!("{}#{}#{}", ctx.tenant_id(), ctx.namespace(), lock_key)
-    }
-
-    fn expires_at(lease_duration_secs: u32) -> SystemTime {
-        SystemTime::now() + std::time::Duration::from_secs(lease_duration_secs as u64)
     }
 
     fn build_lock(lock_key: &str, holder_id: &str, version: &str, lease_duration_secs: u32) -> Lock {
@@ -113,7 +109,7 @@ impl LockManager for RedisLockManager {
         let version = Ulid::new().to_string();
         // value = holder_id:version so release/renew can verify ownership atomically
         let value = format!("{}:{}", options.holder_id, version);
-        let ttl_ms = (options.lease_duration_secs as u64) * 1000;
+        let ttl_ms = (options.lease_duration_secs as usize) * 1000;
 
         let mut conn = self.conn.clone();
         let set_result: Option<String> = conn
@@ -155,7 +151,7 @@ impl LockManager for RedisLockManager {
         let expected_prefix = format!("{}:", options.holder_id);
         let new_version = Ulid::new().to_string();
         let new_value = format!("{}:{}", options.holder_id, new_version);
-        let new_ttl_ms = (options.lease_duration_secs as u64) * 1000;
+        let new_ttl_ms = (options.lease_duration_secs as usize) * 1000;
 
         // Atomically verify ownership then reset TTL with new version
         let script = Script::new(
@@ -254,7 +250,7 @@ impl LockManager for RedisLockManager {
             .map_err(|e| LockError::BackendError(format!("redis PTTL: {e}")))?;
         // pttl returns -2 if key gone, -1 if no expiry; treat both as 0
         let lease_duration_secs = if ttl_ms > 0 {
-            ((ttl_ms as u64 + 999) / 1000) as u32
+            (ttl_ms as u64).div_ceil(1000) as u32
         } else {
             0
         };

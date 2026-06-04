@@ -1628,12 +1628,14 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     actor_registry
         .register_actor(
             &ctx,
-            actor_id.clone(),
-            sender,
-            actor_type.to_string(),
-            None,
-            Some(state_handle.clone()),
-            None,
+            plexspaces_actor::ActorRegistrationParams {
+                actor_id: actor_id.clone(),
+                sender,
+                actor_type: actor_type.to_string(),
+                config: None,
+                instance: Some(state_handle.clone()),
+                behavior_kind: None,
+            },
         )
         .await;
 

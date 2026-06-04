@@ -836,6 +836,7 @@ mod tests {
         sent_messages: Arc<tokio::sync::Mutex<Vec<(String, String)>>>,
     }
 
+    #[allow(dead_code)]
     struct NoopObjectRegistry;
 
     #[async_trait]
@@ -869,13 +870,7 @@ mod tests {
         async fn discover(
             &self,
             _ctx: &plexspaces_actor::RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _object_category: Option<String>,
-            _capabilities: Option<Vec<String>>,
-            _labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _offset: usize,
-            _limit: usize,
+            _opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(Vec::new())
         }

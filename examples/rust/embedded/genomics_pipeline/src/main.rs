@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
         let message = cast_message(serde_json::to_value(&coordinator_msg)?);
 
         metrics_tracker.start_coordinate();
-        coordinator_ref.tell(message).await?;
+        coordinator_ref.tell(&ctx, message).await?;
         metrics_tracker.end_coordinate();
 
         info!("✅ Sample submitted: {}", sample_id);

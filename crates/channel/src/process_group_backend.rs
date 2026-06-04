@@ -21,7 +21,7 @@ use crate::{Channel, ChannelError, ChannelResult};
 use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
-use plexspaces_service_traits::{ProcessGroupService, ServiceLocatorBase as ServiceLocator};
+use plexspaces_service_traits::ServiceLocatorBase as ServiceLocator;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
 const DEFAULT_RECEIVE_TIMEOUT_MS: u64 = 5000;
@@ -62,6 +62,7 @@ pub struct ProcessGroupChannel {
     total_sent: AtomicU64,
     total_received: AtomicU64,
     total_failed: AtomicU64,
+    #[allow(dead_code)]
     created_at: Instant,
     actor_id: String,
 }
@@ -71,6 +72,7 @@ struct InternalStats {
     messages_sent: u64,
     messages_received: u64,
     messages_pending: u64,
+    #[allow(dead_code)]
     messages_failed: u64,
     total_latency_us: u64,
     latency_count: u64,
@@ -407,6 +409,7 @@ impl Channel for ProcessGroupChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_actor::ProcessGroupService;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 

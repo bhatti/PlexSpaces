@@ -125,6 +125,7 @@ pub struct HealthConfigYaml {
     pub registry_url: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct SecurityConfigYaml {
     #[serde(default)]
@@ -144,6 +145,7 @@ pub struct SecurityConfigYaml {
     pub disable_auth: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct ServiceIdentityYaml {
     pub service_id: String,
@@ -201,6 +203,7 @@ pub struct AuthnConfigYaml {
     pub mtls_config: Option<MtlsConfigYaml>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct AuthzConfigYaml {
     #[serde(default = "default_true")]
@@ -209,6 +212,7 @@ pub struct AuthzConfigYaml {
     pub policy_file_path: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct ApplicationSpecYaml {
     pub name: String,
@@ -280,6 +284,7 @@ pub struct SharedRelationalDbConfigYaml {
     pub migration_paths: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct StorageProviderConfigYaml {
     #[serde(default)]
@@ -302,6 +307,7 @@ pub struct StorageProviderConfigYaml {
     pub dynamodb: Option<DynamoDbBackendConfigYaml>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct InMemoryBackendConfigYaml {
     #[serde(default = "default_capacity")]
@@ -315,6 +321,7 @@ pub struct SqliteBackendConfigYaml {
     pub wal_mode: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct RedisBackendConfigYaml {
     pub url: String,
@@ -328,6 +335,7 @@ pub struct RedisBackendConfigYaml {
     pub cluster_mode: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct KafkaBackendConfigYaml {
     #[serde(default)]
@@ -342,6 +350,7 @@ pub struct KafkaBackendConfigYaml {
     pub replication_factor: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct NatsBackendConfigYaml {
     #[serde(default)]

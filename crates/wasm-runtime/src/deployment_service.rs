@@ -43,7 +43,6 @@
 //! ```
 
 use crate::error::{WasmError, WasmResult};
-use crate::runtime::{WasmModule, WasmRuntime};
 use crate::WasmConfig;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -186,7 +185,7 @@ impl WasmDeploymentService {
                     "Failed to compile module {name}@{version}: {e}"
                 ))
             })?;
-        let module = crate::wasm_runtime_helpers::extract_wasm_module(module_any)?;
+        let _module = crate::wasm_runtime_helpers::extract_wasm_module(module_any)?;
 
         // Verify hash matches
         let actual_hash = Self::compute_hash(module_bytes);
@@ -398,6 +397,7 @@ impl WasmDeploymentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::WasmRuntime;
 
     #[test]
     fn test_compute_hash() {

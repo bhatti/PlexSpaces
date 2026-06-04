@@ -19,7 +19,7 @@ mod sqlite_tests {
 
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
-        let mut value = serde_json::json!({
+        let value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

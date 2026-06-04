@@ -472,7 +472,7 @@ type WasmModule struct {
 	//
 	// Used for bandwidth estimation and pre-warming decisions.
 	SizeBytes uint64 `protobuf:"varint,9,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
-	// Schema version for forward/backward compatibility
+	// Schema version for forward compatibility
 	VersionNumber uint32 `protobuf:"varint,10,opt,name=version_number,json=versionNumber,proto3" json:"version_number,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

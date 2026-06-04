@@ -37,7 +37,7 @@ fn main() {
 
     // Get git commit hash if available
     let git_commit = std::process::Command::new("git")
-        .args(&["rev-parse", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .ok()
         .and_then(|output| {
@@ -58,10 +58,9 @@ fn main() {
 
 /// Format Unix timestamp as ISO 8601 string
 fn format_timestamp(epoch_secs: i64) -> String {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, UNIX_EPOCH};
 
-    let datetime = UNIX_EPOCH + Duration::from_secs(epoch_secs as u64);
-    let system_time = SystemTime::from(datetime);
+    let _datetime = UNIX_EPOCH + Duration::from_secs(epoch_secs as u64);
 
     // Format as ISO 8601 (simplified, UTC)
     // Format: YYYY-MM-DDTHH:MM:SSZ

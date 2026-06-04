@@ -13,7 +13,7 @@ use std::sync::Arc;
 #[cfg(feature = "component-model")]
 use tokio::sync::Semaphore;
 use tokio::sync::{Mutex, RwLock};
-use wasmtime::{Caller, Engine, Instance, Linker, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Caller, Engine, Instance, Linker, Store, StoreLimits};
 
 #[cfg(feature = "component-model")]
 use wasmtime::component::Linker as ComponentLinker;
@@ -230,6 +230,7 @@ impl WasmInstance {
     ///
     /// ## Errors
     /// Returns error if instantiation fails
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         engine: &Engine,
         module: WasmModule,
@@ -492,7 +493,7 @@ impl WasmInstance {
                                     let imports: Vec<String> = c
                                         .component_type()
                                         .imports(engine)
-                                        .map(|(k, _)| format!("{}", k))
+                                        .map(|(k, _)| k.to_string())
                                         .collect();
                                     WasmError::InstantiationError(format!(
                                         "actor-world component instantiation failed. imports={:?}, error={}",
@@ -984,14 +985,12 @@ impl WasmInstance {
                                                 error = %e,
                                                 "Failed to send message from WASM actor"
                                             );
-                                        } else {
-                                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                                tracing::debug!(
-                                                    from = %from_actor,
-                                                    to = %to_actor,
-                                                    "Message sent successfully from WASM actor"
-                                                );
-                                            }
+                                        } else if tracing::enabled!(tracing::Level::DEBUG) {
+                                            tracing::debug!(
+                                                from = %from_actor,
+                                                to = %to_actor,
+                                                "Message sent successfully from WASM actor"
+                                            );
                                         }
                                     });
 
@@ -1336,7 +1335,7 @@ impl WasmInstance {
 
         metrics::counter!("plexspaces_wasm_message_handled_total").increment(1);
 
-        use crate::memory::{read_bytes, write_bytes};
+        use crate::memory::write_bytes;
 
         let mut store = self.store.write().await;
 
@@ -1456,15 +1455,12 @@ impl WasmInstance {
             // Read new state name from memory (if new_state_ptr != 0)
             if new_state_ptr != 0 {
                 use crate::memory::read_bytes;
-                match read_bytes(&memory, &mut *store, new_state_ptr, 256) {
-                    Ok(bytes) => {
-                        // Try to parse as string (new state name)
-                        if let Ok(state_name) = std::str::from_utf8(&bytes) {
-                            // Return state name as response
-                            return Ok(state_name.trim_end_matches('\0').as_bytes().to_vec());
-                        }
+                if let Ok(bytes) = read_bytes(&memory, &mut *store, new_state_ptr, 256) {
+                    // Try to parse as string (new state name)
+                    if let Ok(state_name) = std::str::from_utf8(&bytes) {
+                        // Return state name as response
+                        return Ok(state_name.trim_end_matches('\0').as_bytes().to_vec());
                     }
-                    Err(_) => {}
                 }
             }
             return Ok(vec![]);
@@ -1509,106 +1505,6 @@ impl WasmInstance {
         )))
     }
 
-    /// Call component init function (for WASM components only)
-    ///
-    /// Uses the bindgen!-generated PlexspacesActor bindings to call the exported
-    /// init function with proper typing.
-    #[cfg(feature = "component-model")]
-    async fn call_component_init(&self, initial_state: &[u8]) -> WasmResult<()> {
-        // Get the component state (store + bindings together)
-        let component_state = self.component_state.as_ref().ok_or_else(|| {
-            WasmError::ActorFunctionError("Component state not available".to_string())
-        })?;
-
-        // Acquire lock on the component state (both store and bindings)
-        let mut state = component_state.lock().await;
-
-        // Destructure to get separate mutable references to store and bindings
-        // This avoids borrow checker issues when calling methods
-        let ComponentState { store, bindings } = &mut *state;
-
-        // Call init based on binding type
-        match bindings {
-            ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
-                // Full PlexspacesActor bindings - init takes Vec<u8>
-                let initial_state_vec = initial_state.to_vec();
-                let result = plexspaces_bindings
-                    .plexspaces_actor_native_actor()
-                    .call_init(store, &initial_state_vec)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(
-                            actor_id = %self.actor_id,
-                            error = %e,
-                            "Component init() call failed"
-                        );
-                        WasmError::ActorFunctionError(format!(
-                            "Component init() call failed: {}",
-                            e
-                        ))
-                    })?;
-
-                match result {
-                    Ok(()) => {
-                        tracing::info!(
-                            actor_id = %self.actor_id,
-                            initial_state_len = initial_state.len(),
-                            "Component init() succeeded"
-                        );
-                        Ok(())
-                    }
-                    Err(error_msg) => {
-                        tracing::error!(
-                            actor_id = %self.actor_id,
-                            error = %error_msg,
-                            "Component init() returned error"
-                        );
-                        Err(WasmError::ActorFunctionError(format!(
-                            "Component init() returned error: {}",
-                            error_msg
-                        )))
-                    }
-                }
-            }
-            ComponentBindings::SimpleActor(simple_bindings) => {
-                let initial_state_vec = initial_state.to_vec();
-                let result = simple_bindings
-                    .plexspaces_actor_actor()
-                    .call_init(store, &initial_state_vec)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(
-                            actor_id = %self.actor_id,
-                            error = %e,
-                            "actor-world init() call failed"
-                        );
-                        WasmError::ActorFunctionError(format!(
-                            "actor-world init() call failed: {}",
-                            e
-                        ))
-                    })?;
-
-                if result.is_ok() {
-                    tracing::info!(
-                        actor_id = %self.actor_id,
-                        "actor-world init() succeeded"
-                    );
-                    Ok(())
-                } else {
-                    let error_msg = result.err().unwrap_or_default();
-                    tracing::error!(
-                        actor_id = %self.actor_id,
-                        error = %error_msg,
-                        "actor-world init() returned error"
-                    );
-                    Err(WasmError::ActorFunctionError(format!(
-                        "actor-world init() returned error: {}",
-                        error_msg
-                    )))
-                }
-            }
-        }
-    }
 
     /// Tries to get application-level msg_type (handler name) from JSON payload.
     /// Used when routing to handle_event (GenEvent) so event_type is the handler name (e.g. "ingest").
@@ -1642,7 +1538,6 @@ impl WasmInstance {
         &self,
         instance_ctx: &InstanceContext,
     ) -> WasmResult<ComponentState> {
-        use crate::runtime::WasmModuleInner;
         let engine = self.reinstantiation_engine.as_ref().ok_or_else(|| {
             WasmError::ActorFunctionError("Reinstantiation engine not set".to_string())
         })?;
@@ -1785,7 +1680,6 @@ impl WasmInstance {
         &self,
         instance_ctx: &InstanceContext,
     ) -> WasmResult<ComponentState> {
-        use crate::runtime::WasmModuleInner;
         let engine = self.reinstantiation_engine.as_ref().ok_or_else(|| {
             WasmError::ActorFunctionError("Reinstantiation engine not set".to_string())
         })?;
@@ -1949,13 +1843,12 @@ impl WasmInstance {
                     (message_type_string == "cast" || message_type_string == "info") && {
                         let event_type = Self::try_msg_type_from_payload(&payload)
                             .unwrap_or_else(|| message_type_string.clone());
-                        match actor
-                            .call_handle_event(&mut *store, &event_type, &payload)
-                            .await
-                        {
-                            Ok(Ok(())) => true,
-                            _ => false,
-                        }
+                        matches!(
+                            actor
+                                .call_handle_event(&mut *store, &event_type, &payload)
+                                .await,
+                            Ok(Ok(()))
+                        )
                     };
                 if used_handle_event {
                     let duration = start_time.elapsed();

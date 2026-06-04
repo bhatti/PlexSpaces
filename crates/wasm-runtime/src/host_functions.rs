@@ -426,6 +426,7 @@ impl HostFunctions {
     }
 
     /// Create with all services
+    #[allow(clippy::too_many_arguments)]
     pub fn with_all_services(
         sender: Option<Arc<dyn MessageSender>>,
         channel_service: Option<Arc<dyn ChannelService>>,

@@ -41,6 +41,9 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 
+/// Type alias for the application registry map to reduce type complexity.
+type ApplicationRegistry = Arc<RwLock<HashMap<String, Arc<RwLock<Box<dyn Application>>>>>>;
+
 /// Application controller for lifecycle management
 ///
 /// ## Purpose
@@ -53,7 +56,7 @@ use tokio::time::timeout;
 /// - Handles shutdown timeouts
 pub struct ApplicationController {
     /// Registry of loaded applications (wrapped in RwLock to support &mut self in trait methods)
-    applications: Arc<RwLock<HashMap<String, Arc<RwLock<Box<dyn Application>>>>>>,
+    applications: ApplicationRegistry,
 
     /// Application states
     states: Arc<RwLock<HashMap<String, ApplicationRuntimeState>>>,
@@ -392,7 +395,7 @@ impl ApplicationController {
             for dep in &config.dependencies {
                 reverse_graph
                     .entry(dep.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(app_name.clone());
             }
         }
@@ -648,11 +651,13 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn with_start_failure(mut self) -> Self {
             self.should_fail_start = true;
             self
         }
 
+        #[allow(dead_code)]
         fn with_stop_failure(mut self) -> Self {
             self.should_fail_stop = true;
             self

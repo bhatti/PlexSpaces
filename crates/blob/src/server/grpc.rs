@@ -22,7 +22,7 @@
 //! Implements the BlobService gRPC interface for blob storage operations.
 //! This enables clients to upload, download, and manage blobs via gRPC and HTTP/REST.
 
-use crate::{helpers::datetime_to_timestamp, repository::ListFilters, BlobService};
+use crate::{repository::ListFilters, BlobService};
 use chrono::{Duration, Utc};
 use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_proto::storage::v1::{
@@ -58,6 +58,7 @@ impl BlobServiceImpl {
     /// 1. `x-tenant-id` header (set by JWT middleware, NOT from client)
     /// 2. `tenant_id` in request labels (fallback, only if auth disabled)
     /// 3. Error if not found (production should always have JWT)
+    #[allow(clippy::result_large_err)] // tonic::Status is the canonical gRPC error type
     fn extract_context<T>(request: &Request<T>) -> Result<RequestContext, Status> {
         let metadata = request.metadata();
 
@@ -66,12 +67,7 @@ impl BlobServiceImpl {
         let tenant_id = metadata
             .get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty()) // Reject empty strings
-            .or_else(|| {
-                // Fallback: check request labels (for backward compatibility when auth disabled)
-                // This is the HTTP API boundary exception
-                None // For now, require x-tenant-id header from JWT
-            })
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| {
                 Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
             })?;
@@ -131,26 +127,16 @@ impl BlobServiceTrait for BlobServiceImpl {
             .blob_service
             .upload_blob(
                 &ctx,
-                &req.name,
-                req.data,
-                if req.content_type.is_empty() {
-                    None
-                } else {
-                    Some(req.content_type)
+                crate::UploadBlobParams {
+                    name: req.name,
+                    data: req.data,
+                    content_type: if req.content_type.is_empty() { None } else { Some(req.content_type) },
+                    blob_group: if req.blob_group.is_empty() { None } else { Some(req.blob_group) },
+                    kind: if req.kind.is_empty() { None } else { Some(req.kind) },
+                    metadata: req.metadata,
+                    tags: req.tags,
+                    expires_after,
                 },
-                if req.blob_group.is_empty() {
-                    None
-                } else {
-                    Some(req.blob_group)
-                },
-                if req.kind.is_empty() {
-                    None
-                } else {
-                    Some(req.kind)
-                },
-                req.metadata,
-                req.tags,
-                expires_after,
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to upload blob: {}", e)))?;
@@ -290,9 +276,9 @@ impl BlobServiceTrait for BlobServiceImpl {
         let limit = req
             .page
             .as_ref()
-            .map(|p| p.limit.max(1).min(1000))
+            .map(|p| p.limit.clamp(1, 1000))
             .unwrap_or(100) as i64;
-        let page = (offset / limit) as i64 + 1;
+        let page = (offset / limit) + 1;
 
         // List blobs (tenant_id and namespace from RequestContext)
         let (blobs, total_count) = self

@@ -2619,6 +2619,7 @@ mod tests {
     }
 
     /// Helper to create a test message with TTL
+    #[allow(dead_code)]
     fn create_test_message_with_ttl(payload: Vec<u8>, ttl: std::time::Duration) -> Message {
         let mut msg = create_test_message(payload);
         msg.ttl = Some(prost_types::Duration {
@@ -2640,6 +2641,7 @@ mod tests {
     struct CheckpointTrackingBehavior {
         count: i32,
         observed_count: Arc<tokio::sync::RwLock<i32>>,
+        #[allow(dead_code)]
         behavior_type: crate::core::BehaviorType,
     }
 

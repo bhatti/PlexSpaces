@@ -1482,7 +1482,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
 
         let now_secs = Utc::now().timestamp();
-        let now_ts = chrono::DateTime::from_timestamp(now_secs, 0).unwrap_or_else(|| Utc::now());
+        let _now_ts = chrono::DateTime::from_timestamp(now_secs, 0).unwrap_or_else(|| Utc::now());
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
@@ -1662,7 +1662,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let pk = Self::composite_key(ctx, execution_id);
         let status_str = status.as_sql_str().to_string();
         let now_secs = Utc::now().timestamp();
-        let tenant_namespace = Self::tenant_namespace_key(ctx);
+        let _tenant_namespace = Self::tenant_namespace_key(ctx);
 
         // Build update expression
         let mut update_expr =
@@ -1735,7 +1735,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     .code()
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-                let error_message = e
+                let _error_message = e
                     .message()
                     .map(|m| m.to_string())
                     .unwrap_or_else(|| error_str.clone());
@@ -2360,7 +2360,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let pk = Self::composite_key(ctx, execution_id);
 
         // Query for the first signal with this name (ordered by received_at)
-        let mut query = self
+        let query = self
             .client
             .query()
             .table_name(&table_name)

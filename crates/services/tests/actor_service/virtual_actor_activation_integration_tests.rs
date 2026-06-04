@@ -91,6 +91,7 @@ async fn build_test_node(node_id: &str) -> (Node, TempDir) {
 }
 
 impl CounterActor {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self { count: 0 }
     }
@@ -712,6 +713,7 @@ async fn invoke_virtual_actor(
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct LocalInvokeResponse {
     success: bool,
     payload: Vec<u8>,
@@ -964,7 +966,7 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
         100,
     );
 
-    let actor_ref = node
+    let _actor_ref = node
         .spawn(
             &ctx,
             &actor_id,

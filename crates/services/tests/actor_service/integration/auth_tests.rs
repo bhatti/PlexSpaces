@@ -21,7 +21,6 @@ use plexspaces_grpc_middleware::cert_gen::CertificateGenerator;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::common::v1::ActorIdentity;
 use plexspaces_proto::v1::actor::SpawnActorRequest;
-use plexspaces_proto::ActorServiceClient;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::Duration;

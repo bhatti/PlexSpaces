@@ -16,7 +16,7 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::{
-    ActorRegistry, InitializableServiceLocator, ObjectRegistration,
+    ActorRegistry, DiscoverOptions, InitializableServiceLocator, ObjectRegistration,
     ObjectRegistry as CoreObjectRegistry, RequestContextExt,
 };
 use plexspaces_common::ServiceNameExt;
@@ -30,6 +30,7 @@ use std::sync::Arc;
 use tonic::transport::Server;
 
 /// Simple wrapper to adapt ObjectRegistryImpl to CoreObjectRegistry trait
+#[allow(dead_code)]
 struct ObjectRegistryAdapter {
     inner: Arc<ObjectRegistryImpl>,
 }
@@ -48,8 +49,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
             .lookup(ctx, obj_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     e.to_string(),
                 )) as Box<dyn std::error::Error + Send + Sync>
             })
@@ -65,8 +65,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
             .lookup_full(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     e.to_string(),
                 )) as Box<dyn std::error::Error + Send + Sync>
             })
@@ -78,8 +77,7 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.inner.register(ctx, registration).await.map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Box::new(std::io::Error::other(
                 e.to_string(),
             )) as Box<dyn std::error::Error + Send + Sync>
         })
@@ -88,29 +86,13 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
     async fn discover(
         &self,
         ctx: &plexspaces_actor::RequestContext,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        offset: usize,
-        limit: usize,
+        opts: DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .discover(
-                ctx,
-                object_type,
-                object_category,
-                capabilities,
-                labels,
-                health_status,
-                offset,
-                limit,
-            )
+            .discover(ctx, opts)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     e.to_string(),
                 )) as Box<dyn std::error::Error + Send + Sync>
             })

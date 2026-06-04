@@ -28,7 +28,6 @@ mod ddb_tests {
         journal_entry::Entry, Checkpoint, JournalEntry, MessageReceived,
     };
     use prost_types;
-    use std::time::SystemTime;
 
     use plexspaces_common::test_helpers::dynamodb_local_available;
 

@@ -1662,11 +1662,13 @@ mod tests {
     }
 
     // Helper struct for testing - need to make it accessible
+    #[allow(dead_code)]
     struct MockActorService {
         sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
     }
 
     impl MockActorService {
+        #[allow(dead_code)]
         fn new() -> Self {
             Self {
                 sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -1738,7 +1740,8 @@ mod tests {
     }
 
     /// Helper to create test ActorContext
-    fn create_test_context(actor_id: &str, node_id: &str) -> crate::core::ActorContext {
+    #[allow(dead_code)]
+    fn create_test_context(_actor_id: &str, node_id: &str) -> crate::core::ActorContext {
         use crate::core::ActorContext;
         use std::sync::Arc;
 
@@ -2019,8 +2022,9 @@ mod tests {
         // Create a mock actor service that tracks sent messages
         let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sent_messages_clone = sent_messages.clone();
+        let _sent_messages_clone = sent_messages.clone();
 
+        #[allow(dead_code)]
         struct TrackingActorService {
             sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
         }
@@ -2112,8 +2116,9 @@ mod tests {
     }
 
     /// Helper to create test ActorContext with custom ActorService
+    #[allow(dead_code)]
     fn create_test_context_with_actor_service(
-        actor_id: &str,
+        _actor_id: &str,
         node_id: &str,
         _actor_service: Arc<dyn crate::core::ActorService>,
     ) -> ActorContext {
@@ -2138,12 +2143,12 @@ mod tests {
         // This is handled by ReplyWaiterRegistry in the unified API
         let correlation_id = "test-corr-123".to_string();
         let reply_mailbox_id = format!("reply-mailbox-{}", Ulid::new());
-        let reply_mailbox = Arc::new(
+        let _reply_mailbox = Arc::new(
             Mailbox::new(MailboxConfig::default(), reply_mailbox_id)
                 .await
                 .expect("Failed to create reply mailbox"),
         );
-        let reply_actor_id = test_actor_id_string(&format!("reply-{}", correlation_id), "node1");
+        let _reply_actor_id = test_actor_id_string(&format!("reply-{}", correlation_id), "node1");
 
         // Create a local ActorRef that will receive the reply
         let target_mailbox_arc = create_test_mailbox().await;
@@ -2239,6 +2244,7 @@ mod tests {
     #[tokio::test]
     async fn test_ask_remote() {
         // Create a mock actor service that handles ask pattern
+        #[allow(dead_code)]
         struct MockActorService;
         #[async_trait::async_trait]
         impl crate::core::ActorService for MockActorService {
@@ -2458,8 +2464,9 @@ mod tests {
         // Test remote (different node)
         let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sent_messages_clone = sent_messages.clone();
+        let _sent_messages_clone = sent_messages.clone();
 
+        #[allow(dead_code)]
         struct TrackingActorService {
             sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
         }
@@ -2734,7 +2741,7 @@ mod tests {
         for i in 0..10 {
             let corr_id = format!("corr-{}", i);
             let waiter = crate::core::ReplyWaiter::new();
-            let waiter_clone = waiter.clone();
+            let _waiter_clone = waiter.clone();
 
             if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
                 waiter_registry.register(corr_id.clone(), waiter).await;

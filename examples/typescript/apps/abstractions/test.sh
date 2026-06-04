@@ -245,8 +245,17 @@ assert_actor_ok "send_event" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"send_ev
 assert_actor_ok "broadcast_event" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"broadcast_event","group":"abstractions-group","channel":"alerts","body":"broadcast"}' 15)"
 
 echo "Step 7: Durable reactivation"
-STOP_DURABLE_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$INTERNAL_ACTOR_ID")"
-assert_actor_ok "stop_actor" "$(send_actor "$CONTROLLER_ACTOR" "$STOP_DURABLE_PAYLOAD" 15)"
+# Increment count twice so we can verify journal persistence after stop+restart
+assert_actor_ok "increment_1" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"increment","amount":1}' 15)"
+assert_actor_ok "increment_2" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"increment","amount":1}' 15)"
+# Verify count=2 before stopping
+wait_for_json_field "$ABSTRACTIONS_ACTOR" '{"op":"status"}' "count" "2" 10 0.2
+# Stop actor — durability facet should persist state to journal
+STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+  "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ABSTRACTIONS_ACTOR" \
+  -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+assert_actor_ok "stop_actor" "$STOP_RESULT"
+# After reactivation, count should be restored from journal
 wait_for_json_field "$ABSTRACTIONS_ACTOR" '{"op":"status"}' "count" "2" 25 0.2
 
 echo "Step 8: Non-durable reactivation"

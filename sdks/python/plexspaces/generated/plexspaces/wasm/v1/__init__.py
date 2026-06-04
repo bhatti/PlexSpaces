@@ -284,7 +284,7 @@ class WasmModule(betterproto.Message):
     """
 
     version_number: int = betterproto.uint32_field(10)
-    """Schema version for forward/backward compatibility"""
+    """Schema version for forward compatibility"""
 
 
 @dataclass(eq=False, repr=False)

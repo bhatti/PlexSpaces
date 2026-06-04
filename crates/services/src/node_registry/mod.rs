@@ -42,7 +42,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn, Level};
 
 use plexspaces_actor::{
-    NodeRegistryTrait, ObjectRegistry, RequestContext, RequestContextExt, ServiceLocator,
+    DiscoverOptions, NodeRegistryTrait, ObjectRegistry, RequestContext, RequestContextExt,
+    ServiceLocator,
 };
 use plexspaces_proto::common::v1::Metadata as CommonMetadata;
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration, PingResponse};
@@ -68,7 +69,6 @@ const DEFAULT_ACTIVE_NODE_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 /// Cached node registration with expiry
 struct CachedNodeRegistration {
     registration: NodeRegistration,
-    cached_at: Instant,
     expires_at: Instant,
 }
 
@@ -77,7 +77,6 @@ impl CachedNodeRegistration {
         let now = Instant::now();
         Self {
             registration,
-            cached_at: now,
             expires_at: now + ttl,
         }
     }
@@ -138,8 +137,6 @@ pub struct NodeRegistry {
     swim: Arc<SwimProtocol>,
     /// Protocol running flag (Arc for sharing with spawned tasks)
     running: Arc<AtomicBool>,
-    /// Local node ID
-    local_node_id: String,
     /// Cache hits counter (for observability)
     cache_hits: AtomicU64,
     /// Cache misses counter (for observability)
@@ -175,7 +172,6 @@ impl NodeRegistry {
             config,
             swim,
             running: Arc::new(AtomicBool::new(false)),
-            local_node_id,
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
             db_failures: AtomicU64::new(0),
@@ -186,6 +182,7 @@ impl NodeRegistry {
     /// Create with simple parameters (for backward compatibility).
     /// `service_locator` is `None`; callers that need gossip should use `new()` directly
     /// or call `set_service_locator()` after construction.
+    #[allow(clippy::field_reassign_with_default)]
     pub fn new_simple(
         object_registry: Arc<dyn ObjectRegistry>,
         local_node_id: String,
@@ -363,11 +360,11 @@ impl NodeRegistry {
             node_address: obj_reg.grpc_address.clone(),
             capabilities,
             status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
-            last_heartbeat: obj_reg.last_heartbeat.clone(),
+            last_heartbeat: obj_reg.last_heartbeat,
             actor_count: 0,
             message_count: 0,
             error_count: 0,
-            registered_at: obj_reg.created_at.clone(),
+            registered_at: obj_reg.created_at,
         }
     }
 
@@ -407,9 +404,9 @@ impl NodeRegistry {
             health_status: HealthStatus::HealthStatusHealthy as i32,
             capabilities: node_reg.capabilities.keys().cloned().collect(),
             metadata,
-            created_at: node_reg.registered_at.clone().or(Some(timestamp.clone())),
-            updated_at: Some(timestamp.clone()),
-            last_heartbeat: node_reg.last_heartbeat.clone().or(Some(timestamp)),
+            created_at: node_reg.registered_at.or(Some(timestamp)),
+            updated_at: Some(timestamp),
+            last_heartbeat: node_reg.last_heartbeat.or(Some(timestamp)),
             ..Default::default()
         }
     }
@@ -493,6 +490,52 @@ impl NodeRegistry {
         Self::timestamp_within_age(registration.last_heartbeat.as_ref(), active_node_window)
     }
 
+    async fn lookup_node_in_object_registry(
+        object_registry: &Arc<dyn ObjectRegistry>,
+        ctx: &RequestContext,
+        target: &str,
+    ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        if let Ok(Some(found)) = object_registry
+            .lookup_full(ctx, ObjectType::ObjectTypeNode, target)
+            .await
+        {
+            return Ok(Some(found));
+        }
+
+        if !Self::looks_like_address(target) {
+            return Ok(None);
+        }
+
+        // Address-based lookup: scan ObjectRegistry to find node by gRPC address
+        let registrations = object_registry
+            .discover(
+                ctx,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("{}", e).into()
+            })?;
+        let target_address_key = canonical_node_address_key(target);
+        let mut fallback = None;
+        for registration in registrations {
+            if canonical_node_address_key(&registration.grpc_address) != target_address_key {
+                continue;
+            }
+            if !Self::is_unknown_node_id(&registration.object_id) {
+                return Ok(Some(registration));
+            }
+            if fallback.is_none() {
+                fallback = Some(registration);
+            }
+        }
+        Ok(fallback)
+    }
+
     async fn recent_node_registrations_from_registry(
         &self,
         cluster: Option<&str>,
@@ -502,13 +545,11 @@ impl NodeRegistry {
             .object_registry
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeNode),
-                None,
-                None,
-                None,
-                None,
-                0,
-                1000,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
             )
             .await?;
 
@@ -555,13 +596,11 @@ impl NodeRegistry {
         let existing = object_registry
             .discover(
                 registry_ctx,
-                Some(ObjectType::ObjectTypeNode),
-                None,
-                None,
-                None,
-                None,
-                0,
-                1000,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
             )
             .await?;
 
@@ -619,7 +658,7 @@ impl NodeRegistry {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() })?;
 
         if let Some(mut obj_reg) = obj_reg {
-            obj_reg.last_heartbeat = Some(heartbeat_timestamp.clone());
+            obj_reg.last_heartbeat = Some(heartbeat_timestamp);
             obj_reg.updated_at = Some(heartbeat_timestamp);
             obj_reg.health_status = HealthStatus::HealthStatusHealthy as i32;
 
@@ -627,7 +666,7 @@ impl NodeRegistry {
                 if let Some(ref total) = cap.total {
                     obj_reg
                         .metrics
-                        .insert("total_cpu_cores".to_string(), total.cpu_cores as f64);
+                        .insert("total_cpu_cores".to_string(), total.cpu_cores);
                     obj_reg
                         .metrics
                         .insert("total_memory_bytes".to_string(), total.memory_bytes as f64);
@@ -659,7 +698,7 @@ impl NodeRegistry {
         let effective_cluster = cluster
             .map(str::to_string)
             .filter(|value| !value.is_empty())
-            .or_else(|| {
+            .or({
                 if local_cluster.is_empty() {
                     None
                 } else {
@@ -708,11 +747,38 @@ impl NodeRegistry {
         cache_guard.remove(node_id);
         drop(cache_guard);
 
-        let system_ctx = Self::system_registry_context_for(service_locator, cluster_name).await;
+        // Resolve the actual namespace under which this node was stored in ObjectRegistry.
+        // register_node uses system_registry_context(node_capabilities.cluster) which may
+        // differ from the caller's cluster_name (e.g. _unknown_ nodes have no cluster
+        // capability and register under empty namespace). discover with admin+empty skips
+        // namespace filtering, so we can find the registration regardless of stored namespace.
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+        let stored_namespace = match object_registry
+            .discover(
+                &admin_ctx,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(registrations) => registrations
+                .iter()
+                .find(|r| r.object_id == node_id)
+                .map(|r| r.namespace.clone())
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+
+        let unregister_ctx =
+            RequestContext::new_without_auth(String::new(), stored_namespace).with_admin(true);
 
         // Cascade: mark all objects on the dead node as DEAD.
         match object_registry
-            .mark_objects_dead_by_node(&system_ctx, node_id)
+            .mark_objects_dead_by_node(&unregister_ctx, node_id)
             .await
         {
             Ok(count) if count > 0 => {
@@ -733,7 +799,7 @@ impl NodeRegistry {
         }
 
         if let Err(e) = object_registry
-            .unregister(&system_ctx, ObjectType::ObjectTypeNode, node_id)
+            .unregister(&unregister_ctx, ObjectType::ObjectTypeNode, node_id)
             .await
         {
             let msg = e.to_string().to_lowercase();
@@ -768,6 +834,7 @@ impl NodeRegistry {
         Self::system_registry_context_for(&self.service_locator, cluster).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn reconcile_ping_response(
         cache: &Arc<RwLock<HashMap<String, CachedNodeRegistration>>>,
         swim: &Arc<SwimProtocol>,
@@ -845,7 +912,6 @@ impl NodeRegistry {
 
         let heartbeat = response
             .last_heartbeat
-            .clone()
             .unwrap_or_else(Self::now_timestamp);
 
         let registration = NodeRegistration {
@@ -853,7 +919,7 @@ impl NodeRegistry {
             node_address: resolved_address.clone(),
             capabilities: capabilities.clone(),
             status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
-            last_heartbeat: Some(heartbeat.clone()),
+            last_heartbeat: Some(heartbeat),
             actor_count: 0,
             message_count: 0,
             error_count: 0,
@@ -1107,13 +1173,11 @@ impl NodeRegistry {
                     registry
                         .discover(
                             &ctx,
-                            Some(ObjectType::ObjectTypeNode),
-                            None,
-                            None,
-                            None,
-                            None,
-                            0,
-                            1000,
+                            DiscoverOptions {
+                                object_type: Some(ObjectType::ObjectTypeNode),
+                                limit: 1000,
+                                ..Default::default()
+                            },
                         )
                         .await
                         .map_err(|e| format!("{}", e).into())
@@ -1222,6 +1286,7 @@ impl NodeRegistry {
     }
 
     /// Probe a node (direct ping, then indirect if needed)
+    #[allow(clippy::too_many_arguments)]
     async fn probe_node(
         swim: &Arc<SwimProtocol>,
         cache: &Arc<RwLock<HashMap<String, CachedNodeRegistration>>>,
@@ -1476,89 +1541,64 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
-        // Cache miss - lookup in ObjectRegistry with backoff
-        if self.config.use_shared_db {
-            let object_registry = self.object_registry.clone();
-            let target_owned = target.to_string();
-            let system_ctx = self.system_registry_context(None).await;
-
-            let result = self
-                .with_db_backoff("lookup", || {
-                    let registry = object_registry.clone();
-                    let ctx = system_ctx.clone();
-                    let lookup_target = target_owned.clone();
-                    async move {
-                        if let Some(found) = registry
-                            .lookup_full(&ctx, ObjectType::ObjectTypeNode, &lookup_target)
-                            .await
-                            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                                format!("{}", e).into()
-                            })?
-                        {
-                            return Ok(Some(found));
-                        }
-
-                        if !Self::looks_like_address(&lookup_target) {
-                            return Ok(None);
-                        }
-
-                        let registrations = registry
-                            .discover(
-                                &ctx,
-                                Some(ObjectType::ObjectTypeNode),
-                                None,
-                                None,
-                                None,
-                                None,
-                                0,
-                                1000,
-                            )
-                            .await
-                            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                                format!("{}", e).into()
-                            })?;
-                        let mut fallback = None;
-                        for registration in registrations {
-                            if canonical_node_address_key(&registration.grpc_address)
-                                != canonical_node_address_key(&lookup_target)
-                            {
-                                continue;
-                            }
-                            if !Self::is_unknown_node_id(&registration.object_id) {
-                                return Ok(Some(registration));
-                            }
-                            if fallback.is_none() {
-                                fallback = Some(registration);
-                            }
-                        }
-                        Ok(fallback)
-                    }
-                })
-                .await;
-
-            match result {
-                Ok(Some(obj_reg)) => {
-                    let node_reg = Self::to_node_registration(&obj_reg);
-                    self.update_cache(node_reg.node_id.as_str(), node_reg.clone())
-                        .await;
-
-                    // Also update SWIM
-                    let mut member =
-                        SwimMember::new(obj_reg.object_id.clone(), obj_reg.grpc_address.clone());
-                    member.metadata = node_reg.capabilities.clone();
-                    self.swim.upsert_member(member).await;
-
-                    return Ok(Some(node_reg));
-                }
-                Ok(None) => return Ok(None),
-                Err(e) => {
-                    warn!("DB lookup failed, returning cache-only result: {}", e);
-                    return Ok(None);
-                }
+        // If SWIM explicitly knows this node as dead/left, it was intentionally removed —
+        // do not resurrect it from ObjectRegistry. Only catches declare_dead (concrete nodes);
+        // remove_member_silently (unknown nodes) deletes the entry entirely — those are cleaned
+        // from ObjectRegistry by unregister_discovered_node which resolves the stored namespace.
+        if let Some(member) = self.swim.get_member(target).await {
+            if !member.state.is_active() {
+                return Ok(None);
             }
         }
 
-        Ok(None)
+        // Cache miss and SWIM doesn't know about this node — check ObjectRegistry.
+        // This keeps lookup_node consistent with list_nodes which also consults ObjectRegistry
+        // regardless of shared-db mode. In shared-db mode use backoff for transient DB errors;
+        // in non-shared-db mode the ObjectRegistry is local so a single attempt suffices.
+        let system_ctx = self.system_registry_context(None).await;
+        let result: Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> =
+            if self.config.use_shared_db {
+                let object_registry = self.object_registry.clone();
+                let target_owned = target.to_string();
+                let ctx_clone = system_ctx.clone();
+
+                self.with_db_backoff("lookup", || {
+                    let registry = object_registry.clone();
+                    let ctx = ctx_clone.clone();
+                    let lookup_target = target_owned.clone();
+                    async move {
+                        Self::lookup_node_in_object_registry(&registry, &ctx, &lookup_target).await
+                    }
+                })
+                .await
+            } else {
+                Self::lookup_node_in_object_registry(
+                    &self.object_registry,
+                    &system_ctx,
+                    target,
+                )
+                .await
+            };
+
+        match result {
+            Ok(Some(obj_reg)) => {
+                let node_reg = Self::to_node_registration(&obj_reg);
+                self.update_cache(node_reg.node_id.as_str(), node_reg.clone())
+                    .await;
+
+                let mut member =
+                    SwimMember::new(obj_reg.object_id.clone(), obj_reg.grpc_address.clone());
+                member.metadata = node_reg.capabilities.clone();
+                self.swim.upsert_member(member).await;
+
+                Ok(Some(node_reg))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                warn!("ObjectRegistry lookup failed, returning cache-only result: {}", e);
+                Ok(None)
+            }
+        }
     }
 
     async fn register_node(
@@ -1680,7 +1720,7 @@ impl NodeRegistryTrait for NodeRegistry {
         _page_token: &str,
     ) -> Result<(Vec<NodeRegistration>, String), Box<dyn std::error::Error + Send + Sync>> {
         let local_cluster = Self::local_cluster_name(&self.service_locator).await;
-        let cluster_filter = cluster.or_else(|| {
+        let cluster_filter = cluster.or({
             if local_cluster.is_empty() {
                 None
             } else {
@@ -1797,7 +1837,7 @@ impl NodeRegistryTrait for NodeRegistry {
         {
             let mut cache = self.cache.write().await;
             if let Some(entry) = cache.get_mut(node_id) {
-                entry.registration.last_heartbeat = Some(heartbeat_timestamp.clone());
+                entry.registration.last_heartbeat = Some(heartbeat_timestamp);
             }
         }
 
@@ -1809,7 +1849,7 @@ impl NodeRegistryTrait for NodeRegistry {
         let object_registry = self.object_registry.clone();
         let node_id_owned = node_id.to_string();
         let capacity_clone = capacity.clone();
-        let heartbeat_timestamp_clone = heartbeat_timestamp.clone();
+        let heartbeat_timestamp_clone = heartbeat_timestamp;
         let system_ctx = self.system_registry_context(None).await;
 
         let refresh_result = if self.config.use_shared_db {
@@ -1818,7 +1858,7 @@ impl NodeRegistryTrait for NodeRegistry {
                 let ctx = system_ctx.clone();
                 let nid = node_id_owned.clone();
                 let cap = capacity_clone.clone();
-                let ts = heartbeat_timestamp_clone.clone();
+                let ts = heartbeat_timestamp_clone;
                 async move {
                     Self::refresh_node_heartbeat_in_registry(&registry, &ctx, &nid, ts, cap).await
                 }
@@ -1906,24 +1946,6 @@ impl NodeRegistryTrait for NodeRegistry {
     }
 }
 
-// Re-export for backward compatibility
-pub fn new(
-    object_registry: Arc<dyn ObjectRegistry>,
-    local_node_id: String,
-    cache_ttl_seconds: Option<u64>,
-    gossip_enabled: Option<bool>,
-    gossip_interval_ms: Option<u64>,
-    gossip_fanout: Option<usize>,
-) -> NodeRegistry {
-    NodeRegistry::new_simple(
-        object_registry,
-        local_node_id,
-        cache_ttl_seconds,
-        gossip_enabled,
-        gossip_interval_ms,
-        gossip_fanout,
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -2684,7 +2706,7 @@ mod tests {
         let ctx =
             RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
 
-        let (size, hits, ttl) = registry.cache_stats().await;
+        let (size, _hits, ttl) = registry.cache_stats().await;
         assert_eq!(size, 0);
         assert_eq!(ttl, Duration::from_secs(60));
 
@@ -3048,7 +3070,7 @@ mod tests {
 
         let registry = NodeRegistry::from_config(object_registry, &node_config, None);
 
-        assert_eq!(registry.local_node_id, "test-node-proto");
+        assert_eq!(registry.swim.local_node_id(), "test-node-proto");
         assert_eq!(registry.config.cache_ttl, Duration::from_secs(90));
         assert!(registry.config.gossip_enabled);
         assert_eq!(
@@ -3134,5 +3156,62 @@ mod tests {
             node_ids
         );
         assert_eq!(nodes.len(), 2, "expected 2 nodes, got: {:?}", node_ids);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_node_finds_object_registry_node_in_non_shared_db_mode() {
+        let object_repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let object_registry = Arc::new(ObjectRegistryImpl::new(object_repo));
+        let mut config = NodeRegistryConfig::default();
+        config.gossip_enabled = false;
+        config.use_shared_db = false;
+
+        let registry = NodeRegistry::new(
+            object_registry.clone(),
+            "local-node".to_string(),
+            "localhost:8000".to_string(),
+            config,
+            None,
+        );
+
+        // Use empty namespace — matches what system_registry_context(None) produces
+        // when no service_locator/cluster is configured (production nodes use cluster name).
+        let ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let now_ts = Timestamp { seconds: now_secs, nanos: 0 };
+        object_registry
+            .register(
+                &ctx,
+                ObjectRegistration {
+                    object_type: ObjectType::ObjectTypeNode as i32,
+                    object_id: "remote-node".to_string(),
+                    node_id: "remote-node".to_string(),
+                    grpc_address: "http://localhost:8001".to_string(),
+                    object_category: "Node".to_string(),
+                    last_heartbeat: Some(now_ts.clone()),
+                    updated_at: Some(now_ts),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let result = registry.lookup_node(&ctx, "remote-node").await.unwrap();
+        assert!(
+            result.is_some(),
+            "lookup_node must find remote-node via ObjectRegistry when not in SWIM/cache"
+        );
+        let reg = result.unwrap();
+        assert_eq!(reg.node_id, "remote-node");
+        assert_eq!(reg.node_address, "http://localhost:8001");
     }
 }

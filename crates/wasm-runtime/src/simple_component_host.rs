@@ -42,14 +42,11 @@ use plexspaces_proto::actor::v1::{
     BulkUpdateShardGroupRequest, CreateShardGroupRequest, MapShardGroupRequest,
     ReduceShardGroupRequest, ScatterGatherRequest, SpawnActorsRequest,
 };
-use plexspaces_proto::application::v1::{
-    ApplicationInfo, ApplicationMetrics, GetApplicationStatusResponse,
-};
-use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::application::v1::{ApplicationMetrics, GetApplicationStatusResponse};
 use plexspaces_proto::locks::prv::Lock as ProtoLock;
 use plexspaces_proto::pool::v1::{ActorHandle as PoolActorHandle, PoolMetrics as ProtoPoolMetrics};
 use plexspaces_proto::tuplespace::v1::{
-    ReadRequest, ReadResponse, Tuple as ProtoTuple, WriteRequest, WriteResponse,
+    ReadRequest, ReadResponse, Tuple as ProtoTuple, WriteRequest,
 };
 use plexspaces_proto::wasm::v1::{HttpFetchRequest, HttpFetchResponse};
 use plexspaces_tuplespace::{
@@ -1579,8 +1576,8 @@ impl plexspaces::actor::channels::Host for SimpleHostImpl {
 #[cfg(feature = "component-model")]
 pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> bool {
     let component_type = component.component_type();
-    for (name, _) in component_type.imports(&component.engine()) {
-        let n = format!("{}", name);
+    for (name, _) in component_type.imports(component.engine()) {
+        let n = name.to_string();
         // actor-world components import `plexspaces:actor/host@<version>` (slash, not `@` after package).
         // Match any package version so WIT bumps do not route TS/Python/Go components through native-actor.
         if n.starts_with("plexspaces:actor/host@") || n.starts_with("plexspaces:actor@") {
@@ -1603,7 +1600,10 @@ mod tests {
         ScatterGatherResponse, ScatterGatherStats, ShardGroup, ShardQueryResponse,
         SpawnActorRequest, SpawnActorsRequest, SpawnActorsResponse,
     };
-    use plexspaces_proto::application::v1::{ApplicationMetrics, GetApplicationStatusResponse};
+    use plexspaces_proto::application::v1::{
+        ApplicationInfo, ApplicationMetrics, GetApplicationStatusResponse,
+    };
+    use plexspaces_proto::common::v1::Message;
     use plexspaces_proto::wasm::v1::{HttpFetchRequest, HttpFetchResponse};
     use prost::Message as _;
     use std::sync::Arc;

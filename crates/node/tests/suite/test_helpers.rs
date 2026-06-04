@@ -304,12 +304,14 @@ pub async fn register_actor_with_message_sender(
     actor_registry
         .register_actor(
             &ctx,
-            actor_id.clone(),
-            wrapper,
-            actor_id.actor_type().to_string(),
-            None,
-            None,
-            None,
+            plexspaces_actor::ActorRegistrationParams {
+                actor_id: actor_id.clone(),
+                sender: wrapper,
+                actor_type: actor_id.actor_type().to_string(),
+                config: None,
+                instance: None,
+                behavior_kind: None,
+            },
         )
         .await;
 }

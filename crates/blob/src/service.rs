@@ -507,15 +507,23 @@ impl BlobService {
         ctx: &RequestContext,
         name: &str,
     ) -> BlobResult<Option<BlobMetadata>> {
-        // Use list with name_prefix filter to find exact match
         let filters = ListFilters {
             name_prefix: Some(name.to_string()),
             ..Default::default()
         };
-        let (blobs, _count) = self.repository.list(ctx, &filters, 100, 0).await?;
-
-        // Find exact name match (prefix filter might return more)
-        Ok(blobs.into_iter().find(|b| b.name == name))
+        // Paginate through prefix matches to find exact name
+        let mut offset = 0i64;
+        let page_size = 100i64;
+        loop {
+            let (blobs, _count) = self.repository.list(ctx, &filters, page_size, offset).await?;
+            if blobs.is_empty() {
+                return Ok(None);
+            }
+            if let Some(found) = blobs.into_iter().find(|b| b.name == name) {
+                return Ok(Some(found));
+            }
+            offset += page_size;
+        }
     }
 
     /// Download a blob by name (exact match)
@@ -786,17 +794,12 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
             kind: kind_filter.map(|s| s.to_string()),
             ..Default::default()
         };
-        // Fetch one extra to determine has_next without a separate count query
-        let fetch_limit = (limit + 1) as i64;
-        // Convert offset to page number (list_blobs uses 1-indexed pages)
-        let page = (offset as i64 / fetch_limit) + 1;
-        let page_offset = offset as i64 % fetch_limit;
-        // Simpler: use direct offset by fetching offset+limit+1 from page 1
+        // Fetch offset+limit+1 from page 1, then skip offset entries.
+        // The extra +1 determines has_next without a separate count query.
         let (mut blobs, _total) = self
             .list_blobs(ctx, &filters, (offset + limit + 1) as i64, 1)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        // Skip the offset entries
         if offset < blobs.len() {
             blobs.drain(..offset);
         } else {
@@ -804,8 +807,6 @@ impl plexspaces_actor::BlobServiceTrait for BlobService {
         }
         let has_next = blobs.len() > limit;
         blobs.truncate(limit);
-        let _ = page; // suppress unused warning
-        let _ = page_offset;
         Ok((blobs, has_next))
     }
 

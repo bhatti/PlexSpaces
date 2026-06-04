@@ -191,6 +191,7 @@ impl BlobService {
     /// * `metadata` - Optional metadata map
     /// * `tags` - Optional tags map
     /// * `expires_after` - Optional expiration duration
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload_blob(
         &self,
         ctx: &RequestContext,
@@ -236,9 +237,9 @@ impl BlobService {
             etag: String::new(),
             blob_group: blob_group.unwrap_or_default(),
             kind: kind.unwrap_or_default(),
-            metadata: metadata,
-            tags: tags,
-            expires_at: expires_at,
+            metadata,
+            tags,
+            expires_at,
             created_at: Some(datetime_to_timestamp(now)),
             updated_at: Some(datetime_to_timestamp(now)),
         };

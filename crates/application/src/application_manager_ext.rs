@@ -27,6 +27,7 @@ use plexspaces_proto::application::v1::ApplicationSpec;
 use std::sync::Arc;
 
 /// Extension trait for ApplicationManager with node-specific functionality
+#[allow(async_fn_in_trait)]
 pub trait ApplicationManagerExt {
     /// Get ApplicationSpec from application (if available)
     ///

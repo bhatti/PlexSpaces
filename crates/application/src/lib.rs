@@ -50,9 +50,6 @@ pub mod controller;
 // Re-export main types (ApplicationManager is the type alias above)
 pub use controller::ApplicationController;
 
-// SupervisorBuilder is now in plexspaces-actor crate
-// Re-export for backward compatibility
-pub use plexspaces_actor::ProtoSupervisorBuilder as SupervisorBuilder;
 
 pub mod child_spec_util;
 

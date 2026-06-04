@@ -25,7 +25,7 @@
 //!   (checkout on spawn, checkin on terminate). Requires binding actor_id and services on checkout
 //!   or creating pool instances with node-level services. See PROJECT_TRACKER.md.
 
-use crate::{WasmCapabilities, WasmConfig, WasmError, WasmInstance, WasmModule, WasmResult};
+use crate::{WasmConfig, WasmError, WasmInstance, WasmModule, WasmResult};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use wasmtime::{Engine, StoreLimitsBuilder};

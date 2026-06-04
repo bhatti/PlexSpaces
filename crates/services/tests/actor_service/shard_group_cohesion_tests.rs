@@ -21,7 +21,7 @@ use plexspaces_actor::Message;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
     ActorRegistry, BehaviorError, BehaviorType, InitializableServiceLocator, NodeRegistryTrait,
-    RequestContext, RequestContextExt, ServiceLocator,
+    RequestContext, RequestContextExt,
 };
 use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
@@ -83,7 +83,6 @@ async fn create_test_actor_service(
     Arc<ActorRegistry>,
     Arc<plexspaces_services::ServiceLocatorImpl>,
 ) {
-    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_node::create_default_service_locator;
 
     let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
@@ -206,13 +205,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn discover(
         &self,
         _ctx: &RequestContext,
-        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        _name: Option<String>,
-        _labels: Option<Vec<String>>,
-        _exclude_labels: Option<Vec<String>>,
-        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        _limit: usize,
-        _offset: usize,
+        _opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(vec![])
     }

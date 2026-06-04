@@ -940,7 +940,7 @@ impl ApplicationService for ApplicationServiceImpl {
                         start_timestamp_ms: app_info
                             .deployed_at
                             .as_ref()
-                            .map(|ts| (ts.seconds * 1000) as i64)
+                            .map(|ts| ts.seconds * 1000)
                             .unwrap_or(0),
                         supervisor_pid: None, // Supervisor PID not tracked yet
                         env,

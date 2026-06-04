@@ -116,12 +116,11 @@ mod tests {
                         Some(TrafficLightState::Red)
                     }
                     (_, TrafficLightEvent::Emergency) => Some(TrafficLightState::Red),
-                    _ => None,
                 }
             },
         );
 
-        let mut fsm = GenStateMachineBehavior::new(TrafficLightState::Red, transition_fn);
+        let fsm = GenStateMachineBehavior::new(TrafficLightState::Red, transition_fn);
 
         assert_eq!(fsm.behavior_type(), BehaviorType::GenStateMachine);
         assert_eq!(fsm.current_state(), &TrafficLightState::Red);

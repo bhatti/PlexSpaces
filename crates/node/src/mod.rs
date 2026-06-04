@@ -27,16 +27,16 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use plexspaces_actor::actor_context::ObjectRegistry;
-use plexspaces_actor::LinkProvider;
 use plexspaces_actor::{
-    ActorId, ActorRegistrationParams, ActorRegistry, ActorService,
+    ActorId, ActorRegistry,
     ApplicationManager as ApplicationManagerTrait, ExitReason, InitializableServiceLocator,
     ProcessResourceSampler, RequestContext, RequestContextExt,
     ServiceLocator as ServiceLocatorTrait,
 };
-use plexspaces_application::{Application, ApplicationError, ApplicationManager, ApplicationNode};
-use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
+#[cfg(test)]
+use plexspaces_actor::ActorRegistrationParams;
+use plexspaces_application::{ApplicationError, ApplicationManager, ApplicationNode};
+#[cfg(test)]
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::node::v1::{NodeCapabilities as ProtoNodeCapabilities, NodeMetrics};
 use plexspaces_service_traits::ServiceLocatorBase;
@@ -92,8 +92,6 @@ impl std::fmt::Display for NodeId {
 // MonitorLink is now defined in ActorRegistry (core crate)
 // Use plexspaces_actor::MonitorLink instead
 
-// Use proto-generated ActorLink instead of custom struct
-type ActorLink = ProtoActorLink;
 
 // VirtualActorMetadata and MonitorLink are now defined in ActorRegistry (core crate)
 // Re-export for convenience
@@ -512,12 +510,13 @@ impl Node {
     /// let actor_id = ActorId::from_canonical("counter//gen_server::default@my-node")?;
     /// let actor = node.spawn(&ctx, &actor_id, "GenServer", vec![], None, HashMap::new(), vec![]).await?;
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &self,
         ctx: &RequestContext,
         actor_id: &ActorId,
         actor_type: &str,
-        initial_state: Vec<u8>,
+        _initial_state: Vec<u8>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
@@ -758,7 +757,7 @@ impl Node {
                     .placement
                     .as_ref()
                     .and_then(|p| p.resource_requirements.as_ref());
-                if let Some(ref resources) = resources {
+                if let Some(resources) = resources {
                     allocated_cpu_cores += resources.cpu_cores;
                     allocated_memory_bytes += resources.memory_bytes;
                     allocated_disk_bytes += resources.disk_bytes;
@@ -1015,13 +1014,12 @@ impl Node {
             match object_registry
                 .discover(
                     &admin_ctx,
-                    Some(ObjectType::ObjectTypeActor),
-                    None,
-                    None,
-                    None,
-                    Some(status),
-                    0,
-                    10_000,
+                    plexspaces_object_registry::DiscoverOptions {
+                        object_type: Some(ObjectType::ObjectTypeActor),
+                        health_status: Some(status),
+                        limit: 10_000,
+                        ..Default::default()
+                    },
                 )
                 .await
             {
@@ -1333,10 +1331,8 @@ impl Node {
                 if let Ok(release_spec) = self.load_release_config().await {
                     self.set_release_spec(release_spec).await;
                     tracing::info!("Loaded release config from file or environment variable");
-                } else {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!("No release config found, using defaults");
-                    }
+                } else if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("No release config found, using defaults");
                 }
             }
         }
@@ -1555,9 +1551,9 @@ impl Node {
         // Start the Axum blob REST server only for non-embedded backends (s3, gcp, azure).
         // For "embedded", rustfs itself handles all HTTP on blob_http_port.
         let _blob_http_handle: Option<tokio::task::JoinHandle<()>> =
-            if blob_service.is_some() && blob_backend != "embedded" {
+            if let Some(blob_svc) = blob_service.as_ref().filter(|_| blob_backend != "embedded") {
                 use plexspaces_blob::server::http_axum::create_blob_router;
-                let router = create_blob_router(blob_service.as_ref().unwrap().clone());
+                let router = create_blob_router(blob_svc.clone());
 
                 let grpc_addr: std::net::SocketAddr = self
                     .config
@@ -2509,6 +2505,7 @@ impl Node {
     ///
     /// ## Arguments
     /// * `event` - The lifecycle event to publish
+    #[allow(dead_code)]
     async fn publish_lifecycle_event(&self, event: plexspaces_proto::ActorLifecycleEvent) {
         let actor_registry = match self.actor_registry().await {
             Ok(ar) => ar,
@@ -2722,7 +2719,6 @@ impl Node {
     /// let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), "my-app".to_string());
     /// node.application_manager().register(&ctx, app).await?;
     /// ```
-
     /// Gracefully shutdown the node and all applications
     ///
     /// ## Purpose
@@ -4486,9 +4482,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_remote_actor_node_not_connected() {
-        let node = Arc::new(NodeBuilder::new("node1").build().await);
+        let node = Arc::new(NodeBuilder::new("monitor-test-local").build().await);
 
-        // Try to monitor actor on unregistered remote node
+        // Try to monitor actor on a node that was never registered anywhere
         let ctx = node
             .service_locator()
             .request_context_for_system_operations()
@@ -4496,8 +4492,8 @@ mod tests {
         let result = node
             .monitor(
                 &ctx,
-                &test_runtime_actor_id("test-actor", "node2"),
-                &test_runtime_actor_id("supervisor", "node1"),
+                &test_runtime_actor_id("test-actor", "nonexistent-remote-node"),
+                &test_runtime_actor_id("supervisor", "monitor-test-local"),
             )
             .await;
 

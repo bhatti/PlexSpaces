@@ -44,13 +44,17 @@ pub enum ConfigLoaderError {
     /// File I/O error
     #[error("Failed to read config file '{path}': {source}")]
     IoError {
+        /// Path to the configuration file
         path: String,
+        /// Underlying IO error
         source: std::io::Error,
     },
     /// YAML parsing error
     #[error("Failed to parse YAML at '{path}': {error}")]
     YamlError {
+        /// Path to the YAML file
         path: String,
+        /// YAML parse error details
         error: serde_yaml::Error,
     },
     /// Security validation error
@@ -137,7 +141,7 @@ impl ConfigLoader {
 
         // Convert to proto ReleaseSpec
         let spec = convert_yaml_to_proto(yaml_release)
-            .map_err(|e| ConfigLoaderError::EnvSubstitutionError(e))?;
+            .map_err(ConfigLoaderError::EnvSubstitutionError)?;
 
         Ok(spec)
     }
@@ -223,46 +227,6 @@ impl ConfigLoader {
         Ok(())
     }
 
-    /// Validate security configuration in parsed spec (after substitution)
-    ///
-    /// This is a fallback check, but primary validation should be in YAML.
-    fn validate_security(&self, spec: &ReleaseSpec) -> Result<(), ConfigLoaderError> {
-        if let Some(ref runtime) = spec.runtime {
-            if let Some(ref security) = runtime.security {
-                // Check JWT config (direct in SecurityConfig)
-                if let Some(ref jwt) = security.jwt {
-                    // Validate JWT secret
-                    if !jwt.secret.is_empty() {
-                        // Check if it's an env var reference
-                        if !jwt.secret.starts_with("${") || !jwt.secret.ends_with("}") {
-                            return Err(ConfigLoaderError::SecurityError(
-                                "JWT secret must be an environment variable reference (e.g., ${JWT_SECRET}), not a hardcoded value".to_string(),
-                            ));
-                        }
-                    }
-                }
-
-                // Check mTLS config
-                if let Some(ref mtls) = security.mtls {
-                    // Validate mTLS cert paths (should be env vars or file paths, not hardcoded secrets)
-                    // For now, we just check that they're not empty if mTLS is enabled
-                    if mtls.enable_mtls && !mtls.auto_generate {
-                        if mtls.ca_certificate_path.is_empty()
-                            || mtls.server_certificate_path.is_empty()
-                            || mtls.server_key_path.is_empty()
-                        {
-                            return Err(ConfigLoaderError::SecurityError(
-                                "mTLS is enabled but certificate paths are not configured"
-                                    .to_string(),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl Default for ConfigLoader {

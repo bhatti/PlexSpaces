@@ -49,14 +49,14 @@
 //! - Sort Key: `field0_value` = "{field_value}"
 //! - Purpose: Efficient queries by first field
 
-use super::{TupleSpaceStorage, WatchEventMessage};
+use super::TupleSpaceStorage;
 use crate::{Pattern, Tuple, TupleSpaceError};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
     types::{
-        AttributeDefinition, AttributeValue, BillingMode, GlobalSecondaryIndex, KeySchemaElement,
-        KeyType, Projection, ProjectionType, ScalarAttributeType, TimeToLiveSpecification,
+        AttributeDefinition, AttributeValue, BillingMode, KeySchemaElement,
+        KeyType, ScalarAttributeType, TimeToLiveSpecification,
     },
     Client as DynamoDbClient,
 };
@@ -76,6 +76,7 @@ pub struct DynamoDBStorage {
     /// Table name
     table_name: String,
     /// Schema version
+    #[allow(dead_code)]
     schema_version: u32,
     /// Notify for blocking reads
     notify: Arc<Notify>,
@@ -711,7 +712,7 @@ impl TupleSpaceStorage for DynamoDBStorage {
                                 Ok(stored_tuple) => {
                                     if stored_tuple.fields() == tuple.fields() {
                                         if let Some(tuple_id_attr) = item.get("tuple_id") {
-                                            if let Ok(tuple_id) = tuple_id_attr.as_s() {
+                                            if let Ok(_tuple_id) = tuple_id_attr.as_s() {
                                                 // Delete the tuple
                                                 if let Some(pk_attr) = item.get("pk") {
                                                     if let Ok(pk) = pk_attr.as_s() {

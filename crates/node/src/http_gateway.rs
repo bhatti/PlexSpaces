@@ -44,16 +44,12 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Path, Query},
+    extract::Query,
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{Json, Response},
-    routing::{delete, get, post},
-    Router,
 };
 use serde_json::Value;
-use tokio::net::TcpListener;
-use tokio::task::JoinHandle;
 
 use plexspaces_actor::RequestContextExt;
 use plexspaces_services::actor_service::ActorServiceImpl;

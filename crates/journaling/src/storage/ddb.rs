@@ -98,7 +98,7 @@ use aws_sdk_dynamodb::{
 use chrono::Utc;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::timer::v1::ReminderState;
-use plexspaces_service_traits::{JournalError, JournalResult, JournalStorage};
+use plexspaces_service_traits::{JournalResult, JournalStorage};
 use prost::Message;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -112,6 +112,7 @@ pub struct DynamoDBJournalStorage {
     /// Table name prefix
     table_prefix: String,
     /// Schema version
+    #[allow(dead_code)]
     schema_version: u32,
 }
 

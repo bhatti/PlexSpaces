@@ -38,47 +38,64 @@ use tokio::sync::RwLock;
 
 use crate::executor::WorkflowExecutor;
 use crate::storage::WorkflowStorage;
-use crate::types::{
-    ExecutionStatus, WorkflowError, WorkflowExecutionExt, WorkflowExecutionOutputExt,
-};
+use crate::types::{ExecutionStatus, WorkflowError, WorkflowExecutionOutputExt};
 
 /// Message types for workflow control
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowMessage {
     /// Start a new workflow execution
     Start {
+        /// Workflow definition ID
         definition_id: String,
+        /// Workflow definition version
         definition_version: String,
+        /// Workflow input data
         input: Value,
     },
 
     /// Query workflow execution status
-    Query { execution_id: String },
+    Query {
+        /// Execution ID to query
+        execution_id: String,
+    },
 
     /// Cancel a running workflow
-    Cancel { execution_id: String },
+    Cancel {
+        /// Execution ID to cancel
+        execution_id: String,
+    },
 
     /// Send a signal to a waiting workflow
     Signal {
+        /// Execution ID to signal
         execution_id: String,
+        /// Signal name
         signal_name: String,
+        /// Signal payload
         payload: Value,
     },
 
     /// Resume a paused workflow
-    Resume { execution_id: String },
+    Resume {
+        /// Execution ID to resume
+        execution_id: String,
+    },
 }
 
 /// Response types from workflow operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowResponse {
     /// Workflow started successfully
-    Started { execution_id: String },
+    Started {
+        /// Execution ID of the started workflow
+        execution_id: String,
+    },
 
     /// Workflow status query response
     Status {
         /// Execution status as i32 (proto enum value)
         status_code: i32,
+        /// Optional workflow output value
         output: Option<Value>,
     },
 
@@ -92,7 +109,10 @@ pub enum WorkflowResponse {
     Resumed,
 
     /// Error occurred
-    Error { message: String },
+    Error {
+        /// Error message describing what went wrong
+        message: String,
+    },
 }
 
 impl WorkflowResponse {

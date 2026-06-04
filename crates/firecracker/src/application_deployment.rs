@@ -56,6 +56,7 @@ use crate::{FirecrackerVm, VmConfig};
 /// - VM contains entire application, not individual actors
 /// - Uses Firecracker for strong isolation with low overhead
 pub struct ApplicationDeployment {
+    #[allow(dead_code)] // Read in tests; will be used when VM deployment is fully wired
     application_id: String,
     vm_config: Option<VmConfig>,
 }

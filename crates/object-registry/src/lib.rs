@@ -146,13 +146,13 @@ use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use repository::{DiscoverFilter, ObjectRegistryRepository, RepositoryError};
 use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tracing::instrument;
 
 // Re-export commonly used types
+pub use plexspaces_actor::DiscoverOptions;
 pub use config::{create_repository_from_shared_db, create_repository_from_storage_config};
 
 #[cfg(feature = "sql-backend")]
@@ -439,7 +439,7 @@ impl ObjectRegistryImpl {
             seconds: now.timestamp(),
             nanos: now.timestamp_subsec_nanos() as i32,
         });
-        registration.updated_at = registration.created_at.clone();
+        registration.updated_at = registration.created_at;
 
         // Store via repository (upsert semantics)
         self.repository.put(ctx, &registration).await?;
@@ -593,26 +593,22 @@ impl ObjectRegistryImpl {
     ///
     /// ## Performance
     /// O(log n + k) using indexed columns for filtering
-    #[instrument(skip(self, ctx, capabilities, labels), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?object_type, offset = %offset, limit = %limit))]
+    #[instrument(skip(self, ctx, opts), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?opts.object_type, offset = %opts.offset, limit = %opts.limit))]
     pub async fn discover(
         &self,
         ctx: &RequestContext,
-        object_type: Option<ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<HealthStatus>,
-        offset: usize,
-        limit: usize,
+        opts: DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, ObjectRegistryError> {
         let filter = DiscoverFilter {
-            object_type,
-            object_category,
-            health_status,
-            labels,
-            capabilities,
+            object_type: opts.object_type,
+            object_category: opts.object_category,
+            health_status: opts.health_status,
+            labels: opts.labels,
+            capabilities: opts.capabilities,
             ..Default::default()
         };
+        let offset = opts.offset;
+        let limit = opts.limit;
 
         let results = self
             .repository
@@ -997,10 +993,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         let obj_type = object_type
             .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.lookup(ctx, obj_type, object_id).await.map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -1027,34 +1020,16 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
     async fn discover(
         &self,
         ctx: &RequestContext,
-        object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        offset: usize,
-        limit: usize,
+        opts: DiscoverOptions,
     ) -> Result<
         Vec<plexspaces_actor::actor_context::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
-        self.discover(
-            ctx,
-            object_type,
-            object_category,
-            capabilities,
-            labels,
-            health_status,
-            offset,
-            limit,
-        )
-        .await
-        .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
-        })
+        self.discover(ctx, opts)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn unregister(
@@ -1066,10 +1041,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.unregister(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1083,10 +1055,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.list_tenant_ids_by_object_type(ctx, object_type, offset, limit)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1098,10 +1067,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.count_tenant_ids_by_object_type(ctx, object_type)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1114,10 +1080,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.heartbeat(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1128,10 +1091,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
     ) -> Result<Option<plexspaces_actor::actor_context::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
     {
         self.lookup_by_alias(ctx, alias).await.map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -1144,10 +1104,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.register_with_unique_alias(ctx, registration, enforce_unique)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1159,10 +1116,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.record_heartbeat_failure(ctx, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1174,10 +1128,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.mark_objects_dead_by_node(ctx, node_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -1190,10 +1141,7 @@ impl plexspaces_actor::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.find_stale_heartbeats_raw(ctx, threshold_seconds, limit)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }
@@ -1387,13 +1335,11 @@ mod tests {
         let actors = registry
             .discover(
                 &ctx,
-                Some(ObjectType::ObjectTypeActor),
-                None,
-                None,
-                None,
-                None,
-                0,
-                100,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -1482,13 +1428,11 @@ mod tests {
         let unhealthy = registry
             .discover(
                 &ctx,
-                None,
-                None,
-                None,
-                None,
-                Some(HealthStatus::HealthStatusDead),
-                0,
-                100,
+                DiscoverOptions {
+                    health_status: Some(HealthStatus::HealthStatusDead),
+                    limit: 100,
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();

@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 use plexspaces_actor::actor_context::{
-    ActorService, ChannelService, FacetService, ProcessGroupService, TupleSpaceProvider,
+    ChannelService, FacetService, ProcessGroupService, TupleSpaceProvider,
 };
 use plexspaces_actor::Service;
 use plexspaces_common::ServiceNameExt;
@@ -41,8 +41,6 @@ use plexspaces_facet::Facet;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
-
-use futures::StreamExt;
 
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
@@ -472,7 +470,7 @@ impl FacetService for FacetServiceWrapper {
             .service_locator
             .get_facet_manager()
             .await
-            .ok_or_else(|| format!("FacetManager not found in ServiceLocator"))?;
+            .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
 
         if let Some(facets) = facet_manager.get_facets(actor_id).await {

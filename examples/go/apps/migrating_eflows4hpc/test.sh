@@ -29,7 +29,12 @@ if [ ! -f "$WASM_FILE" ]; then
   echo ""
 fi
 
-HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
+HTTP_CHECK="000"
+for _i in 1 2 3; do
+  HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
+  [ "$HTTP_CHECK" != "000" ] && break
+  sleep 2
+done
 if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Start node: ./scripts/server.sh (from repo root)${NC}"
   exit 1

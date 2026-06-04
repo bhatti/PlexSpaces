@@ -21,6 +21,7 @@ mod actor_integration_tests {
     use async_trait::async_trait;
     use plexspaces_actor::ActorInstance as ActorStruct;
     use plexspaces_actor::Message;
+    use plexspaces_facet::Facet;
     use plexspaces_actor::{
         Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
     };
@@ -29,7 +30,7 @@ mod actor_integration_tests {
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_journaling::*;
-    use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
+    use plexspaces_mailbox::{mailbox_config_default, Mailbox};
     use serde_json::Value as JsonValue;
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -140,7 +141,7 @@ mod actor_integration_tests {
         .await;
 
         // Attach DurabilityFacet (this will set ReplayHandler automatically)
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -193,7 +194,7 @@ mod actor_integration_tests {
         .await;
 
         // Attach DurabilityFacet again (ReplayHandler will be set, replay will happen)
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -253,7 +254,7 @@ mod actor_integration_tests {
         )
         .await;
 
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -318,7 +319,7 @@ mod actor_integration_tests {
         )
         .await;
 
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -382,7 +383,7 @@ mod actor_integration_tests {
         )
         .await;
 
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -446,7 +447,7 @@ mod actor_integration_tests {
         )
         .await;
 
-        let mut config_value = serde_json::json!({
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

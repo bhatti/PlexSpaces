@@ -48,7 +48,6 @@
 use crate::{Channel, ChannelError, InMemoryChannel};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use futures::StreamExt;
 use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, DeliveryGuarantee};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_service_traits::ChannelService;
@@ -230,6 +229,7 @@ impl ChannelService for ChannelServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use plexspaces_proto::common::v1::Message;
     use plexspaces_service_traits::ChannelService;
 

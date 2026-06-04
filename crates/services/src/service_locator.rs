@@ -123,11 +123,6 @@ fn fatal_exit(message: &str) -> ! {
         panic!("FATAL EXIT (test mode): {}", message);
     }
 
-    // Check for test mode environment variable (for integration tests)
-    if std::env::var("PLEXSPACES_TEST_MODE").is_ok() {
-        panic!("FATAL EXIT (test mode): {}", message);
-    }
-
     // Signal main thread via global channel (if registered)
     if let Some(tx_mutex) = FATAL_ERROR_TX.get() {
         if let Ok(mut tx_guard) = tx_mutex.lock() {
@@ -172,7 +167,7 @@ use plexspaces_actor::metrics_service_access::MetricsServiceAccess;
 use plexspaces_actor::monitoring::NodeConnectionInfo;
 use plexspaces_actor::JournalStorage;
 use plexspaces_actor::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-use plexspaces_actor::{InitializableServiceLocator, ServiceLocator};
+use plexspaces_actor::ServiceLocator;
 use plexspaces_common::RequestContextExt;
 use plexspaces_service_traits::ServiceLocatorBase;
 
@@ -252,30 +247,10 @@ impl ServiceStorage {
         }
 
         // Type name matches but downcast failed - this indicates TypeId mismatch
-        // Use unsafe extraction as fallback (safe because we verified type name matches)
-        unsafe {
-            // Safety: We've verified that type_name matches, so the stored type is T.
-            // We need to extract the data pointer from Arc<dyn Any> and create Arc<T> from it.
-            //
-            // Arc<dyn Any> is a pointer to a heap-allocated structure containing:
-            // - Reference count
-            // - vtable pointer (for dyn Any)
-            // - Data (of type T)
-            //
-            // Arc<T> is a pointer to a heap-allocated structure containing:
-            // - Reference count
-            // - Data (of type T)
-            //
-            // The data is at the same offset in both cases, but the vtable is different.
-            // We can't safely cast Arc<dyn Any> to Arc<T> because the memory layouts differ
-            // (trait objects have a vtable pointer that concrete types don't).
-            //
-            // Design note: This is intentional - services should be retrieved via typed methods
-            // like get_node_registry(), get_blob_service() which store services in typed fields.
-            // The generic registry is kept for backwards compatibility but new code should use
-            // the typed accessors.
-            None
-        }
+        // Design note: services should be retrieved via typed methods like get_node_registry(),
+        // get_blob_service() which store services in typed fields. The generic registry is kept
+        // for backwards compatibility but new code should use the typed accessors.
+        None
     }
 }
 
@@ -1287,32 +1262,15 @@ impl ServiceLocatorImpl {
     pub async fn create_channel(
         &self,
         config: plexspaces_proto::channel::v1::ChannelConfig,
-        ctx: &plexspaces_actor::RequestContext,
+        _ctx: &plexspaces_actor::RequestContext,
     ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
     {
-        use plexspaces_proto::channel::v1::ChannelProvider;
-
-        // Use provider from config (defaults to IN_MEMORY if 0)
-        // Provider is set by config_manager::initialize() based on RuntimeConfig.channel_provider
-        let provider = ChannelProvider::try_from(config.provider)
-            .unwrap_or(ChannelProvider::ChannelProviderInMemory);
-
-        // Validate provider-specific config
         self.validate_channel_config(&config)?;
 
-        // Create channel based on provider type
-        match provider {
-            ChannelProvider::ChannelProviderProcessGroup => {
-                self.create_process_group_channel(config, ctx).await
-            }
-            _ => {
-                // Use generic create_channel for other providers
-                let channel = plexspaces_channel::create_channel(config)
-                    .await
-                    .map_err(|e| format!("Failed to create channel: {}", e))?;
-                Ok(Arc::from(channel))
-            }
-        }
+        let channel = plexspaces_channel::create_channel(config)
+            .await
+            .map_err(|e| format!("Failed to create channel: {}", e))?;
+        Ok(Arc::from(channel))
     }
 
     /// Validate channel configuration for the specified provider
@@ -1369,42 +1327,6 @@ impl ServiceLocatorImpl {
         Ok(())
     }
 
-    /// Create a ProcessGroup-based channel
-    #[cfg(feature = "process-group-backend")]
-    async fn create_process_group_channel(
-        &self,
-        config: plexspaces_proto::channel::v1::ChannelConfig,
-        ctx: &plexspaces_actor::RequestContext,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
-    {
-        use plexspaces_channel::ProcessGroupChannel;
-
-        // Get self as Arc for ProcessGroupChannel
-        // Since we can't get Arc<Self> from &self, we create the channel differently
-        let process_group_service = self
-            .get_process_group_service()
-            .await
-            .ok_or("ProcessGroupService not available for ProcessGroup channel backend")?;
-
-        // Create ProcessGroupChannel using ServiceLocator
-        // Note: ProcessGroupChannel requires Arc<dyn ServiceLocator>, which we can't easily get from &self
-        // For now, return error suggesting to use plexspaces_channel::create_channel directly
-        Err("ProcessGroup channel creation via ServiceLocator not yet supported. Use plexspaces_channel::create_channel with explicit ServiceLocator".into())
-    }
-
-    /// Create a ProcessGroup-based channel (fallback when feature disabled)
-    #[cfg(not(feature = "process-group-backend"))]
-    async fn create_process_group_channel(
-        &self,
-        _config: plexspaces_proto::channel::v1::ChannelConfig,
-        _ctx: &plexspaces_actor::RequestContext,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
-    {
-        Err(
-            "ProcessGroup channel backend not enabled. Enable 'process-group-backend' feature"
-                .into(),
-        )
-    }
 }
 
 #[async_trait::async_trait]
@@ -2591,8 +2513,8 @@ mod tests {
     async fn test_multiple_services() {
         let locator = ServiceLocatorImpl::new();
 
-        let service_a = Arc::new(MockService { value: 10 });
-        let service_b = Arc::new(MockService { value: 20 });
+        let _service_a = Arc::new(MockService { value: 10 });
+        let _service_b = Arc::new(MockService { value: 20 });
 
         // Register different service types
         struct ServiceA;

@@ -33,13 +33,12 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 use plexspaces_actor::actor_context::{
-    ActorService, ChannelService, ProcessGroupService, TupleSpaceProvider,
+    ChannelService, ProcessGroupService, TupleSpaceProvider,
 };
 use plexspaces_actor::Service;
 use plexspaces_common::ServiceNameExt;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
-use std::time::Duration;
 
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 

@@ -115,9 +115,13 @@ pub struct RedisStorage {
 #[cfg(feature = "redis-backend")]
 #[derive(Debug, Clone)]
 pub struct RedisConfig {
+    /// Redis connection string (e.g., redis://localhost:6379)
     pub connection_string: String,
+    /// Connection pool size
     pub pool_size: u32,
+    /// Key prefix for namespacing
     pub key_prefix: String,
+    /// Enable pub/sub for watch operations
     pub enable_pubsub: bool,
 }
 
@@ -211,6 +215,7 @@ impl RedisStorage {
 
     /// Lua script for atomic take (scan + delete in single operation)
     /// This ensures that tuples are not taken by multiple clients simultaneously
+    #[allow(dead_code)]
     fn atomic_take_lua_script() -> &'static str {
         r#"
         local pattern = ARGV[1]

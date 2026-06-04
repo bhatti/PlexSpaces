@@ -266,7 +266,7 @@ impl NodeBuilder {
         mut self,
         connection_string: impl Into<String>,
     ) -> Self {
-        use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
+        use plexspaces_proto::node::v1::ReleaseSpec;
         use plexspaces_proto::storage::v1::SharedDbConfig;
         let connection_string = normalize_shared_db_connection_string(connection_string.into());
 

@@ -35,7 +35,8 @@
 //! ## Design Notes
 //! - All gRPC services consolidated here for easier management
 
-pub mod actor_factory_helpers;
+#![allow(clippy::result_large_err)]
+
 pub mod release_runtime_registration;
 pub mod service_locator;
 pub mod service_wrappers;

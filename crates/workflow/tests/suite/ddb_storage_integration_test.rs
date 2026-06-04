@@ -24,7 +24,8 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_actor::{RequestContext, RequestContextExt};
+    use plexspaces_actor::RequestContext;
+    use plexspaces_common::RequestContextExt;
     use plexspaces_workflow::types::{
         ExecutionStatus, StepExecutionExt, StepStatus, WorkflowExecutionExt,
     };
@@ -73,6 +74,7 @@ mod ddb_tests {
     }
 
     /// Helper to create a default test RequestContext with unique tenant ID
+    #[allow(dead_code)]
     fn default_ctx() -> RequestContext {
         use ulid::Ulid;
         let unique_id = Ulid::new().to_string();

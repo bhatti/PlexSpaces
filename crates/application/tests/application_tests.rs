@@ -5,13 +5,15 @@
 
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
+use plexspaces_proto::v1::application::HealthStatus;
 use std::sync::Arc;
 
 struct MockNode {
     id: String,
     addr: String,
+    #[allow(dead_code)]
     spawned_actors: Arc<std::sync::Mutex<Vec<String>>>,
+    #[allow(dead_code)]
     stopped_actors: Arc<std::sync::Mutex<Vec<String>>>,
 }
 

@@ -339,13 +339,15 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
         self.inner
             .discover(
                 ctx,
-                object_type_enum,
-                name,
-                None,
-                labels,
-                health_status_enum,
-                offset,
-                limit,
+                crate::DiscoverOptions {
+                    object_type: object_type_enum,
+                    object_category: name,
+                    labels,
+                    health_status: health_status_enum,
+                    offset,
+                    limit,
+                    ..Default::default()
+                },
             )
             .await
             .map_err(|e| e.to_string())
@@ -759,13 +761,7 @@ mod tests {
         async fn discover(
             &self,
             _ctx: &RequestContext,
-            _object_type: Option<ObjectType>,
-            _object_category: Option<String>,
-            _capabilities: Option<Vec<String>>,
-            _labels: Option<Vec<String>>,
-            _health_status: Option<HealthStatus>,
-            _offset: usize,
-            _limit: usize,
+            _opts: crate::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(Vec::new())
         }

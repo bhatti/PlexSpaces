@@ -23,7 +23,7 @@
 use plexspaces_proto::pool::v1::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::sync::{oneshot, watch, Mutex, RwLock, Semaphore};
+use tokio::sync::{oneshot, watch, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -140,7 +140,6 @@ pub struct ElasticPool {
     workers: Arc<RwLock<HashMap<String, Worker>>>, // Internal: actors in the pool
     available_workers: Arc<Mutex<VecDeque<String>>>, // Internal: available actor IDs
     checkout_queue: Arc<Mutex<VecDeque<CheckoutWaiter>>>,
-    semaphore: Arc<Semaphore>,
     metrics: Arc<RwLock<PoolMetrics>>,
     scaling_state: Arc<RwLock<ScalingState>>,
     last_scale_up: Arc<RwLock<Option<Instant>>>,
@@ -194,6 +193,7 @@ impl ElasticPool {
         }
 
         // Create shutdown channel for auto-scaler
+        #[cfg_attr(test, allow(unused_variables))]
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let mut pool = Self {
@@ -201,7 +201,6 @@ impl ElasticPool {
             workers: Arc::new(RwLock::new(HashMap::new())),
             available_workers: Arc::new(Mutex::new(VecDeque::new())),
             checkout_queue: Arc::new(Mutex::new(VecDeque::new())),
-            semaphore: Arc::new(Semaphore::new(config.max_size as usize)),
             metrics: Arc::new(RwLock::new(Self::initial_metrics(&config))),
             scaling_state: Arc::new(RwLock::new(ScalingState::ScalingStateStable)),
             last_scale_up: Arc::new(RwLock::new(None)),
@@ -357,7 +356,6 @@ impl ElasticPool {
 
     /// Actually checkout a specific actor
     async fn checkout_worker(&self, worker_id: String) -> Result<ActorHandle, ElasticPoolError> {
-        let now = Instant::now();
         let mut workers = self.workers.write().await;
 
         if let Some(worker) = workers.get_mut(&worker_id) {
@@ -371,12 +369,15 @@ impl ElasticPool {
 
             self.update_metrics().await;
 
+            let wall_clock = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default();
             Ok(ActorHandle {
                 actor_id: worker_id.clone(),
                 pool_name: self.config.name.clone(),
                 checkout_time: Some(prost_types::Timestamp {
-                    seconds: now.elapsed().as_secs() as i64,
-                    nanos: now.elapsed().subsec_nanos() as i32,
+                    seconds: wall_clock.as_secs() as i64,
+                    nanos: wall_clock.subsec_nanos() as i32,
                 }),
                 checkout_id: ulid::Ulid::new().to_string(),
                 metadata: HashMap::new(),
@@ -587,6 +588,7 @@ impl ElasticPool {
     }
 
     /// Start auto-scaler background task
+    #[allow(dead_code)]
     fn start_auto_scaler(&mut self, shutdown_rx: watch::Receiver<bool>) {
         let pool = ElasticPoolData {
             config: self.config.clone(),
@@ -607,6 +609,7 @@ impl ElasticPool {
 }
 
 /// Data needed by auto-scaler task
+#[allow(dead_code)]
 struct ElasticPoolData {
     config: PoolConfig,
     workers: Arc<RwLock<HashMap<String, Worker>>>,
@@ -619,6 +622,7 @@ struct ElasticPoolData {
 
 impl ElasticPoolData {
     /// Auto-scaler main loop
+    #[allow(dead_code)]
     async fn auto_scaler_loop(&self, mut shutdown_rx: watch::Receiver<bool>) {
         let interval = self
             .config
@@ -714,9 +718,6 @@ impl ElasticPoolData {
         let current_size = self.workers.read().await.len() as u32;
         let to_add = self.calculate_scale_amount(current_size, true);
 
-        // Batch all inserts under a single critical section so update_metrics() (which reads
-        // both workers and available_workers) cannot interleave and see an inconsistent state,
-        // and so we don't re-acquire the locks on every iteration.
         {
             let mut workers = self.workers.write().await;
             let mut available = self.available_workers.lock().await;
@@ -725,9 +726,10 @@ impl ElasticPoolData {
                 workers.insert(worker_id.clone(), Worker::new());
                 available.push_back(worker_id);
             }
-        } // workers and available released here
+        }
 
         *self.last_scale_up.write().await = Some(Instant::now());
+        self.refresh_metrics().await;
     }
 
     /// Scale down
@@ -735,18 +737,46 @@ impl ElasticPoolData {
         let current_size = self.workers.read().await.len() as u32;
         let to_remove = self.calculate_scale_amount(current_size, false);
 
-        // Remove available workers
-        let mut workers = self.workers.write().await;
-        let mut available = self.available_workers.lock().await;
-
-        for _ in 0..to_remove {
-            if let Some(worker_id) = available.pop_back() {
-                workers.remove(&worker_id);
+        {
+            let mut workers = self.workers.write().await;
+            let mut available = self.available_workers.lock().await;
+            for _ in 0..to_remove {
+                if let Some(worker_id) = available.pop_back() {
+                    workers.remove(&worker_id);
+                }
             }
         }
 
-        // Update state
         *self.last_scale_down.write().await = Some(Instant::now());
+        self.refresh_metrics().await;
+    }
+
+    /// Update metrics after scaling operations
+    async fn refresh_metrics(&self) {
+        let (total, busy, avail_len) = {
+            let workers = self.workers.read().await;
+            let available = self.available_workers.lock().await;
+            let mut total = 0u32;
+            let mut busy = 0u32;
+            for worker in workers.values() {
+                total += 1;
+                if worker.state == WorkerState::Busy {
+                    busy += 1;
+                }
+            }
+            (total, busy, available.len() as u32)
+        };
+        let scaling_state_i32 = self.scaling_state.read().await.clone() as i32;
+        let mut metrics = self.metrics.write().await;
+        metrics.total_actors = total;
+        metrics.available_actors = avail_len;
+        metrics.busy_actors = busy;
+        metrics.current_load = if total > 0 {
+            (busy as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        metrics.scaling_state = scaling_state_i32;
     }
 
     /// Calculate how many workers to add/remove
@@ -919,7 +949,6 @@ impl Clone for ElasticPool {
             workers: self.workers.clone(),
             available_workers: self.available_workers.clone(),
             checkout_queue: self.checkout_queue.clone(),
-            semaphore: self.semaphore.clone(),
             metrics: self.metrics.clone(),
             scaling_state: self.scaling_state.clone(),
             last_scale_up: self.last_scale_up.clone(),

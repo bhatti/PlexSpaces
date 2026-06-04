@@ -32,13 +32,11 @@
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
 use metrics;
-use plexspaces_actor::{SupervisionStrategy, Supervisor};
 use plexspaces_proto::application::v1::ApplicationSpec;
 use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::v1::application::HealthStatus;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 /// Production-quality application implementation from ApplicationSpec
@@ -707,12 +705,11 @@ impl SpecApplication {
     fn validate_supervisor_spec_static(
         app_name: &str,
         supervisor_spec: &SupervisorSpec,
-        has_behavior_factory: bool,
+        _has_behavior_factory: bool,
     ) -> Result<(), ApplicationError> {
         // Validate supervision strategy
         use plexspaces_proto::supervision::v1::SupervisionStrategy as ProtoSupervisionStrategy;
-        let strategy = ProtoSupervisionStrategy::try_from(supervisor_spec.strategy())
-            .unwrap_or(ProtoSupervisionStrategy::SupervisionStrategyUnspecified);
+        let strategy = supervisor_spec.strategy();
         if strategy == ProtoSupervisionStrategy::SupervisionStrategyUnspecified {
             return Err(ApplicationError::ConfigError(
                 "Supervisor spec has unspecified supervision strategy".to_string(),
@@ -736,9 +733,7 @@ impl SpecApplication {
 
             // Validate restart policy
             use plexspaces_proto::supervision::v1::RestartPolicy as ProtoRestartPolicy;
-            let restart_val = child.restart();
-            let restart = ProtoRestartPolicy::try_from(restart_val)
-                .unwrap_or(ProtoRestartPolicy::RestartPolicyUnspecified);
+            let restart = child.restart();
             if restart == ProtoRestartPolicy::RestartPolicyUnspecified {
                 return Err(ApplicationError::ConfigError(format!(
                     "Child '{}' at index {} has unspecified restart policy in application '{}'",
@@ -760,7 +755,7 @@ impl SpecApplication {
                     Self::validate_supervisor_spec_static(
                         app_name,
                         nested_spec,
-                        has_behavior_factory,
+                        _has_behavior_factory,
                     )?;
                 }
             }
@@ -793,6 +788,7 @@ mod tests {
         id: String,
         addr: String,
         spawned_actors: Arc<RwLock<Vec<String>>>,
+        #[allow(dead_code)]
         stopped_actors: Arc<RwLock<Vec<String>>>,
         service_locator: Arc<dyn plexspaces_actor::ServiceLocator>,
     }
@@ -823,6 +819,7 @@ mod tests {
             self.spawned_actors.read().await.clone()
         }
 
+        #[allow(dead_code)]
         async fn get_stopped_actors(&self) -> Vec<String> {
             self.stopped_actors.read().await.clone()
         }

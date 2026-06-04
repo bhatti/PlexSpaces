@@ -94,7 +94,7 @@ impl HealthChecker for EmbeddedObjectStoreHealthChecker {
 #[derive(Clone)]
 pub struct DynamoDBHealthChecker {
     region: String,
-    table_name: Option<String>,
+    _table_name: Option<String>,
     is_critical: bool,
 }
 
@@ -108,7 +108,7 @@ impl DynamoDBHealthChecker {
     pub fn new(region: String, table_name: Option<String>, is_critical: bool) -> Self {
         Self {
             region,
-            table_name,
+            _table_name: table_name,
             is_critical,
         }
     }
@@ -160,7 +160,7 @@ impl HealthChecker for DynamoDBHealthChecker {
 #[derive(Clone)]
 pub struct SQSHealthChecker {
     region: String,
-    queue_url: Option<String>,
+    _queue_url: Option<String>,
     is_critical: bool,
 }
 
@@ -174,7 +174,7 @@ impl SQSHealthChecker {
     pub fn new(region: String, queue_url: Option<String>, is_critical: bool) -> Self {
         Self {
             region,
-            queue_url,
+            _queue_url: queue_url,
             is_critical,
         }
     }

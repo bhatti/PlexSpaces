@@ -190,8 +190,6 @@ impl VirtualActorMetadata {
         VirtualActorManager::activation_strategy_from_facet_config(&facet_config)
     }
 
-    // --- backward-compat accessors (inline delegation to spec) ---
-
     /// Namespace for tenant isolation.
     pub fn namespace(&self) -> &str {
         &self.spec.namespace
@@ -1195,6 +1193,7 @@ mod tests {
     use std::sync::Arc;
 
     // Helper to wrap ObjectRegistry for ActorRegistry
+    #[allow(dead_code)]
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistryImpl>,
     }
@@ -1266,28 +1265,13 @@ mod tests {
         async fn discover(
             &self,
             ctx: &crate::RequestContext,
-            object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            object_category: Option<String>,
-            capabilities: Option<Vec<String>>,
-            labels: Option<Vec<String>>,
-            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            offset: usize,
-            limit: usize,
+            opts: crate::DiscoverOptions,
         ) -> Result<
             Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
             Box<dyn std::error::Error + Send + Sync>,
         > {
             self.inner
-                .discover(
-                    ctx,
-                    object_type,
-                    object_category,
-                    capabilities,
-                    labels,
-                    health_status,
-                    offset,
-                    limit,
-                )
+                .discover(ctx, opts)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }

@@ -121,8 +121,6 @@ pub trait DeclaredFacets {
 // ============================================================================
 
 #[cfg(feature = "native")]
-use plexspaces_actor::RequestContextExt as _;
-#[cfg(feature = "native")]
 pub use plexspaces_actor::{ActorBuilder, ActorRef};
 #[cfg(feature = "native")]
 pub use plexspaces_actor::{
@@ -833,9 +831,9 @@ pub use plexspaces_journaling::TimerFacet;
 /// Re-export VirtualActorFacet for Orleans-style virtual actor lifecycle
 /// Virtual actors are always addressable but activated on-demand
 #[cfg(feature = "native")]
-pub use plexspaces_journaling::{
-    ActivationStrategy, VirtualActorFacet, VirtualActorLifecycleState,
-};
+pub use plexspaces_journaling::{ActivationStrategy, VirtualActorFacet};
+#[cfg(feature = "native")]
+pub use plexspaces_facet::VirtualActorLifecycleState;
 
 /// Re-export DurabilityFacet for durable execution (journaling)
 #[cfg(feature = "native")]

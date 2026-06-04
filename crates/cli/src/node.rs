@@ -32,7 +32,6 @@ use tokio::signal;
 use tonic::transport::Channel;
 use tonic::Request;
 use tracing::{debug, info, warn};
-use tracing_subscriber;
 
 pub async fn status(node_addr: &str) -> Result<()> {
     let channel = Channel::from_shared(format!("http://{}", node_addr))

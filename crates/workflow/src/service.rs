@@ -214,7 +214,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         // Start execution using executor
         let execution_id =
-            WorkflowExecutor::start_execution(&*self.storage, &req.definition_id, version, input)
+            WorkflowExecutor::start_execution(&self.storage, &req.definition_id, version, input)
                 .await
                 .map_err(Self::workflow_error_to_status)?;
 
@@ -343,7 +343,7 @@ impl WorkflowService for WorkflowServiceImpl {
                 // Convert prost_types::Value to serde_json::Value
                 match v.kind {
                     Some(prost_types::value::Kind::StringValue(s)) => {
-                        serde_json::from_str(&s).unwrap_or_else(|_| Value::String(s))
+                        serde_json::from_str(&s).unwrap_or(Value::String(s))
                     }
                     Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(b),
                     Some(prost_types::value::Kind::NumberValue(n)) => Value::Number(
@@ -465,7 +465,6 @@ impl WorkflowService for WorkflowServiceImpl {
 mod tests {
     use super::*;
     use crate::storage::WorkflowStorage;
-    use plexspaces_proto::v1::common::Empty;
     use plexspaces_proto::workflow::v1::{
         CreateDefinitionRequest, DeleteDefinitionRequest, GetDefinitionRequest,
         GetExecutionRequest, GetStepExecutionsRequest, ListDefinitionsRequest,
@@ -919,7 +918,8 @@ mod tests {
 
         let response = result.unwrap().into_inner();
         // Step executions may be empty for simple workflows
-        assert!(response.step_executions.len() >= 0);
+        #[allow(unused_comparisons)]
+        let _ = response.step_executions.len() >= 0;
     }
 
     #[tokio::test]

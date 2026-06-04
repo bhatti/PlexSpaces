@@ -170,10 +170,3 @@ pub async fn invoke(node_addr: &str, actor_id: &str, payload: &str) -> Result<()
     Ok(())
 }
 
-/// List actors on a node
-pub async fn list(node_addr: &str) -> Result<()> {
-    // TODO: Implement actor listing
-    println!("📋 Listing actors on node: {}", node_addr);
-    println!("   (Not yet implemented)");
-    Ok(())
-}

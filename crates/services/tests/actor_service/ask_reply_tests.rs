@@ -13,11 +13,12 @@
 //! - Error cases (404, invalid args, etc.)
 
 use async_trait::async_trait;
+use plexspaces_common::RequestContextExt;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
 use plexspaces_actor::{
     behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorId, ActorRegistry,
     BehaviorError, BehaviorType, FacetManager, InitializableServiceLocator, Message,
-    ReplyWaiterRegistry, RequestContextExt, ServiceLocator as ServiceLocatorTrait,
+    ReplyWaiterRegistry,
     VirtualActorManager,
 };
 use plexspaces_actor::behavior::GenServer;
@@ -146,9 +147,10 @@ async fn create_test_registry_with_actors(
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
+    let _object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
     // Simple adapter
+    #[allow(dead_code)]
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistry>,
     }
@@ -208,13 +210,7 @@ async fn create_test_registry_with_actors(
         async fn discover(
             &self,
             _ctx: &plexspaces_actor::RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _name: Option<String>,
-            _labels: Option<Vec<String>>,
-            _exclude_labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _limit: usize,
-            _offset: usize,
+            _opts: plexspaces_service_traits::object_registry::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
@@ -356,12 +352,14 @@ async fn create_test_registry_with_actors(
         actor_registry
             .register_actor(
                 &ctx,
-                actor_id.clone(),
-                message_sender,
-                actor_type.to_string(),
-                None, // config
-                None, // instance
-                Some(BehaviorType::GenServer),
+                plexspaces_actor::ActorRegistrationParams {
+                    actor_id: actor_id.clone(),
+                    sender: message_sender,
+                    actor_type: actor_type.to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: Some(BehaviorType::GenServer),
+                },
             )
             .await;
     }

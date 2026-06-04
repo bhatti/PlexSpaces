@@ -116,6 +116,7 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+#![allow(clippy::result_large_err)]
 
 use async_trait::async_trait;
 
@@ -263,6 +264,7 @@ impl ActorServiceImpl {
         }
     }
 
+    /// Returns the service locator for this actor service
     pub fn service_locator(&self) -> Arc<ServiceLocatorImpl> {
         self.service_locator.clone()
     }
@@ -431,6 +433,7 @@ impl ActorServiceImpl {
         Ok(target_actor_id.to_string())
     }
 
+    /// Resolves a canonical actor ID from a client-supplied target string
     pub async fn canonical_actor_id_from_client_target(
         &self,
         ctx: &RequestContext,
@@ -965,7 +968,7 @@ impl ActorServiceImpl {
                 // When MessageSender.tell() is called, it eventually calls ActorRef::tell(),
                 // which checks ReplyWaiterRegistry for the correlation_id and routes to ReplyWaiter
                 // Try lookup with constructed ID first
-                let mut sender_opt = self
+                let sender_opt = self
                     .get_actor_registry()
                     .await
                     .lookup_actor(&actor_id_full)
@@ -1190,7 +1193,7 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        let message_id = message.id.clone();
+        let _message_id = message.id.clone();
 
         // Use unified routing module (returns Future, converts ActorRefError to Status)
         use plexspaces_actor::routing::route_message as routing_route_message;
@@ -3040,7 +3043,7 @@ impl ActorServiceImpl {
         let local_node_id = registry.local_node_id();
 
         let target_nodes = self
-            .resolve_shard_group_target_nodes(ctx, config.placement.as_ref(), &local_node_id)
+            .resolve_shard_group_target_nodes(ctx, config.placement.as_ref(), local_node_id)
             .await?;
 
         let actor_factory = self
@@ -3127,7 +3130,7 @@ impl ActorServiceImpl {
                     }
                 };
                 match actor_factory
-                    .spawn_actor(&ctx, &shard_spawn_spec, vec![])
+                    .spawn_actor(ctx, &shard_spawn_spec, vec![])
                     .await
                 {
                     Ok(_sender) => {
@@ -3267,10 +3270,10 @@ impl ActorServiceImpl {
         record_node_shard_groups_created(self.local_node_id.as_str());
 
         // Emit metrics
-        metrics::counter!("plexspaces_shard_group_created_total", 
+        metrics::counter!("plexspaces_shard_group_created_total",
             "group_id" => config.group_id.clone(),
             "actor_type" => req.actor_type.clone(),
-            "shard_count" => shard_count.to_string());
+            "shard_count" => shard_count.to_string()).increment(1);
 
         tracing::info!(
             group_id = %config.group_id,
@@ -3304,7 +3307,7 @@ impl ActorServiceImpl {
         let timeout = resolve_timeout(req.timeout.as_ref());
 
         // Group updates by shard_id
-        let total_updates = req.updates.len();
+        let _total_updates = req.updates.len();
         let mut updates_by_shard: std::collections::HashMap<u32, Vec<(String, Message)>> =
             std::collections::HashMap::new();
         for (partition_key_str, mut message) in req.updates {
@@ -3333,18 +3336,18 @@ impl ActorServiceImpl {
             message.receiver_id = shard_actor_id.clone();
             updates_by_shard
                 .entry(shard_id)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((partition_key_str, message));
         }
 
         // Send updates to shards in parallel (reuse existing logic from gRPC method)
         // TODO: Extract common parallel update logic
         let mut handles = Vec::new();
-        let mut shard_stats_map: std::collections::HashMap<u32, ShardUpdateStats> =
+        let _shard_stats_map: std::collections::HashMap<u32, ShardUpdateStats> =
             std::collections::HashMap::new();
 
         for (shard_id, updates) in updates_by_shard {
-            let shard_actor_id = group
+            let _shard_actor_id = group
                 .shard_actor_ids
                 .get(shard_id as usize)
                 .unwrap()
@@ -3576,7 +3579,7 @@ impl ActorServiceImpl {
             let tid = temp_sender_id.clone();
             let cid = correlation_id.clone();
             let sid = shard_actor_id.clone();
-            let mid = message_id.clone();
+            let _mid = message_id.clone();
             let t = timeout;
             // CRITICAL: Clone RequestContext for each task (tenant_id flows from API → ActorBuilder → ActorRef)
             let ctx_task = ctx.clone();
@@ -4121,7 +4124,7 @@ impl ActorServiceImpl {
                 values.push(select_collective_value(response, req.target.as_ref())?);
             }
         }
-        let reduced_value = reduce_values(values, req.reduction as i32)?;
+        let reduced_value = reduce_values(values, req.reduction)?;
         let result = build_collective_message(
             "collective",
             serde_json::to_vec(&reduced_value)?,
@@ -4145,7 +4148,7 @@ impl ActorServiceImpl {
         let reduce_req = ReduceShardGroupRequest {
             group_id: req.group_id.clone(),
             map_function: req.map_function.clone(),
-            timeout: req.timeout.clone(),
+            timeout: req.timeout,
             min_responses: req.min_responses,
             reduction: req.reduction,
             target: req.target.clone(),
@@ -4235,232 +4238,6 @@ impl ActorServiceImpl {
         Ok(Response::new(resp))
     }
 
-    #[allow(dead_code)]
-    async fn bulk_update_shard_group_old(
-        &self,
-        request: Request<BulkUpdateShardGroupRequest>,
-    ) -> Result<Response<BulkUpdateShardGroupResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        // Get group
-        let group = {
-            let groups = self.shard_groups.read().await;
-            groups
-                .get(&req.group_id)
-                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
-                .clone()
-        };
-
-        // Route updates to appropriate shards based on partition_key
-        use crate::actor_service::partition::calculate_shard_id;
-        use futures::future::join_all;
-
-        let timeout = resolve_timeout(req.timeout.as_ref());
-
-        // Group updates by shard_id
-        let mut updates_by_shard: std::collections::HashMap<u32, Vec<(String, Message)>> =
-            std::collections::HashMap::new();
-        for (partition_key_str, mut message) in req.updates {
-            let partition_key = partition_key_str.as_bytes();
-            let shard_id = calculate_shard_id(
-                partition_key,
-                shard_group_config(&group).partition_strategy,
-                shard_group_config(&group).shard_count,
-                None,
-            )
-            .map_err(|e| {
-                Status::invalid_argument(format!("Partition calculation failed: {}", e))
-            })?;
-
-            let shard_actor_id = group
-                .shard_actor_ids
-                .get(shard_id as usize)
-                .ok_or_else(|| Status::internal(format!("Invalid shard_id {}", shard_id)))?
-                .clone();
-
-            message.receiver_id = shard_actor_id.clone();
-            updates_by_shard
-                .entry(shard_id)
-                .or_insert_with(Vec::new)
-                .push((partition_key_str, message));
-        }
-
-        // Send updates to shards in parallel
-        let mut handles = Vec::new();
-        let mut shard_stats_map: std::collections::HashMap<u32, ShardUpdateStats> =
-            std::collections::HashMap::new();
-
-        for (shard_id, updates) in updates_by_shard {
-            let shard_actor_id = group
-                .shard_actor_ids
-                .get(shard_id as usize)
-                .unwrap()
-                .clone();
-            let service_locator = self.service_locator.clone();
-            let wait_for_responses = req.wait_for_responses;
-            let consistency_level = req.consistency_level;
-
-            let handle = tokio::spawn(async move {
-                let mut succeeded = 0u32;
-                let mut failed = 0u32;
-
-                // Send updates based on consistency level
-                // Clone updates for iteration (needed because updates is moved in first match arm)
-                let updates_clone = updates.clone();
-                match consistency_level {
-                    x if x
-                        == plexspaces_proto::v1::actor::ConsistencyLevel::ConsistencyLevelEventual
-                            as i32 =>
-                    {
-                        // Eventual consistency: send all updates, don't wait
-                        for (_key, message) in updates_clone {
-                            let actor_registry: Option<Arc<plexspaces_actor::ActorRegistry>> =
-                                service_locator.actor_registry().await;
-                            if let Some(registry) = actor_registry {
-                                if let Ok(receiver_id) =
-                                    ActorId::from_canonical(&message.receiver_id)
-                                {
-                                    let tell_ctx = RequestContext::new_without_auth(
-                                        String::new(),
-                                        receiver_id.namespace().to_string(),
-                                    );
-                                    if registry
-                                        .tell(&tell_ctx, &receiver_id, message)
-                                        .await
-                                        .is_ok()
-                                    {
-                                        succeeded += 1;
-                                    } else {
-                                        failed += 1;
-                                    }
-                                } else {
-                                    failed += 1;
-                                }
-                            } else {
-                                failed += 1;
-                            }
-                        }
-                    }
-                    _ => {
-                        // Stronger consistency: send sequentially or with coordination
-                        // For now, send sequentially (can be optimized later)
-                        for (_key, message) in updates_clone {
-                            let actor_registry: Option<Arc<plexspaces_actor::ActorRegistry>> =
-                                service_locator.actor_registry().await;
-                            if let Some(registry) = actor_registry {
-                                let receiver_id =
-                                    match ActorId::from_canonical(&message.receiver_id) {
-                                        Ok(receiver_id) => receiver_id,
-                                        Err(_) => {
-                                            failed += 1;
-                                            continue;
-                                        }
-                                    };
-                                if wait_for_responses {
-                                    let ask_ctx = RequestContext::new_without_auth(
-                                        String::new(),
-                                        String::new(),
-                                    );
-                                    if registry
-                                        .ask(
-                                            &ask_ctx,
-                                            &receiver_id,
-                                            message,
-                                            Duration::from_secs(5),
-                                        )
-                                        .await
-                                        .is_ok()
-                                    {
-                                        succeeded += 1;
-                                    } else {
-                                        failed += 1;
-                                    }
-                                } else {
-                                    let tell_ctx = RequestContext::new_without_auth(
-                                        String::new(),
-                                        receiver_id.namespace().to_string(),
-                                    );
-                                    if registry
-                                        .tell(&tell_ctx, &receiver_id, message)
-                                        .await
-                                        .is_ok()
-                                    {
-                                        succeeded += 1;
-                                    } else {
-                                        failed += 1;
-                                    }
-                                }
-                            } else {
-                                failed += 1;
-                            }
-                        }
-                    }
-                }
-
-                (shard_id, succeeded, failed, updates.len() as u32)
-            });
-            handles.push(handle);
-        }
-
-        // Wait for all updates to complete
-        let results = tokio::time::timeout(timeout, join_all(handles))
-            .await
-            .map_err(|_| Status::deadline_exceeded("Bulk update timeout"))?;
-
-        let mut total_sent = 0u32;
-        let mut total_succeeded = 0u32;
-        let mut total_failed = 0u32;
-        let mut shard_stats = Vec::new();
-
-        for result in results {
-            let (shard_id, succeeded, failed, sent) = result.unwrap_or((0, 0, 0, 0));
-            total_sent += sent;
-            total_succeeded += succeeded;
-            total_failed += failed;
-
-            let shard_actor_id = group
-                .shard_actor_ids
-                .get(shard_id as usize)
-                .cloned()
-                .unwrap_or_default();
-
-            shard_stats.push(ShardUpdateStats {
-                shard_id,
-                shard_actor_id,
-                updates_sent: sent,
-                updates_succeeded: succeeded,
-                updates_failed: failed,
-            });
-        }
-
-        // Emit metrics
-        metrics::counter!("plexspaces_bulk_update_shard_group_total",
-            "group_id" => req.group_id.clone());
-        metrics::histogram!("plexspaces_bulk_update_shard_group_updates",
-            "group_id" => req.group_id.clone())
-        .record(total_sent as f64);
-
-        Ok(Response::new(BulkUpdateShardGroupResponse {
-            updates_sent: total_sent,
-            updates_succeeded: total_succeeded,
-            updates_failed: total_failed,
-            shard_stats,
-            errors: Vec::new(), // TODO: Collect actual errors
-        }))
-    }
-}
-
-impl ActorServiceImpl {
-    /// Extract tenant_id from JWT claims in request metadata (x-tenant-id header set by JWT middleware).
-    fn extract_tenant_id_from_jwt(metadata: &tonic::metadata::MetadataMap) -> Option<String> {
-        // Try to get from x-tenant-id header (set by JWT middleware)
-        metadata
-            .get("x-tenant-id")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-    }
 }
 
 /// Newtype wrapper for Arc<ActorServiceImpl> to implement ActorServiceTrait
@@ -4753,6 +4530,7 @@ mod tests {
     }
 
     /// Simple wrapper to adapt ObjectRegistryImpl to ObjectRegistryTrait
+    #[allow(dead_code)]
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistryImpl>,
     }
@@ -4901,25 +4679,10 @@ mod tests {
         async fn discover(
             &self,
             ctx: &plexspaces_actor::RequestContext,
-            object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            object_category: Option<String>,
-            capabilities: Option<Vec<String>>,
-            labels: Option<Vec<String>>,
-            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            offset: usize,
-            limit: usize,
+            opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             self.inner
-                .discover(
-                    ctx,
-                    object_type,
-                    object_category,
-                    capabilities,
-                    labels,
-                    health_status,
-                    offset,
-                    limit,
-                )
+                .discover(ctx, opts)
                 .await
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                     Box::new(std::io::Error::new(

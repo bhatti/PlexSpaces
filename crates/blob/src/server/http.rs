@@ -35,7 +35,6 @@
 mod handlers {
     use crate::BlobError;
     use crate::BlobService;
-    use futures::stream;
     use http_body_util::{BodyExt, Full};
     use hyper::body::Bytes;
     use hyper::{Method, Request, Response, StatusCode};
@@ -152,7 +151,7 @@ mod handlers {
             };
 
             // Collect request body (now we can move req since we've extracted what we need)
-            let (parts, body) = req.into_parts();
+            let (_parts, body) = req.into_parts();
             let body_bytes = BodyExt::collect(body)
                 .await
                 .map_err(|e| {
@@ -252,14 +251,14 @@ mod handlers {
                 .blob_service
                 .upload_blob(
                     &ctx,
-                    &file_name,
-                    file_data,
-                    content_type_field,
-                    blob_group,
-                    kind,
-                    std::collections::HashMap::new(),
-                    std::collections::HashMap::new(),
-                    None,
+                    crate::UploadBlobParams {
+                        name: file_name,
+                        data: file_data,
+                        content_type: content_type_field,
+                        blob_group,
+                        kind,
+                        ..Default::default()
+                    },
                 )
                 .await?;
 

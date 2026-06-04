@@ -497,7 +497,7 @@ mod sqlite_tests {
 
         // Append events without sequence (should auto-increment)
         for i in 1..=5 {
-            let mut event = ActorEvent {
+            let event = ActorEvent {
                 id: ulid::Ulid::new().to_string(),
                 actor_id: "actor-1".to_string(),
                 sequence: 0, // Will be auto-assigned

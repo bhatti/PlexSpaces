@@ -36,7 +36,7 @@ use plexspaces_actor::supervisor::{
     SupervisedChild,
     SupervisionStrategy,
 };
-use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
+use plexspaces_actor::{ChildSpec, child_spec::{ShutdownSpec, StartedChild}, ProtoRestartPolicy, ActorInstance};
 use plexspaces_actor::{ActorId, ActorRef as CoreActorRef};
 use plexspaces_mailbox::{Mailbox, mailbox_config_default, OrderingStrategy, BackpressureStrategy};
 
@@ -70,8 +70,8 @@ fn supervisor_label(pool: &str, node_id: &str) -> String {
 /// Helper to create a ChildSpec from a sync factory
 fn create_child_spec(
     child_actor_id: ActorId,
-    factory: Arc<dyn Fn() -> Result<plexspaces_actor::Actor, plexspaces_actor::ActorError> + Send + Sync>,
-    restart: RestartStrategy,
+    factory: Arc<dyn Fn() -> Result<ActorInstance, plexspaces_actor::ActorError> + Send + Sync>,
+    restart: ProtoRestartPolicy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     let actor_ref = CoreActorRef::new(child_actor_id.clone()).expect("Failed to create actor ref");
@@ -174,7 +174,7 @@ impl Application for GenomicsPipelineApplication {
                         ))
                     })
                     .expect("Failed to create mailbox");
-                    Ok(plexspaces_actor::Actor::new(
+                    Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(QCWorker::new(child_actor_id_for_factory.name().to_string())),
                         mailbox,
@@ -183,7 +183,7 @@ impl Application for GenomicsPipelineApplication {
                         Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
-                RestartStrategy::Permanent,
+                ProtoRestartPolicy::RestartPolicyPermanent,
                 Some(5000),
             );
             qc_supervisor.add_child(spec).await.map_err(|e| {
@@ -223,7 +223,7 @@ impl Application for GenomicsPipelineApplication {
                         ))
                     })
                     .expect("Failed to create mailbox");
-                    Ok(plexspaces_actor::Actor::new(
+                    Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(AlignmentWorker::new(
                             child_actor_id_for_factory.name().to_string(),
@@ -234,7 +234,7 @@ impl Application for GenomicsPipelineApplication {
                         Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
-                RestartStrategy::Permanent,
+                ProtoRestartPolicy::RestartPolicyPermanent,
                 Some(5000),
             );
             alignment_supervisor.add_child(spec).await.map_err(|e| {
@@ -276,7 +276,7 @@ impl Application for GenomicsPipelineApplication {
                         ))
                     })
                     .expect("Failed to create mailbox");
-                    Ok(plexspaces_actor::Actor::new(
+                    Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(ChromosomeWorker::new(
                             child_actor_id_for_factory.name().to_string(),
@@ -288,7 +288,7 @@ impl Application for GenomicsPipelineApplication {
                         Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
-                RestartStrategy::Permanent,
+                ProtoRestartPolicy::RestartPolicyPermanent,
                 Some(5000),
             );
             variant_supervisor.add_child(spec).await.map_err(|e| {
@@ -331,7 +331,7 @@ impl Application for GenomicsPipelineApplication {
                         ))
                     })
                     .expect("Failed to create mailbox");
-                    Ok(plexspaces_actor::Actor::new(
+                    Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(AnnotationWorker::new(
                             child_actor_id_for_factory.name().to_string(),
@@ -342,7 +342,7 @@ impl Application for GenomicsPipelineApplication {
                         Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
-                RestartStrategy::Permanent,
+                ProtoRestartPolicy::RestartPolicyPermanent,
                 Some(5000),
             );
             annotation_supervisor.add_child(spec).await.map_err(|e| {
@@ -381,7 +381,7 @@ impl Application for GenomicsPipelineApplication {
                         ))
                     })
                     .expect("Failed to create mailbox");
-                    Ok(plexspaces_actor::Actor::new(
+                    Ok(ActorInstance::new(
                         child_actor_id_for_factory.clone(),
                         Box::new(ReportWorker::new(
                             child_actor_id_for_factory.name().to_string(),
@@ -392,7 +392,7 @@ impl Application for GenomicsPipelineApplication {
                         Some(node_id_for_factory.clone()), // node_id
                     ))
                 }),
-                RestartStrategy::Permanent,
+                ProtoRestartPolicy::RestartPolicyPermanent,
                 Some(5000),
             );
             report_supervisor.add_child(spec).await.map_err(|e| {

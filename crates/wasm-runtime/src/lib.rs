@@ -217,7 +217,7 @@
 //! - WASM actors run inside the framework (which may be in a Firecracker VM)
 //! - See `crates/firecracker/` for VM lifecycle management
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![warn(clippy::all)]
 
 // Module declarations

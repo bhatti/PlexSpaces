@@ -82,7 +82,7 @@ mod tests {
         let interceptor = AuthInterceptor::new(config).unwrap();
 
         // Create request with peer certificate
-        let mut headers = std::collections::HashMap::new();
+        let headers = std::collections::HashMap::new();
         let request = plexspaces_proto::grpc::v1::InterceptorRequest {
             method: "/ActorService/SpawnActor".to_string(),
             headers,

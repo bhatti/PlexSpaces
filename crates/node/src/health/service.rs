@@ -100,7 +100,7 @@ impl plexspaces_actor::Service for PlexSpacesHealthReporter {
 pub struct PlexSpacesHealthReporter {
     /// tonic-health reporter for standard gRPC health service
     /// This is used to update the standard grpc.health.v1.Health service status
-    reporter: Arc<tokio::sync::RwLock<HealthReporter>>,
+    _reporter: Arc<tokio::sync::RwLock<HealthReporter>>,
 
     /// Internal health state (proto-defined)
     state: Arc<RwLock<NodeHealthState>>,
@@ -207,7 +207,7 @@ impl PlexSpacesHealthReporter {
         };
 
         let health_reporter = Self {
-            reporter: Arc::new(tokio::sync::RwLock::new(reporter)),
+            _reporter: Arc::new(tokio::sync::RwLock::new(reporter)),
             state: Arc::new(RwLock::new(initial_state)),
             config: Arc::new(config),
             started_at: Instant::now(),
@@ -427,11 +427,8 @@ impl PlexSpacesHealthReporter {
         };
 
         // Build component checks (basic system components)
-        let mut component_checks = Vec::new();
-
-        // Add basic component health checks
         // Note: More detailed component checks can be added as needed
-        component_checks.push(HealthCheck {
+        let component_checks = vec![HealthCheck {
             component: "health_reporter".to_string(),
             status: HealthStatus::HealthStatusHealthy as i32,
             message: "Health reporter operational".to_string(),
@@ -441,7 +438,7 @@ impl PlexSpacesHealthReporter {
             }),
             response_time: None,
             details: std::collections::HashMap::new(),
-        });
+        }];
 
         DetailedHealthCheck {
             overall_status: overall_status as i32,
@@ -687,40 +684,6 @@ impl PlexSpacesHealthReporter {
 
     /// Update standard gRPC health status for all services
     ///
-    /// ## Arguments
-    /// * `status` - Serving status to set for all services
-    async fn update_standard_health_status(&self, status: ServingStatus) {
-        // Update internal service status tracking
-        // The standard gRPC health service will query our internal state
-        // via the custom health service implementation
-        // Convert enum to i32 first to avoid move issues
-        let status_i32 = status as i32;
-
-        // Helper to recreate enum from i32
-        let recreate_status = |i: i32| -> ServingStatus {
-            match i {
-                1 => ServingStatus::ServingStatusServing,
-                2 => ServingStatus::ServingStatusNotServing,
-                _ => ServingStatus::ServingStatusUnknown,
-            }
-        };
-
-        let mut service_status = self.service_status.write().await;
-        service_status.insert("".to_string(), recreate_status(status_i32)); // Overall health
-        service_status.insert(
-            "plexspaces.actor.v1.ActorService".to_string(),
-            recreate_status(status_i32),
-        );
-        service_status.insert(
-            "plexspaces.tuplespace.v1.TupleSpaceService".to_string(),
-            recreate_status(status_i32),
-        );
-        service_status.insert(
-            "plexspaces.supervisor.v1.SupervisorService".to_string(),
-            recreate_status(status_i32),
-        );
-    }
-
     /// Get current node readiness status (detailed diagnostics)
     ///
     /// ## Purpose

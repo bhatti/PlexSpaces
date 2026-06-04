@@ -62,7 +62,7 @@ pub async fn register_node(
         tenant_id: ctx.tenant_id().to_string(),
         namespace: ctx.namespace().to_string(),
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         labels: cluster_name
             .map(|c| vec![c.to_string()])
@@ -74,10 +74,7 @@ pub async fn register_node(
         .register(ctx, registration)
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -119,7 +116,7 @@ pub async fn register_workflow(
         tenant_id: ctx.tenant_id().to_string(),
         namespace: ctx.namespace().to_string(),
         health_status: HealthStatus::HealthStatusHealthy as i32,
-        created_at: Some(timestamp.clone()),
+        created_at: Some(timestamp),
         updated_at: Some(timestamp),
         ..Default::default()
     };
@@ -128,10 +125,7 @@ pub async fn register_workflow(
         .register(ctx, registration)
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })
 }
 
@@ -152,20 +146,16 @@ pub async fn discover_application_nodes(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeApplication),
-            Some(app_name.to_string()),
-            None, // capabilities
-            None, // labels
-            None, // health_status
-            0,    // offset
-            1000, // limit
+            plexspaces_object_registry::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeApplication),
+                object_category: Some(app_name.to_string()),
+                limit: 1000,
+                ..Default::default()
+            },
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     Ok(registrations)
@@ -188,20 +178,16 @@ pub async fn discover_workflow_nodes(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeWorkflow),
-            Some(definition_id.to_string()),
-            None, // capabilities
-            None, // labels
-            None, // health_status
-            0,    // offset
-            1000, // limit
+            plexspaces_object_registry::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeWorkflow),
+                object_category: Some(definition_id.to_string()),
+                limit: 1000,
+                ..Default::default()
+            },
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     Ok(registrations)

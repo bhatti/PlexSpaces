@@ -25,7 +25,6 @@
 //! - Create JWT tokens for API authentication (tenant_id, roles, groups, is_admin)
 
 use anyhow::{Context, Result};
-use clap::Args;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

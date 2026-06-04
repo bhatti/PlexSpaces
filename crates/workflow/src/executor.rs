@@ -201,7 +201,7 @@ impl WorkflowExecutor {
                         // Choice step: read decision from step execution output
                         let history = storage.get_step_execution_history(execution_id).await?;
                         let choice_execution =
-                            history.iter().filter(|s| s.step_id == step.id).last();
+                            history.iter().rfind(|s| s.step_id == step.id);
 
                         if let Some(exec) = choice_execution {
                             if let Some(output) = exec.output_value() {
@@ -494,7 +494,7 @@ impl WorkflowExecutor {
                     "result": n * factor
                 }))
             }
-            Some("succeed") | _ => {
+            _ => {
                 // Check if step has custom output defined in config
                 if let Some(custom_output) = config.get("output") {
                     // Use custom output from config (for tests)
@@ -617,7 +617,7 @@ impl WorkflowExecutor {
                 // Simulate delay if specified
                 if let Some(delay_ms) = branch_config
                     .get("delay_ms")
-                    .and_then(|v| Self::json_as_u64(v))
+                    .and_then(Self::json_as_u64)
                 {
                     sleep(Duration::from_millis(delay_ms)).await;
                 }
@@ -756,7 +756,7 @@ impl WorkflowExecutor {
         // Get max_concurrency limit (default: no limit)
         let max_concurrency = step_cfg_map
             .get("max_concurrency")
-            .and_then(|v| Self::json_as_u64(v))
+            .and_then(Self::json_as_u64)
             .unwrap_or(items.len() as u64) as usize;
 
         // Process items in batches to respect max_concurrency
@@ -807,7 +807,7 @@ impl WorkflowExecutor {
                     // Simulate delay if specified
                     let item_cfg = step_config_value(&item_step);
                     if let Some(delay_ms) =
-                        item_cfg.get("delay_ms").and_then(|v| Self::json_as_u64(v))
+                        item_cfg.get("delay_ms").and_then(Self::json_as_u64)
                     {
                         sleep(Duration::from_millis(delay_ms)).await;
                     }
@@ -1009,8 +1009,7 @@ impl WorkflowExecutor {
     ///
     /// Supports: $.field_name (extracts field from object)
     fn extract_variable(input: &Value, variable: &str) -> Value {
-        if variable.starts_with("$.") {
-            let field_name = &variable[2..]; // Remove "$."
+        if let Some(field_name) = variable.strip_prefix("$.") {
             input.get(field_name).cloned().unwrap_or(Value::Null)
         } else {
             // Direct field access
@@ -1081,7 +1080,7 @@ impl WorkflowExecutor {
         let wait_cfg = step_config_value(step);
         let wait_duration = if let Some(duration_ms) = wait_cfg
             .get("duration_ms")
-            .and_then(|v| Self::json_as_u64(v))
+            .and_then(Self::json_as_u64)
         {
             // Wait for milliseconds
             Duration::from_millis(duration_ms)
@@ -1193,7 +1192,7 @@ impl WorkflowExecutor {
         // Extract optional timeout
         let timeout_ms = signal_cfg
             .get("timeout_ms")
-            .and_then(|v| Self::json_as_u64(v));
+            .and_then(Self::json_as_u64);
 
         let poll_interval = Duration::from_millis(10); // Poll every 10ms
         let start_time = std::time::Instant::now();

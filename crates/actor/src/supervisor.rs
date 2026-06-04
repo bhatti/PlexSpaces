@@ -2844,6 +2844,7 @@ mod tests {
 
     /// Helper function to create a ChildSpec for tests
     /// Uses async factory pattern (ChildSpec standard)
+    #[allow(dead_code)]
     async fn create_child_spec(
         id: String,
         restart: crate::child_spec::ProtoRestartPolicy,

@@ -14,7 +14,6 @@ use plexspaces_proto::common::v1::{ActorIdentity, Facet as ProtoFacet};
 use plexspaces_proto::v1::actor::SpawnActorRequest;
 use plexspaces_services::actor_service::{ActorServiceImpl, ActorServiceWrapper};
 use plexspaces_services::ServiceLocatorImpl;
-use plexspaces_services::ServiceLocatorTrait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::Request;
@@ -37,9 +36,10 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
             .await
             .unwrap(),
     );
-    let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
+    let _object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
 
     // Create an adapter struct inline
+    #[allow(dead_code)]
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistryImpl>,
     }
@@ -106,13 +106,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
         async fn discover(
             &self,
             _ctx: &plexspaces_actor::RequestContext,
-            _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-            _name: Option<String>,
-            _labels: Option<Vec<String>>,
-            _exclude_labels: Option<Vec<String>>,
-            _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-            _limit: usize,
-            _offset: usize,
+            _opts: plexspaces_actor::DiscoverOptions,
         ) -> Result<
             Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
             Box<dyn std::error::Error + Send + Sync>,

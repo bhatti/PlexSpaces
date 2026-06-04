@@ -38,6 +38,33 @@ use std::collections::HashMap;
 
 use crate::types::*;
 
+/// Type alias for the execution query row tuple returned from SQL queries
+type ExecutionQueryRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<chrono::DateTime<chrono::Utc>>,
+);
+
+/// Type alias for the step execution query row tuple returned from SQL queries
+type StepExecutionQueryRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+);
+
 /// Database type for workflow storage
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseType {
@@ -157,10 +184,6 @@ fn prost_value_to_value(v: &prost_types::Value) -> Value {
     }
 }
 
-/// Get the `serde_json::Value` from an `Option<prost_types::Struct>`
-fn opt_struct_to_value(s: &Option<prost_types::Struct>) -> Option<Value> {
-    s.as_ref().map(struct_to_value)
-}
 
 /// Convert serde_json::Value to Option<prost_types::Struct>
 fn value_to_opt_struct(v: &Value) -> Option<prost_types::Struct> {
@@ -254,7 +277,7 @@ pub(crate) struct WorkflowExecutionRow {
     pub output: Option<Value>,
     pub error: Option<String>,
     pub node_id: Option<String>,
-    pub version: u64,
+    pub _version: u64,
     pub last_heartbeat: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -279,8 +302,8 @@ impl From<WorkflowExecutionRow> for WorkflowExecution {
             definition_version: row.definition_version,
             status: row.status as i32,
             current_step_id: row.current_step_id.unwrap_or_default(),
-            input: row.input.as_ref().and_then(|v| value_to_opt_struct(v)),
-            output: row.output.as_ref().and_then(|v| value_to_opt_struct(v)),
+            input: row.input.as_ref().and_then(value_to_opt_struct),
+            output: row.output.as_ref().and_then(value_to_opt_struct),
             error: row.error.unwrap_or_default(),
             node_id: row.node_id.unwrap_or_default(),
             created_at: None,
@@ -303,8 +326,8 @@ impl From<StepExecutionRow> for StepExecution {
             execution_id: row.execution_id,
             step_id: row.step_id,
             status: row.status as i32,
-            input: row.input.as_ref().and_then(|v| value_to_opt_struct(v)),
-            output: row.output.as_ref().and_then(|v| value_to_opt_struct(v)),
+            input: row.input.as_ref().and_then(value_to_opt_struct),
+            output: row.output.as_ref().and_then(value_to_opt_struct),
             error: row.error.unwrap_or_default(),
             attempt: row.attempt,
             started_at: None,
@@ -912,19 +935,7 @@ impl WorkflowStorage {
             node_id,
             version,
             last_heartbeat,
-        ): (
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            i64,
-            Option<chrono::DateTime<chrono::Utc>>,
-        ) = match &self.pool {
+        ): ExecutionQueryRow = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let row = sqlx::query(
                     r#"
@@ -1005,7 +1016,7 @@ impl WorkflowStorage {
                 .and_then(|s| serde_json::from_str(s).ok()),
             error,
             node_id,
-            version: version as u64,
+            _version: version as u64,
             last_heartbeat,
         })
     }
@@ -1424,16 +1435,7 @@ impl WorkflowStorage {
             output_json,
             error,
             attempt,
-        ): (
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            i64,
-        ) = match &self.pool {
+        ): StepExecutionQueryRow = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let row = sqlx::query(
                     r#"
@@ -1889,7 +1891,7 @@ impl WorkflowStorage {
                             .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
-                        version: version as u64,
+                        _version: version as u64,
                         last_heartbeat,
                     });
                 }
@@ -1959,7 +1961,7 @@ impl WorkflowStorage {
                             .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
-                        version: version as u64,
+                        _version: version as u64,
                         last_heartbeat,
                     });
                 }
@@ -2050,7 +2052,7 @@ impl WorkflowStorage {
                             .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
-                        version: version as u64,
+                        _version: version as u64,
                         last_heartbeat,
                     });
                 }
@@ -2111,7 +2113,7 @@ impl WorkflowStorage {
                             .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
-                        version: version as u64,
+                        _version: version as u64,
                         last_heartbeat,
                     });
                 }

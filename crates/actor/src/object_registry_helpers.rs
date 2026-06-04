@@ -452,13 +452,11 @@ pub async fn discover_nodes<T: ObjectRegistryTrait + ?Sized>(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeNode),
-            None, // object_category
-            None, // capabilities
-            None, // labels
-            None, // health_status
-            0,    // offset
-            1000, // limit
+            crate::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeNode),
+                limit: 1000,
+                ..Default::default()
+            },
         )
         .await?;
 
@@ -508,13 +506,12 @@ pub async fn discover_application_nodes<T: ObjectRegistryTrait + ?Sized>(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeApplication),
-            Some(app_name.to_string()),
-            None, // capabilities
-            None, // labels
-            None, // health_status
-            0,    // offset
-            1000, // limit
+            crate::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeApplication),
+                object_category: Some(app_name.to_string()),
+                limit: 1000,
+                ..Default::default()
+            },
         )
         .await?;
 
@@ -564,13 +561,12 @@ pub async fn discover_workflow_nodes<T: ObjectRegistryTrait + ?Sized>(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeWorkflow),
-            Some(definition_id.to_string()),
-            None, // capabilities
-            None, // labels
-            None, // health_status
-            0,    // offset
-            1000, // limit
+            crate::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeWorkflow),
+                object_category: Some(definition_id.to_string()),
+                limit: 1000,
+                ..Default::default()
+            },
         )
         .await?;
 
@@ -761,13 +757,12 @@ pub async fn discover_actors_by_type<T: ObjectRegistryTrait + ?Sized>(
     let registrations = object_registry
         .discover(
             ctx,
-            Some(ObjectType::ObjectTypeActor),
-            Some(actor_type.to_string()),
-            None,
-            None,
-            None,
-            0,
-            10_000,
+            crate::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeActor),
+                object_category: Some(actor_type.to_string()),
+                limit: 10_000,
+                ..Default::default()
+            },
         )
         .await?;
 

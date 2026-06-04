@@ -6,8 +6,8 @@
 use plexspaces_actor::{
     actor_context::ActorService as CoreActorSpawnService,
     actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext,
-    RequestContextExt,
 };
+use plexspaces_common::RequestContextExt;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
 use plexspaces_proto::common::v1::ActorIdentity;
@@ -111,13 +111,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn discover(
         &self,
         _ctx: &plexspaces_actor::RequestContext,
-        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        _name: Option<String>,
-        _labels: Option<Vec<String>>,
-        _exclude_labels: Option<Vec<String>>,
-        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        _limit: usize,
-        _offset: usize,
+        _opts: plexspaces_service_traits::object_registry::DiscoverOptions,
     ) -> Result<
         Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
@@ -164,7 +158,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 async fn test_spawn_actor_always_uses_local_node_id() {
     // Test: spawn_actor should always use local node_id, ignoring any node_id in actor_id
     use plexspaces_node::create_default_service_locator;
-    let object_repo = Arc::new(
+    let _object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap(),
@@ -271,7 +265,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 async fn test_spawn_actor_rejects_remote_node_id() {
     // Test: spawn_actor should reject actor_id with remote node_id
     use plexspaces_node::create_default_service_locator;
-    let object_repo = Arc::new(
+    let _object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap(),
@@ -322,7 +316,7 @@ async fn test_spawn_actor_design_principle() {
     // Test: Verify design principle - ActorService always creates locally
     // This test documents the design: to spawn on remote node, call that node's ActorService
     use plexspaces_node::create_default_service_locator;
-    let object_repo = Arc::new(
+    let _object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap(),
@@ -386,10 +380,9 @@ async fn test_spawn_actor_design_principle() {
 #[tokio::test]
 async fn test_spawn_actor_with_callback() {
     // Test: spawn_actor should work when callback is set
-    use plexspaces_actor::ActorRef;
     use std::sync::Arc;
 
-    let object_repo = Arc::new(
+    let _object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap(),

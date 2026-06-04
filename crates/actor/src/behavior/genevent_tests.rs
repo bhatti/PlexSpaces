@@ -59,7 +59,7 @@ mod tests {
     impl EventHandler for LoggingHandler {
         async fn handle_event(
             &mut self,
-            ctx: &crate::core::ActorContext,
+            _ctx: &crate::core::ActorContext,
             event: Message,
         ) -> Result<(), BehaviorError> {
             let payload = String::from_utf8_lossy(&event.payload);

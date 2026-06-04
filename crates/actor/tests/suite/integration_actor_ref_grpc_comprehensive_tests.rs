@@ -92,25 +92,10 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn discover(
         &self,
         ctx: &plexspaces_actor::RequestContext,
-        object_type: Option<ObjectType>,
-        object_category: Option<String>,
-        capabilities: Option<Vec<String>>,
-        labels: Option<Vec<String>>,
-        health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        limit: usize,
-        offset: usize,
+        opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .discover(
-                ctx,
-                object_type,
-                object_category,
-                capabilities,
-                labels,
-                health_status,
-                limit,
-                offset,
-            )
+            .discover(ctx, opts)
             .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(

@@ -50,6 +50,7 @@ use tonic::{Request, Response, Status};
 
 /// Firecracker VM Service implementation
 #[cfg(feature = "firecracker")]
+#[derive(Default)]
 pub struct FirecrackerVmServiceImpl {
     /// Active VMs by VM ID
     vms: Arc<RwLock<HashMap<String, Arc<RwLock<FirecrackerVm>>>>>,
@@ -59,9 +60,7 @@ pub struct FirecrackerVmServiceImpl {
 impl FirecrackerVmServiceImpl {
     /// Create new Firecracker VM Service
     pub fn new() -> Self {
-        Self {
-            vms: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self::default()
     }
 }
 
@@ -85,7 +84,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         let config = VmConfig {
             vm_id: vm_id.clone(),
             vcpu_count: vm_config.vcpu_count as u8,
-            mem_size_mib: vm_config.mem_size_mib as u32,
+            mem_size_mib: vm_config.mem_size_mib,
             ..Default::default()
         };
 

@@ -3,4 +3,5 @@
 
 // Placeholder for Redis journaling storage
 
+/// Placeholder Redis journaling storage (not yet implemented).
 pub struct RedisJournalStorage;

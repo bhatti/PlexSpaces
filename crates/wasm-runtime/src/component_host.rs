@@ -22,7 +22,7 @@
 
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
-use plexspaces_actor::{ActorId, RequestContext, RequestContextExt, TupleSpaceProvider};
+use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
 use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
 
@@ -71,25 +71,9 @@ fn make_actor_error(code: &str, message: impl Into<String>) -> String {
 }
 
 #[cfg(feature = "component-model")]
-fn make_actor_error_with_details(
-    code: &str,
-    message: impl Into<String>,
-    details: impl Into<String>,
-) -> String {
-    let msg = message.into();
-    let det = details.into();
-    format!(
-        r#"{{"code":"{}","message":"{}","details":"{}"}}"#,
-        code,
-        msg.replace('"', "\\\""),
-        det.replace('"', "\\\"")
-    )
-}
-
 /// Host implementation for plexspaces host interfaces
 ///
 /// This struct holds the state needed to implement plexspaces host functions.
-#[cfg(feature = "component-model")]
 pub struct PlexspacesHost {
     /// Actor ID of the component instance
     pub actor_id: ActorId,
@@ -301,17 +285,20 @@ impl plexspaces::actor::logging::Host for LoggingImpl {
 }
 
 #[cfg(feature = "component-model")]
+type PendingAsksMap = Arc<
+    tokio::sync::RwLock<
+        std::collections::HashMap<String, (String, tokio::sync::oneshot::Sender<Vec<u8>>)>,
+    >,
+>;
+
+#[cfg(feature = "component-model")]
 pub struct MessagingImpl {
     pub actor_id: ActorId,
     pub host_functions: Arc<HostFunctions>,
     /// Active timers: timer_id -> join handle for cancellation
     timers: Arc<tokio::sync::RwLock<std::collections::HashMap<u64, tokio::task::JoinHandle<()>>>>,
     /// Pending ask requests: correlation_id -> (sender_id, reply_tx)
-    pending_asks: Arc<
-        tokio::sync::RwLock<
-            std::collections::HashMap<String, (String, tokio::sync::oneshot::Sender<Vec<u8>>)>,
-        >,
-    >,
+    pending_asks: PendingAsksMap,
     /// Monitor references: monitor_ref_u64 -> (target_id, monitor_ref_string)
     monitor_refs: Arc<tokio::sync::RwLock<std::collections::HashMap<u64, (ActorId, String)>>>,
 }
@@ -892,7 +879,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             monitor_refs.get(&monitor_ref).cloned()
         };
 
-        if let Some((target_id, monitor_ref_string)) = monitor_info {
+        if let Some((target_id, _monitor_ref_string)) = monitor_info {
             // Remove from mapping
             {
                 let mut monitor_refs = self.monitor_refs.write().await;
@@ -1052,15 +1039,13 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                     error = %e,
                     "Failed to deliver scheduled message"
                 );
-            } else {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %actor_id_clone,
-                        timer_id = timer_id,
-                        msg_type = %msg_type_clone,
-                        "Scheduled message delivered"
-                    );
-                }
+            } else if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    actor_id = %actor_id_clone,
+                    timer_id = timer_id,
+                    msg_type = %msg_type_clone,
+                    "Scheduled message delivered"
+                );
             }
 
             // Remove timer from tracking when it completes
@@ -1282,7 +1267,7 @@ impl TuplespaceImpl {
 impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
     async fn write(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         tuple_data: plexspaces::actor::types::TupleData,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
@@ -1339,7 +1324,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn write_with_ttl(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         tuple_data: plexspaces::actor::types::TupleData,
         ttl_ms: u64,
     ) -> Result<(), plexspaces::actor::types::ActorError> {
@@ -1403,7 +1388,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn read(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
     ) -> Result<Option<plexspaces::actor::types::TupleData>, plexspaces::actor::types::ActorError>
     {
@@ -1461,7 +1446,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn read_blocking(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
         timeout_ms: u64,
     ) -> Result<Option<plexspaces::actor::types::TupleData>, plexspaces::actor::types::ActorError>
@@ -1541,7 +1526,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn read_all(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
         limit: u32,
     ) -> Result<Vec<plexspaces::actor::types::TupleData>, plexspaces::actor::types::ActorError>
@@ -1606,7 +1591,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn take(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
     ) -> Result<Option<plexspaces::actor::types::TupleData>, plexspaces::actor::types::ActorError>
     {
@@ -1665,7 +1650,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn take_blocking(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
         timeout_ms: u64,
     ) -> Result<Option<plexspaces::actor::types::TupleData>, plexspaces::actor::types::ActorError>
@@ -1747,7 +1732,7 @@ impl plexspaces::actor::tuplespace::Host for TuplespaceImpl {
 
     async fn count(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         pattern_data: plexspaces::actor::types::Pattern,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
@@ -2164,8 +2149,6 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         // Get BlobService from host_functions
         let blob_service = self.host_functions.blob_service();
         if let Some(blob_service) = blob_service {
-            use plexspaces_blob::repository::ListFilters;
-
             // Create RequestContext from context (empty strings use defaults)
             let request_ctx = context_to_request_context(&ctx);
 
@@ -2432,8 +2415,8 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         &mut self,
         ctx: plexspaces::actor::types::Context,
         blob_id: String,
-        bucket: String,
-        key: String,
+        _bucket: String,
+        _key: String,
     ) -> Result<bool, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_blob_exists_total").increment(1);
 
@@ -2598,7 +2581,7 @@ impl plexspaces::actor::blob::Host for BlobImpl {
         ctx: plexspaces::actor::types::Context,
         blob_id: String,
         bucket: String,
-        key: String,
+        _key: String,
     ) -> Result<plexspaces::actor::blob::BlobMetadata, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_blob_metadata_total").increment(1);
 
@@ -2844,11 +2827,11 @@ pub struct WorkflowImpl;
 impl plexspaces::actor::workflow::Host for WorkflowImpl {
     async fn start_workflow(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         workflow_type: String,
         workflow_id: Option<String>,
         input: plexspaces::actor::types::Payload,
-        options: plexspaces::actor::workflow::WorkflowOptions,
+        _options: plexspaces::actor::workflow::WorkflowOptions,
     ) -> Result<String, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_workflow_start_total").increment(1);
@@ -2882,7 +2865,7 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
     async fn signal_workflow(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         workflow_id: String,
         signal_name: String,
         payload: plexspaces::actor::types::Payload,
@@ -2917,7 +2900,7 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
     async fn query_workflow(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         workflow_id: String,
         query_type: String,
     ) -> Result<plexspaces::actor::types::Payload, plexspaces::actor::types::ActorError> {
@@ -2946,7 +2929,7 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
     async fn await_workflow(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         workflow_id: String,
         timeout_ms: u64,
     ) -> Result<plexspaces::actor::types::Payload, plexspaces::actor::types::ActorError> {
@@ -2979,10 +2962,10 @@ impl plexspaces::actor::workflow::Host for WorkflowImpl {
 
     async fn schedule_activity(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         activity_type: String,
         input: plexspaces::actor::types::Payload,
-        options: plexspaces::actor::workflow::ActivityOptions,
+        _options: plexspaces::actor::workflow::ActivityOptions,
     ) -> Result<plexspaces::actor::types::Payload, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_workflow_schedule_activity_total").increment(1);
@@ -3059,7 +3042,7 @@ impl DurabilityImpl {
 impl plexspaces::actor::durability::Host for DurabilityImpl {
     async fn persist(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         event_type: String,
         payload: plexspaces::actor::types::Payload,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
@@ -3137,7 +3120,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn persist_batch(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         events: Vec<(String, plexspaces::actor::types::Payload)>,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
@@ -3317,7 +3300,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn get_sequence(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_durability_get_sequence_total").increment(1);
 
@@ -3349,7 +3332,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn get_checkpoint_sequence(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_durability_get_checkpoint_sequence_total").increment(1);
 
@@ -3380,7 +3363,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn is_replaying(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
     ) -> Result<bool, plexspaces::actor::types::ActorError> {
         metrics::counter!("plexspaces_wasm_durability_is_replaying_total").increment(1);
         let replaying = *self.is_replaying.read().await;
@@ -3389,7 +3372,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn cache_side_effect(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         key: String,
         result_value: plexspaces::actor::types::Payload,
     ) -> Result<plexspaces::actor::types::Payload, plexspaces::actor::types::ActorError> {
@@ -3487,7 +3470,7 @@ impl plexspaces::actor::durability::Host for DurabilityImpl {
 
     async fn read_journal(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         from_sequence: u64,
         to_sequence: u64,
         limit: u32,
@@ -4103,7 +4086,7 @@ impl plexspaces::actor::keyvalue::Host for KeyValueImpl {
 
     async fn watch(
         &mut self,
-        ctx: plexspaces::actor::types::Context,
+        _ctx: plexspaces::actor::types::Context,
         key: String,
     ) -> Result<u64, plexspaces::actor::types::ActorError> {
         let start_time = std::time::Instant::now();
@@ -4224,11 +4207,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_process_groups_create_group_errors_total")
                     .increment(1);
-                let error_code = if e.to_string().contains("already exists") {
-                    "internal"
-                } else {
-                    "internal"
-                };
+                let error_code = "internal";
                 tracing::warn!(group_name = %group_name, namespace = %namespace, error = %e, "ProcessGroup create_group failed");
                 Err(make_actor_error(
                     error_code,
@@ -4743,11 +4722,7 @@ impl plexspaces::actor::locks::Host for LocksImpl {
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_locks_acquire_errors_total").increment(1);
-                let error_code = if e.to_string().contains("already held") {
-                    "internal"
-                } else {
-                    "internal"
-                };
+                let error_code = "internal";
                 tracing::warn!(lock_key = %lock_key, holder_id = %holder_id, error = %e, "Lock acquire failed");
                 Err(make_actor_error(
                     error_code,
@@ -5274,13 +5249,14 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
 
         match registry.discover(
             &request_ctx,
-            object_type_opt,
-            category_opt,
-            caps_opt,
-            labels_opt,
-            None,
-            0,
-            page_size,
+            plexspaces_actor::DiscoverOptions {
+                object_type: object_type_opt,
+                object_category: category_opt,
+                capabilities: caps_opt,
+                labels: labels_opt,
+                limit: page_size,
+                ..Default::default()
+            },
         ).await {
             Ok(registrations) => {
                 metrics::counter!("plexspaces_wasm_registry_discover_success_total").increment(1);

@@ -471,13 +471,15 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
         self.inner
             .discover(
                 ctx,
-                object_type_enum,
-                name,
-                None,
-                labels,
-                health_status_enum,
-                offset,
-                limit,
+                plexspaces_actor::DiscoverOptions {
+                    object_type: object_type_enum,
+                    object_category: name,
+                    capabilities: None,
+                    labels,
+                    health_status: health_status_enum,
+                    offset,
+                    limit,
+                },
             )
             .await
             .map_err(|e| e.to_string())

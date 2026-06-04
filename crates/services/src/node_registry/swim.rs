@@ -60,13 +60,8 @@ use tracing::{debug, info, instrument, trace, warn};
 // Metrics Keys - Centralized for consistency
 // ============================================================================
 
-/// Metrics namespace prefix
-const METRICS_PREFIX: &str = "plexspaces_swim";
-
 /// Metric: Total members in cluster
 const METRIC_MEMBERS_TOTAL: &str = "plexspaces_swim_members_total";
-/// Metric: Members by state (alive, suspect, dead)
-const METRIC_MEMBERS_BY_STATE: &str = "plexspaces_swim_members_by_state";
 /// Metric: Direct pings sent
 const METRIC_DIRECT_PINGS: &str = "plexspaces_swim_direct_pings_total";
 /// Metric: Direct ping successes

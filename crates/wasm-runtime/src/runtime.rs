@@ -7,7 +7,6 @@
 
 use crate::{WasmConfig, WasmError, WasmResult};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
 use wasmtime::{Engine, Module};
@@ -174,6 +173,7 @@ impl WasmRuntime {
         wasmtime_config.allocation_strategy(wasmtime::InstanceAllocationStrategy::OnDemand);
 
         // Pooling is disabled - the condition below never executes
+        #[allow(clippy::overly_complex_bool_expr)]
         if config.enable_pooling && false {
             let mut pooling = wasmtime::PoolingAllocationConfig::default();
             pooling.max_memory_size(config.limits.max_memory_bytes as usize);
@@ -268,7 +268,7 @@ impl WasmRuntime {
 
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
-        let module = match Module::new(&self.engine, bytes) {
+        match Module::new(&self.engine, bytes) {
             Ok(m) => {
                 // Successfully parsed as traditional module
                 // Use it as a module (not a component)
@@ -306,7 +306,7 @@ impl WasmRuntime {
                     "WASM module loaded successfully"
                 );
 
-                return Ok(wasm_module);
+                Ok(wasm_module)
             }
             Err(module_err) => {
                 // If component-model is enabled, try parsing as component
@@ -359,7 +359,7 @@ impl WasmRuntime {
                                 );
                             }
 
-                            return Ok(wasm_module);
+                            Ok(wasm_module)
                         }
                         Err(component_err) => {
                             metrics::counter!("plexspaces_wasm_module_load_errors_total")
@@ -373,11 +373,11 @@ impl WasmRuntime {
                                 first_16_bytes = format!("{:02x?}", bytes.iter().take(16).collect::<Vec<_>>()),
                                 "WASM file failed to parse as both module and component"
                             );
-                            return Err(WasmError::CompilationError(format!(
+                            Err(WasmError::CompilationError(format!(
                                 "failed to parse WebAssembly file as module or component. \
                                 Module error: {}. Component error: {}",
                                 module_err, component_err
-                            )));
+                            )))
                         }
                     }
                 }
@@ -394,43 +394,15 @@ impl WasmRuntime {
                         so WASM components (WIT-based) cannot be loaded. Enable component-model feature \
                         to support components from componentize-py."
                     );
-                    return Err(WasmError::CompilationError(format!(
+                    Err(WasmError::CompilationError(format!(
                         "failed to parse WebAssembly module: {}. \
                         Note: If this is a WASM component (WIT-based from componentize-py), \
                         enable the component-model feature and use Component::new() instead of Module::new()",
                         module_err
-                    )));
+                    )))
                 }
             }
-        };
-        let compile_duration = compile_start.elapsed();
-
-        let wasm_module = WasmModule {
-            name: name.to_string(),
-            version: version.to_string(),
-            hash: hash.clone(),
-            #[cfg(not(feature = "component-model"))]
-            module: Arc::new(module),
-            #[cfg(feature = "component-model")]
-            module: WasmModuleInner::Module(Arc::new(module)),
-            size_bytes: bytes.len() as u64,
-        };
-
-        // Cache module (with LRU eviction if needed)
-        {
-            let mut cache = self.module_cache.write().await;
-            cache.insert(hash, Arc::new(wasm_module.clone()));
         }
-
-        let total_duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_wasm_module_load_duration_seconds")
-            .record(total_duration.as_secs_f64());
-        metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds")
-            .record(compile_duration.as_secs_f64());
-        metrics::histogram!("plexspaces_wasm_module_size_bytes").record(bytes.len() as f64);
-        metrics::counter!("plexspaces_wasm_module_load_success_total").increment(1);
-
-        Ok(wasm_module)
     }
 
     /// Load WASM module from bytes with hash verification
@@ -524,6 +496,7 @@ impl WasmRuntime {
     ///
     /// # Errors
     /// Returns error if instantiation fails
+    #[allow(clippy::too_many_arguments)]
     pub async fn instantiate(
         &self,
         module: WasmModule,
@@ -785,7 +758,7 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
         // Create store limits from config
         let limits = StoreLimitsBuilder::new()
             .memory_size(wasm_config.limits.max_memory_bytes as usize)
-            .table_elements(wasm_config.limits.max_table_elements as u32)
+            .table_elements(wasm_config.limits.max_table_elements)
             .build();
 
         // Downcast process_group_registry if provided
@@ -810,10 +783,7 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
         // Convert BlobServiceTrait to concrete BlobService via as_any + downcast
         let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> =
             blob_service
-                .map(|bs| {
-                    use plexspaces_actor::BlobServiceTrait;
-                    bs.as_any()
-                })
+                .map(|bs| bs.as_any())
                 .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
 
         // Parse actor_id string to ActorId at the boundary

@@ -370,6 +370,7 @@ fn convert_shared_db_config(yaml: SharedRelationalDbConfigYaml) -> SharedDbConfi
     }
 }
 
+#[allow(clippy::manual_map)]
 fn convert_storage_provider(yaml: StorageProviderConfigYaml) -> StorageProviderConfig {
     let provider = parse_storage_provider_type(&yaml.provider_type);
 

@@ -87,13 +87,11 @@ async fn test_discover_vms_from_object_registry() {
     let vms = object_registry
         .discover(
             &ctx,
-            Some(ObjectType::ObjectTypeVm),
-            None,
-            None,
-            None,
-            None,
-            0,
-            100,
+            plexspaces_object_registry::DiscoverOptions {
+                object_type: Some(ObjectType::ObjectTypeVm),
+                limit: 100,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

@@ -59,7 +59,12 @@ echo ""
 
 # ── Step 1: Node check ───────────────────────────────────────────────────────
 echo "Step 1: Check node"
-HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
+HTTP_CHECK="000"
+for _i in 1 2 3; do
+  HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
+  [ "$HTTP_CHECK" != "000" ] && break
+  sleep 2
+done
 if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Cannot connect to node at localhost:$HTTP_PORT${NC}"
   exit 1

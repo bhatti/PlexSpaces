@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
             "worker_id": worker_id,
         }));
         
-        actor_ref.tell(message).await?;
+        actor_ref.tell(&ctx, message).await?;
     }
     
     // Wait for all workers to complete (poll barrier - this is coordination overhead)

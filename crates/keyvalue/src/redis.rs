@@ -125,6 +125,7 @@ impl RedisKVStore {
     }
 
     /// Remove namespace prefix from key
+    #[allow(dead_code)]
     fn unprefixed_key(&self, key: &str) -> String {
         key.strip_prefix(&self.namespace).unwrap_or(key).to_string()
     }
@@ -384,7 +385,7 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Watch for changes to specific key
-    async fn watch(&self, ctx: &RequestContext, _key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch(&self, _ctx: &RequestContext, _key: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
         // TODO: Implement Redis keyspace notifications
         // Requires CONFIG SET notify-keyspace-events and separate connection
         // For now, return empty channel (not implemented yet)
@@ -395,7 +396,7 @@ impl KeyValueStore for RedisKVStore {
     /// Watch for changes to keys matching prefix
     async fn watch_prefix(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         _prefix: &str,
     ) -> KVResult<mpsc::Receiver<KVEvent>> {
         // TODO: Implement Redis keyspace notifications

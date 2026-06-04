@@ -278,8 +278,7 @@ class ActorMetrics(betterproto.Message):
 
      ## Purpose
      Tracks actor lifecycle and message routing/delivery metrics that can be updated by ActorRegistry
-     without depending on Node. These metrics are also synced to NodeMetrics
-     via NodeMetricsUpdater for backward compatibility.
+     without depending on Node. These metrics are also synced to NodeMetrics via NodeMetricsUpdater.
 
      ## Design
      Proto-first design: All actor/message metrics are defined in proto for:

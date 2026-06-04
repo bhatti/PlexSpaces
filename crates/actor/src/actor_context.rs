@@ -40,7 +40,8 @@ use plexspaces_service_traits::ActorRef;
 
 // ObjectRegistry, TupleSpaceProvider, ObjectRegistration live in service-traits.
 pub use plexspaces_service_traits::object_registry::{
-    HealthStatus as ObjectRegistryHealthStatus, ObjectRegistration, ObjectRegistry, RegisterResult,
+    DiscoverOptions, HealthStatus as ObjectRegistryHealthStatus, ObjectRegistration,
+    ObjectRegistry, RegisterResult,
 };
 pub use plexspaces_service_traits::tuplespace_provider::TupleSpaceProvider;
 

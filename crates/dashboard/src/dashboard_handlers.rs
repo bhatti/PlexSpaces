@@ -1229,13 +1229,12 @@ async fn api_application_detail(
             if let Ok(registrations) = object_registry
                 .discover(
                     &ctx,
-                    Some(ObjectType::ObjectTypeApplication),
-                    Some(name.clone()),
-                    None, // capabilities
-                    None, // labels
-                    None, // health_status
-                    0,    // offset
-                    1000, // limit
+                    plexspaces_actor::DiscoverOptions {
+                        object_type: Some(ObjectType::ObjectTypeApplication),
+                        object_category: Some(name.clone()),
+                        limit: 1000,
+                        ..Default::default()
+                    },
                 )
                 .await
             {

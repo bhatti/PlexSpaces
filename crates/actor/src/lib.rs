@@ -43,7 +43,7 @@ pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegist
 pub mod actor_context;
 pub use actor_context::LinkProvider;
 pub use actor_context::{
-    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistration,
+    ActorContext, ActorService, ChannelService, DiscoverOptions, FacetService, ObjectRegistration,
     ObjectRegistryHealthStatus, ObjectRegistry, ProcessGroupService, RegisterResult,
     TupleSpaceProvider,
 };
@@ -209,9 +209,6 @@ pub use plexspaces_service_traits::{
     ActorRef as ServiceTraitsActorRef, ActorStateChecker, ServiceLocatorBase,
 };
 
-// ---------------------------------------------------------------------------
-// Core module: compatibility re-export layer for crate::core::X paths
-// ---------------------------------------------------------------------------
 /// Core types module — re-exports all merged types so `crate::core::X` paths work.
 pub mod core;
 
@@ -257,7 +254,6 @@ pub use builder::ActorBuilder;
 pub mod actor_factory;
 pub use actor_factory::ActorFactory;
 pub mod actor_factory_impl;
-pub mod service_locator_helpers;
 pub use actor_factory_impl::ActorFactoryImpl;
 
 // Test stub for ServiceLocator

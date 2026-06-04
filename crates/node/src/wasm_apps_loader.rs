@@ -313,7 +313,7 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
     let max_restart_window_secs = value
         .get("max_restart_window_seconds")
         .and_then(|v| v.as_integer())
-        .unwrap_or(60) as i64;
+        .unwrap_or(60);
 
     // Parse children
     let children = if let Some(children_arr) = value.get("children").and_then(|v| v.as_array()) {
@@ -375,9 +375,8 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 fn parse_child_spec(
     value: &toml::Value,
 ) -> Result<plexspaces_proto::supervision::v1::ChildSpec, WasmAppsLoaderError> {
-    use plexspaces_proto::common::v1::{ActorIdentity, Facet};
+    use plexspaces_proto::common::v1::ActorIdentity;
     use plexspaces_proto::supervision::v1::{ChildSpec, RestartPolicy};
-    use std::collections::HashMap;
 
     let instance_name = value
         .get("name")
@@ -429,7 +428,7 @@ fn parse_child_spec(
     let shutdown_timeout_secs = value
         .get("shutdown_timeout_seconds")
         .and_then(|v| v.as_integer())
-        .unwrap_or(5) as i64;
+        .unwrap_or(5);
 
     // Parse facets from TOML
     // Facets are defined as an array of inline tables: facets = [{ type = "locks", priority = 50, config = {} }]

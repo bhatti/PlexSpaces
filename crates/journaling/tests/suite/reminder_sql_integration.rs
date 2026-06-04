@@ -28,7 +28,6 @@ use plexspaces_journaling::{
 use plexspaces_proto::prost_types;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::time::sleep;
 
 /// Helper to create a test SQLite storage (in-memory)
 async fn create_test_storage() -> Arc<dyn JournalStorage> {

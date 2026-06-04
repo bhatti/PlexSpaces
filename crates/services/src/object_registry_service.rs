@@ -31,7 +31,7 @@
 //! - `list_object_types`: returns per-type counts (best-effort via `discover`).
 
 use async_trait::async_trait;
-use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
+use plexspaces_actor::{DiscoverOptions, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_common::{RequestContext, RequestContextExt};
 use plexspaces_proto::object_registry::v1::{
     object_registry_server::ObjectRegistry as ObjectRegistryGrpc, BatchHeartbeatRequest,
@@ -293,7 +293,18 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
 
         match self
             .registry
-            .discover(&ctx, object_type, category, capabilities, labels, health_status, offset, page_size)
+            .discover(
+                &ctx,
+                DiscoverOptions {
+                    object_type,
+                    object_category: category,
+                    capabilities,
+                    labels,
+                    health_status,
+                    offset,
+                    limit: page_size,
+                },
+            )
             .await
         {
             Ok(registrations) => {
@@ -394,7 +405,13 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
         // TODO: replace with a COUNT GROUP BY repository query to avoid full table scan.
         let all = match self
             .registry
-            .discover(&ctx, None, None, None, None, None, 0, 10_000)
+            .discover(
+                &ctx,
+                DiscoverOptions {
+                    limit: 10_000,
+                    ..Default::default()
+                },
+            )
             .await
         {
             Ok(r) => r,

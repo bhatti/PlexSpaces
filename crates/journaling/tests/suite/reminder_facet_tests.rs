@@ -28,7 +28,6 @@ use plexspaces_journaling::{
     JournalStorage, ReminderError, ReminderFacet, ReminderRegistration, ReminderState,
     SqliteJournalStorage,
 };
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::prost_types;
 use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
@@ -154,7 +153,7 @@ async fn test_reminder_facet_detach() {
 #[tokio::test]
 async fn test_register_reminder() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) =
+    let (facet, _mock_service) =
         setup_facet_with_services(storage.clone(), &reminder_tests_actor_id()).await;
 
     let next_fire = SystemTime::now() + Duration::from_secs(60);
@@ -178,7 +177,7 @@ async fn test_register_reminder() {
 #[tokio::test]
 async fn test_register_duplicate_reminder_fails() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) =
+    let (facet, _mock_service) =
         setup_facet_with_services(storage.clone(), &reminder_tests_actor_id()).await;
 
     let next_fire = SystemTime::now() + Duration::from_secs(60);
@@ -211,7 +210,7 @@ async fn test_register_duplicate_reminder_fails() {
 #[tokio::test]
 async fn test_unregister_reminder() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) =
+    let (facet, _mock_service) =
         setup_facet_with_services(storage.clone(), &reminder_tests_actor_id()).await;
 
     let next_fire = SystemTime::now() + Duration::from_secs(60);
@@ -298,7 +297,7 @@ async fn test_reminder_persistence() {
 #[tokio::test]
 async fn test_max_occurrences_auto_deletion() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, mock_service) =
+    let (facet, mock_service) =
         setup_facet_with_services(storage.clone(), &reminder_tests_actor_id()).await;
 
     // Register reminder with max_occurrences = 2
@@ -336,7 +335,7 @@ async fn test_max_occurrences_auto_deletion() {
 #[tokio::test]
 async fn test_multiple_reminders() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) =
+    let (facet, _mock_service) =
         setup_facet_with_services(storage.clone(), &reminder_tests_actor_id()).await;
 
     let next_fire = SystemTime::now() + Duration::from_secs(60);

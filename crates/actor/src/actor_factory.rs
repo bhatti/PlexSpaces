@@ -34,7 +34,4 @@
 //! method on `ActorFactoryImpl` directly. Use `get_actor_factory_impl()` helper
 //! if you need to call `spawn_built_actor`.
 
-// ActorFactory trait moved to plexspaces-core crate
-// Re-export for backward compatibility
-
 pub use plexspaces_service_traits::ActorFactory;

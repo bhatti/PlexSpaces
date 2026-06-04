@@ -220,7 +220,7 @@ async fn test_event_sourcing_with_durability_facet() {
     };
 
     // Both facets share the same storage
-    let mut durability_config_value = serde_json::json!({
+    let durability_config_value = serde_json::json!({
         "checkpoint_interval": durability_config.checkpoint_interval,
         "replay_on_activation": durability_config.replay_on_activation,
         "cache_side_effects": durability_config.cache_side_effects,

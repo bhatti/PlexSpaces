@@ -49,7 +49,7 @@
 //! ```
 
 use crate::deployment_service::WasmDeploymentService;
-use crate::{WasmConfig, WasmError, WasmRuntime};
+use crate::{WasmConfig, WasmError};
 use plexspaces_proto::prost_types;
 use plexspaces_proto::wasm::v1::{
     wasm_runtime_service_server::WasmRuntimeService, DeployWasmModuleRequest,
@@ -305,6 +305,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WasmRuntime;
     use plexspaces_proto::wasm::v1::WasmModule as ProtoWasmModule;
 
     const SIMPLE_WASM: &[u8] = &[

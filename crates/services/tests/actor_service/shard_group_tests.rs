@@ -16,14 +16,14 @@
 use async_trait::async_trait;
 use plexspaces_actor::Message;
 use plexspaces_actor::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, behavior_factory::BehaviorFactory,
+    actor_context::ObjectRegistry as ObjectRegistryTrait,
     Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType,
     InitializableServiceLocator, NodeRegistryTrait, RequestContext, RequestContextExt,
     ServiceLocator,
 };
 use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
-use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+use plexspaces_object_registry::ObjectRegistryImpl;
 use plexspaces_proto::actor::v1::ActorSpawnSpec;
 use plexspaces_proto::actor::v1::{
     actor_service_server::ActorService as ActorServiceTrait, CreateShardGroupRequest,
@@ -394,13 +394,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
     async fn discover(
         &self,
         _ctx: &RequestContext,
-        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-        _name: Option<String>,
-        _labels: Option<Vec<String>>,
-        _exclude_labels: Option<Vec<String>>,
-        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
-        _limit: usize,
-        _offset: usize,
+        _opts: plexspaces_actor::DiscoverOptions,
     ) -> Result<
         Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
         Box<dyn std::error::Error + Send + Sync>,
@@ -451,7 +445,6 @@ async fn create_test_actor_service(
     Arc<ActorRegistry>,
     Arc<plexspaces_services::ServiceLocatorImpl>,
 ) {
-    use plexspaces_actor::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_node::create_default_service_locator;
 
     let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
@@ -1052,7 +1045,7 @@ impl ActorTrait for FailingActor {
 impl GenServer for FailingActor {
     async fn handle_request(
         &mut self,
-        ctx: &ActorContext,
+        _ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
         if let Ok(payload_str) = String::from_utf8(msg.payload.clone()) {
@@ -1110,8 +1103,8 @@ impl GenServer for SlowActor {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_scatter_gather_partial_failures() {
     // Test: Some shards succeed, some fail - should still return partial results
-    let (service, registry, locator) = create_test_actor_service("test-node").await;
-    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let (service, _registry, locator) = create_test_actor_service("test-node").await;
+    let _ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
 
     // Register failing actor behavior
     let behavior_registry = locator.get_behavior_registry().await.unwrap();
@@ -1173,7 +1166,7 @@ async fn test_scatter_gather_partial_failures() {
 async fn test_scatter_gather_timeout() {
     // Test: Some shards timeout - should return partial results
     let (service, _registry, locator) = create_test_actor_service("test-node").await;
-    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let _ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
 
     // Register slow actor behavior
     let behavior_registry = locator.get_behavior_registry().await.unwrap();
@@ -1237,7 +1230,7 @@ async fn test_scatter_gather_timeout() {
 async fn test_scatter_gather_min_responses_threshold() {
     // Test: min_responses threshold - should fail if not enough responses
     let (service, _registry, locator) = create_test_actor_service("test-node").await;
-    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let _ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
 
     // Register failing actor behavior
     let behavior_registry = locator.get_behavior_registry().await.unwrap();
@@ -1293,7 +1286,7 @@ async fn test_scatter_gather_min_responses_threshold() {
 async fn test_map_shard_group_partial_failures() {
     // Test: Map operation with partial failures
     let (service, _registry, locator) = create_test_actor_service("test-node").await;
-    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let _ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
 
     // Register failing actor behavior
     let behavior_registry = locator.get_behavior_registry().await.unwrap();

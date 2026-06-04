@@ -272,6 +272,7 @@ mod tests {
     use crate::Message;
 
     struct TestBehavior {
+        #[allow(dead_code)]
         id: String,
     }
 
@@ -303,7 +304,7 @@ mod tests {
             })
             .await;
 
-        let behavior = registry.create("test::Worker", &[]).await.unwrap();
+        let _behavior = registry.create("test::Worker", &[]).await.unwrap();
         assert!(registry.is_registered("test::Worker").await);
         assert!(!registry.is_registered("test::Unknown").await);
     }

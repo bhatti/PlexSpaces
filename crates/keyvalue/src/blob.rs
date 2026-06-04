@@ -58,7 +58,6 @@ use object_store::{
     local::LocalFileSystem, path::Path as ObjectPath, ObjectMeta, ObjectStore,
 };
 use plexspaces_common::{RequestContext, RequestContextExt};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -308,7 +307,8 @@ impl BlobKVStore {
     }
 
     /// Check if object is expired based on last_modified and TTL.
-    fn is_expired(meta: &ObjectMeta, expires_at: Option<DateTime<Utc>>) -> bool {
+    #[allow(dead_code)]
+    fn is_expired(_meta: &ObjectMeta, expires_at: Option<DateTime<Utc>>) -> bool {
         if let Some(expires) = expires_at {
             return Utc::now() > expires;
         }
@@ -326,7 +326,7 @@ impl KeyValueStore for BlobKVStore {
 
         // Try to get object metadata first (to check if exists)
         match self.object_store.head(&path).await {
-            Ok(meta) => {
+            Ok(_meta) => {
                 // Check expiration if needed (we'll store TTL in metadata later)
                 // For now, just download the object
                 let result = self.object_store.get(&path).await.map_err(|e| {

@@ -115,9 +115,6 @@ impl Application for ByzantineApplication {
             })
             .await;
 
-        service_locator
-            .register_behavior_registry(Arc::new(behavior_registry))
-            .await;
 
         let register_time = register_start.elapsed();
         metrics_tracker.end_coordinate();
@@ -197,7 +194,7 @@ impl Application for ByzantineApplication {
                 "peer_ids": peer_ids.iter().filter(|&&id| id != i).collect::<Vec<_>>(),
             }));
 
-            general_ref.tell(init_msg).await.map_err(|e| {
+            general_ref.tell(&ctx, init_msg).await.map_err(|e| {
                 ApplicationError::StartupFailed(format!(
                     "Failed to initialize general {}: {}",
                     i, e
@@ -253,7 +250,7 @@ impl Application for ByzantineApplication {
 
             // Broadcast to all generals
             for general_ref in &general_refs {
-                general_ref.tell(source_msg.clone()).await.map_err(|e| {
+                general_ref.tell(&ctx, source_msg.clone()).await.map_err(|e| {
                     ApplicationError::StartupFailed(format!("Failed to send vote: {}", e))
                 })?;
                 metrics_tracker.increment_message();
@@ -287,7 +284,7 @@ impl Application for ByzantineApplication {
                             },
                         }));
 
-                        target_ref.tell(relay_msg).await.map_err(|e| {
+                        target_ref.tell(&ctx, relay_msg).await.map_err(|e| {
                             ApplicationError::StartupFailed(format!("Failed to relay vote: {}", e))
                         })?;
                         metrics_tracker.increment_message();
@@ -309,7 +306,7 @@ impl Application for ByzantineApplication {
                 }));
 
                 let reply = general_ref
-                    .ask(decision_msg, std::time::Duration::from_secs(5))
+                    .ask(&ctx, decision_msg, std::time::Duration::from_secs(5))
                     .await
                     .map_err(|e| {
                         ApplicationError::StartupFailed(format!(

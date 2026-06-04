@@ -103,10 +103,11 @@ impl SecurityValidator {
         // - `postgresql://user:${DB_PASSWORD}@localhost/db`
         // - `postgresql://user:%s@localhost/db` (with placeholder)
 
-        // Check for password= with actual value (not placeholder)
-        if connection_string.contains("password=") {
-            // Extract password part
-            if let Some(pwd_start) = connection_string.find("password=") {
+        let conn_lower = connection_string.to_lowercase();
+
+        // Check for password= with actual value (not placeholder, case-insensitive)
+        if conn_lower.contains("password=") {
+            if let Some(pwd_start) = conn_lower.find("password=") {
                 let pwd_part = &connection_string[pwd_start + 9..];
                 // Check if it's a placeholder or actual password
                 if let Some(pwd_end) = pwd_part.find('&').or_else(|| pwd_part.find('@')) {

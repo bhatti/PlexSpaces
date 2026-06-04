@@ -41,18 +41,13 @@ use tokio::time::sleep;
 /// ## Design (Simplicity First)
 /// - OneForOne: Restart only the failed VM (default, simplest)
 /// - OneForAll: Restart all VMs if one fails (for tightly coupled groups)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SupervisionStrategy {
     /// Restart only the failed VM (default)
+    #[default]
     OneForOne,
     /// Restart all VMs if one fails
     OneForAll,
-}
-
-impl Default for SupervisionStrategy {
-    fn default() -> Self {
-        Self::OneForOne
-    }
 }
 
 /// Restart policy for supervised VMs
@@ -312,9 +307,11 @@ impl VmSupervisor {
                 };
 
                 for id in vm_ids {
-                    if let Some(supervised_vm) = self.vms.read().await.get(&id) {
-                        let vm_arc = Arc::clone(&supervised_vm.vm);
-                        drop(supervised_vm);
+                    let vm_arc = {
+                        let guard = self.vms.read().await;
+                        guard.get(&id).map(|sv| Arc::clone(&sv.vm))
+                    };
+                    if let Some(vm_arc) = vm_arc {
                         let _ = self.restart_vm(vm_arc).await;
                     }
                 }
@@ -341,14 +338,13 @@ impl VmSupervisor {
                 max_delay,
                 factor,
             } => {
-                let delay = if supervised_vm.restart_count == 0 {
+                if supervised_vm.restart_count == 0 {
                     *initial_delay
                 } else {
                     let calculated = initial_delay.as_secs_f64()
                         * factor.powi(supervised_vm.restart_count as i32);
                     Duration::from_secs_f64(calculated).min(*max_delay)
-                };
-                delay
+                }
             }
             RestartPolicy::MaxRetries { backoff, .. } => {
                 if supervised_vm.restart_count == 0 {

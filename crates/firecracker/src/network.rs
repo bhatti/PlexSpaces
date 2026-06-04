@@ -235,16 +235,16 @@ pub async fn create_tap_device(tap_name: &str) -> FirecrackerResult<()> {
                 tap_name, stderr
             )));
         }
+
+        Ok(())
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        return Err(FirecrackerError::NetworkSetupFailed(
+        Err(FirecrackerError::NetworkSetupFailed(
             "TAP devices are only supported on Linux".to_string(),
-        ));
+        ))
     }
-
-    Ok(())
 }
 
 /// Delete TAP device
@@ -320,17 +320,17 @@ pub async fn delete_tap_device(tap_name: &str) -> FirecrackerResult<()> {
                 tap_name, stderr
             )));
         }
+
+        Ok(())
     }
 
     #[cfg(not(target_os = "linux"))]
     {
         let _ = tap_name;
-        return Err(FirecrackerError::NetworkSetupFailed(
+        Err(FirecrackerError::NetworkSetupFailed(
             "TAP devices are only supported on Linux".to_string(),
-        ));
+        ))
     }
-
-    Ok(())
 }
 
 // ============================================================================

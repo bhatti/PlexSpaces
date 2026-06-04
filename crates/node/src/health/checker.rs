@@ -33,6 +33,7 @@ pub struct ShutdownChecker {
 }
 
 impl ShutdownChecker {
+    /// Create a new ShutdownChecker with the given shutdown receiver
     pub fn new(shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Self {
         Self {
             shutdown_tx: shutdown_rx,

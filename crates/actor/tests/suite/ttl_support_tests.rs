@@ -141,7 +141,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     );
 
     // Register actor before calling tell()
-    use plexspaces_actor::{ActorRegistry, RequestContext};
+    use plexspaces_actor::{ActorRegistry, ActorRegistrationParams, RequestContext};
     let tell_ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     if let Some(registry) = service_locator.actor_registry().await {
         let actor_id = actor_ref.id().clone();
@@ -149,12 +149,14 @@ async fn test_actor_ref_tell_with_ttl_message() {
         registry
             .register_actor(
                 &tell_ctx,
-                actor_id,
-                sender,
-                "test_actor".to_string(),
-                None,
-                None,
-                None,
+                ActorRegistrationParams {
+                    actor_id,
+                    sender,
+                    actor_type: "test_actor".to_string(),
+                    config: None,
+                    instance: None,
+                    behavior_kind: None,
+                },
             )
             .await;
     }

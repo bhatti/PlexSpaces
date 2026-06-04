@@ -588,7 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         metrics_tracker.start_compute();
         let workflow_start = Instant::now();
         
-        let state: WorkflowState = workflow_ref.run(request).await
+        let state: WorkflowState = workflow_ref.run(&ctx, request).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         
         let workflow_time = workflow_start.elapsed();
@@ -621,7 +621,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         metrics_tracker.start_compute();
         let signal_start = Instant::now();
         
-        workflows[0].signal("approve", &serde_json::json!({
+        workflows[0].signal(&ctx, "approve", &serde_json::json!({
             "approver_id": format!("approver-{}", approver_idx),
             "comment": format!("Approved by {} (step {}/{})", 
                 if approver_idx % 2 == 0 { "Reviewer A" } else { "Reviewer B" },
@@ -656,7 +656,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
     // Query status for multiple workflows
     for i in 0..std::cmp::min(5, num_workflows) {
-        let status: serde_json::Value = workflows[i].query("status").await
+        let status: serde_json::Value = workflows[i].query(&ctx, "status").await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         
         if i == 0 {
@@ -683,7 +683,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let audit_start = Instant::now();
     
     // Query audit trail with typed API
-    let audit_trail: Vec<AuditEntry> = workflows[0].query("audit_trail").await
+    let audit_trail: Vec<AuditEntry> = workflows[0].query(&ctx, "audit_trail").await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
     
     let audit_time = audit_start.elapsed();

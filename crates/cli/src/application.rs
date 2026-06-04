@@ -298,7 +298,7 @@ async fn deploy_via_http_multipart(
     // Send HTTP request
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/api/v1/applications/deploy", http_url))
+        .post(format!("{}/api/v1/applications/deploy", http_url))
         .multipart(form)
         .send()
         .await

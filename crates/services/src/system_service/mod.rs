@@ -112,11 +112,12 @@ impl SystemService for SystemServiceImpl {
             .to_string();
         let git_commit = option_env!("PLEXSPACES_GIT_COMMIT")
             .or_else(|| option_env!("VERGEN_GIT_SHA"))
-            .or_else(|| option_env!("GIT_COMMIT"))
+            .or(option_env!("GIT_COMMIT"))
             .unwrap_or("unknown")
             .to_string();
 
         // Get enabled features (compile-time feature flags)
+        #[allow(clippy::vec_init_then_push)]
         let features = {
             let mut enabled_features = Vec::new();
             #[cfg(feature = "sqlite-backend")]
@@ -142,7 +143,7 @@ impl SystemService for SystemServiceImpl {
             platform: sysinfo::System::name().unwrap_or_default(),
             architecture: std::env::consts::ARCH.to_string(),
             cpu_cores: cpu_count as i32,
-            total_memory_mb: (total_memory / (1024 * 1024)) as u64,
+            total_memory_mb: total_memory / (1024 * 1024),
             features,
         };
 
@@ -573,16 +574,12 @@ impl SystemService for SystemServiceImpl {
                 nanos: 0,
             }),
             completed_at: None,
-            size_bytes: {
-                // Estimate backup size based on components
-                let estimated_size = if req.components.is_empty() {
-                    // Full backup - no size estimate until backup walks real components
-                    0
-                } else {
-                    // Partial backup - estimate based on component count
-                    req.components.len() as u64 * 1024 * 1024 // 1MB per component estimate
-                };
-                estimated_size
+            size_bytes: if req.components.is_empty() {
+                // Full backup - no size estimate until backup walks real components
+                0
+            } else {
+                // Partial backup - estimate based on component count
+                req.components.len() as u64 * 1024 * 1024 // 1MB per component estimate
             },
             location: req.destination.clone(),
             checksum: String::new(),
@@ -667,7 +664,7 @@ impl SystemService for SystemServiceImpl {
         let status = ShutdownStatus {
             phase,
             signal: ShutdownSignal::ShutdownSignalUnspecified as i32,
-            shutdown_started_at: state.state_entered_at.clone(),
+            shutdown_started_at: state.state_entered_at,
             elapsed,
             health_not_serving_status: None,
             draining_status: None,

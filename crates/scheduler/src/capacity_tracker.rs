@@ -27,7 +27,7 @@
 //! - Extracts capacity from metrics map (sent via heartbeat)
 //! - Provides methods to get node capacities, filter by labels, etc.
 
-use plexspaces_actor::{ObjectRegistry, RequestContext, RequestContextExt};
+use plexspaces_actor::{ObjectRegistry, RequestContext};
 use plexspaces_proto::{
     common::v1::ResourceSpec, node::v1::NodeCapacity, object_registry::v1::ObjectType,
 };
@@ -121,13 +121,11 @@ impl CapacityTracker {
             .registry
             .discover(
                 ctx,
-                Some(ObjectType::ObjectTypeNode),
-                None, // object_category
-                None, // capabilities
-                None, // labels (we'll filter by node labels separately)
-                None, // health_status
-                0,    // offset
-                1000, // limit
+                plexspaces_actor::DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
             )
             .await
             .map_err(|e| CapacityTrackerError::RegistryError(e.to_string()))?;
@@ -149,14 +147,14 @@ impl CapacityTracker {
             };
 
             // Filter by node labels if provided
-            if let Some(ref required_labels) = node_labels {
+            if let Some(required_labels) = node_labels {
                 if !Self::matches_labels(required_labels, &capacity.labels) {
                     continue;
                 }
             }
 
             // Filter by minimum available resources if provided
-            if let Some(ref min_resources) = min_available_resources {
+            if let Some(min_resources) = min_available_resources {
                 if let Some(ref available) = capacity.available {
                     if available.cpu_cores < min_resources.cpu_cores
                         || available.memory_bytes < min_resources.memory_bytes
@@ -221,7 +219,7 @@ impl CapacityTracker {
         // Extract available resources (or calculate from total - allocated)
         let available = ResourceSpec {
             cpu_cores: Self::get_metric_f64(&registration.metrics, "available_cpu_cores")
-                .unwrap_or_else(|| total.cpu_cores - allocated.cpu_cores),
+                .unwrap_or(total.cpu_cores - allocated.cpu_cores),
             memory_bytes: Self::get_metric_f64(&registration.metrics, "available_memory_mb")
                 .map(|mb| (mb * 1024.0 * 1024.0) as u64)
                 .unwrap_or_else(|| total.memory_bytes.saturating_sub(allocated.memory_bytes)),
@@ -262,13 +260,14 @@ impl CapacityTracker {
         // All required labels must be present and match
         required_labels
             .iter()
-            .all(|(key, value)| node_labels.get(key).map_or(false, |v| v == value))
+            .all(|(key, value)| node_labels.get(key) == Some(value))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_actor::RequestContextExt;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
 

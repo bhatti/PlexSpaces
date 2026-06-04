@@ -19,7 +19,7 @@
 //! DynamoDB-based BlobRepository implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for blob metadata storage
+//! Provides a DynamoDB backend for blob metadata storage
 //! with proper tenant isolation, efficient queries, and comprehensive observability.
 //!
 //! ## Design
@@ -93,8 +93,6 @@ pub struct DynamoDBBlobRepository {
     client: DynamoDbClient,
     /// Table name
     table_name: String,
-    /// Schema version
-    schema_version: u32,
 }
 
 impl DynamoDBBlobRepository {
@@ -144,7 +142,6 @@ impl DynamoDBBlobRepository {
         Ok(Self {
             client,
             table_name,
-            schema_version: 1,
         })
     }
 
@@ -1003,7 +1000,7 @@ impl BlobRepository for DynamoDBBlobRepository {
                             }
                         }
 
-                        match Self::item_to_metadata(&item) {
+                        match Self::item_to_metadata(item) {
                             Ok(metadata) => results.push(metadata),
                             Err(e) => {
                                 warn!(error = %e, "Failed to parse metadata, skipping");
@@ -1091,7 +1088,7 @@ impl BlobRepository for DynamoDBBlobRepository {
             match query.send().await {
                 Ok(result) => {
                     for item in result.items() {
-                        match Self::item_to_metadata(&item) {
+                        match Self::item_to_metadata(item) {
                             Ok(metadata) => expired.push(metadata),
                             Err(e) => {
                                 warn!(error = %e, "Failed to parse metadata, skipping");

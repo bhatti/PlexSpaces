@@ -147,8 +147,8 @@ impl CircuitBreakerHealthChecker {
                 error_rate: metrics.error_rate,
                 consecutive_failures: metrics.consecutive_failures,
                 trip_count: metrics.trip_count,
-                last_opened: metrics.last_opened.clone(),
-                time_in_state: metrics.time_in_state.clone(),
+                last_opened: metrics.last_opened,
+                time_in_state: metrics.time_in_state,
             }),
         }
     }

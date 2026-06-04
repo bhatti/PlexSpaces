@@ -19,7 +19,7 @@
 //! DynamoDB-based scheduling state store implementation.
 //!
 //! ## Purpose
-//! Provides a production-grade DynamoDB backend for scheduling request storage
+//! Provides a scalable DynamoDB backend for scheduling request storage
 //! with proper tenant isolation, efficient status queries, and comprehensive observability.
 //!
 //! ## Design
@@ -85,7 +85,7 @@ use std::error::Error;
 use std::time::Duration;
 use tracing::{debug, error, instrument, warn};
 
-/// DynamoDB scheduling state store with production-grade observability.
+/// DynamoDB scheduling state store with scalable observability.
 ///
 /// ## Example
 /// ```rust,no_run
@@ -592,7 +592,6 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
             .into());
         }
         let start_time = std::time::Instant::now();
-        let pk = Self::composite_key(&request.tenant_id, &request.namespace, &request.request_id);
 
         let item = self.request_to_item(&request)?;
 
@@ -768,7 +767,6 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
             .into());
         }
         let start_time = std::time::Instant::now();
-        let pk = Self::composite_key(&request.tenant_id, &request.namespace, &request.request_id);
 
         let item = self.request_to_item(&request)?;
 
@@ -871,14 +869,12 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
 
                 let mut requests = Vec::new();
                 for item in result.items() {
-                    match Self::item_to_request(&item) {
+                    match Self::item_to_request(item) {
                         Ok(request) => {
-                            // Double-check tenant match (defense in depth)
-                            // For admin/internal with empty namespace, skip namespace check
                             if request.tenant_id == ctx.tenant_id() {
-                                if ctx.should_skip_namespace_filter() {
-                                    requests.push(request);
-                                } else if request.namespace == ctx.namespace() {
+                                if ctx.should_skip_namespace_filter()
+                                    || request.namespace == ctx.namespace()
+                                {
                                     requests.push(request);
                                 } else {
                                     warn!("Request namespace mismatch - skipping (security check)");

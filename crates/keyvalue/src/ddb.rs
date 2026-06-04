@@ -62,7 +62,7 @@
 //! - Tracing: Distributed tracing with tenant context
 //! - Logging: Structured logging with request context
 
-use crate::{KVError, KVEvent, KVEventType, KVResult, KVStats, KeyValueStore};
+use crate::{KVError, KVEvent, KVResult, KVStats, KeyValueStore};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
@@ -75,7 +75,7 @@ use aws_sdk_dynamodb::{
 use chrono::Utc;
 use plexspaces_common::{RequestContext, RequestContextExt};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, error, instrument, warn};
 
@@ -502,8 +502,8 @@ impl DynamoDBKVStore {
         expires_at_secs: Option<i64>,
     ) -> HashMap<String, AttributeValue> {
         // Use tenant_id and namespace as-is (may be empty)
-        let tenant_id = ctx.tenant_id();
-        let namespace = ctx.namespace();
+        let _tenant_id = ctx.tenant_id();
+        let _namespace = ctx.namespace();
 
         let pk = Self::composite_key(ctx, key);
         let tenant_namespace = Self::tenant_namespace_key(ctx);
@@ -1055,7 +1055,7 @@ impl KeyValueStore for DynamoDBKVStore {
         new_value: Vec<u8>,
     ) -> KVResult<bool> {
         let start_time = std::time::Instant::now();
-        let pk = Self::composite_key(ctx, key);
+        let _pk = Self::composite_key(ctx, key);
 
         match &expected {
             None => {
@@ -1367,7 +1367,7 @@ impl KeyValueStore for DynamoDBKVStore {
                 );
                 Ok(new_value)
             }
-            Err(e) => {
+            Err(_e) => {
                 // If the key doesn't exist or numeric_value doesn't exist, ADD will fail
                 // Get current value to initialize numeric_value
                 let current = self.get(ctx, key).await?;
@@ -1407,7 +1407,7 @@ impl KeyValueStore for DynamoDBKVStore {
                         // numeric_value initialized, now retry increment
                         return self.increment(ctx, key, delta).await;
                     }
-                    Err(init_err) => {
+                    Err(_init_err) => {
                         // Key might not exist, create it
                         let zero_bytes = 0i64.to_be_bytes().to_vec();
                         let item = self.kv_to_item(ctx, key, &zero_bytes, None);

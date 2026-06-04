@@ -1612,8 +1612,8 @@ type Actor struct {
 	//
 	// ## Migration Strategy
 	// ```
-	// Version 1 → 2: Add new field with default value (backward compatible, no migration)
-	// Version 2 → 3: Remove deprecated field (backward compatible, no migration)
+	// Version 1 → 2: Add new field with default value (no migration needed)
+	// Version 2 → 3: Remove field (no migration needed)
 	// Version 3 → 4: Change field type (BREAKING - requires explicit migration function)
 	// Version 4 → 5: Restructure nested fields (BREAKING - requires migration)
 	// ```
@@ -1888,7 +1888,7 @@ type ActorConfig struct {
 	// // Version 1: Simple timeout config
 	// properties: {"timeout_ms": 5000}
 	//
-	// // Version 2: Added retry config (backward compatible)
+	// // Version 2: Added retry config
 	//
 	//	properties: {
 	//	    "timeout_ms": 5000,

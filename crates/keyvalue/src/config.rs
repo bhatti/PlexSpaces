@@ -226,9 +226,6 @@ fn kv_config_from_storage_provider(
                     .then(|| dynamodb.endpoint_url.clone()),
             }))
         }
-        StorageProvider::StorageProviderDynamodb => Err(KVError::ConfigError(
-            "dynamodb keyvalue provider requires 'ddb-backend' feature".to_string(),
-        )),
         StorageProvider::StorageProviderUnspecified => shared_db
             .ok_or_else(|| {
                 KVError::ConfigError(
@@ -236,6 +233,10 @@ fn kv_config_from_storage_provider(
                 )
             })
             .and_then(kv_config_from_shared_db),
+        #[cfg(not(feature = "ddb-backend"))]
+        StorageProvider::StorageProviderDynamodb => Err(KVError::ConfigError(
+            "dynamodb keyvalue provider requires 'ddb-backend' feature".to_string(),
+        )),
     }
 }
 

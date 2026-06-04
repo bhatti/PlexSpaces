@@ -183,7 +183,7 @@ impl VmRegistry {
             ..Default::default()
         };
 
-        registry.register(&ctx, registration).await?;
+        registry.register(ctx, registration).await?;
         Ok(())
     }
 }

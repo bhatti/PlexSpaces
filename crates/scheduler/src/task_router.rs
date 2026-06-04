@@ -30,13 +30,22 @@
 
 use plexspaces_channel::Channel;
 use plexspaces_proto::{
-    actor::v1::{DataParallelConfig, PartitionStrategy, ShardGroup},
+    actor::v1::ShardGroup,
     common::v1::Message,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+
+type ChannelFactory = Arc<
+    dyn Fn(
+            &str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Arc<dyn Channel>, String>> + Send>,
+        > + Send
+        + Sync,
+>;
 
 /// Routing strategy for task distribution
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,12 +103,8 @@ pub type TaskRouterResult<T> = Result<T, TaskRouterError>;
 /// Actor load information for least-loaded routing
 #[derive(Debug, Clone)]
 struct ActorLoad {
-    /// Actor ID
-    actor_id: String,
     /// Current queue depth (number of pending messages)
     queue_depth: u32,
-    /// Last update timestamp
-    last_update: std::time::SystemTime,
 }
 
 /// Task router for routing tasks to shard groups
@@ -112,14 +117,7 @@ pub struct TaskRouter {
     /// Round-robin counters (group_name -> next_index)
     round_robin_counters: Arc<RwLock<HashMap<String, usize>>>,
     /// Channel factory (creates/get channels by name)
-    channel_factory: Arc<
-        dyn Fn(
-                &str,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<Arc<dyn Channel>, String>> + Send>,
-            > + Send
-            + Sync,
-    >,
+    channel_factory: ChannelFactory,
 }
 
 impl TaskRouter {
@@ -221,14 +219,7 @@ impl TaskRouter {
     /// * `queue_depth`: Current queue depth
     pub async fn update_actor_load(&self, actor_id: String, queue_depth: u32) {
         let mut loads = self.actor_loads.write().await;
-        loads.insert(
-            actor_id.clone(),
-            ActorLoad {
-                actor_id,
-                queue_depth,
-                last_update: std::time::SystemTime::now(),
-            },
-        );
+        loads.insert(actor_id, ActorLoad { queue_depth });
     }
 
     /// Route task to shard group
@@ -261,7 +252,7 @@ impl TaskRouter {
         // Get or create channel for group
         let channel = (self.channel_factory)(group_id)
             .await
-            .map_err(|e| TaskRouterError::ChannelError(e))?;
+            .map_err(TaskRouterError::ChannelError)?;
 
         // Create channel message
         let message_id = ulid::Ulid::new().to_string();
@@ -400,7 +391,7 @@ impl TaskRouter {
         groups
             .get(group_id)
             .ok_or_else(|| TaskRouterError::GroupNotFound(group_id.to_string()))
-            .map(|g| g.clone())
+            .cloned()
     }
 
     /// List all groups
@@ -414,6 +405,7 @@ impl TaskRouter {
 mod tests {
     use super::*;
     use plexspaces_channel::InMemoryChannel;
+    use plexspaces_proto::actor::v1::{DataParallelConfig, PartitionStrategy};
     use plexspaces_proto::channel::v1::ChannelConfig;
     use std::sync::Arc;
 

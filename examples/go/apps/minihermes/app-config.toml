@@ -1,0 +1,150 @@
+name = "go-minihermes"
+version = "1.0.0"
+tenant_id = "default"
+seed_nodes = ["localhost:8091", "localhost:8094"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "llm_gateway"
+actor_type = "minihermes_wasm"
+role = "llm_gateway"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "llm_gateway", default_provider = "ollama", default_model = "llama3.2" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "tool_executor"
+actor_type = "minihermes_wasm"
+role = "tool_executor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "tool_executor" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "agent"
+actor_type = "minihermes_wasm"
+role = "agent"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "agent", system_prompt = "You are Hermes, a self-improving AI assistant. You learn from experience, create reusable skills, and automate recurring tasks.", max_iterations = "8", token_budget = "8192" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 3 } }
+]
+
+[[supervisor.children]]
+name = "skill_store"
+actor_type = "minihermes_wasm"
+role = "skill_store"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "skill_store" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "memory"
+actor_type = "minihermes_wasm"
+role = "memory"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "memory", reachable_ttl_ms = "3600000" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "context_compressor"
+actor_type = "minihermes_wasm"
+role = "context_compressor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "context_compressor" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "cron_scheduler"
+actor_type = "minihermes_wasm"
+role = "cron_scheduler"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "cron_scheduler", tick_interval_ms = "60000" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "eager" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]
+
+[[supervisor.children]]
+name = "guardrails"
+actor_type = "minihermes_wasm"
+role = "guardrails"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+args = { role = "guardrails" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]
+
+[[supervisor.children]]
+name = "session_manager"
+actor_type = "minihermes_wasm"
+role = "session_manager"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "session_manager" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+name = "audit_event"
+actor_type = "minihermes_wasm"
+role = "audit_event"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+args = { role = "audit_event" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "health_monitor"
+actor_type = "minihermes_wasm"
+role = "health_monitor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenServer"
+args = { role = "health_monitor", poll_interval_ms = "10000" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "eager" } }
+]
+tenant_id = "default"

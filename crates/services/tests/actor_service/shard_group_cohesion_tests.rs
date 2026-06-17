@@ -85,36 +85,15 @@ async fn create_test_actor_service(
 ) {
     use plexspaces_node::create_default_service_locator;
 
-    let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
-
+    // create_default_service_locator calls initialize_services which creates a fully-wired
+    // ActorRegistry (with ActorFactory, ReplyWaiterRegistry, VirtualActorManager, etc.)
     let service_locator = create_default_service_locator(Some(node_id.to_string()), None).await;
-    service_locator
-        .register_service(actor_registry.clone())
-        .await;
 
-    // Register ActorFactory (required for spawn_actor to work)
-    use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
-    let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
-        FacetManager::new(),
-    )));
-    service_locator
-        .register_service(virtual_actor_manager)
-        .await;
-    service_locator.register_service(facet_manager).await;
-    let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
-    )
-    .await;
-    service_locator
-        .register_service_by_name(
-            plexspaces_actor::ServiceName::ServiceNameActorFactoryImpl.as_str(),
-            actor_factory.clone(),
-        )
-        .await;
-    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
-    service_locator.register_actor_factory(factory_trait).await;
+    // Retrieve the ActorRegistry that initialize_services already created and wired
+    let actor_registry: Arc<ActorRegistry> = service_locator
+        .actor_registry()
+        .await
+        .expect("ActorRegistry should be created by initialize_services");
 
     // Register BehaviorRegistry and behavior for "counter" actor type
     use plexspaces_actor::behavior_factory::BehaviorRegistry;
@@ -133,6 +112,7 @@ async fn create_test_actor_service(
     // Disable auth for tests
     let config = plexspaces_proto::node::v1::SecurityConfig {
         disable_auth: true,
+        oidc: None,
         ..Default::default()
     };
     service_locator.register_security_config(config).await;
@@ -144,6 +124,15 @@ async fn create_test_actor_service(
         node_id.to_string(),
     ));
     (actor_service, actor_registry, service_locator_impl)
+}
+
+fn test_request<T>(inner: T) -> Request<T> {
+    let mut req = Request::new(inner);
+    req.metadata_mut()
+        .insert("x-tenant-id", "test-tenant".parse().unwrap());
+    req.metadata_mut()
+        .insert("x-namespace", "test".parse().unwrap());
+    req
 }
 
 // Helper adapter for ObjectRegistry (same as shard_group_tests.rs)
@@ -259,7 +248,7 @@ async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
         DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy,
         RebalancePolicy,
     };
-    let req = Request::new(CreateShardGroupRequest {
+    let req = test_request(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "labeled-group".to_string(),
             shard_count: 2,
@@ -506,7 +495,7 @@ async fn test_shard_group_cohesion_end_to_end() {
         DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy,
         RebalancePolicy,
     };
-    let req = Request::new(CreateShardGroupRequest {
+    let req = test_request(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "cohesion-test-group".to_string(),
             shard_count: 2,

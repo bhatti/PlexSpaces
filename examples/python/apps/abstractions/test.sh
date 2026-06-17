@@ -17,13 +17,40 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+# Auto-generate JWT if not provided
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+  echo "  Token: ${PLEXSPACES_TEST_TOKEN:0:20}..."
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+echo "AUTH_HEADER set: $([ -n "$AUTH_HEADER" ] && echo 'YES' || echo 'NO')"
 
 send_actor() {
   local actor="$1" payload="$2" timeout="${3:-20}"
-  curl -s --max-time "$timeout" -X POST \
-    "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
-    -H "Content-Type: application/json" \
-    -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  if [ -n "$AUTH_HEADER" ]; then
+    curl -s --max-time "$timeout" -X POST \
+      "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
+      -H "Content-Type: application/json" \
+      -H "$AUTH_HEADER" \
+      -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  else
+    curl -s --max-time "$timeout" -X POST \
+      "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
+      -H "Content-Type: application/json" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  fi
 }
 
 extract_payload_json() {
@@ -136,37 +163,73 @@ echo "Step 2: Deploy"
 sleep 2
 _deployed=0
 for _attempt in 1 2 3; do
-  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-  -F "application_id=$APP_ID" \
-  -F "name=abstractions-python" \
-  -F "version=1.0.0" \
-  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
+  echo "  Deploy attempt $_attempt (timeout 500s)..."
+  CURL_EXIT=0
+  if [ -n "$AUTH_HEADER" ]; then
+    DEPLOY_OUT=$(curl --max-time 500 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    -H "$AUTH_HEADER" \
+    -F "application_id=$APP_ID" \
+    -F "name=abstractions-python" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$CONFIG_FILE" 2>&1) || CURL_EXIT=$?
+  else
+    DEPLOY_OUT=$(curl --max-time 500 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+    -F "application_id=$APP_ID" \
+    -F "name=abstractions-python" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$CONFIG_FILE" 2>&1) || CURL_EXIT=$?
+  fi
+  if [ "$CURL_EXIT" -ne 0 ]; then
+    echo -e "  ${RED}curl failed with exit code $CURL_EXIT${NC}"
+    echo "  Output: $(echo "$DEPLOY_OUT" | tail -5)"
+    sleep 3
+    continue
+  fi
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  echo "  HTTP $HTTP_CODE — $(echo "$RESPONSE" | grep -o '"success"[^,}]*' | head -1)"
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
     _deployed=1
     break
   fi
-  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  echo -e "  ${RED}Deploy attempt $_attempt FAILED${NC}"
   sleep 3
 done
 if [ "$_deployed" -eq 0 ]; then
-  echo -e "${RED}Deploy failed: $RESPONSE${NC}"
+  echo -e "${RED}FATAL: Deploy failed after 3 attempts. Last HTTP $HTTP_CODE${NC}"
+  echo "  Response: $RESPONSE"
   exit 1
 fi
+echo -e "  ${GREEN}Deploy successful${NC}"
 
 echo "Step 9: Non-durable reactivation"
+echo "  Checking ephemeral actor status..."
 EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
 assert_actor_ok "ephemeral status" "$EPHEMERAL_UPDATED"
+echo "  ✓ ephemeral status OK"
+echo "  Incrementing ephemeral actor..."
 assert_actor_ok "ephemeral increment" "$(send_actor "$EPHEMERAL_ACTOR" '{"op":"increment","amount":2}' 15)"
+echo "  ✓ ephemeral increment OK"
 # Stop via DELETE API so the Rust node handles stop directly (no WASM controller indirection).
 # DELETE /api/v1/actors/{namespace}/{actor_type:id} resolves canonical ID, calls actor_factory.stop_actor,
 # then prime_instance_from_definition refreshes the spec so reactivation uses initial_count=5.
-STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
-  "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
-  -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+echo "  Stopping ephemeral actor..."
+if [ -n "$AUTH_HEADER" ]; then
+  STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+    "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
+    -H "Content-Type: application/json" \
+    -H "$AUTH_HEADER" 2>/dev/null || echo '{"error":"timeout"}')"
+else
+  STOP_RESULT="$(curl -s --max-time 15 -X DELETE \
+    "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$EPHEMERAL_ACTOR" \
+    -H "Content-Type: application/json" 2>/dev/null || echo '{"error":"timeout"}')"
+fi
 assert_actor_ok "stop_ephemeral" "$STOP_RESULT"
+echo "  ✓ ephemeral actor stopped"
+echo "  Waiting for reactivation (count should reset to 5)..."
 wait_for_json_field \
   "$EPHEMERAL_ACTOR" \
   '{"op":"status"}' \
@@ -174,6 +237,7 @@ wait_for_json_field \
   "5" \
   30 \
   0.2
+echo "  ✓ ephemeral reactivated with count=5"
 
 echo ""
-echo -e "${GREEN}Python abstractions example passed${NC}"
+echo -e "${GREEN}Python abstractions example passed — all assertions verified${NC}"

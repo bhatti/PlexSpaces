@@ -538,9 +538,11 @@ async fn set_replay_handler_for_facet(
     context: &Arc<ActorContext>,
 ) {
     // Create ReplayHandler that calls actor's behavior
+    let replay_signal = behavior.read().await.replay_signal();
     let handler = ActorReplayHandler {
         behavior: Arc::clone(behavior),
         context: Arc::clone(context),
+        replay_signal,
     };
 
     // Downcast to DurabilityFacet (no longer generic, uses trait objects)
@@ -591,6 +593,7 @@ async fn set_checkpoint_state_adapter_for_facet(
 struct ActorReplayHandler {
     behavior: Arc<RwLock<Box<dyn ActorTrait>>>,
     context: Arc<ActorContext>,
+    replay_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 struct ActorCheckpointStateAdapter {
@@ -600,6 +603,18 @@ struct ActorCheckpointStateAdapter {
 
 #[async_trait]
 impl ReplayHandler for ActorReplayHandler {
+    async fn on_replay_start(&self) {
+        if let Some(ref signal) = self.replay_signal {
+            signal.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    async fn on_replay_end(&self) {
+        if let Some(ref signal) = self.replay_signal {
+            signal.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     async fn replay_message(
         &self,
         message: Message,

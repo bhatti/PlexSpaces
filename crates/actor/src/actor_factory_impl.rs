@@ -1834,7 +1834,7 @@ impl ActorFactoryImpl {
             .service_locator
             .get_node_config()
             .await
-            .map(|c| c.grpc_address)
+            .map(|c| plexspaces_common::dialable_node_address(&c.grpc_address))
             .unwrap_or_default();
 
         let reg_ctx =

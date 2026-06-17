@@ -173,12 +173,14 @@ impl DynamoDBSchedulingStateStore {
         )
         .record(duration.as_secs_f64());
 
-        debug!(
-            table_name = %table_name,
-            region = %region,
-            duration_ms = duration.as_millis(),
-            "DynamoDB scheduling state store initialized"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                table_name = %table_name,
+                region = %region,
+                duration_ms = duration.as_millis(),
+                "DynamoDB scheduling state store initialized"
+            );
+        }
 
         Ok(Self {
             client,
@@ -201,7 +203,9 @@ impl DynamoDBSchedulingStateStore {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -212,7 +216,9 @@ impl DynamoDBSchedulingStateStore {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB table");
+        }
 
         // Create table with composite key for tenant isolation
         let pk_key_schema = KeySchemaElement::builder()
@@ -291,7 +297,9 @@ impl DynamoDBSchedulingStateStore {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table created successfully");
+                }
                 // Wait for table to be active
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
@@ -299,7 +307,9 @@ impl DynamoDBSchedulingStateStore {
             Err(e) => {
                 // Check if table was created concurrently
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -331,7 +341,9 @@ impl DynamoDBSchedulingStateStore {
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
                     TableStatus::Active => {
-                        debug!(table_name = %table_name, "Table is now active");
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(table_name = %table_name, "Table is now active");
+                        }
                         return Ok(());
                     }
                     TableStatus::Creating => {
@@ -619,11 +631,13 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                 )
                 .increment(1);
 
-                debug!(
-                    request_id = %request.request_id,
-                    duration_ms = duration.as_millis(),
-                    "Scheduling request stored successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        request_id = %request.request_id,
+                        duration_ms = duration.as_millis(),
+                        "Scheduling request stored successfully"
+                    );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -793,11 +807,13 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                 )
                 .increment(1);
 
-                debug!(
-                    request_id = %request.request_id,
-                    duration_ms = duration.as_millis(),
-                    "Scheduling request updated successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        request_id = %request.request_id,
+                        duration_ms = duration.as_millis(),
+                        "Scheduling request updated successfully"
+                    );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -900,11 +916,13 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                 )
                 .increment(1);
 
-                debug!(
-                    count = requests.len(),
-                    duration_ms = duration.as_millis(),
-                    "Queried pending scheduling requests"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        count = requests.len(),
+                        duration_ms = duration.as_millis(),
+                        "Queried pending scheduling requests"
+                    );
+                }
 
                 Ok(requests)
             }

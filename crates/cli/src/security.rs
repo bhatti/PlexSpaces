@@ -371,9 +371,8 @@ struct JwtCreateClaims {
 ///
 /// ## Purpose
 /// Generates a JWT with tenant_id, roles, groups, and is_admin for use with
-/// HTTP (Authorization: Bearer) or gRPC metadata. Token is validated by
-/// grpc-middleware AuthInterceptor and must be signed with the same secret
-/// as configured on the node (PLEXSPACES_JWT_SECRET or release security.jwt.secret).
+/// HTTP (Authorization: Bearer) or gRPC metadata. Token is signed with the
+/// ES256 private key and validated by the same key pair on the node.
 ///
 /// ## Arguments
 /// * `tenant_id` - Tenant ID (required)
@@ -382,7 +381,7 @@ struct JwtCreateClaims {
 /// * `groups` - List of groups
 /// * `is_admin` - Admin flag
 /// * `exp_hours` - Validity in hours
-/// * `secret` - JWT secret (from --secret or PLEXSPACES_JWT_SECRET)
+/// * `private_key_file` - Path to ES256 PEM file (from --private-key-file or PLEXSPACES_JWT_PRIVATE_KEY_FILE)
 pub async fn create_jwt_token(
     tenant_id: String,
     sub: String,
@@ -390,17 +389,24 @@ pub async fn create_jwt_token(
     groups: Vec<String>,
     is_admin: bool,
     exp_hours: u32,
-    secret: Option<String>,
+    private_key_file: Option<String>,
 ) -> Result<()> {
-    let secret = secret.ok_or_else(|| {
+    let key_file = private_key_file.ok_or_else(|| {
         anyhow::anyhow!(
-            "JWT secret required. Set --secret or PLEXSPACES_JWT_SECRET environment variable."
+            "ES256 private key file required. Set --private-key-file or PLEXSPACES_JWT_PRIVATE_KEY_FILE environment variable."
         )
     })?;
 
+    let key_pair = plexspaces_grpc_middleware::JwtKeyPair::from_config(
+        "",
+        &key_file,
+        "",
+        false,
+    ).context("Failed to load JWT key pair from private key file")?;
+
     let now = chrono::Utc::now();
     let exp = now + chrono::Duration::hours(exp_hours as i64);
-    let claims = JwtCreateClaims {
+    let claims = plexspaces_grpc_middleware::JwtClaims {
         sub: sub.clone(),
         exp: exp.timestamp(),
         iat: now.timestamp(),
@@ -410,14 +416,11 @@ pub async fn create_jwt_token(
         roles,
         groups,
         is_admin,
+        jti: None,
     };
 
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .context("Failed to encode JWT")?;
+    let token = plexspaces_grpc_middleware::sign_jwt_with_keypair(&key_pair, &claims)
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     println!("{}", token);
     eprintln!(

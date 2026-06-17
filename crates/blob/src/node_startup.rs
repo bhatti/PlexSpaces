@@ -44,7 +44,11 @@ pub fn default_blob_config_from_env() -> ProtoBlobConfig {
             .unwrap_or_else(|_| "false".to_string())
             .parse()
             .unwrap_or(false),
-        prefix: env::var("BLOB_PREFIX").unwrap_or_else(|_| "/plexspaces".to_string()),
+        prefix: env::var("BLOB_PREFIX").unwrap_or_else(|_| {
+            env::var("HOME")
+                .map(|h| format!("{}/plexspaces/blob", h))
+                .unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
+        }),
         gcp_service_account_json: env::var("GCP_SERVICE_ACCOUNT_JSON")
             .ok()
             .unwrap_or_default(),

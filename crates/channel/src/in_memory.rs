@@ -523,9 +523,8 @@ mod tests {
         assert_eq!(received.len(), 3);
     }
 
-    // Note: test_ack and test_nack_requeue moved to sqlite_backend.rs
     // In-memory channels don't track pending_acks (ack/nack are no-ops),
-    // so these tests need SQLite backend for proper ack/nack behavior
+    // so ack/nack tests use SQLite backend for proper behavior
 
     #[tokio::test]
     async fn test_publish_subscribe() {

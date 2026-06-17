@@ -107,6 +107,7 @@ pub mod chain;
 pub mod compression;
 pub mod http_server;
 pub mod jwt;
+pub mod jwt_keys;
 pub mod metrics;
 pub mod observability;
 pub mod rate_limit;
@@ -119,10 +120,13 @@ pub use auth::AuthInterceptor;
 pub use cert_gen::{CertGenError, CertificateGenerator, CertificatePaths};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;
-pub use http_server::{GrpcHttpServerBuilder, ServerBuildError};
+pub use http_server::{GrpcHttpServerBuilder, MtlsServerConfig, ServerBuildError};
 pub use jwt::{
-    resolve_tenant_id, validate_bearer_token, validate_jwt_token, JwtClaims, AUTH_REQUIRED_HINT,
+    resolve_tenant_id, sign_jwt_with_keypair, validate_bearer_token,
+    validate_bearer_token_with_keypair, validate_jwt_token, validate_jwt_token_with_keypair,
+    JwtClaims, AUTH_REQUIRED_HINT,
 };
+pub use jwt_keys::{JwtKeyError, JwtKeyPair};
 pub use metrics::MetricsInterceptor;
 pub use observability::{metrics_handler, LogLevel, ObservabilityError, ObservabilityManager};
 pub use rate_limit::RateLimitInterceptor;

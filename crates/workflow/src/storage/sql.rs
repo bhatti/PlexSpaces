@@ -37,6 +37,7 @@ use sqlx::{
 use std::collections::HashMap;
 
 use crate::types::*;
+use plexspaces_actor::{RequestContext, RequestContextExt};
 
 /// Type alias for the execution query row tuple returned from SQL queries
 type ExecutionQueryRow = (
@@ -340,7 +341,9 @@ impl From<StepExecutionRow> for StepExecution {
 async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), WorkflowError> {
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS workflow_definitions (
-            id TEXT NOT NULL, version TEXT NOT NULL, name TEXT NOT NULL, definition_proto BLOB NOT NULL,
+            id TEXT NOT NULL, version TEXT NOT NULL, name TEXT NOT NULL,
+            tenant_id TEXT NOT NULL DEFAULT '', namespace TEXT NOT NULL DEFAULT '',
+            definition_proto BLOB NOT NULL,
             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
             PRIMARY KEY (id, version))"#,
     )
@@ -355,9 +358,13 @@ async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), Work
     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_created ON workflow_definitions(created_at DESC)")
         .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_tenant ON workflow_definitions(tenant_id, namespace)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS workflow_executions (
-            execution_id TEXT PRIMARY KEY, definition_id TEXT NOT NULL, definition_version TEXT NOT NULL, status TEXT NOT NULL,
+            execution_id TEXT PRIMARY KEY, definition_id TEXT NOT NULL, definition_version TEXT NOT NULL,
+            tenant_id TEXT NOT NULL DEFAULT '', namespace TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
             current_step_id TEXT, input_json TEXT, output_json TEXT, error TEXT, node_id TEXT, version INTEGER NOT NULL DEFAULT 1,
             last_heartbeat INTEGER, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
             started_at INTEGER, completed_at INTEGER, updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -373,6 +380,7 @@ async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), Work
         "CREATE INDEX IF NOT EXISTS idx_workflow_executions_created ON workflow_executions(created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_workflow_executions_heartbeat ON workflow_executions(status, last_heartbeat) WHERE status IN ('RUNNING', 'PENDING')",
         "CREATE INDEX IF NOT EXISTS idx_workflow_executions_version ON workflow_executions(execution_id, version)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_tenant ON workflow_executions(tenant_id, namespace)",
     ] {
         sqlx::query(sql).execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
     }
@@ -580,15 +588,21 @@ impl WorkflowStorage {
     }
 
     /// Save workflow definition (serialized as proto binary)
-    pub async fn save_definition(&self, def: &WorkflowDefinition) -> Result<(), WorkflowError> {
+    pub async fn save_definition(
+        &self,
+        ctx: &RequestContext,
+        def: &WorkflowDefinition,
+    ) -> Result<(), WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         let definition_bytes = encode_definition(def)?;
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
                 sqlx::query(
                     r#"
-            INSERT INTO workflow_definitions (id, version, name, definition_proto)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO workflow_definitions (id, version, name, tenant_id, namespace, definition_proto)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (id, version) DO UPDATE SET
                 name = excluded.name,
                 definition_proto = excluded.definition_proto,
@@ -598,6 +612,8 @@ impl WorkflowStorage {
                 .bind(&def.id)
                 .bind(&def.version)
                 .bind(&def.name)
+                .bind(tenant_id)
+                .bind(namespace)
                 .bind(&definition_bytes)
                 .execute(pool)
                 .await
@@ -606,8 +622,8 @@ impl WorkflowStorage {
             SqlPool::Postgres(pool) => {
                 sqlx::query(
                     r#"
-                    INSERT INTO workflow_definitions (id, version, name, definition_proto)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO workflow_definitions (id, version, name, tenant_id, namespace, definition_proto)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (id, version) DO UPDATE SET
                         name = EXCLUDED.name,
                         definition_proto = EXCLUDED.definition_proto,
@@ -617,6 +633,8 @@ impl WorkflowStorage {
                 .bind(&def.id)
                 .bind(&def.version)
                 .bind(&def.name)
+                .bind(tenant_id)
+                .bind(namespace)
                 .bind(&definition_bytes)
                 .execute(pool)
                 .await
@@ -630,19 +648,24 @@ impl WorkflowStorage {
     /// Get workflow definition
     pub async fn get_definition(
         &self,
+        ctx: &RequestContext,
         id: &str,
         version: &str,
     ) -> Result<WorkflowDefinition, WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         let definition_bytes: Vec<u8> = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let row = sqlx::query(
                     r#"
             SELECT definition_proto FROM workflow_definitions
-            WHERE id = ? AND version = ?
+            WHERE id = ? AND version = ? AND tenant_id = ? AND namespace = ?
             "#,
                 )
                 .bind(id)
                 .bind(version)
+                .bind(tenant_id)
+                .bind(namespace)
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
@@ -657,11 +680,13 @@ impl WorkflowStorage {
                 let row = sqlx::query(
                     r#"
                     SELECT definition_proto FROM workflow_definitions
-                    WHERE id = $1 AND version = $2
+                    WHERE id = $1 AND version = $2 AND tenant_id = $3 AND namespace = $4
                     "#,
                 )
                 .bind(id)
                 .bind(version)
+                .bind(tenant_id)
+                .bind(namespace)
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
@@ -680,37 +705,46 @@ impl WorkflowStorage {
     /// List all workflow definitions
     ///
     /// ## Arguments
+    /// * `ctx` - Request context for tenant isolation
     /// * `name_prefix` - Optional prefix filter for definition names
     ///
     /// ## Returns
     /// Vector of all matching workflow definitions
     pub async fn list_definitions(
         &self,
+        ctx: &RequestContext,
         name_prefix: Option<&str>,
     ) -> Result<Vec<WorkflowDefinition>, WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         let mut definitions = Vec::new();
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-                let query = if let Some(prefix) = name_prefix {
-                    sqlx::query(
-                        r#"
-                        SELECT definition_proto FROM workflow_definitions
-                        WHERE name LIKE ?
-                        ORDER BY id, version ASC
-                        "#,
-                    )
-                    .bind(format!("{}%", prefix))
-                } else {
-                    sqlx::query(
-                        r#"
-                        SELECT definition_proto FROM workflow_definitions
-                        ORDER BY id, version ASC
-                        "#,
-                    )
-                };
+                let mut sql = String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
+                if name_prefix.is_some() {
+                    sql.push_str(" AND name LIKE ?");
+                }
+                if !tenant_id.is_empty() {
+                    sql.push_str(" AND tenant_id = ?");
+                }
+                if !namespace.is_empty() {
+                    sql.push_str(" AND namespace = ?");
+                }
+                sql.push_str(" ORDER BY id, version ASC");
 
-                let rows = query
+                let mut query_builder = sqlx::query(&sql);
+                if let Some(prefix) = name_prefix {
+                    query_builder = query_builder.bind(format!("{}%", prefix));
+                }
+                if !tenant_id.is_empty() {
+                    query_builder = query_builder.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    query_builder = query_builder.bind(namespace);
+                }
+
+                let rows = query_builder
                     .fetch_all(pool)
                     .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -722,25 +756,35 @@ impl WorkflowStorage {
                 }
             }
             SqlPool::Postgres(pool) => {
-                let query = if let Some(prefix) = name_prefix {
-                    sqlx::query(
-                        r#"
-                        SELECT definition_proto FROM workflow_definitions
-                        WHERE name LIKE $1
-                        ORDER BY id, version ASC
-                        "#,
-                    )
-                    .bind(format!("{}%", prefix))
-                } else {
-                    sqlx::query(
-                        r#"
-                        SELECT definition_proto FROM workflow_definitions
-                        ORDER BY id, version ASC
-                        "#,
-                    )
-                };
+                let mut sql = String::from("SELECT definition_proto FROM workflow_definitions WHERE 1=1");
+                let mut param_idx = 1;
+                if name_prefix.is_some() {
+                    sql.push_str(&format!(" AND name LIKE ${}", param_idx));
+                    param_idx += 1;
+                }
+                if !tenant_id.is_empty() {
+                    sql.push_str(&format!(" AND tenant_id = ${}", param_idx));
+                    param_idx += 1;
+                }
+                if !namespace.is_empty() {
+                    sql.push_str(&format!(" AND namespace = ${}", param_idx));
+                    param_idx += 1;
+                }
+                let _ = param_idx;
+                sql.push_str(" ORDER BY id, version ASC");
 
-                let rows = query
+                let mut query_builder = sqlx::query(&sql);
+                if let Some(prefix) = name_prefix {
+                    query_builder = query_builder.bind(format!("{}%", prefix));
+                }
+                if !tenant_id.is_empty() {
+                    query_builder = query_builder.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    query_builder = query_builder.bind(namespace);
+                }
+
+                let rows = query_builder
                     .fetch_all(pool)
                     .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -759,26 +803,33 @@ impl WorkflowStorage {
     /// Delete workflow definition
     ///
     /// ## Arguments
+    /// * `ctx` - Request context for tenant isolation
     /// * `id` - Definition ID
     /// * `version` - Version to delete (empty = delete all versions)
     ///
     /// ## Returns
     /// Ok if deleted successfully
-    pub async fn delete_definition(&self, id: &str, version: &str) -> Result<(), WorkflowError> {
+    pub async fn delete_definition(&self, ctx: &RequestContext, id: &str, version: &str) -> Result<(), WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         match &self.pool {
             SqlPool::Sqlite(pool) => {
                 if version.is_empty() {
                     // Delete all versions
-                    sqlx::query("DELETE FROM workflow_definitions WHERE id = ?")
+                    sqlx::query("DELETE FROM workflow_definitions WHERE id = ? AND tenant_id = ? AND namespace = ?")
                         .bind(id)
+                        .bind(tenant_id)
+                        .bind(namespace)
                         .execute(pool)
                         .await
                         .map_err(|e| WorkflowError::Storage(e.to_string()))?;
                 } else {
                     // Delete specific version
-                    sqlx::query("DELETE FROM workflow_definitions WHERE id = ? AND version = ?")
+                    sqlx::query("DELETE FROM workflow_definitions WHERE id = ? AND version = ? AND tenant_id = ? AND namespace = ?")
                         .bind(id)
                         .bind(version)
+                        .bind(tenant_id)
+                        .bind(namespace)
                         .execute(pool)
                         .await
                         .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -787,16 +838,20 @@ impl WorkflowStorage {
             SqlPool::Postgres(pool) => {
                 if version.is_empty() {
                     // Delete all versions
-                    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1")
+                    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1 AND tenant_id = $2 AND namespace = $3")
                         .bind(id)
+                        .bind(tenant_id)
+                        .bind(namespace)
                         .execute(pool)
                         .await
                         .map_err(|e| WorkflowError::Storage(e.to_string()))?;
                 } else {
                     // Delete specific version
-                    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1 AND version = $2")
+                    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1 AND version = $2 AND tenant_id = $3 AND namespace = $4")
                         .bind(id)
                         .bind(version)
+                        .bind(tenant_id)
+                        .bind(namespace)
                         .execute(pool)
                         .await
                         .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -810,24 +865,28 @@ impl WorkflowStorage {
     /// Create workflow execution
     pub async fn create_execution(
         &self,
+        ctx: &RequestContext,
         definition_id: &str,
         definition_version: &str,
         input: Value,
         labels: HashMap<String, String>,
     ) -> Result<String, WorkflowError> {
-        self.create_execution_with_node(definition_id, definition_version, input, labels, None)
+        self.create_execution_with_node(ctx, definition_id, definition_version, input, labels, None)
             .await
     }
 
     /// Create workflow execution with node ownership
     pub async fn create_execution_with_node(
         &self,
+        ctx: &RequestContext,
         definition_id: &str,
         definition_version: &str,
         input: Value,
         labels: HashMap<String, String>,
         node_id: Option<&str>,
     ) -> Result<String, WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         let execution_id = ulid::Ulid::new().to_string();
         let input_json = serde_json::to_string(&input)
             .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
@@ -838,8 +897,8 @@ impl WorkflowStorage {
                 sqlx::query(
             r#"
             INSERT INTO workflow_executions
-                    (execution_id, definition_id, definition_version, status, input_json, node_id, version, last_heartbeat)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    (execution_id, definition_id, definition_version, status, input_json, node_id, tenant_id, namespace, version, last_heartbeat)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
             "#,
         )
         .bind(&execution_id)
@@ -848,6 +907,8 @@ impl WorkflowStorage {
         .bind(ExecutionStatus::ExecutionStatusPending.as_sql_str())
         .bind(&input_json)
                 .bind(node_id)
+                .bind(tenant_id)
+                .bind(namespace)
                 .execute(pool)
         .await
         .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -856,8 +917,8 @@ impl WorkflowStorage {
                 sqlx::query(
                     r#"
                     INSERT INTO workflow_executions
-                    (execution_id, definition_id, definition_version, status, input_json, node_id, version, last_heartbeat)
-                    VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP)
+                    (execution_id, definition_id, definition_version, status, input_json, node_id, tenant_id, namespace, version, last_heartbeat)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, CURRENT_TIMESTAMP)
                     "#,
                 )
                 .bind(&execution_id)
@@ -866,6 +927,8 @@ impl WorkflowStorage {
                 .bind(ExecutionStatus::ExecutionStatusPending.as_sql_str())
                 .bind(&input_json)
                 .bind(node_id)
+                .bind(tenant_id)
+                .bind(namespace)
                 .execute(pool)
                 .await
                 .map_err(|e| WorkflowError::Storage(e.to_string()))?;
@@ -912,9 +975,12 @@ impl WorkflowStorage {
     /// Get workflow execution (returns proto WorkflowExecution)
     pub async fn get_execution(
         &self,
+        ctx: &RequestContext,
         execution_id: &str,
     ) -> Result<WorkflowExecution, WorkflowError> {
-        let row = self.get_execution_row(execution_id).await?;
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
+        let row = self.get_execution_row_with_tenant(execution_id, tenant_id, namespace).await?;
         Ok(row.into())
     }
 
@@ -979,6 +1045,115 @@ impl WorkflowStorage {
                     "#,
                 )
                 .bind(execution_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| {
+                    WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
+                })?;
+                (
+                    row.get::<String, _>(0),
+                    row.get::<String, _>(1),
+                    row.get::<String, _>(2),
+                    row.get::<String, _>(3),
+                    row.get::<Option<String>, _>(4),
+                    row.get::<Option<String>, _>(5),
+                    row.get::<Option<String>, _>(6),
+                    row.get::<Option<String>, _>(7),
+                    row.get::<Option<String>, _>(8),
+                    row.get::<i64, _>(9),
+                    row.get::<Option<chrono::DateTime<chrono::Utc>>, _>(10),
+                )
+            }
+        };
+
+        let status = ExecutionStatus::from_sql_str(&status_str)?;
+
+        Ok(WorkflowExecutionRow {
+            execution_id: execution_id_val,
+            definition_id,
+            definition_version,
+            status,
+            current_step_id,
+            input: input_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            output: output_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            error,
+            node_id,
+            _version: version as u64,
+            last_heartbeat,
+        })
+    }
+
+    /// Get workflow execution as internal row with tenant isolation
+    pub(crate) async fn get_execution_row_with_tenant(
+        &self,
+        execution_id: &str,
+        tenant_id: &str,
+        namespace: &str,
+    ) -> Result<WorkflowExecutionRow, WorkflowError> {
+        let (
+            execution_id_val,
+            definition_id,
+            definition_version,
+            status_str,
+            current_step_id,
+            input_json,
+            output_json,
+            error,
+            node_id,
+            version,
+            last_heartbeat,
+        ): ExecutionQueryRow = match &self.pool {
+            SqlPool::Sqlite(pool) => {
+                let row = sqlx::query(
+                    r#"
+            SELECT execution_id, definition_id, definition_version, status,
+                   current_step_id, input_json, output_json, error,
+                           node_id, version, last_heartbeat,
+                           created_at, started_at, completed_at, updated_at
+            FROM workflow_executions
+            WHERE execution_id = ? AND tenant_id = ? AND namespace = ?
+            "#,
+                )
+                .bind(execution_id)
+                .bind(tenant_id)
+                .bind(namespace)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| {
+                    WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
+                })?;
+                (
+                    row.get::<String, _>(0),
+                    row.get::<String, _>(1),
+                    row.get::<String, _>(2),
+                    row.get::<String, _>(3),
+                    row.get::<Option<String>, _>(4),
+                    row.get::<Option<String>, _>(5),
+                    row.get::<Option<String>, _>(6),
+                    row.get::<Option<String>, _>(7),
+                    row.get::<Option<String>, _>(8),
+                    row.get::<i64, _>(9),
+                    row.get::<Option<chrono::DateTime<chrono::Utc>>, _>(10),
+                )
+            }
+            SqlPool::Postgres(pool) => {
+                let row = sqlx::query(
+                    r#"
+                    SELECT execution_id, definition_id, definition_version, status,
+                           current_step_id, input_json, output_json, error,
+                           node_id, version, last_heartbeat,
+                           created_at, started_at, completed_at, updated_at
+                    FROM workflow_executions
+                    WHERE execution_id = $1 AND tenant_id = $2 AND namespace = $3
+                    "#,
+                )
+                .bind(execution_id)
+                .bind(tenant_id)
+                .bind(namespace)
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
@@ -1807,11 +1982,14 @@ impl WorkflowStorage {
     /// List workflow executions by status
     pub async fn list_executions_by_status(
         &self,
+        ctx: &RequestContext,
         statuses: Vec<ExecutionStatus>,
         node_id: Option<&str>,
     ) -> Result<Vec<WorkflowExecution>, WorkflowError> {
+        let tenant_id = ctx.tenant_id();
+        let namespace = ctx.namespace();
         let rows = self
-            .list_execution_rows_by_status(statuses, node_id)
+            .list_execution_rows_by_status(statuses, node_id, tenant_id, namespace)
             .await?;
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -1821,6 +1999,8 @@ impl WorkflowStorage {
         &self,
         statuses: Vec<ExecutionStatus>,
         node_id: Option<&str>,
+        tenant_id: &str,
+        namespace: &str,
     ) -> Result<Vec<WorkflowExecutionRow>, WorkflowError> {
         let status_strings: Vec<String> = statuses
             .iter()
@@ -1850,6 +2030,12 @@ impl WorkflowStorage {
                 if node_id.is_some() {
                     query.push_str(" AND node_id = ?");
                 }
+                if !tenant_id.is_empty() {
+                    query.push_str(" AND tenant_id = ?");
+                }
+                if !namespace.is_empty() {
+                    query.push_str(" AND namespace = ?");
+                }
 
                 query.push_str(" ORDER BY created_at ASC");
 
@@ -1861,6 +2047,12 @@ impl WorkflowStorage {
 
                 if let Some(nid) = node_id {
                     query_builder = query_builder.bind(nid);
+                }
+                if !tenant_id.is_empty() {
+                    query_builder = query_builder.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    query_builder = query_builder.bind(namespace);
                 }
 
                 let rows = query_builder
@@ -1918,6 +2110,14 @@ impl WorkflowStorage {
                     query.push_str(&format!(" AND node_id = ${}", param_idx));
                     param_idx += 1;
                 }
+                if !tenant_id.is_empty() {
+                    query.push_str(&format!(" AND tenant_id = ${}", param_idx));
+                    param_idx += 1;
+                }
+                if !namespace.is_empty() {
+                    query.push_str(&format!(" AND namespace = ${}", param_idx));
+                    param_idx += 1;
+                }
 
                 let _ = param_idx; // suppress warning
 
@@ -1931,6 +2131,12 @@ impl WorkflowStorage {
 
                 if let Some(nid) = node_id {
                     query_builder = query_builder.bind(nid);
+                }
+                if !tenant_id.is_empty() {
+                    query_builder = query_builder.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    query_builder = query_builder.bind(namespace);
                 }
 
                 let rows = query_builder

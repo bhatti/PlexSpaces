@@ -37,7 +37,26 @@
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use plexspaces_common::RequestContextExt;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::jwt_keys::JwtKeyPair;
+
+/// Deserialize `aud` claim per RFC 7519: accepts either a single string or an array of strings.
+fn deserialize_aud<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AudValue {
+        Single(String),
+        Multiple(Vec<String>),
+    }
+    match AudValue::deserialize(deserializer)? {
+        AudValue::Single(s) => Ok(if s.is_empty() { vec![] } else { vec![s] }),
+        AudValue::Multiple(v) => Ok(v),
+    }
+}
 
 /// Hint message for auth-related errors
 pub const AUTH_REQUIRED_HINT: &str = " For local testing, set PLEXSPACES_DISABLE_AUTH=1.";
@@ -71,8 +90,8 @@ pub struct JwtClaims {
     /// Issuer
     #[serde(default)]
     pub iss: String,
-    /// Audience
-    #[serde(default)]
+    /// Audience (RFC 7519: may be a single string or an array of strings)
+    #[serde(default, deserialize_with = "deserialize_aud")]
     pub aud: Vec<String>,
     /// Tenant ID for multi-tenancy
     #[serde(default)]
@@ -86,6 +105,9 @@ pub struct JwtClaims {
     /// Admin flag
     #[serde(default)]
     pub is_admin: bool,
+    /// JWT ID — present on API tokens, maps to token_id in api_tokens table for revocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
 }
 
 impl JwtClaims {
@@ -213,6 +235,54 @@ pub fn validate_jwt_token(secret: &str, token: &str) -> Result<JwtClaims, String
     Ok(claims)
 }
 
+/// Validate a Bearer token using a JwtKeyPair (ES256 or HS256).
+///
+/// This is the preferred validation path — it supports both asymmetric (ES256) and
+/// symmetric (HS256) keys transparently based on the configured key pair.
+pub fn validate_bearer_token_with_keypair(
+    key_pair: &JwtKeyPair,
+    auth_header: Option<&str>,
+) -> Result<JwtClaims, String> {
+    let token = auth_header
+        .and_then(|v| v.strip_prefix("Bearer ").map(str::trim))
+        .ok_or_else(|| {
+            format!(
+                "Missing or invalid Authorization header (expected: Bearer <token>).{}",
+                AUTH_REQUIRED_HINT
+            )
+        })?;
+
+    validate_jwt_token_with_keypair(key_pair, token)
+}
+
+/// Validate a JWT token using a JwtKeyPair (ES256 or HS256).
+pub fn validate_jwt_token_with_keypair(
+    key_pair: &JwtKeyPair,
+    token: &str,
+) -> Result<JwtClaims, String> {
+    let mut validation = Validation::new(key_pair.algorithm());
+    validation.validate_exp = true;
+    validation.validate_aud = false;
+
+    let token_data = decode::<JwtClaims>(token, key_pair.decoding_key(), &validation).map_err(|e| {
+        format!(
+            "JWT validation failed: {} (token may be expired or invalid).{}",
+            e, AUTH_REQUIRED_HINT
+        )
+    })?;
+
+    let claims = token_data.claims;
+
+    if claims.tenant_id.is_empty() {
+        return Err(format!(
+            "JWT missing tenant_id claim.{}",
+            AUTH_REQUIRED_HINT
+        ));
+    }
+
+    Ok(claims)
+}
+
 /// Extract tenant_id from JWT or headers with fallback
 ///
 /// ## Purpose
@@ -257,6 +327,22 @@ pub fn resolve_tenant_id(
     header_tenant_id.unwrap_or_default().to_string()
 }
 
+/// Sign a JWT token using a JwtKeyPair. Used for issuing tokens (OIDC callback, API token creation).
+pub fn sign_jwt_with_keypair(
+    key_pair: &JwtKeyPair,
+    claims: &JwtClaims,
+) -> Result<String, String> {
+    use jsonwebtoken::{encode, Header};
+
+    let mut header = Header::new(key_pair.algorithm());
+    if key_pair.is_asymmetric() {
+        header.kid = Some(key_pair.kid().to_string());
+    }
+
+    encode(&header, claims, key_pair.encoding_key())
+        .map_err(|e| format!("Failed to sign JWT: {}", e))
+}
+
 /// Generate a test JWT token (for testing only)
 ///
 /// ## Arguments
@@ -291,6 +377,7 @@ pub fn generate_test_token(
         roles: vec!["user".to_string()],
         groups: vec![],
         is_admin: false,
+        jti: None,
     };
 
     encode(
@@ -325,6 +412,7 @@ mod tests {
             roles: vec!["user".to_string()],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         encode(
@@ -408,6 +496,7 @@ mod tests {
             roles: vec![],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         let token = encode(
@@ -434,6 +523,7 @@ mod tests {
             roles: vec![],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         let result = resolve_tenant_id(Some(&claims), false, None, None, Some("header-tenant"));
@@ -478,6 +568,7 @@ mod tests {
             roles: vec!["admin".to_string()],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         let ctx = claims.to_request_context("my-namespace".to_string(), true);
@@ -500,6 +591,7 @@ mod tests {
             roles: vec!["superadmin".to_string()],
             groups: vec![],
             is_admin: true,
+            jti: None,
         };
 
         let ctx = claims.to_request_context("prod".to_string(), true);
@@ -522,6 +614,7 @@ mod tests {
             roles: vec![],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         let ctx = claims.to_request_context_default(false);
@@ -561,11 +654,53 @@ mod tests {
             roles: vec![],
             groups: vec![],
             is_admin: false,
+            jti: None,
         };
 
         // auth_enabled = false should still work
         let ctx = claims.to_request_context("ns".to_string(), false);
         assert_eq!(ctx.tenant_id(), "tenant");
         assert!(!ctx.auth_enabled);
+    }
+
+    #[test]
+    fn test_validate_token_with_different_secret() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+
+        let secret = "my-jwt-secret2";
+        let now = chrono::Utc::now().timestamp();
+        let claims = JwtClaims {
+            sub: "test-user".to_string(),
+            exp: now + 86400,
+            iat: now,
+            iss: String::new(),
+            aud: vec![],
+            tenant_id: "test-tenant".to_string(),
+            roles: vec!["admin".to_string(), "developer".to_string()],
+            groups: vec![],
+            is_admin: true,
+            jti: None,
+        };
+
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+
+        let auth_header = format!("Bearer {}", token);
+        let result = validate_bearer_token(secret, Some(&auth_header));
+        assert!(result.is_ok(), "Token validation failed: {:?}", result.err());
+
+        let validated = result.unwrap();
+        assert_eq!(validated.sub, "test-user");
+        assert_eq!(validated.tenant_id, "test-tenant");
+        assert!(validated.is_admin);
+        assert_eq!(validated.roles, vec!["admin", "developer"]);
+
+        // Wrong secret must fail
+        let wrong = validate_bearer_token("wrong-secret", Some(&auth_header));
+        assert!(wrong.is_err());
     }
 }

@@ -6,10 +6,31 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/streaming_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
+
+# Auto-generate JWT if not provided
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
-  NODES="localhost:$1"
+  NODES=""
+  for _port in "$@"; do
+    NODES="${NODES:+$NODES }localhost:$_port"
+  done
 else
   NODES="$*"
   NODES="${NODES//,/ }"
@@ -106,7 +127,7 @@ PY
 list_registered_node_count() {
   local host="$1" port="$2"
   local raw
-  raw="$(curl -s --connect-timeout 5 --max-time 15 "http://${host}:${port}/api/v1/nodes?page_size=100" 2>/dev/null || true)"
+  raw="$(curl -s --connect-timeout 5 --max-time 15 ${AUTH_HEADER:+-H "$AUTH_HEADER"} "http://${host}:${port}/api/v1/nodes?page_size=100" 2>/dev/null || true)"
   RAW_RESPONSE="$raw" python3 - <<'PY'
 import json
 import os
@@ -160,7 +181,7 @@ wait_for_registry_membership() {
     local host="${node%%:*}"
     local port="${node##*:}"
     echo "  Registered nodes from http://${host}:${port}/api/v1/nodes"
-    curl -s --connect-timeout 5 --max-time 30 "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
+    curl -s --connect-timeout 5 --max-time 30 ${AUTH_HEADER:+-H "$AUTH_HEADER"} "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
   done
   exit 1
 }
@@ -188,10 +209,40 @@ echo "Step 1: Undeploy existing app from all nodes"
 "$SCRIPT_DIR/undeploy.sh" $NODES
 sleep 2
 
-echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
+echo "Step 1: Deploy to all nodes (non-entry first, entry last)"
+for node in "${NODE_LIST[@]}"; do
+  if [ "$node" = "$ENTRY_NODE" ]; then
+    continue
+  fi
+  host="${node%%:*}"
+  port="${node##*:}"
+  _deployed=0
+  for _attempt in 1 2 3; do
+    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1)
+    http_code=$(echo "$deploy_output" | tail -n1)
+    response=$(echo "$deploy_output" | sed '$d')
+    if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+      _deployed=1
+      break
+    fi
+    echo "  Deploy attempt $_attempt to ${host}:${port} failed, retrying in 3s..."
+    sleep 3
+  done
+  if [ "$_deployed" -eq 0 ]; then
+    echo -e "${RED}Deploy to ${host}:${port} failed: $response${NC}"
+    exit 1
+  fi
+done
 _deployed=0
 for _attempt in 1 2 3; do
   deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
@@ -216,14 +267,14 @@ rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
 
 echo "Step 1a: Wait for registry convergence"
-wait_for_registry_membership "${#NODE_LIST[@]}" "${STREAMING_PIPELINE_REGISTRY_ATTEMPTS:-30}" "${STREAMING_PIPELINE_REGISTRY_SLEEP_SECS:-2}"
+wait_for_registry_membership "${#NODE_LIST[@]}" "${STREAMING_PIPELINE_REGISTRY_ATTEMPTS:-5}" "${STREAMING_PIPELINE_REGISTRY_SLEEP_SECS:-2}"
 
 echo "Step 1b: ListConnectedNodes (GET /api/v1/nodes) per node"
 for node in "${NODE_LIST[@]}"; do
   host="${node%%:*}"
   port="${node##*:}"
   echo "  Registered nodes from http://${host}:${port}/api/v1/nodes"
-  curl -s --connect-timeout 5 --max-time 30 "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
+  curl -s --connect-timeout 5 --max-time 30 ${AUTH_HEADER:+-H "$AUTH_HEADER"} "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
 done
 echo ""
 
@@ -240,6 +291,7 @@ while true; do
   run_response=$(curl -s --max-time 240 -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=240" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
 
   should_retry=false

@@ -7,12 +7,10 @@
     <link rel="stylesheet" href="/static/dashboard.css">
     <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+    <script src="/static/dashboard/layout.js"></script>
 </head>
 <body>
     <div class="dashboard-container">
-        <header class="dashboard-header">
-            <h1>PlexSpaces Dashboard</h1>
-        </header>
 
         <section class="widgets-section">
             <div class="widget">
@@ -63,6 +61,7 @@
                     <thead>
                         <tr>
                             <th>Node ID</th>
+                            <th>Node Address</th>
                             <th>Cluster</th>
                             <th>CPU %</th>
                             <th>Memory</th>
@@ -72,7 +71,7 @@
                         </tr>
                     </thead>
                     <tbody id="nodes-table-body">
-                        <tr><td colspan="7">Loading...</td></tr>
+                        <tr><td colspan="8">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -103,23 +102,6 @@
             <div class="table-pagination" id="applications-pagination"></div>
         </section>
 
-        <section class="table-section">
-            <h2>Tenants</h2>
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Tenant ID</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tenants-table-body">
-                        <tr><td colspan="2">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="table-pagination" id="tenants-pagination"></div>
-        </section>
     </div>
 
     <footer class="dashboard-footer">
@@ -138,7 +120,6 @@
         const tableState = {
             nodes: { offset: 0, limit: 10 },
             applications: { offset: 0, limit: 10 },
-            tenants: { offset: 0, limit: 10 },
         };
 
         function escapeHtml(value) {
@@ -150,8 +131,17 @@
                 .replace(/'/g, '&#39;');
         }
 
+        let _redirecting = false;
         async function fetchJson(url) {
-            const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (_redirecting) throw new Error('Redirecting to login...');
+            const response = await fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'include' });
+            if (response.status === 401) {
+                if (!_redirecting) {
+                    _redirecting = true;
+                    window.location.href = '/api/v1/auth/oidc/login';
+                }
+                throw new Error('Redirecting to login...');
+            }
             if (!response.ok) {
                 throw new Error(`Request failed: ${response.status}`);
             }
@@ -303,14 +293,21 @@
             const buildDate = systemInfo.build_date && systemInfo.build_date !== 'unknown'
                 ? ` • built ${new Date(systemInfo.build_date).toLocaleString()}`
                 : '';
-            document.getElementById('build-version').textContent = `PlexSpaces ${version}${buildDate}`;
+            const securityBadges = [];
+            if (systemInfo.mtls_enabled) securityBadges.push('mTLS');
+            if (systemInfo.auth_enabled) securityBadges.push('JWT Auth');
+            if (systemInfo.oidc_enabled) securityBadges.push('OIDC');
+            const securityStr = securityBadges.length
+                ? ` • Security: ${securityBadges.join(', ')}`
+                : ' • Security: disabled';
+            document.getElementById('build-version').textContent = `PlexSpaces ${version}${buildDate}${securityStr}`;
             document.getElementById('last-updated').textContent = `Last updated ${new Date().toLocaleString()}`;
         }
 
         function renderNodes(nodes) {
             const body = document.getElementById('nodes-table-body');
             if (!nodes.length) {
-                body.innerHTML = '<tr><td colspan="7">No nodes found.</td></tr>';
+                body.innerHTML = '<tr><td colspan="8">No nodes found.</td></tr>';
                 return;
             }
 
@@ -334,7 +331,8 @@
                 const memoryValue = used > 0 ? formatBytes(used) : '-';
                 return `
                     <tr>
-                        <td>${escapeHtml(node.id)}</td>
+                        <td style="font-size:0.85em">${escapeHtml(node.id)}</td>
+                        <td style="font-size:0.85em">${escapeHtml(node.node_address || '-')}</td>
                         <td>${escapeHtml(node.cluster_name || '-')}</td>
                         <td>${Number(metrics.cpu_usage_percent || 0).toFixed(1)}</td>
                         <td>${memoryValue}</td>
@@ -371,21 +369,6 @@
             }).join('');
         }
 
-        function renderTenants(tenants) {
-            const body = document.getElementById('tenants-table-body');
-            if (!tenants.length) {
-                body.innerHTML = '<tr><td colspan="2">No tenants found.</td></tr>';
-                return;
-            }
-
-            body.innerHTML = tenants.map(tenant => `
-                <tr>
-                    <td>${escapeHtml(tenant.tenant_id)}</td>
-                    <td><a href="/dashboard/tenant/${encodeURIComponent(tenant.tenant_id)}">Open</a></td>
-                </tr>
-            `).join('');
-        }
-
         async function loadNodes() {
             const data = await fetchJson(buildPagedUrl('/api/v1/dashboard/nodes', tableState.nodes));
             renderNodes(data.nodes || []);
@@ -410,17 +393,6 @@
             return data.applications || [];
         }
 
-        async function loadTenants() {
-            const data = await fetchJson(buildPagedUrl('/api/v1/dashboard/tenants', tableState.tenants));
-            renderTenants(data.tenants || []);
-            renderPagination('tenants-pagination', data.page, direction => {
-                tableState.tenants.offset = direction === 'next'
-                    ? tableState.tenants.offset + tableState.tenants.limit
-                    : Math.max(0, tableState.tenants.offset - tableState.tenants.limit);
-                loadTenants();
-            });
-        }
-
         async function loadDashboard() {
             try {
                 const [summary, nodes, systemInfo, applications] = await Promise.all([
@@ -430,7 +402,6 @@
                     loadApplications(),
                 ]);
                 updateSummary(summary, nodes);
-                await loadTenants();
                 appendClusterMetricSnapshot(nodes, applications);
                 updateFooter(systemInfo);
             } catch (error) {

@@ -72,15 +72,12 @@ impl SqliteObjectRegistryRepository {
             .await
             .map_err(|e| RepositoryError::Connection(e.to_string()))?;
 
-        // For :memory: only: create schema. File-based uses unified db/migrations.
-        if path == ":memory:" {
-            Self::run_migrations(&pool).await?;
-        }
+        Self::run_migrations(&pool).await?;
 
         Ok(Self { pool })
     }
 
-    /// Create object_registrations schema for :memory: SQLite. File-based uses unified db/migrations at init.
+    /// Ensure object_registrations schema exists (idempotent).
     async fn run_migrations(pool: &Pool<Sqlite>) -> RepositoryResult<()> {
         const SCHEMA: &str = r#"CREATE TABLE IF NOT EXISTS object_registrations (
             tenant_id TEXT NOT NULL, namespace TEXT NOT NULL, object_id TEXT NOT NULL,
@@ -305,11 +302,11 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         let mut conditions = Vec::new();
         let mut bindings: Vec<String> = Vec::new();
 
-        if !ctx.is_admin() || !ctx.tenant_id().is_empty() {
+        if !ctx.is_admin() {
             conditions.push("tenant_id = ?".to_string());
             bindings.push(ctx.tenant_id().to_string());
         }
-        if !ctx.is_admin() || !ctx.namespace().is_empty() {
+        if !ctx.namespace().is_empty() {
             conditions.push("namespace = ?".to_string());
             bindings.push(ctx.namespace().to_string());
         }
@@ -473,11 +470,11 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         let mut conditions = Vec::new();
         let mut bindings: Vec<String> = Vec::new();
 
-        if !ctx.is_admin() || !ctx.tenant_id().is_empty() {
+        if !ctx.is_admin() {
             conditions.push("tenant_id = ?".to_string());
             bindings.push(ctx.tenant_id().to_string());
         }
-        if !ctx.is_admin() || !ctx.namespace().is_empty() {
+        if !ctx.namespace().is_empty() {
             conditions.push("namespace = ?".to_string());
             bindings.push(ctx.namespace().to_string());
         }
@@ -558,7 +555,8 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         let mut conditions = vec!["object_type = ?".to_string()];
         let mut bindings = vec![(object_type as i32).to_string()];
 
-        if !ctx.tenant_id().is_empty() {
+        // Admin sees all tenants — don't filter by their own tenant_id
+        if !ctx.is_admin() && !ctx.tenant_id().is_empty() {
             conditions.push("tenant_id = ?".to_string());
             bindings.push(ctx.tenant_id().to_string());
         }
@@ -609,7 +607,8 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         let mut conditions = vec!["object_type = ?".to_string()];
         let mut bindings = vec![(object_type as i32).to_string()];
 
-        if !ctx.tenant_id().is_empty() {
+        // Admin sees all tenants — don't filter by their own tenant_id
+        if !ctx.is_admin() && !ctx.tenant_id().is_empty() {
             conditions.push("tenant_id = ?".to_string());
             bindings.push(ctx.tenant_id().to_string());
         }
@@ -1390,7 +1389,8 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         let mut tenant_filter_index = None;
         let mut namespace_filter_index = None;
 
-        if !ctx.tenant_id().is_empty() {
+        // Admin sees all tenants — don't filter by their own tenant_id
+        if !ctx.is_admin() && !ctx.tenant_id().is_empty() {
             next_param += 1;
             tenant_filter_index = Some(next_param);
             conditions.push(format!("tenant_id = ${next_param}"));
@@ -1446,7 +1446,8 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         let mut has_tenant_filter = false;
         let mut has_namespace_filter = false;
 
-        if !ctx.tenant_id().is_empty() {
+        // Admin sees all tenants — don't filter by their own tenant_id
+        if !ctx.is_admin() && !ctx.tenant_id().is_empty() {
             next_param += 1;
             has_tenant_filter = true;
             conditions.push(format!("tenant_id = ${next_param}"));

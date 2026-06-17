@@ -78,6 +78,8 @@ wasmtime::component::bindgen!({
 pub struct SimpleHostImpl {
     /// Actor ID of the component instance
     pub actor_id: ActorId,
+    /// Tenant ID for this actor instance (from deployment context)
+    pub tenant_id: String,
     /// Host functions implementation (gateway to framework services)
     pub host_functions: Arc<HostFunctions>,
     /// TupleSpace provider for ts_write/read/take
@@ -95,11 +97,12 @@ impl SimpleHostImpl {
         host_functions: Arc<HostFunctions>,
         tuplespace_provider: Option<Arc<dyn TupleSpaceProvider>>,
     ) -> Self {
-        // Extract lock_manager and blob_service from host_functions if available
         let lock_manager = host_functions.lock_manager().cloned();
         let blob_service = host_functions.blob_service().cloned();
+        let tenant_id = host_functions.tenant_id.clone();
         Self {
             actor_id,
+            tenant_id,
             host_functions,
             tuplespace_provider,
             lock_manager,
@@ -114,8 +117,10 @@ impl SimpleHostImpl {
         lock_manager: Option<Arc<dyn LockManager + Send + Sync>>,
         blob_service: Option<Arc<BlobService>>,
     ) -> Self {
+        let tenant_id = host_functions.tenant_id.clone();
         Self {
             actor_id,
+            tenant_id,
             host_functions,
             tuplespace_provider,
             lock_manager,
@@ -126,7 +131,7 @@ impl SimpleHostImpl {
     /// Build a RequestContext for process group operations.
     /// The namespace comes directly from the validated structured actor ID.
     fn pg_context(&self) -> RequestContext {
-        RequestContext::new_without_auth(String::new(), self.actor_id.namespace().to_string())
+        RequestContext::new_without_auth(self.tenant_id.clone(), self.actor_id.namespace().to_string())
     }
 
     fn decode_proto<M>(payload: &[u8], type_name: &str) -> Result<M, String>
@@ -172,6 +177,13 @@ impl SimpleHostImpl {
 impl plexspaces::actor::host::Host for SimpleHostImpl {
     /// Send a message to another actor (fire-and-forget at the WIT boundary).
     async fn send(&mut self, to: String, msg_type: String, payload: Vec<u8>) -> Result<(), String> {
+        if self.host_functions.is_replaying.load(std::sync::atomic::Ordering::Acquire) {
+            tracing::debug!(
+                actor_id = %self.actor_id, to = %to, msg_type = %msg_type,
+                "send: suppressed during journal replay"
+            );
+            return Ok(());
+        }
         metrics::counter!("plexspaces_wasm_simple_send_total").increment(1);
         let self_id = self.actor_id.to_string();
 
@@ -920,6 +932,18 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         msg_type: String,
         payload: Vec<u8>,
     ) -> Result<String, String> {
+        // During journal replay, suppress timer scheduling to prevent reentrance traps.
+        // The WASM component model forbids re-entering a component instance; timers that
+        // fire during replay would attempt to deliver messages while the instance is busy.
+        if self.host_functions.is_replaying.load(std::sync::atomic::Ordering::Acquire) {
+            let suppressed_id = format!("timer-replay-suppressed-{}", ulid::Ulid::new());
+            tracing::debug!(
+                actor_id = %self.actor_id, timer_id = %suppressed_id,
+                delay_ms = delay_ms, msg_type = %msg_type,
+                "send_after: suppressed during journal replay"
+            );
+            return Ok(suppressed_id);
+        }
         metrics::counter!("plexspaces_wasm_send_after_total").increment(1);
         let host_functions = self.host_functions.clone();
         let self_id = self.actor_id.to_string();
@@ -2359,5 +2383,79 @@ mod tests {
     {
         M::decode(response.expect("host call should succeed").as_slice())
             .expect("response should be valid protobuf")
+    }
+
+    #[cfg(feature = "component-model")]
+    #[tokio::test]
+    async fn test_send_after_suppressed_during_replay() {
+        use plexspaces::actor::host::Host;
+
+        let hf = Arc::new(HostFunctions::new());
+        hf.is_replaying
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+
+        let result = host
+            .send_after(1000, "timer_fire".to_string(), b"payload".to_vec())
+            .await;
+
+        assert!(result.is_ok());
+        let timer_id = result.unwrap();
+        assert!(
+            timer_id.contains("replay-suppressed"),
+            "Timer ID should indicate suppression: {}",
+            timer_id
+        );
+
+        // No timer handle should have been spawned
+        let handles = hf.timer_handles.lock().unwrap();
+        assert_eq!(handles.len(), 0, "No timers should be spawned during replay");
+    }
+
+    #[cfg(feature = "component-model")]
+    #[tokio::test]
+    async fn test_send_suppressed_during_replay() {
+        use plexspaces::actor::host::Host;
+
+        let sender = Arc::new(MockMessageSender) as Arc<dyn crate::MessageSender>;
+        let hf = Arc::new(HostFunctions::with_message_sender(sender));
+        hf.is_replaying
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+
+        let result = host
+            .send("other-actor".to_string(), "event".to_string(), b"data".to_vec())
+            .await;
+
+        assert!(result.is_ok(), "send should succeed (suppressed) during replay");
+    }
+
+    #[cfg(feature = "component-model")]
+    #[tokio::test]
+    async fn test_send_after_works_when_not_replaying() {
+        use plexspaces::actor::host::Host;
+
+        let sender = Arc::new(MockMessageSender) as Arc<dyn crate::MessageSender>;
+        let hf = Arc::new(HostFunctions::with_message_sender(sender));
+
+        let mut host = SimpleHostImpl::new(ActorId::new("test-actor", "test-type", "test-ns", "node-1").unwrap(), hf.clone(), None);
+
+        let result = host
+            .send_after(50, "timer_fire".to_string(), b"payload".to_vec())
+            .await;
+
+        assert!(result.is_ok());
+        let timer_id = result.unwrap();
+        assert!(
+            !timer_id.contains("replay-suppressed"),
+            "Timer should be real when not replaying: {}",
+            timer_id
+        );
+
+        // A timer handle should have been spawned
+        let handles = hf.timer_handles.lock().unwrap();
+        assert_eq!(handles.len(), 1, "One timer should be spawned");
     }
 }

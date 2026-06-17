@@ -3,23 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Node Dashboard</title>
+    <title>Node Details - PlexSpaces</title>
     <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard/layout.js"></script>
     <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
 </head>
 <body>
     <div class="dashboard-container">
-        <header class="dashboard-header">
-            <h1>Node Dashboard</h1>
-            <a class="back-link" href="/dashboard">Back to Home</a>
-            <a class="back-link" href="/dashboard/metrics/:node_id" style="margin-left:1rem">Metrics</a>
-        </header>
 
         <section class="widgets-section">
             <div class="widget">
                 <div class="widget-header">Node ID</div>
-                <div class="widget-value" id="node-id">:node_id</div>
+                <div class="widget-value" id="node-id" style="font-size:0.85em">:node_id</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Node Address</div>
+                <div class="widget-value" id="node-address" style="font-size:0.85em">-</div>
             </div>
             <div class="widget">
                 <div class="widget-header">Cluster</div>
@@ -50,6 +50,7 @@
                 <div class="widget-value" id="peer-count">-</div>
             </div>
         </section>
+
 
         <section class="widgets-section">
             <div class="widget widget-chart">
@@ -237,10 +238,6 @@
             </div>
         </section>
 
-        <section class="table-section">
-            <h2>Metrics</h2>
-            <p>View detailed metrics, graphs, and counters on the <a href="/dashboard/metrics/:node_id">Metrics page</a>.</p>
-        </section>
     </div>
 
     <footer class="dashboard-footer">
@@ -285,11 +282,21 @@
                 .replace(/'/g, '&#39;');
         }
 
+        let _redirecting = false;
         async function fetchJson(url, options = {}) {
+            if (_redirecting) throw new Error('Redirecting to login...');
             const response = await fetch(url, {
                 headers: { 'Accept': 'application/json' },
+                credentials: 'include',
                 ...options,
             });
+            if (response.status === 401) {
+                if (!_redirecting) {
+                    _redirecting = true;
+                    window.location.href = '/api/v1/auth/oidc/login';
+                }
+                throw new Error('Redirecting to login...');
+            }
             if (!response.ok) {
                 throw new Error(`Request failed: ${response.status}`);
             }
@@ -332,6 +339,9 @@
             const metrics = data.node_metrics || {};
             const actorCount = Object.values(summary.actors_by_type || {}).reduce((sum, value) => sum + Number(value || 0), 0);
             document.getElementById('cluster-name').textContent = node.cluster_name || metrics.cluster_name || '-';
+            const nodeAddr = node.node_address || '-';
+            document.getElementById('node-address').textContent = nodeAddr;
+            document.title = `${node.id || nodeId} (${nodeAddr}) - PlexSpaces`;
             document.getElementById('tenant-count').textContent = summary.total_tenants ?? 0;
             document.getElementById('application-count').textContent = summary.total_applications ?? 0;
             document.getElementById('actor-count').textContent = actorCount;

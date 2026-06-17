@@ -22,6 +22,7 @@
 //! Orchestrates multi-step workflow execution with retry logic.
 //! Following TDD principles - GREEN phase implementation.
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
@@ -55,18 +56,18 @@ impl WorkflowExecutor {
     /// 5. Update final status (COMPLETED or FAILED)
     pub async fn start_execution(
         storage: &WorkflowStorage,
+        ctx: &RequestContext,
         definition_id: &str,
         definition_version: &str,
         input: Value,
     ) -> Result<String, WorkflowError> {
-        // Get workflow definition
         let definition = storage
-            .get_definition(definition_id, definition_version)
+            .get_definition(ctx, definition_id, definition_version)
             .await?;
 
-        // Create execution record
         let execution_id = storage
             .create_execution(
+                ctx,
                 definition_id,
                 definition_version,
                 input.clone(),
@@ -110,14 +111,13 @@ impl WorkflowExecutor {
     /// WorkflowError if execution fails
     pub async fn execute_from_state(
         storage: &WorkflowStorage,
+        ctx: &RequestContext,
         execution_id: &str,
     ) -> Result<(), WorkflowError> {
-        // Get execution to retrieve definition info and input
-        let execution = storage.get_execution(execution_id).await?;
+        let execution = storage.get_execution(ctx, execution_id).await?;
 
-        // Get workflow definition
         let definition = storage
-            .get_definition(&execution.definition_id, &execution.definition_version)
+            .get_definition(ctx, &execution.definition_id, &execution.definition_version)
             .await?;
 
         // Handle empty workflow
@@ -1364,11 +1364,13 @@ mod tests {
     use super::*;
     use crate::storage::sql::make_workflow_definition;
     use crate::types::WorkflowExecutionExt;
+    use plexspaces_actor::RequestContext;
     use serde_json::json;
 
     #[tokio::test]
     async fn test_executor_minimal() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "test",
@@ -1385,14 +1387,14 @@ mod tests {
             )],
         );
 
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "test", "1.0", json!({"test": "input"}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "test", "1.0", json!({"test": "input"}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusCompleted
@@ -1402,9 +1404,10 @@ mod tests {
     #[tokio::test]
     async fn test_workflow_not_found() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let result =
-            WorkflowExecutor::start_execution(&storage, "non-existent", "1.0", json!({})).await;
+            WorkflowExecutor::start_execution(&storage, &ctx, "non-existent", "1.0", json!({})).await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
@@ -1413,6 +1416,7 @@ mod tests {
     #[tokio::test]
     async fn test_parallel_step_missing_branches() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "parallel-invalid",
@@ -1428,14 +1432,14 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "parallel-invalid", "1.0", json!({}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "parallel-invalid", "1.0", json!({}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusFailed
@@ -1445,6 +1449,7 @@ mod tests {
     #[tokio::test]
     async fn test_map_step_missing_items() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "map-invalid",
@@ -1460,14 +1465,14 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "map-invalid", "1.0", json!({}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "map-invalid", "1.0", json!({}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusFailed
@@ -1477,6 +1482,7 @@ mod tests {
     #[tokio::test]
     async fn test_map_step_missing_iterator() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "map-no-iterator",
@@ -1492,14 +1498,14 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "map-no-iterator", "1.0", json!({}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "map-no-iterator", "1.0", json!({}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusFailed
@@ -1653,6 +1659,7 @@ mod tests {
     #[tokio::test]
     async fn test_step_with_invalid_next_reference() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "invalid-next",
@@ -1668,14 +1675,14 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "invalid-next", "1.0", json!({}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "invalid-next", "1.0", json!({}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusCompleted
@@ -1685,6 +1692,7 @@ mod tests {
     #[tokio::test]
     async fn test_parallel_branch_missing_id() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
+        let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
         let def = make_workflow_definition(
             "parallel-no-id",
@@ -1700,14 +1708,14 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&def).await.unwrap();
+        storage.save_definition(&ctx, &def).await.unwrap();
 
         let execution_id =
-            WorkflowExecutor::start_execution(&storage, "parallel-no-id", "1.0", json!({}))
+            WorkflowExecutor::start_execution(&storage, &ctx, "parallel-no-id", "1.0", json!({}))
                 .await
                 .unwrap();
 
-        let execution = storage.get_execution(&execution_id).await.unwrap();
+        let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusFailed

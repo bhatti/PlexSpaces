@@ -5,6 +5,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/mcp_tool_server_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -102,11 +121,12 @@ _deployed=0
 for _attempt in 1 2 3; do
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
       "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
       -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
   http_code=$(echo "$response" | tail -n1)
   body=$(echo "$response" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -140,6 +160,7 @@ echo "Test 1: tools_list — list all available tools"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_list"}')
 RESP="$RESP" python3 <<'PY' || fail "tools_list: expected 3 tools"
 import json, os
@@ -163,6 +184,7 @@ echo "Test 2: tools_call calculator — add(10, 5)"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_call","tool_name":"calculator","input":{"operation":"add","a":10,"b":5}}')
 RESP="$RESP" python3 <<'PY' || fail "calculator add(10,5): expected result=15"
 import json, os
@@ -183,6 +205,7 @@ echo "Test 3: tools_call calculator — divide by zero"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_call","tool_name":"calculator","input":{"operation":"divide","a":42,"b":0}}')
 RESP="$RESP" python3 <<'PY' || fail "calculator divide by zero: expected error field"
 import json, os
@@ -202,6 +225,7 @@ echo "Test 4: tools_call search — query 'actor'"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_call","tool_name":"search","input":{"query":"actor","max_results":10}}')
 RESP="$RESP" python3 <<'PY' || fail "search 'actor': expected at least 1 result"
 import json, os
@@ -225,6 +249,7 @@ echo "Test 5: tools_call weather — London celsius"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_call","tool_name":"weather","input":{"location":"London","units":"celsius"}}')
 RESP="$RESP" python3 <<'PY' || fail "weather London celsius: expected temperature field"
 import json, os
@@ -246,6 +271,7 @@ echo "Test 6: get_stats — verify invocation counts"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"get_stats"}')
 RESP="$RESP" python3 <<'PY' || fail "get_stats: expected non-zero invocation counts"
 import json, os
@@ -275,6 +301,7 @@ echo "Test 7: register_tool — add 'translator' tool"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{
     "op":"register_tool",
     "tool_schema":{
@@ -308,6 +335,7 @@ pass "register_tool accepted new tool"
 RESP=$(curl -s --max-time 30 -X POST \
   "${BASE}/${REGISTRY_ACTOR}/ask?timeout=30" \
   -H "Content-Type: application/json" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -d '{"op":"tools_list"}')
 RESP="$RESP" python3 <<'PY' || fail "tools_list after register: expected translator in list"
 import json, os

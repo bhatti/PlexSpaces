@@ -89,10 +89,19 @@ pub async fn request_context_from_grpc_request(
         .map(|s| s == "true" || s == "1")
         .unwrap_or(false);
 
+    // Extract Bearer token so it can be forwarded in cross-node gRPC calls.
+    // The token is forwarded by apply_request_context_to_grpc_metadata and validated
+    // by the receiving node's auth interceptor (JWT mode) or accepted by mTLS peers.
+    let bearer_token = metadata
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| s.starts_with("Bearer ") || s.starts_with("bearer "))
+        .map(|s| s[7..].to_string());
+
     // Use shared validation from RequestContext::from_auth
     // This validates tenant_id if auth_enabled, otherwise allows empty tenant_id
     // No defaults from NodeConfig - tenant/namespace must come from request
-    RequestContext::from_auth(
+    let ctx = RequestContext::from_auth(
         tenant_id_from_header.or(tenant_id_from_labels),
         namespace_from_header.or(namespace_from_labels),
         user_id,
@@ -100,12 +109,23 @@ pub async fn request_context_from_grpc_request(
         auth_enabled,
         None, // No default tenant - must come from request/auth
         None, // No default namespace - must come from request
-    )
+    )?;
+
+    // Store Bearer token in context so cross-node calls can forward it
+    if let Some(token) = bearer_token {
+        Ok(ctx.with_bearer_token(token))
+    } else {
+        Ok(ctx)
+    }
 }
 
 /// Apply [`RequestContext`] to outbound gRPC metadata so a peer can run
 /// [`request_context_from_grpc_request`] and recover the same tenant (JWT / auth
-/// interceptor), namespace from the original edge request, and propagated auth headers.
+/// Propagate request context to outbound gRPC metadata for service-to-service calls.
+///
+/// Node-to-node calls use mTLS for identity. The receiving node trusts headers
+/// from mTLS-authenticated peers, so we propagate the full context including
+/// tenant-id for delegated (on-behalf-of-user) requests.
 ///
 /// Header names match the ingress contract used by [`request_context_from_grpc_request`]:
 /// `x-tenant-id`, `x-namespace`, `x-user-id`, `x-admin`, and `authorization` when present.

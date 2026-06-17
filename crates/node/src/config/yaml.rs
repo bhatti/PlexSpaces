@@ -140,9 +140,34 @@ pub struct SecurityConfigYaml {
     pub authn_config: Option<AuthnConfigYaml>,
     #[serde(default)]
     pub authz_config: Option<AuthzConfigYaml>,
+    #[serde(default)]
+    pub oidc: Option<OidcConfigYaml>,
     /// When true, disables JWT/mTLS auth (for local testing). Also set via PLEXSPACES_DISABLE_AUTH=1.
     #[serde(default)]
     pub disable_auth: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Default)]
+pub struct OidcConfigYaml {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub discovery_url: String,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: String,
+    #[serde(default)]
+    pub redirect_uri: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub tenant_claim: String,
+    #[serde(default)]
+    pub admin_groups: Vec<String>,
+    #[serde(default)]
+    pub default_tenant_id: String,
 }
 
 #[allow(dead_code)]
@@ -186,6 +211,14 @@ pub struct JwtConfigYaml {
     pub allowed_audiences: Vec<String>,
     #[serde(default)]
     pub disable_auth_for_testing: bool,
+    #[serde(default)]
+    pub algorithm: String,
+    #[serde(default)]
+    pub private_key_pem: String,
+    #[serde(default)]
+    pub private_key_file: String,
+    #[serde(default)]
+    pub auto_generate_key: bool,
 }
 
 #[derive(Debug, Deserialize)]

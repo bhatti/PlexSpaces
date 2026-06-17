@@ -255,13 +255,15 @@ impl SQSChannel {
         )
         .record(duration.as_secs_f64());
 
-        debug!(
-            channel_name = %config.name,
-            queue_url = %queue_url,
-            dlq_enabled = dlq_enabled,
-            duration_ms = duration.as_millis(),
-            "SQS channel initialized"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                channel_name = %config.name,
+                queue_url = %queue_url,
+                dlq_enabled = dlq_enabled,
+                duration_ms = duration.as_millis(),
+                "SQS channel initialized"
+            );
+        }
 
         Ok(Self {
             config,
@@ -293,7 +295,9 @@ impl SQSChannel {
         match client.get_queue_url().queue_name(queue_name).send().await {
             Ok(result) => {
                 if let Some(url) = result.queue_url() {
-                    debug!(queue_name = %queue_name, "SQS queue already exists");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(queue_name = %queue_name, "SQS queue already exists");
+                    }
                     return Ok(url.to_string());
                 }
             }
@@ -303,12 +307,14 @@ impl SQSChannel {
                 let error_code = e.code().unwrap_or("unknown");
                 let error_message = e.message().unwrap_or(&error_msg);
 
-                debug!(
-                    queue_name = %queue_name,
-                    error_code = %error_code,
-                    error_message = %error_message,
-                    "SQS get_queue_url result"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        queue_name = %queue_name,
+                        error_code = %error_code,
+                        error_message = %error_message,
+                        "SQS get_queue_url result"
+                    );
+                }
 
                 if !error_msg.contains("AWS.SimpleQueueService.NonExistentQueue")
                     && error_code != "AWS.SimpleQueueService.NonExistentQueue"
@@ -328,7 +334,9 @@ impl SQSChannel {
             }
         }
 
-        debug!(queue_name = %queue_name, "Creating SQS queue");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(queue_name = %queue_name, "Creating SQS queue");
+        }
 
         // Create queue
         let mut create_request = client
@@ -362,7 +370,9 @@ impl SQSChannel {
                         ChannelError::BackendError("Queue URL not returned from create".to_string())
                     })?
                     .to_string();
-                debug!(queue_name = %queue_name, queue_url = %queue_url, "SQS queue created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(queue_name = %queue_name, queue_url = %queue_url, "SQS queue created successfully");
+                }
                 Ok(queue_url)
             }
             Err(e) => {
@@ -513,13 +523,15 @@ impl Channel for SQSChannel {
                 .increment(1);
                 self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
 
-                debug!(
-                    channel_name = %self.config.name,
-                    message_id = %message_id,
-                    sqs_message_id = %sqs_message_id,
-                    duration_ms = duration.as_millis(),
-                    "Message sent successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        channel_name = %self.config.name,
+                        message_id = %message_id,
+                        sqs_message_id = %sqs_message_id,
+                        duration_ms = duration.as_millis(),
+                        "Message sent successfully"
+                    );
+                }
 
                 Ok(sqs_message_id)
             }
@@ -621,12 +633,14 @@ impl Channel for SQSChannel {
                     .messages_received
                     .fetch_add(messages.len() as u64, Ordering::Relaxed);
 
-                debug!(
-                    channel_name = %self.config.name,
-                    message_count = messages.len(),
-                    duration_ms = duration.as_millis(),
-                    "Messages received"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        channel_name = %self.config.name,
+                        message_count = messages.len(),
+                        duration_ms = duration.as_millis(),
+                        "Messages received"
+                    );
+                }
 
                 Ok(messages)
             }
@@ -785,12 +799,14 @@ impl Channel for SQSChannel {
                     .increment(1);
                     self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
 
-                    debug!(
-                        channel_name = %self.config.name,
-                        message_id = %message_id,
-                        duration_ms = duration.as_millis(),
-                        "Message acknowledged"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            channel_name = %self.config.name,
+                            message_id = %message_id,
+                            duration_ms = duration.as_millis(),
+                            "Message acknowledged"
+                        );
+                    }
                     Ok(())
                 }
                 Err(e) => {
@@ -864,12 +880,14 @@ impl Channel for SQSChannel {
                         .increment(1);
                         self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
 
-                        debug!(
-                            channel_name = %self.config.name,
-                            message_id = %message_id,
-                            duration_ms = duration.as_millis(),
-                            "Message nacked with requeue"
-                        );
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(
+                                channel_name = %self.config.name,
+                                message_id = %message_id,
+                                duration_ms = duration.as_millis(),
+                                "Message nacked with requeue"
+                            );
+                        }
                         Ok(())
                     }
                     Err(e) => {
@@ -913,12 +931,14 @@ impl Channel for SQSChannel {
                 self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
                 self.stats.messages_dlq.fetch_add(1, Ordering::Relaxed);
 
-                debug!(
-                    channel_name = %self.config.name,
-                    message_id = %message_id,
-                    duration_ms = duration.as_millis(),
-                    "Message nacked (will go to DLQ if max receive count exceeded)"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        channel_name = %self.config.name,
+                        message_id = %message_id,
+                        duration_ms = duration.as_millis(),
+                        "Message nacked (will go to DLQ if max receive count exceeded)"
+                    );
+                }
                 Ok(())
             }
         } else {
@@ -948,7 +968,9 @@ impl Channel for SQSChannel {
 
     async fn close(&self) -> ChannelResult<()> {
         self.closed.store(true, Ordering::Relaxed);
-        debug!(channel_name = %self.config.name, "Channel closed");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(channel_name = %self.config.name, "Channel closed");
+        }
         Ok(())
     }
 

@@ -32,6 +32,7 @@ plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-scheduler = { path = "../scheduler" }
 plexspaces-db = { path = "../../db" }
 plexspaces-http-client = { workspace = true }
+plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 sysinfo = "0.30"
 
 # Blob service dependencies
@@ -41,10 +42,11 @@ sha2 = "0.10"
 regex = "1.10"
 hex = "0.4"
 
-# gRPC
+# gRPC + HTTP
 tonic = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
+axum = { workspace = true }
 
 # Async
 tokio = { workspace = true }
@@ -61,6 +63,14 @@ anyhow = "1.0"
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 tracing = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# OIDC/OAuth
+reqwest = { workspace = true }
+jsonwebtoken = "9.3"
+urlencoding = "2.1"
 
 # Utilities
 uuid = { workspace = true }

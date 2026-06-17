@@ -36,7 +36,7 @@ pub fn timestamp_to_datetime(ts: Option<Timestamp>) -> Option<DateTime<Utc>> {
 }
 
 /// Get storage path for blob
-/// Format: /plexspaces/{tenant_id}/{namespace}/{blob_id}
+/// Format: {prefix}/{tenant_id}/{namespace}/{blob_id}
 pub fn get_storage_path(metadata: &BlobMetadata, prefix: &str) -> String {
     let normalized_prefix = prefix.trim_end_matches('/');
     format!(

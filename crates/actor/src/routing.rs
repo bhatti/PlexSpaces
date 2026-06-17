@@ -485,7 +485,7 @@ pub fn route_remote(
             apply_request_context_to_grpc_metadata(&ctx, grpc_req.metadata_mut());
             client.ask_reply(grpc_req).await.map(|resp| {
                 let inner = resp.into_inner();
-                (inner.actor_id, inner.payload, inner.headers, String::new())
+                (inner.actor_id, inner.payload, inner.headers, String::new(), inner.success)
             })
         } else {
             let mut grpc_req = tonic::Request::new(SendMessageRequest {
@@ -512,6 +512,7 @@ pub fn route_remote(
                     Vec::new(),
                     Default::default(),
                     inner.message_id,
+                    true,
                 )
             })
         } {
@@ -555,13 +556,14 @@ pub fn route_remote(
         .increment(1);
 
         if wait_for_response {
-            let (resolved_actor_id, payload, headers, _) = response;
+            let (resolved_actor_id, payload, headers, _, success) = response;
             let correlation_id = proto_message.id.clone();
+            let message_type = if success { "call" } else { "error_reply" };
             let reply_message = Message {
                 id: format!("res-{}", ulid::Ulid::new()),
                 sender_id: resolved_actor_id,
                 receiver_id: proto_message.sender_id,
-                message_type: "call".to_string(),
+                message_type: message_type.to_string(),
                 payload,
                 headers,
                 correlation_id,
@@ -569,7 +571,7 @@ pub fn route_remote(
             };
             Ok((proto_message.id, Some(reply_message)))
         } else {
-            let (_resolved_actor_id, _payload, _headers, message_id) = response;
+            let (_resolved_actor_id, _payload, _headers, message_id, _) = response;
             Ok((message_id, None))
         }
     })

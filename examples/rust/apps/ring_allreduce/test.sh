@@ -2,11 +2,32 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RUST_APPS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "${_RUST_APPS_ROOT}/test-common.sh"
 WASM_FILE="$SCRIPT_DIR/ring_allreduce_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
 export CARGO_PROFILE="${CARGO_PROFILE:-debug}"
+
+
+# Auto-generate JWT if not provided
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
 
 if [[ -f "$HOME/venv/bin/activate" ]]; then
   # shellcheck disable=SC1090
@@ -46,11 +67,10 @@ TEMP_CONFIG=""
 
 
 grpc_seed_nodes() {
-  local seed_list=()
   local joined=""
   local sep=""
-  for entry in ${seed_list[@]+"${seed_list[@]}"}; do
-    joined="${joined}${sep}${entry}"
+  for entry in "${NODE_LIST[@]}"; do
+    joined="${joined}${sep}\"${entry}\""
     sep=", "
   done
   printf '%s' "$joined"
@@ -119,11 +139,12 @@ for node in "${NODE_LIST[@]}"; do
   _deployed=0
   for _attempt in 1 2 3; do
     deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
       -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
     http_code=$(echo "$deploy_output" | tail -n1)
     response=$(echo "$deploy_output" | sed '$d')
     if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -141,11 +162,12 @@ done
 _deployed=0
 for _attempt in 1 2 3; do
   deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+    -F "config=@$TEMP_CONFIG" 2>&1) || true
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -160,7 +182,9 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-sleep 2
+echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
+wait_for_registry_membership "${#NODE_LIST[@]}" 5 2
+echo -e "  ${GREEN}All ${#NODE_LIST[@]} nodes discovered${NC}"
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
 
@@ -177,6 +201,7 @@ while true; do
   run_response=$(curl -s --max-time 240 -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=240" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
 
   if [[ "$run_response" != *"Placement produced no target nodes"* ]]; then

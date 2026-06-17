@@ -3,17 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Application Dashboard</title>
+    <title>Application - PlexSpaces</title>
     <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard/layout.js"></script>
     <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
 </head>
 <body>
     <div class="dashboard-container">
-        <header class="dashboard-header">
-            <h1>Application Dashboard</h1>
-            <a class="back-link" href="/dashboard">Back to Home</a>
-        </header>
 
         <section class="widgets-section">
             <div class="widget">
@@ -131,10 +128,6 @@
             <div class="table-pagination" id="actors-pagination"></div>
         </section>
 
-        <section class="table-section">
-            <h2>Metrics</h2>
-            <p>View actor and application metrics for this application on the <span id="metrics-link-container"></span>.</p>
-        </section>
     </div>
 
     <div class="modal" id="actor-detail-modal">
@@ -186,8 +179,13 @@
         async function fetchJson(url, options = {}) {
             const response = await fetch(url, {
                 headers: { 'Accept': 'application/json' },
+                credentials: 'include',
                 ...options,
             });
+            if (response.status === 401) {
+                window.location.href = '/api/v1/auth/oidc/login';
+                throw new Error('Redirecting to login...');
+            }
             if (!response.ok) {
                 throw new Error(`Request failed: ${response.status}`);
             }
@@ -305,7 +303,8 @@
             if (!timestamp || typeof timestamp.seconds === 'undefined') {
                 return 'Not yet recorded';
             }
-            return new Date((Number(timestamp.seconds) * 1000) + Math.floor(Number(timestamp.nanos || 0) / 1_000_000)).toLocaleString();
+            var d = new Date((Number(timestamp.seconds) * 1000) + Math.floor(Number(timestamp.nanos || 0) / 1_000_000));
+            return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
         }
 
         function metricTable(rows) {
@@ -447,12 +446,6 @@
             }
             trackAppMetrics(metrics);
 
-            const metricsLinkContainer = document.getElementById('metrics-link-container');
-            if (metricsLinkContainer) {
-                const ns = applicationDetails.namespace || applicationDetails.application_id || applicationId;
-                metricsLinkContainer.innerHTML =
-                    `<a href="/dashboard/metrics/${encodeURIComponent(applicationId)}?scope=app&namespace=${encodeURIComponent(ns)}">Metrics page</a>`;
-            }
         }
 
         async function loadActors() {

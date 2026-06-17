@@ -109,7 +109,7 @@ export PLEXSPACES_LISTEN_ADDR="$PORT"
 export BLOB_ENABLED="true"
 export BLOB_BACKEND="$BACKEND"
 export BLOB_BUCKET="$BUCKET"
-export BLOB_PREFIX="/plexspaces"
+export BLOB_PREFIX="${BLOB_PREFIX:-$HOME/plexspaces/blob}"
 export BLOB_DATABASE_URL="sqlite:blob_metadata.db"
 export RUST_LOG="${RUST_LOG:-info}"
 

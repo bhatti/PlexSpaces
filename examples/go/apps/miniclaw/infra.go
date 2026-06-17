@@ -235,6 +235,15 @@ var serviceGroups = []string{
 }
 
 func (h *HealthMonitorActor) doPoll() string {
+	now := host.NowMs()
+
+	// Coalesce: if this tick arrived while we already processed recently, skip the
+	// actual poll work but still drain the message. Only the last pending tick
+	// reschedules the next one.
+	if h.LastPollMs > 0 && now-h.LastPollMs < h.PollInterval/2 {
+		return marshal(map[string]any{"status": "ok", "skipped": true, "poll_count": h.PollCount})
+	}
+
 	if h.GroupHealth == nil {
 		h.GroupHealth = map[string]int{}
 	}
@@ -247,7 +256,7 @@ func (h *HealthMonitorActor) doPoll() string {
 		}
 	}
 	h.PollCount++
-	h.LastPollMs = host.NowMs()
+	h.LastPollMs = now
 
 	snapJSON, err := json.Marshal(h.GroupHealth)
 	if err != nil {

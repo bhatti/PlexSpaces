@@ -25,18 +25,75 @@ body {
 .dashboard-header {
     background: linear-gradient(135deg, #0f766e 0%, #115e59 52%, #164e63 100%);
     color: #f8fffd;
-    padding: 30px;
+    padding: 24px 30px;
     border-radius: 20px;
     margin-bottom: 30px;
     display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 18px 40px rgba(15, 118, 110, 0.20);
+}
+
+.header-top {
+    display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 18px 40px rgba(15, 118, 110, 0.20);
 }
 
 .dashboard-header h1 {
     font-size: 2em;
     font-weight: 600;
+}
+
+.header-nav {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.nav-link {
+    color: #f8fffd;
+    text-decoration: none;
+    font-size: 0.85em;
+    padding: 5px 12px;
+    background: rgba(248, 255, 253, 0.10);
+    border-radius: 999px;
+    transition: background 0.3s;
+}
+
+.nav-link:hover {
+    background: rgba(248, 255, 253, 0.22);
+}
+
+.nav-link.active {
+    background: rgba(248, 255, 253, 0.30);
+    font-weight: 600;
+}
+
+.header-title-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.header-user {
+    font-size: 0.95em;
+    opacity: 0.9;
+    padding: 6px 14px;
+    background: rgba(248, 255, 253, 0.12);
+    border-radius: 999px;
+}
+
+.logout-link {
+    color: #f8fffd;
+    opacity: 0.7;
+    margin-left: 10px;
+    text-decoration: none;
+    font-size: 0.85em;
+}
+
+.logout-link:hover {
+    opacity: 1;
+    text-decoration: underline;
 }
 
 .back-link {
@@ -117,9 +174,12 @@ body {
 }
 
 .widget-value {
-    font-size: 2em;
+    font-size: 1.5em;
     font-weight: 600;
     color: #0f766e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .widget-chart {

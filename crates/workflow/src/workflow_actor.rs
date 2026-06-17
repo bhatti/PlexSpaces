@@ -30,6 +30,7 @@
 //! - Resume paused workflows
 //! - Integration with actor supervision
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -137,11 +138,13 @@ impl WorkflowResponse {
 /// ## Usage
 /// ```rust,no_run
 /// use plexspaces_workflow::*;
+/// use plexspaces_actor::{RequestContext, RequestContextExt};
 /// use serde_json::json;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
 /// let storage = WorkflowStorage::new_in_memory().await?;
-/// let actor = WorkflowActor::new("my-workflow-actor", storage).await?;
+/// let actor = WorkflowActor::new(ctx, "my-workflow-actor", storage).await?;
 ///
 /// // Start a workflow
 /// let msg = WorkflowMessage::Start {
@@ -158,6 +161,9 @@ pub struct WorkflowActor {
     /// Actor ID
     id: String,
 
+    /// Request context (tenant/namespace scope for this actor)
+    ctx: RequestContext,
+
     /// Workflow storage
     storage: WorkflowStorage,
 
@@ -167,19 +173,14 @@ pub struct WorkflowActor {
 
 impl WorkflowActor {
     /// Create a new workflow actor
-    ///
-    /// ## Arguments
-    /// * `id` - Actor ID
-    /// * `storage` - Workflow storage
-    ///
-    /// ## Returns
-    /// New WorkflowActor instance
     pub async fn new(
+        ctx: RequestContext,
         id: impl Into<String>,
         storage: WorkflowStorage,
     ) -> Result<Self, WorkflowError> {
         Ok(Self {
             id: id.into(),
+            ctx,
             storage,
             active_executions: Arc::new(RwLock::new(HashMap::new())),
         })
@@ -226,9 +227,9 @@ impl WorkflowActor {
         definition_version: String,
         input: Value,
     ) -> Result<WorkflowResponse, WorkflowError> {
-        // Start workflow execution
         let execution_id = WorkflowExecutor::start_execution(
             &self.storage,
+            &self.ctx,
             &definition_id,
             &definition_version,
             input,
@@ -243,7 +244,7 @@ impl WorkflowActor {
         &self,
         execution_id: String,
     ) -> Result<WorkflowResponse, WorkflowError> {
-        let execution = self.storage.get_execution(&execution_id).await?;
+        let execution = self.storage.get_execution(&self.ctx, &execution_id).await?;
 
         Ok(WorkflowResponse::Status {
             status_code: execution.status,
@@ -289,7 +290,7 @@ impl WorkflowActor {
         execution_id: String,
     ) -> Result<WorkflowResponse, WorkflowError> {
         // Execute workflow from current state
-        WorkflowExecutor::execute_from_state(&self.storage, &execution_id).await?;
+        WorkflowExecutor::execute_from_state(&self.storage, &self.ctx, &execution_id).await?;
         Ok(WorkflowResponse::Resumed)
     }
 
@@ -311,10 +312,16 @@ mod tests {
     use crate::types::{ExecutionStatus, StepType, WorkflowExecutionExt};
     use serde_json::json;
 
+    fn test_ctx() -> RequestContext {
+        RequestContext::new_without_auth("test-tenant".into(), "test-ns".into())
+    }
+
     #[tokio::test]
     async fn test_workflow_actor_creation() {
         let storage = WorkflowStorage::new_in_memory().await.unwrap();
-        let actor = WorkflowActor::new("test-actor", storage).await.unwrap();
+        let actor = WorkflowActor::new(test_ctx(), "test-actor", storage)
+            .await
+            .unwrap();
         assert_eq!(actor.id(), "test-actor");
     }
 
@@ -336,9 +343,10 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&definition).await.unwrap();
+        let ctx = test_ctx();
+        storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let actor = WorkflowActor::new("test-actor", storage.clone())
+        let actor = WorkflowActor::new(ctx, "test-actor", storage.clone())
             .await
             .unwrap();
 
@@ -354,7 +362,7 @@ mod tests {
             WorkflowResponse::Started { execution_id } => {
                 assert!(!execution_id.is_empty());
 
-                let execution = storage.get_execution(&execution_id).await.unwrap();
+                let execution = storage.get_execution(&test_ctx(), &execution_id).await.unwrap();
                 assert_eq!(
                     execution.execution_status(),
                     ExecutionStatus::ExecutionStatusCompleted
@@ -382,9 +390,10 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&definition).await.unwrap();
+        let ctx = test_ctx();
+        storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let actor = WorkflowActor::new("test-actor", storage.clone())
+        let actor = WorkflowActor::new(ctx, "test-actor", storage.clone())
             .await
             .unwrap();
 
@@ -434,9 +443,10 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&definition).await.unwrap();
+        let ctx = test_ctx();
+        storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let actor = WorkflowActor::new("test-actor", storage.clone())
+        let actor = WorkflowActor::new(ctx, "test-actor", storage.clone())
             .await
             .unwrap();
 
@@ -456,7 +466,7 @@ mod tests {
 
             match cancel_response {
                 WorkflowResponse::Cancelled => {
-                    let execution = storage.get_execution(&execution_id).await.unwrap();
+                    let execution = storage.get_execution(&test_ctx(), &execution_id).await.unwrap();
                     assert_eq!(
                         execution.execution_status(),
                         ExecutionStatus::ExecutionStatusCancelled
@@ -485,14 +495,15 @@ mod tests {
                 None,
             )],
         );
-        storage.save_definition(&definition).await.unwrap();
+        let ctx = test_ctx();
+        storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let actor = WorkflowActor::new("test-actor", storage.clone())
+        let actor = WorkflowActor::new(ctx, "test-actor", storage.clone())
             .await
             .unwrap();
 
         let execution_id = storage
-            .create_execution("signal-workflow", "1.0", json!({}), HashMap::new())
+            .create_execution(&test_ctx(), "signal-workflow", "1.0", json!({}), HashMap::new())
             .await
             .unwrap();
 

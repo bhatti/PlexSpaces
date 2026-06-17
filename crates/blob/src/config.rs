@@ -58,6 +58,15 @@ pub struct BlobConfig {
     pub azure_account_key: Option<String>,
 }
 
+/// Resolve the default blob prefix: `$HOME/plexspaces/blob`.
+/// Falls back to `/tmp/plexspaces/blob` if `$HOME` is unset.
+fn default_blob_prefix() -> String {
+    match env::var("HOME") {
+        Ok(home) => format!("{}/plexspaces/blob", home),
+        Err(_) => "/tmp/plexspaces/blob".to_string(),
+    }
+}
+
 impl Default for BlobConfig {
     fn default() -> Self {
         Self {
@@ -68,7 +77,7 @@ impl Default for BlobConfig {
             access_key_id: None,
             secret_access_key: None,
             use_ssl: false,
-            prefix: "/plexspaces".to_string(),
+            prefix: default_blob_prefix(),
             gcp_service_account_json: None,
             azure_account_name: None,
             azure_account_key: None,
@@ -97,7 +106,7 @@ impl BlobConfig {
                 .parse()
                 .unwrap_or(false),
             prefix: env::var("BLOB_PREFIX")
-                .unwrap_or_else(|_| "/plexspaces".to_string()),
+                .unwrap_or_else(|_| default_blob_prefix()),
             gcp_service_account_json: env::var("GCP_SERVICE_ACCOUNT_JSON").ok(),
             azure_account_name: env::var("AZURE_ACCOUNT_NAME").ok(),
             azure_account_key: env::var("AZURE_ACCOUNT_KEY").ok(),
@@ -107,7 +116,7 @@ impl BlobConfig {
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
         match self.backend.as_str() {
-            "s3" | "embedded" | "gcp" | "azure" => {}
+            "s3" | "embedded" | "local" | "gcp" | "azure" => {}
             _ => return Err(format!("Invalid backend: {}", self.backend)),
         }
 

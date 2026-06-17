@@ -109,6 +109,13 @@ pub trait Actor: Send + Sync {
         Ok(())
     }
 
+    /// Returns an optional atomic flag used to suppress side effects during replay.
+    /// WASM actors return their HostFunctions.is_replaying flag so that timers and
+    /// outbound messages are suppressed while the journal is being replayed.
+    fn replay_signal(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        None
+    }
+
     /// Get the behavior type.
     fn behavior_type(&self) -> BehaviorType;
 

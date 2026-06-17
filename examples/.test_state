@@ -1,4 +1,4 @@
-LAST_KEY=typescript/apps/streaming_pipeline
+LAST_KEY=typescript/apps/web_crawl
 LAST_LANG=typescript
-LAST_EXAMPLE=apps/streaming_pipeline
-LAST_STATUS=RUNNING
+LAST_EXAMPLE=apps/web_crawl
+LAST_STATUS=PASSED

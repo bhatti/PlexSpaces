@@ -88,7 +88,6 @@ pub async fn create_and_register_health_service(
         .register_service(health_reporter.clone())
         .await;
 
-    tracing::info!("✅ Registered HealthService in ServiceLocator (shutdown source of truth)");
 
     (health_reporter, health_service)
 }

@@ -595,15 +595,7 @@ impl ActorServiceImpl {
         if http_method.eq_ignore_ascii_case("GET") {
             serde_json::to_vec(query_params)
                 .map_err(|e| Status::internal(format!("Failed to serialize query params: {}", e)))
-        } else if payload.is_empty() {
-            Ok(Vec::new())
         } else {
-            // Deserialize only the first JSON value; do not require end-of-input (matches Python
-            // `payload_from_request_json`, which uses raw_decode on "Extra data"). Some gateways
-            // or clients append a second JSON document or stray bytes after a valid object.
-            let mut de = serde_json::Deserializer::from_slice(payload);
-            let _: serde_json::Value = Deserialize::deserialize(&mut de)
-                .map_err(|e| Status::invalid_argument(format!("Invalid JSON payload: {}", e)))?;
             Ok(payload.to_vec())
         }
     }
@@ -2473,21 +2465,31 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         match result {
             Ok((resolved_actor_id, _message_id, Some(reply))) => {
+                let is_error = reply.message_type == "error_reply";
+                let error_message = if is_error {
+                    serde_json::from_slice::<serde_json::Value>(&reply.payload)
+                        .ok()
+                        .and_then(|v| v.get("error")?.as_str().map(String::from))
+                        .unwrap_or_else(|| "Actor handler failed".to_string())
+                } else {
+                    String::new()
+                };
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(
                         actor_type = %actor_type,
                         actor_id = %resolved_actor_id,
                         duration_ms = start.elapsed().as_millis(),
                         reply_size = reply.payload.len(),
+                        is_error = is_error,
                         "ask_reply request completed"
                     );
                 }
                 Ok(Response::new(AskReplyResponse {
-                    success: true,
+                    success: !is_error,
                     payload: reply.payload,
                     headers: reply.headers,
                     actor_id: resolved_actor_id,
-                    error_message: String::new(),
+                    error_message,
                 }))
             }
             Ok((_resolved_actor_id, _message_id, None)) => {
@@ -3613,22 +3615,40 @@ impl ActorServiceImpl {
             let latency = request_start.elapsed();
             match result {
                 Ok(reply) => {
-                    tracing::debug!(
-                        group_id = %group_id,
-                        shard_id = shard_id,
-                        actor_id = %shard_actor_id,
-                        latency_ms = latency.as_millis(),
-                        "✅ [{}] Received reply",
-                        operation_name
-                    );
-                    results.push((
-                        shard_id,
-                        shard_actor_id,
-                        latency,
-                        true,
-                        String::new(),
-                        Some(reply),
-                    ));
+                    if reply.message_type == "error_reply" {
+                        let error_msg = String::from_utf8(reply.payload.clone())
+                            .ok()
+                            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                            .and_then(|v| v.get("error")?.as_str().map(String::from))
+                            .unwrap_or_else(|| "Actor handler failed".to_string());
+                        tracing::warn!(
+                            group_id = %group_id,
+                            shard_id = shard_id,
+                            actor_id = %shard_actor_id,
+                            latency_ms = latency.as_millis(),
+                            error = %error_msg,
+                            "❌ [{}] Shard returned error reply",
+                            operation_name
+                        );
+                        results.push((shard_id, shard_actor_id, latency, false, error_msg, None));
+                    } else {
+                        tracing::debug!(
+                            group_id = %group_id,
+                            shard_id = shard_id,
+                            actor_id = %shard_actor_id,
+                            latency_ms = latency.as_millis(),
+                            "✅ [{}] Received reply",
+                            operation_name
+                        );
+                        results.push((
+                            shard_id,
+                            shard_actor_id,
+                            latency,
+                            true,
+                            String::new(),
+                            Some(reply),
+                        ));
+                    }
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -4745,6 +4765,7 @@ mod tests {
         service_locator_impl
             .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
                 disable_auth: true,
+                oidc: None,
                 ..Default::default()
             })
             .await;

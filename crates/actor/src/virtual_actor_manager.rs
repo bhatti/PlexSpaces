@@ -931,7 +931,7 @@ impl VirtualActorManager {
     }
 
     /// Queue a message for processing after activation, retaining the caller `RequestContext`.
-    pub async fn queue_message(&self, actor_id: &ActorId, message: Message, ctx: &RequestContext) {
+    pub async fn queue_message(&self, ctx: &RequestContext, actor_id: &ActorId, message: Message) {
         let mut pending = self.registry.pending_activations().write().await;
         pending
             .entry(actor_id.clone())
@@ -2026,7 +2026,7 @@ mod tests {
 
         // Queue message
         manager
-            .queue_message(&actor_id, message.clone(), &ctx)
+            .queue_message(&ctx, &actor_id, message.clone())
             .await;
 
         // Verify message is queued

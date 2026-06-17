@@ -29,13 +29,8 @@
 mod r#mod;
 pub use r#mod::*;
 
-
-// gRPC service moved to plexspaces-services/actor_service
-
 // gRPC client for remote actor communication
 pub mod grpc_client;
-
-// gRPC service for distributed TupleSpace operations moved to plexspaces-services/tuple_service
 
 // HTTP router for blob service endpoints
 pub mod blob_http_router;
@@ -49,20 +44,12 @@ pub mod http_gateway;
 // Modular HTTP REST bridge route handlers
 pub mod http_routes;
 
-// Node registry removed - replaced by object-registry
-
-// Health service moved to plexspaces-core
-
-// Health checker moved to plexspaces-core
-
 // Wrapper so NodeServiceServer and NodeConnectivity share the same Arc<NodeServiceImpl>
 mod node_service_handler;
 
 /// Health module - consolidated health checking and service functionality
 pub mod health;
 pub use health::circuit_breaker as health_checker_circuit_breaker;
-
-// Metrics service moved to plexspaces-services/metrics_service
 
 // OpenTelemetry tracing setup (Phase 5)
 pub mod tracing_setup;
@@ -73,16 +60,11 @@ pub mod standard_health_service;
 // gRPC health service with dependency checks
 pub mod grpc_health_service;
 
-// System service moved to plexspaces-services/system_service
-
 // Automatic dependency registration (includes built-in dependencies)
 pub mod dependency_registration;
 
 // External dependency health checkers (embedded object store, DynamoDB, SQS)
 pub mod external_dependency_checkers;
-
-
-// Firecracker VM service moved to plexspaces-services/firecracker_service
 
 // Graceful shutdown coordinator (Phase 5)
 pub mod shutdown_coordinator;
@@ -118,6 +100,7 @@ pub use config::loader as config_loader;
 pub mod wasm_apps_loader;
 
 pub mod metrics_helper;
+pub(crate) mod tls_server;
 pub mod service_locator_helpers;
 pub use metrics_helper::CoordinationComputeTracker;
 pub use service_locator_helpers::create_default_service_locator;

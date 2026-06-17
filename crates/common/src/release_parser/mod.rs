@@ -661,6 +661,7 @@ fn convert_security_config(
         jwt: None,
         api_keys: vec![],
         disable_auth: false,
+        oidc: None,
     };
 
     // Convert service identity
@@ -741,9 +742,13 @@ fn convert_security_config(
                 seconds: s as i64,
                 nanos: 0,
             }),
-            refresh_token_ttl: None,                  // Not in TOML
-            tenant_id_claim: "tenant_id".to_string(), // Default
-            user_id_claim: "sub".to_string(),         // Default
+            refresh_token_ttl: None,
+            tenant_id_claim: "tenant_id".to_string(),
+            user_id_claim: "sub".to_string(),
+            algorithm: "ES256".to_string(),
+            private_key_pem: String::new(),
+            private_key_file: String::new(),
+            auto_generate_key: true,
         });
     }
 

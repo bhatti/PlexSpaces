@@ -91,6 +91,17 @@ pub struct AuditLogState {
     pub last_actor_id: String,
 }
 
+/// State envelope for serialization across WASM re-instantiations.
+/// Self-describing: carries actor_type as a string so set_state can
+/// determine which variant to decode without external context.
+#[derive(Clone, PartialEq, Message)]
+pub struct StateEnvelope {
+    #[prost(string, tag = "1")]
+    pub actor_type: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub state_data: Vec<u8>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -615,17 +626,46 @@ mod wasm_app {
 
         fn get_state() -> Result<Vec<u8>, String> {
             let guard = actor_cell().lock().expect("lock");
-            match &*guard {
-                ActorState::InferenceWorker(s) => Ok(encode(s)),
-                ActorState::Validator(s) => Ok(encode(s)),
-                ActorState::Supervisor(s) => Ok(encode(s)),
-                ActorState::AuditLog(s) => Ok(encode(s)),
-                ActorState::Uninitialized => Ok(vec![]),
-            }
+            let (actor_type, state_data) = match &*guard {
+                ActorState::InferenceWorker(s) => ("inference_worker", encode(s)),
+                ActorState::Validator(s) => ("validator_agent", encode(s)),
+                ActorState::Supervisor(s) => ("pipeline_supervisor", encode(s)),
+                ActorState::AuditLog(s) => ("audit_log", encode(s)),
+                ActorState::Uninitialized => return Ok(vec![]),
+            };
+            let envelope = StateEnvelope {
+                actor_type: actor_type.to_string(),
+                state_data,
+            };
+            Ok(encode(&envelope))
         }
 
-        fn set_state(_bytes: Vec<u8>) -> Result<(), String> {
-            // State restoration handled by init() for this example
+        fn set_state(bytes: Vec<u8>) -> Result<(), String> {
+            if bytes.is_empty() {
+                return Ok(());
+            }
+            let envelope: StateEnvelope = decode(&bytes);
+            if envelope.actor_type.is_empty() {
+                return Err("state envelope missing actor_type".to_string());
+            }
+            let state = match envelope.actor_type.as_str() {
+                "inference_worker" => {
+                    ActorState::InferenceWorker(decode(&envelope.state_data))
+                }
+                "validator_agent" => {
+                    ActorState::Validator(decode(&envelope.state_data))
+                }
+                "pipeline_supervisor" => {
+                    ActorState::Supervisor(decode(&envelope.state_data))
+                }
+                "audit_log" => {
+                    ActorState::AuditLog(decode(&envelope.state_data))
+                }
+                other => {
+                    return Err(format!("unknown actor_type in state envelope: {other}"));
+                }
+            };
+            *actor_cell().lock().expect("lock") = state;
             Ok(())
         }
     }
@@ -850,5 +890,90 @@ mod tests {
         assert!(!is_byzantine_response(
             "The actor model is a mathematical model of concurrent computation."
         ));
+    }
+
+    // ── State envelope round-trip tests ─────────────────────────────────────
+
+    #[test]
+    fn test_state_envelope_inference_worker_roundtrip() {
+        let state = InferenceWorkerState {
+            actor_id: "worker-a//inference_worker::ns@node".to_string(),
+            worker_id: "worker-a".to_string(),
+            mode: "byzantine".to_string(),
+            total_requests: 42,
+            error_count: 7,
+            linked_peers: vec!["peer-1".to_string(), "peer-2".to_string()],
+        };
+        let envelope = StateEnvelope {
+            actor_type: "inference_worker".to_string(),
+            state_data: encode(&state),
+        };
+        let bytes = encode(&envelope);
+        let restored: StateEnvelope = decode(&bytes);
+        assert_eq!(restored.actor_type, "inference_worker");
+        let restored_state: InferenceWorkerState = decode(&restored.state_data);
+        assert_eq!(restored_state.worker_id, "worker-a");
+        assert_eq!(restored_state.mode, "byzantine");
+        assert_eq!(restored_state.total_requests, 42);
+        assert_eq!(restored_state.error_count, 7);
+        assert_eq!(restored_state.linked_peers.len(), 2);
+    }
+
+    #[test]
+    fn test_state_envelope_validator_roundtrip() {
+        let state = ValidatorState {
+            actor_id: "validator//validator_agent::ns@node".to_string(),
+            total_validations: 100,
+            pass_count: 85,
+            fail_count: 15,
+            byzantine_count: 10,
+            monitor_refs: vec![MonitorEntry {
+                worker_id: "w1".to_string(),
+                monitor_ref: "ref-1".to_string(),
+            }],
+            down_events: vec![],
+        };
+        let envelope = StateEnvelope {
+            actor_type: "validator_agent".to_string(),
+            state_data: encode(&state),
+        };
+        let bytes = encode(&envelope);
+        let restored: StateEnvelope = decode(&bytes);
+        assert_eq!(restored.actor_type, "validator_agent");
+        let restored_state: ValidatorState = decode(&restored.state_data);
+        assert_eq!(restored_state.total_validations, 100);
+        assert_eq!(restored_state.byzantine_count, 10);
+        assert_eq!(restored_state.monitor_refs.len(), 1);
+    }
+
+    #[test]
+    fn test_state_envelope_supervisor_roundtrip() {
+        let state = SupervisorState {
+            actor_id: "sup//pipeline_supervisor::ns@node".to_string(),
+            worker_pool: vec!["w1".to_string(), "w2".to_string()],
+            monitor_refs: vec![],
+            down_events_received: 3,
+            total_dispatched: 50,
+            next_worker_idx: 5,
+        };
+        let envelope = StateEnvelope {
+            actor_type: "pipeline_supervisor".to_string(),
+            state_data: encode(&state),
+        };
+        let bytes = encode(&envelope);
+        let restored: StateEnvelope = decode(&bytes);
+        assert_eq!(restored.actor_type, "pipeline_supervisor");
+        let restored_state: SupervisorState = decode(&restored.state_data);
+        assert_eq!(restored_state.worker_pool.len(), 2);
+        assert_eq!(restored_state.total_dispatched, 50);
+        assert_eq!(restored_state.next_worker_idx, 5);
+    }
+
+    #[test]
+    fn test_state_envelope_empty_bytes_noop() {
+        let bytes: Vec<u8> = vec![];
+        let envelope: StateEnvelope = decode(&bytes);
+        assert!(envelope.actor_type.is_empty());
+        assert!(envelope.state_data.is_empty());
     }
 }

@@ -379,10 +379,11 @@ impl AuthInterceptor {
             Self::extract_service_id_from_certificate(&context.peer_certificate)?
         };
 
-        // Validate service is trusted
         self.validate_mtls_service(&service_id)?;
 
-        // mTLS authentication successful
+        // mTLS peer validated (cert chain + trusted service list). Headers from trusted
+        // peers are accepted as-is — the calling node already validated the original
+        // user's JWT and propagates context for delegated requests.
         Ok(InterceptorResult {
             decision: InterceptorDecision::InterceptorDecisionAllow as i32,
             error_message: String::new(),
@@ -396,13 +397,10 @@ impl AuthInterceptor {
         &self,
         context: &InterceptorRequest,
     ) -> Result<InterceptorResult, InterceptorError> {
-        // Extract token from authorization header
         let token = match Self::extract_token(&context.headers) {
             Some(t) => t,
             None => {
-                // No token provided
                 if self.config.allow_unauthenticated {
-                    // Permissive mode: allow
                     return Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionAllow as i32,
                         error_message: String::new(),
@@ -410,7 +408,14 @@ impl AuthInterceptor {
                         metrics: vec![],
                     });
                 } else {
-                    // Strict mode: deny with actionable message
+                    metrics::counter!("plexspaces_auth_token_validations_total", "status" => "missing").increment(1);
+                    if tracing::enabled!(tracing::Level::WARN) {
+                        tracing::warn!(
+                            method = %context.method,
+                            remote_addr = %context.remote_addr,
+                            "auth.token.missing"
+                        );
+                    }
                     return Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionDeny as i32,
                         error_message: "Missing Authorization header (Bearer token required). For local testing, set PLEXSPACES_DISABLE_AUTH=1.".to_string(),
@@ -421,11 +426,50 @@ impl AuthInterceptor {
             }
         };
 
-        // Validate JWT
-        let claims = self.validate_jwt(&token)?;
+        let claims = match self.validate_jwt(&token) {
+            Ok(c) => {
+                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "valid").increment(1);
+                c
+            }
+            Err(e) => {
+                metrics::counter!("plexspaces_auth_token_validations_total", "status" => "invalid").increment(1);
+                if tracing::enabled!(tracing::Level::WARN) {
+                    tracing::warn!(
+                        method = %context.method,
+                        remote_addr = %context.remote_addr,
+                        error = %e,
+                        "auth.token.invalid"
+                    );
+                }
+                return Err(e);
+            }
+        };
 
-        // Check RBAC permissions
-        self.check_rbac(&claims, &context.method)?;
+        if let Err(e) = self.check_rbac(&claims, &context.method) {
+            let (svc, _) = Self::parse_method(&context.method);
+            metrics::counter!("plexspaces_auth_rbac_denials_total",
+                "service" => svc.to_string()
+            ).increment(1);
+            if tracing::enabled!(tracing::Level::WARN) {
+                tracing::warn!(
+                    user_id = %claims.sub,
+                    method = %context.method,
+                    roles = ?claims.roles,
+                    "auth.rbac.denied"
+                );
+            }
+            return Err(e);
+        }
+
+        metrics::counter!("plexspaces_auth_logins_total", "status" => "success").increment(1);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                user_id = %claims.sub,
+                tenant_id = %claims.tenant_id,
+                method = %context.method,
+                "auth.login.success"
+            );
+        }
 
         // SECURITY: Remove any user-provided headers to prevent header injection attacks
         // These headers must ONLY come from JWT, not from client
@@ -476,7 +520,6 @@ impl AuthInterceptor {
 
 impl Default for AuthInterceptor {
     fn default() -> Self {
-        // Default: permissive mode, no authentication
         Self {
             config: AuthMiddlewareConfig {
                 method: AuthMethod::AuthMethodUnspecified as i32,
@@ -499,20 +542,28 @@ impl Interceptor for AuthInterceptor {
         &self,
         context: &InterceptorRequest,
     ) -> Result<InterceptorResult, InterceptorError> {
-        // Route to appropriate authentication method
+        // Simplified auth model:
+        // 1. mTLS peer present → trusted cluster node, accept headers as-is (delegated context)
+        // 2. JWT Bearer token present → external client, extract tenant from claims
+        // 3. Neither → check allow_unauthenticated
+        //
+        // Security: peer_certificate and peer_service_id are populated by the TLS layer
+        // (rustls/tonic), NOT from HTTP headers. External HTTP clients cannot spoof these
+        // fields — they are only set when a valid client certificate is presented during
+        // the TLS handshake.
+        if !context.peer_certificate.is_empty() || !context.peer_service_id.is_empty() {
+            return self.handle_mtls_auth(context).await;
+        }
+
         match self.config.method {
-            method if method == AuthMethod::AuthMethodMtls as i32 => {
-                // mTLS authentication
-                self.handle_mtls_auth(context).await
-            }
             method if method == AuthMethod::AuthMethodJwt as i32 => {
-                // JWT authentication
                 self.handle_jwt_auth(context).await
             }
+            method if method == AuthMethod::AuthMethodMtls as i32 => {
+                self.handle_mtls_auth(context).await
+            }
             _ => {
-                // Unspecified or unsupported method
                 if self.config.allow_unauthenticated {
-                    // Permissive mode: allow
                     Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionAllow as i32,
                         error_message: String::new(),
@@ -520,7 +571,6 @@ impl Interceptor for AuthInterceptor {
                         metrics: vec![],
                     })
                 } else {
-                    // Strict mode: deny with actionable message
                     Ok(InterceptorResult {
                         decision: InterceptorDecision::InterceptorDecisionDeny as i32,
                         error_message: "Authentication method not configured. For local testing, set PLEXSPACES_DISABLE_AUTH=1.".to_string(),
@@ -598,6 +648,7 @@ mod tests {
             allow_unauthenticated: true,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -628,6 +679,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();

@@ -32,6 +32,8 @@ use plexspaces_proto::workflow::v1::{
     QueryExecutionRequest, QueryExecutionResponse, SignalExecutionRequest, StartExecutionRequest,
     StartExecutionResponse, UpdateDefinitionRequest, UpdateDefinitionResponse,
 };
+use plexspaces_actor::ServiceLocator as ServiceLocatorTrait;
+use plexspaces_common::RequestContext;
 use plexspaces_workflow::executor::WorkflowExecutor;
 use plexspaces_workflow::storage::WorkflowStorage;
 use plexspaces_workflow::types::*;
@@ -43,12 +45,25 @@ use tonic::{Request, Response, Status};
 pub struct WorkflowServiceImpl {
     /// Workflow storage for definitions and execution metadata
     storage: Arc<WorkflowStorage>,
+    /// Service locator for request context extraction
+    service_locator: Arc<dyn ServiceLocatorTrait>,
 }
 
 impl WorkflowServiceImpl {
     /// Create new WorkflowService implementation
-    pub fn new(storage: Arc<WorkflowStorage>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<WorkflowStorage>, service_locator: Arc<dyn ServiceLocatorTrait>) -> Self {
+        Self { storage, service_locator }
+    }
+
+    /// Extract RequestContext from gRPC request metadata
+    async fn ctx_from_request<T>(&self, request: &Request<T>) -> Result<RequestContext, Status> {
+        crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))
     }
 
     /// Convert WorkflowError to gRPC Status
@@ -76,13 +91,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<CreateDefinitionRequest>,
     ) -> Result<Response<CreateDefinitionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
         let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
         self.storage
-            .save_definition(&def)
+            .save_definition(&ctx, &def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -95,6 +111,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<GetDefinitionRequest>,
     ) -> Result<Response<GetDefinitionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         if req.id.is_empty() {
@@ -109,7 +126,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         let def = self
             .storage
-            .get_definition(&req.id, version)
+            .get_definition(&ctx, &req.id, version)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -122,6 +139,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<ListDefinitionsRequest>,
     ) -> Result<Response<ListDefinitionsResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         let name_prefix = if req.name_prefix.is_empty() {
@@ -132,7 +150,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         let definitions = self
             .storage
-            .list_definitions(name_prefix)
+            .list_definitions(&ctx, name_prefix)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -146,13 +164,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<UpdateDefinitionRequest>,
     ) -> Result<Response<UpdateDefinitionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
         let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
         self.storage
-            .save_definition(&def)
+            .save_definition(&ctx, &def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -165,6 +184,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<DeleteDefinitionRequest>,
     ) -> Result<Response<Empty>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         if req.id.is_empty() {
@@ -172,7 +192,7 @@ impl WorkflowService for WorkflowServiceImpl {
         }
 
         self.storage
-            .delete_definition(&req.id, &req.version)
+            .delete_definition(&ctx, &req.id, &req.version)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -183,6 +203,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<StartExecutionRequest>,
     ) -> Result<Response<StartExecutionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         if req.definition_id.is_empty() {
@@ -208,7 +229,7 @@ impl WorkflowService for WorkflowServiceImpl {
         );
 
         let execution_id =
-            WorkflowExecutor::start_execution(&self.storage, &req.definition_id, version, input)
+            WorkflowExecutor::start_execution(&self.storage, &ctx, &req.definition_id, version, input)
                 .await
                 .map_err(Self::workflow_error_to_status)?;
 
@@ -219,6 +240,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<GetExecutionRequest>,
     ) -> Result<Response<GetExecutionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
@@ -227,7 +249,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         let exec = self
             .storage
-            .get_execution(&req.execution_id)
+            .get_execution(&ctx, &req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -240,6 +262,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<ListExecutionsRequest>,
     ) -> Result<Response<ListExecutionsResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         // Build status filter using proto enum values
@@ -261,7 +284,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         let executions = self
             .storage
-            .list_executions_by_status(statuses, None)
+            .list_executions_by_status(&ctx, statuses, None)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -362,6 +385,7 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<QueryExecutionRequest>,
     ) -> Result<Response<QueryExecutionResponse>, Status> {
+        let ctx = self.ctx_from_request(&request).await?;
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
@@ -373,7 +397,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         let exec = self
             .storage
-            .get_execution(&req.execution_id)
+            .get_execution(&ctx, &req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -465,7 +489,9 @@ mod tests {
 
     async fn create_test_service() -> WorkflowServiceImpl {
         let storage = Arc::new(WorkflowStorage::new_in_memory().await.unwrap());
-        WorkflowServiceImpl::new(storage)
+        let service_locator: Arc<dyn plexspaces_actor::ServiceLocator> =
+            Arc::new(crate::ServiceLocatorImpl::new());
+        WorkflowServiceImpl::new(storage, service_locator)
     }
 
     #[tokio::test]

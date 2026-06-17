@@ -2443,7 +2443,11 @@ var InferenceWorkerActor = class extends PlexSpacesActor {
     if (!peerId) {
       return { error: "peer_id required" };
     }
-    host.link?.(peerId);
+    try {
+      host.link?.(peerId);
+    } catch (e) {
+      return { status: "error", error: `link failed: ${e}`, peer_id: peerId };
+    }
     if (!this.state.linkedPeers.includes(peerId)) {
       this.state.linkedPeers.push(peerId);
     }
@@ -2452,7 +2456,10 @@ var InferenceWorkerActor = class extends PlexSpacesActor {
   onUnlink_from(payload) {
     const rawPeer = String(payload.peer_id ?? this.state.linkedPeers[0] ?? "");
     const peerId = siblingId(rawPeer, this.state.actorId);
-    host.unlink?.(peerId);
+    try {
+      host.unlink?.(peerId);
+    } catch (_) {
+    }
     this.state.linkedPeers = this.state.linkedPeers.filter((p) => p !== peerId);
     return { status: "ok", peer_id: peerId };
   }
@@ -2496,7 +2503,12 @@ var ValidatorAgentActor = class extends PlexSpacesActor {
     if (!canonical) {
       return { error: "worker_id required" };
     }
-    const monitorRef = host.monitor?.(canonical) ?? `ref-${Date.now()}`;
+    let monitorRef;
+    try {
+      monitorRef = host.monitor?.(canonical) ?? `ref-${Date.now()}`;
+    } catch (e) {
+      return { status: "error", error: `monitor failed: ${e}`, worker_id: canonical };
+    }
     this.state.monitorRefs.push({ workerId: canonical, monitorRef });
     return { status: "ok", monitor_ref: monitorRef, worker_id: canonical };
   }
@@ -2504,7 +2516,10 @@ var ValidatorAgentActor = class extends PlexSpacesActor {
     const canonical = siblingId(String(payload.worker_id ?? ""), this.state.actorId);
     const entry = this.state.monitorRefs.find((m) => m.workerId === canonical);
     if (entry) {
-      host.demonitor?.(entry.monitorRef);
+      try {
+        host.demonitor?.(entry.monitorRef);
+      } catch (_) {
+      }
       this.state.monitorRefs = this.state.monitorRefs.filter((m) => m.workerId !== canonical);
       return { status: "ok", worker_id: canonical };
     }
@@ -2576,7 +2591,12 @@ var PipelineSupervisorActor = class extends PlexSpacesActor {
     if (!canonical) {
       return { error: "worker_id required" };
     }
-    const monitorRef = host.monitor?.(canonical) ?? `ref-${Date.now()}`;
+    let monitorRef;
+    try {
+      monitorRef = host.monitor?.(canonical) ?? `ref-${Date.now()}`;
+    } catch (e) {
+      return { status: "error", error: `monitor failed: ${e}`, worker_id: canonical };
+    }
     this.state.monitorRefs.push({ workerId: canonical, monitorRef });
     if (!this.state.workerPool.includes(canonical)) {
       this.state.workerPool.push(canonical);
@@ -2587,7 +2607,10 @@ var PipelineSupervisorActor = class extends PlexSpacesActor {
     const canonical = siblingId(String(payload.worker_id ?? ""), this.state.actorId);
     const entry = this.state.monitorRefs.find((m) => m.workerId === canonical);
     if (entry) {
-      host.demonitor?.(entry.monitorRef);
+      try {
+        host.demonitor?.(entry.monitorRef);
+      } catch (_) {
+      }
       this.state.monitorRefs = this.state.monitorRefs.filter((m) => m.workerId !== canonical);
     }
     this.state.workerPool = this.state.workerPool.filter((w) => w !== canonical);
@@ -2603,7 +2626,12 @@ var PipelineSupervisorActor = class extends PlexSpacesActor {
     this.state.totalDispatched++;
     const prompt = String(payload.prompt ?? "");
     const requestId = String(payload.request_id ?? "");
-    const result = host.ask?.(workerId, "infer", { prompt, request_id: requestId }, 3e4) ?? { error: "ask failed" };
+    let result;
+    try {
+      result = host.ask?.(workerId, "infer", { prompt, request_id: requestId }, 3e4) ?? { error: "ask not available" };
+    } catch (e) {
+      result = { error: `ask failed: ${e}` };
+    }
     const resultRecord = result;
     const byzantineDetected = typeof resultRecord === "object" && resultRecord !== null && resultRecord.mode === "byzantine";
     return {

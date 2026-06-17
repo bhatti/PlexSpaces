@@ -236,11 +236,12 @@ pub trait GenServer: Actor {
 
         match msg_type {
             MessageType::Call => {
-                // Clone values for logging before moving msg
+                // Clone values needed for reply before moving msg into handle_request
                 let message_id = msg.id.clone();
                 let correlation_id = msg.correlation_id.clone();
+                let sender_id = msg.sender_id.clone();
+                let receiver_id = msg.receiver_id.clone();
 
-                // Log route_message at debug level (consolidated to reduce noise, guarded)
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[ROUTE_MESSAGE] Call: message_id={}, target={}, correlation_id={}",
@@ -250,30 +251,56 @@ pub trait GenServer: Actor {
                     );
                 }
 
-                // Call handle_request with Message (handler will use ActorService::send() to send reply)
                 let result = self.handle_request(ctx, msg).await;
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    match &result {
-                        Ok(_) => {
-                            tracing::debug!(
-                                "[ROUTE_MESSAGE] Completed: message_id={}, target={}, correlation_id={}",
-                                message_id, target_actor_id, correlation_id
-                            );
-                        }
-                        Err(_) => {
-                            // Errors are logged at warn level below
-                        }
+                    if result.is_ok() {
+                        tracing::debug!(
+                            "[ROUTE_MESSAGE] Completed: message_id={}, target={}, correlation_id={}",
+                            message_id, target_actor_id, correlation_id
+                        );
                     }
                 }
 
-                // Always log errors at warn level
-                if let Err(e) = &result {
+                if let Err(ref e) = result {
                     tracing::warn!(
                         "[ROUTE_MESSAGE] Failed: message_id={}, target={}, correlation_id={}, error={}",
                         message_id, target_actor_id, correlation_id, e
                     );
+                    // Erlang gen_server semantics: send error reply so caller gets fast failure
+                    // instead of timeout, but actor continues processing subsequent messages.
+                    if !sender_id.is_empty() && !correlation_id.is_empty() {
+                        let error_payload = serde_json::json!({
+                            "error": e.to_string(),
+                            "success": false,
+                        });
+                        let error_reply = Message {
+                            id: format!("res-{}", ulid::Ulid::new()),
+                            payload: serde_json::to_vec(&error_payload).unwrap_or_default(),
+                            message_type: "error_reply".to_string(),
+                            receiver_id: sender_id.clone(),
+                            sender_id: receiver_id.clone(),
+                            correlation_id: correlation_id.clone(),
+                            ..Default::default()
+                        };
+                        let from_actor_id = ctx.self_ref()
+                            .map(|r| r.id().clone())
+                            .or_else(|| crate::ActorId::from_canonical(&target_actor_id).ok());
+                        if let Some(actor_id) = from_actor_id {
+                            let _ = ctx.send_reply(
+                                Some(&correlation_id),
+                                &sender_id,
+                                actor_id,
+                                error_reply,
+                            ).await;
+                        }
+                        // Actor survives — matches Erlang where a failed handle_call
+                        // returns {reply, {error, Reason}, State} and the process continues.
+                    } else {
+                        // No caller to reply to — propagate error up to mailbox loop
+                        // which may trigger supervisor restart depending on policy.
+                        result?;
+                    }
                 }
-                result?;
 
                 metrics::counter!("plexspaces_behavior_genserver_replies_sent_total", "behavior" => "genserver").increment(1);
 

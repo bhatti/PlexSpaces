@@ -3,15 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenant Dashboard</title>
+    <title>Tenant - PlexSpaces</title>
     <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard/layout.js"></script>
 </head>
 <body>
     <div class="dashboard-container">
-        <header class="dashboard-header">
-            <h1>Tenant Dashboard</h1>
-            <a class="back-link" href="/dashboard">Back to Home</a>
-        </header>
 
         <section class="widgets-section">
             <div class="widget">
@@ -145,8 +142,13 @@
         async function fetchJson(url, options = {}) {
             const response = await fetch(url, {
                 headers: { 'Accept': 'application/json' },
+                credentials: 'include',
                 ...options,
             });
+            if (response.status === 401) {
+                window.location.href = '/api/v1/auth/oidc/login';
+                throw new Error('Redirecting to login...');
+            }
             if (!response.ok) {
                 throw new Error(`Request failed: ${response.status}`);
             }

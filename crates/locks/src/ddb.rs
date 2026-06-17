@@ -188,7 +188,9 @@ impl DynamoDBLockManager {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -197,12 +199,14 @@ impl DynamoDBLockManager {
                 let error_code = e.code().unwrap_or("unknown");
                 let error_message = e.message().unwrap_or(&error_msg);
 
-                debug!(
-                    table_name = %table_name,
-                    error_code = %error_code,
-                    error_message = %error_message,
-                    "DynamoDB describe_table result"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        table_name = %table_name,
+                        error_code = %error_code,
+                        error_message = %error_message,
+                        "DynamoDB describe_table result"
+                    );
+                }
 
                 if !error_msg.contains("ResourceNotFoundException")
                     && error_code != "ResourceNotFoundException"
@@ -222,7 +226,9 @@ impl DynamoDBLockManager {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB table");
+        }
 
         // Create table with composite key for tenant isolation
         let pk_key_schema = KeySchemaElement::builder()
@@ -313,7 +319,9 @@ impl DynamoDBLockManager {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table created successfully");
+                }
                 // Wait for table to be active
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
@@ -321,7 +329,9 @@ impl DynamoDBLockManager {
             Err(e) => {
                 // Check if table was created concurrently
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -353,7 +363,9 @@ impl DynamoDBLockManager {
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
                     TableStatus::Active => {
-                        debug!(table_name = %table_name, "Table is now active");
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(table_name = %table_name, "Table is now active");
+                        }
                         return Ok(());
                     }
                     TableStatus::Creating => {
@@ -399,14 +411,18 @@ impl DynamoDBLockManager {
             .await
         {
             Ok(_) => {
-                debug!(table_name = %table_name, "TTL enabled for automatic expiration cleanup");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "TTL enabled for automatic expiration cleanup");
+                }
                 Ok(())
             }
             Err(e) => {
                 let error_str = e.to_string();
                 // TTL might already be enabled, ignore that error
                 if error_str.contains("TimeToLiveAlreadyEnabled") {
-                    debug!(table_name = %table_name, "TTL already enabled");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "TTL already enabled");
+                    }
                     Ok(())
                 } else {
                     warn!(
@@ -751,13 +767,15 @@ impl LockManager for DynamoDBLockManager {
                     )
                     .increment(1);
 
-                    debug!(
-                        lock_key = %options.lock_key,
-                        holder_id = %options.holder_id,
-                        version = %new_version,
-                        duration_ms = duration.as_millis(),
-                        "Lock acquired successfully"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            lock_key = %options.lock_key,
+                            holder_id = %options.holder_id,
+                            version = %new_version,
+                            duration_ms = duration.as_millis(),
+                            "Lock acquired successfully"
+                        );
+                    }
 
                     Ok(new_lock)
                 }
@@ -839,13 +857,15 @@ impl LockManager for DynamoDBLockManager {
                     )
                     .increment(1);
 
-                    debug!(
-                        lock_key = %options.lock_key,
-                        holder_id = %options.holder_id,
-                        version = %version,
-                        duration_ms = duration.as_millis(),
-                        "Lock created successfully"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            lock_key = %options.lock_key,
+                            holder_id = %options.holder_id,
+                            version = %version,
+                            duration_ms = duration.as_millis(),
+                            "Lock created successfully"
+                        );
+                    }
 
                     Ok(new_lock)
                 }
@@ -1026,14 +1046,16 @@ impl LockManager for DynamoDBLockManager {
                 )
                 .increment(1);
 
-                debug!(
-                    lock_key = %options.lock_key,
-                    holder_id = %options.holder_id,
-                    new_version = %new_version,
-                    duration_ms = duration.as_millis(),
-                    implementation = "DynamoDBLockManager",
-                    "🔓 DynamoDBLockManager::renew_lock - lock renewed"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        lock_key = %options.lock_key,
+                        holder_id = %options.holder_id,
+                        new_version = %new_version,
+                        duration_ms = duration.as_millis(),
+                        implementation = "DynamoDBLockManager",
+                        "🔓 DynamoDBLockManager::renew_lock - lock renewed"
+                    );
+                }
 
                 Ok(renewed_lock)
             }
@@ -1180,11 +1202,13 @@ impl LockManager for DynamoDBLockManager {
                     )
                     .increment(1);
 
-                    debug!(
-                        lock_key = %options.lock_key,
-                        duration_ms = duration.as_millis(),
-                        "Lock deleted successfully"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            lock_key = %options.lock_key,
+                            duration_ms = duration.as_millis(),
+                            "Lock deleted successfully"
+                        );
+                    }
                     Ok(())
                 }
                 Err(e) => {
@@ -1263,11 +1287,13 @@ impl LockManager for DynamoDBLockManager {
                     )
                     .increment(1);
 
-                    debug!(
-                        lock_key = %options.lock_key,
-                        duration_ms = duration.as_millis(),
-                        "Lock released (unlocked) successfully"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            lock_key = %options.lock_key,
+                            duration_ms = duration.as_millis(),
+                            "Lock released (unlocked) successfully"
+                        );
+                    }
                     Ok(())
                 }
                 Err(e) => {

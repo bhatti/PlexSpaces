@@ -84,6 +84,7 @@ COPY wit/ ./wit/
 
 RUN mkdir -p ./config
 COPY release.yaml ./config/release.yaml
+COPY release-auth.yaml ./config/release-auth.yaml
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -122,16 +123,50 @@ RUN mkdir -p /app/config /app/data /app/data/blob /app/certs && \
     chown -R plexspaces:plexspaces /app
 
 COPY --from=builder /app/config/release.yaml /app/config/release.yaml
-RUN chown plexspaces:plexspaces /app/config/release.yaml
+COPY --from=builder /app/config/release-auth.yaml /app/config/release-auth.yaml
+RUN chown plexspaces:plexspaces /app/config/release.yaml /app/config/release-auth.yaml
 
 USER plexspaces
 
 EXPOSE 8000
 
+# ─── Runtime Configuration ────────────────────────────────────────────────────
+# All configs are proto-first: define in release.yaml, override via env vars.
+# Env vars take precedence over YAML values.
+
+# Core node config
 ENV PLEXSPACES_RELEASE_CONFIG=/app/config/release.yaml
 ENV PLEXSPACES_NODE_ID=node1
 ENV PLEXSPACES_LISTEN_ADDR=0.0.0.0:8000
 ENV PLEXSPACES_BASE_DIR=/app/data
+
+# Auth — set AUTH_ENABLED=true to use release-auth.yaml
+# AUTH_ENABLED is used by scripts/server.sh; for Docker use PLEXSPACES_DISABLE_AUTH
+ENV PLEXSPACES_DISABLE_AUTH=1
+
+# JWT auth (required when PLEXSPACES_DISABLE_AUTH=0)
+# ENV PLEXSPACES_JWT_SECRET=change-me-in-production
+
+# mTLS for node-to-node communication (auto-generated if certs dir mounted)
+# ENV PLEXSPACES_MTLS_CA_CERT=/app/certs/ca.crt
+# ENV PLEXSPACES_MTLS_SERVER_CERT=/app/certs/server.crt
+# ENV PLEXSPACES_MTLS_SERVER_KEY=/app/certs/server.key
+
+# OIDC for dashboard UI login (only when PLEXSPACES_DISABLE_AUTH=0)
+# Configure in release-auth.yaml; override secret via env var:
+# ENV PLEXSPACES_OIDC_CLIENT_SECRET=
+
+# Database backends (override connection strings from release.yaml)
+# ENV PLEXSPACES_POSTGRES_URL=postgres://user:pass@host:5432/db
+# ENV PLEXSPACES_REDIS_URL=redis://host:6379
+
+# Backend selection (sqlite|postgres|redis|dynamodb|kafka|nats)
+# ENV CHANNEL_BACKEND=sqlite
+# ENV KEYVALUE_BACKEND=sql
+# ENV TUPLESPACE_BACKEND=sql
+
+# Observability
+ENV RUST_LOG=warn
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD grpc_health_probe -addr=:8000 -service=readiness || nc -z localhost 8000 || exit 1

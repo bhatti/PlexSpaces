@@ -63,6 +63,7 @@ async fn start_node_service_server(
     service_locator
         .register_security_config(SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         })
         .await;
@@ -107,6 +108,7 @@ async fn start_node_service_server_with_registry(
     service_locator
         .register_security_config(SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         })
         .await;

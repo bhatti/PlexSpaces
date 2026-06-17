@@ -1,0 +1,349 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 2.1 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces OAuth User Record
+//
+// ## Purpose
+// Minimal user record for OIDC/OAuth login flow. Not a full user management
+// system — only supports get_or_create_by_email (OIDC callback) and update
+// (admin status toggle). The User record is the source of truth for admin
+// status and tenant membership after OIDC login.
+//
+// ## Architecture Context
+// - OIDC callback → GetOrCreateByEmail → issue PlexSpaces JWT with user's tenant_id + admin
+// - Admin status stored in User record, not solely derived from OIDC claims
+// - Email is the unique identity key (unique index in storage)
+
+syntax = "proto3";
+
+package plexspaces.security.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/security/security;plexspaces_security_v1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.security.v1";
+
+// User record for OAuth/OIDC authentication flow.
+message User {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "User"
+      description: "OAuth user record. Email is unique."
+      required: ["user_id", "email", "tenant_id"]
+    }
+  };
+
+  // ULID primary key
+  string user_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Email address — unique index, identity key from OIDC
+  string email = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Tenant this user belongs to
+  string tenant_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Display name from OIDC profile
+  string display_name = 4;
+
+  // Admin flag — can view all tenants on dashboard
+  bool admin = 5;
+
+  // Last successful login timestamp
+  google.protobuf.Timestamp last_login = 6;
+
+  // Record creation timestamp
+  google.protobuf.Timestamp created_at = 7;
+
+  // Last update timestamp
+  google.protobuf.Timestamp updated_at = 8;
+
+  // Roles from OIDC claims
+  repeated string roles = 9;
+
+  // Groups from OIDC claims
+  repeated string groups = 10;
+
+  // Avatar URL from OIDC profile
+  string avatar_url = 11;
+
+  // OIDC provider name (google, github, okta, etc.)
+  string provider = 12;
+
+  // OIDC subject identifier from provider
+  string provider_sub = 13;
+}
+
+// Request/Response for OAuth user operations
+
+message GetOrCreateByEmailRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Or Create By Email Request"
+      description: "Find user by email or create if not exists. Called during OIDC callback."
+      required: ["email", "tenant_id"]
+    }
+  };
+
+  // Email from OIDC id_token
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Tenant ID (from OIDC org claim or config mapping)
+  string tenant_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Display name from OIDC profile
+  string display_name = 3;
+
+  // Avatar URL from OIDC profile
+  string avatar_url = 4;
+
+  // OIDC provider name
+  string provider = 5;
+
+  // OIDC subject ID
+  string provider_sub = 6;
+
+  // Roles from OIDC claims
+  repeated string roles = 7;
+
+  // Groups from OIDC claims
+  repeated string groups = 8;
+}
+
+message GetOrCreateByEmailResponse {
+  // The user (existing or newly created)
+  User user = 1;
+
+  // Whether this was a new user creation
+  bool created = 2;
+}
+
+message UpdateUserRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Update User Request"
+      description: "Update user admin status or profile fields."
+      required: ["user_id"]
+    }
+  };
+
+  // User ID to update
+  string user_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Fields to update (only non-empty/set fields are applied)
+  string display_name = 2;
+  optional bool admin = 3;
+  repeated string roles = 4;
+  repeated string groups = 5;
+  string avatar_url = 6;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+}
+
+// First-class tenant entity. Created automatically on first OIDC login for a tenant slug.
+message Tenant {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Tenant"
+      description: "A tenant (organisation) in PlexSpaces. Created on first OIDC login."
+      required: ["tenant_id", "slug"]
+    }
+  };
+
+  // ULID primary key
+  string tenant_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // URL-safe slug, unique. Derived from OIDC org claim or config default_tenant_id.
+  string slug = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Human-readable display name
+  string display_name = 3;
+
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// Long-lived API token for programmatic access (CI/CD, scripts, SDKs).
+// Token format: psx_<32-byte-base64url>. Shown ONCE at creation, never stored in plaintext.
+message ApiToken {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "ApiToken"
+      description: "Long-lived API token for programmatic access."
+      required: ["token_id", "user_id", "tenant_id", "name"]
+    }
+  };
+
+  // ULID primary key
+  string token_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Owner user ID
+  string user_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Tenant this token is scoped to
+  string tenant_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // User-assigned label for this token
+  string name = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // First 8 characters of the token (display only, never the secret)
+  string prefix = 5;
+
+  // Scopes granted (e.g. "read", "write")
+  repeated string scopes = 6;
+
+  // Expiration timestamp (absent = non-expiring)
+  google.protobuf.Timestamp expires_at = 7;
+
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp last_used_at = 9;
+
+  // Whether this token has been revoked
+  bool revoked = 10;
+
+  // Snapshot of the owner's admin status at token creation time.
+  // Stored so validation does not require a users table JOIN on every request.
+  bool is_admin = 11;
+}
+
+// Paginated user listing request. Admins can filter across all tenants.
+message ListUsersRequest {
+  plexspaces.common.v1.PageRequest page = 1;
+
+  // Admin-only: filter to a specific tenant. Empty = caller's own tenant for non-admins.
+  string tenant_id_filter = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// Paginated tenant listing request. Non-admins see only their own tenant.
+message ListTenantsRequest {
+  plexspaces.common.v1.PageRequest page = 1;
+}
+
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+message CreateApiTokenRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create Api Token Request"
+      description: "Create a long-lived API token."
+      required: ["name"]
+    }
+  };
+
+  // User-assigned label for this token
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Scopes to grant. Defaults to ["read", "write"] if empty.
+  repeated string scopes = 2;
+
+  // TTL for the token. Defaults to 100× the session JWT TTL if unset.
+  google.protobuf.Duration ttl = 3;
+}
+
+message CreateApiTokenResponse {
+  // Token metadata (without the secret)
+  ApiToken token = 1;
+
+  // The plaintext token (psx_<secret>). Shown ONCE — store it now.
+  string plaintext = 2;
+}
+
+message DeleteApiTokenRequest {
+  string token_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteApiTokenResponse {}
+
+message ListApiTokensRequest {
+  plexspaces.common.v1.PageRequest page = 1;
+}
+
+message ListApiTokensResponse {
+  repeated ApiToken tokens = 1;
+  plexspaces.common.v1.PageResponse page = 2;
+}
+
+// UserService — OAuth user, tenant, and API token management.
+service UserService {
+  // Get existing user by email or create a new one (OIDC callback flow)
+  rpc GetOrCreateByEmail(GetOrCreateByEmailRequest) returns (GetOrCreateByEmailResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/auth/users/get-or-create"
+      body: "*"
+    };
+  }
+
+  // Update user (admin status, profile fields)
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse) {
+    option (google.api.http) = {
+      patch: "/api/v1/auth/users/{user_id}"
+      body: "*"
+    };
+  }
+
+  // List users. Admins see all tenants; non-admins see only their own tenant.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/auth/users"
+    };
+  }
+
+  // List tenants. Admins see all; non-admins see only their own tenant.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/auth/tenants"
+    };
+  }
+
+  // Create a long-lived API token for programmatic access.
+  rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/auth/tokens"
+      body: "*"
+    };
+  }
+
+  // Revoke an API token. Owner or admin only.
+  rpc DeleteApiToken(DeleteApiTokenRequest) returns (DeleteApiTokenResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/auth/tokens/{token_id}"
+    };
+  }
+
+  // List the caller's API tokens.
+  rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/auth/tokens"
+    };
+  }
+}

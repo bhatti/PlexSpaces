@@ -2,8 +2,30 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_PYTHON_APPS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "${_PYTHON_APPS_ROOT}/test-common.sh"
 WASM_FILE="$SCRIPT_DIR/parallel_ai_inference_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
+
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
 
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
@@ -44,11 +66,10 @@ ORCHESTRATOR_ACTOR_PATH="OrchestratorWorkflow:default"
 
 
 grpc_seed_nodes() {
-  local seed_list=()
   local joined=""
   local sep=""
-  for entry in ${seed_list[@]+"${seed_list[@]}"}; do
-    joined="${joined}${sep}${entry}"
+  for entry in "${NODE_LIST[@]}"; do
+    joined="${joined}${sep}\"${entry}\""
     sep=", "
   done
   printf '%s' "$joined"
@@ -131,6 +152,7 @@ ask_actor() {
   curl -s --max-time "$timeout" -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$actor_path/ask?timeout=$timeout" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 
@@ -166,11 +188,12 @@ for node in "${NODE_LIST[@]}"; do
   for _attempt in 1 2 3; do
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
       "http://${host}:${port}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
       -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
     http_code=$(echo "$response" | tail -n1)
     body=$(echo "$response" | sed '$d')
     if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -189,11 +212,12 @@ _deployed=0
 for _attempt in 1 2 3; do
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
       "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
       -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
   http_code=$(echo "$response" | tail -n1)
   body=$(echo "$response" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -209,7 +233,9 @@ if [ "$_deployed" -eq 0 ]; then
 fi
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
-sleep 2
+echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
+wait_for_registry_membership "${#NODE_LIST[@]}" 5 2
+echo -e "  ${GREEN:-}All ${#NODE_LIST[@]} nodes discovered${NC:-}"
 
 # ─── Step 2: Test inference worker directly ───────────────────────────────────
 echo "Step 2: Test inference worker directly"

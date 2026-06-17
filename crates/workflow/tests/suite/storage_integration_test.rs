@@ -10,6 +10,7 @@
 //! - Health monitoring (heartbeat) works
 //! - Stale workflow detection works
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_workflow::*;
 use serde_json::json;
 use std::collections::HashMap;
@@ -18,12 +19,13 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_create_and_get_execution() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "test-workflow",
             "1.0",
             json!({"input": "test"}),
@@ -32,7 +34,7 @@ async fn test_create_and_get_execution() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
 
     assert_eq!(execution.execution_id, execution_id);
     assert_eq!(execution.definition_id, "test-workflow");
@@ -45,12 +47,13 @@ async fn test_create_and_get_execution() {
 #[tokio::test]
 async fn test_create_execution_with_node() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({"input": "test"}),
@@ -60,7 +63,7 @@ async fn test_create_execution_with_node() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
 
     assert_eq!(execution.node_id, "node-1");
 }
@@ -68,12 +71,13 @@ async fn test_create_execution_with_node() {
 #[tokio::test]
 async fn test_update_execution_status() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -82,7 +86,7 @@ async fn test_update_execution_status() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusRunning
@@ -92,12 +96,13 @@ async fn test_update_execution_status() {
 #[tokio::test]
 async fn test_optimistic_locking_version_check() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -126,12 +131,13 @@ async fn test_optimistic_locking_version_check() {
 #[tokio::test]
 async fn test_transfer_ownership() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -141,7 +147,7 @@ async fn test_transfer_ownership() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(execution.node_id, "node-1");
 
     // Transfer to node-2 (version=1)
@@ -150,19 +156,20 @@ async fn test_transfer_ownership() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(execution.node_id, "node-2");
 }
 
 #[tokio::test]
 async fn test_transfer_ownership_optimistic_locking() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -187,12 +194,13 @@ async fn test_transfer_ownership_optimistic_locking() {
 #[tokio::test]
 async fn test_update_heartbeat() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -211,22 +219,23 @@ async fn test_update_heartbeat() {
         .unwrap();
 
     // Verify execution still exists and is owned by node-1
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(execution.node_id, "node-1");
 }
 
 #[tokio::test]
 async fn test_list_executions_by_status() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let def1 = make_workflow_definition("workflow-1", "Workflow 1", "1.0", vec![]);
-    storage.save_definition(&def1).await.unwrap();
+    storage.save_definition(&ctx, &def1).await.unwrap();
 
     let def2 = make_workflow_definition("workflow-2", "Workflow 2", "1.0", vec![]);
-    storage.save_definition(&def2).await.unwrap();
+    storage.save_definition(&ctx, &def2).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "workflow-1",
             "1.0",
             json!({}),
@@ -237,7 +246,7 @@ async fn test_list_executions_by_status() {
         .unwrap();
 
     let exec2 = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "workflow-2",
             "1.0",
             json!({}),
@@ -253,7 +262,7 @@ async fn test_list_executions_by_status() {
         .unwrap();
 
     let running = storage
-        .list_executions_by_status(vec![ExecutionStatus::ExecutionStatusRunning], None)
+        .list_executions_by_status(&ctx, vec![ExecutionStatus::ExecutionStatusRunning], None)
         .await
         .unwrap();
 
@@ -261,7 +270,7 @@ async fn test_list_executions_by_status() {
     assert_eq!(running[0].execution_id, exec1);
 
     let pending = storage
-        .list_executions_by_status(vec![ExecutionStatus::ExecutionStatusPending], None)
+        .list_executions_by_status(&ctx, vec![ExecutionStatus::ExecutionStatusPending], None)
         .await
         .unwrap();
 
@@ -272,15 +281,16 @@ async fn test_list_executions_by_status() {
 #[tokio::test]
 async fn test_list_executions_by_node() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let def1 = make_workflow_definition("workflow-1", "Workflow 1", "1.0", vec![]);
-    storage.save_definition(&def1).await.unwrap();
+    storage.save_definition(&ctx, &def1).await.unwrap();
 
     let def2 = make_workflow_definition("workflow-2", "Workflow 2", "1.0", vec![]);
-    storage.save_definition(&def2).await.unwrap();
+    storage.save_definition(&ctx, &def2).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "workflow-1",
             "1.0",
             json!({}),
@@ -291,7 +301,7 @@ async fn test_list_executions_by_node() {
         .unwrap();
 
     let _exec2 = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "workflow-2",
             "1.0",
             json!({}),
@@ -302,7 +312,7 @@ async fn test_list_executions_by_node() {
         .unwrap();
 
     let node1_execs = storage
-        .list_executions_by_status(
+        .list_executions_by_status(&ctx, 
             vec![ExecutionStatus::ExecutionStatusPending],
             Some("node-1"),
         )
@@ -316,12 +326,13 @@ async fn test_list_executions_by_node() {
 #[tokio::test]
 async fn test_list_stale_executions() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("workflow-1", "Workflow 1", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let exec1 = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "workflow-1",
             "1.0",
             json!({}),
@@ -348,13 +359,14 @@ async fn test_list_stale_executions() {
 #[tokio::test]
 async fn test_save_and_get_definition() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
 
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let retrieved = storage
-        .get_definition("test-workflow", "1.0")
+        .get_definition(&ctx, "test-workflow", "1.0")
         .await
         .unwrap();
 
@@ -365,12 +377,13 @@ async fn test_save_and_get_definition() {
 #[tokio::test]
 async fn test_send_and_check_signal() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -399,12 +412,13 @@ async fn test_send_and_check_signal() {
 #[tokio::test]
 async fn test_step_execution_lifecycle() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -432,12 +446,13 @@ async fn test_step_execution_lifecycle() {
 #[tokio::test]
 async fn test_step_execution_with_retry() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -486,12 +501,13 @@ async fn test_step_execution_with_retry() {
 #[tokio::test]
 async fn test_update_execution_output() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -500,7 +516,7 @@ async fn test_update_execution_output() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     let output = execution
         .output_value()
         .expect("Execution should have output");
@@ -510,12 +526,13 @@ async fn test_update_execution_output() {
 #[tokio::test]
 async fn test_concurrent_update_detection() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -544,12 +561,13 @@ async fn test_concurrent_update_detection() {
 #[tokio::test]
 async fn test_update_execution_output_with_version() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -559,7 +577,7 @@ async fn test_update_execution_output_with_version() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     let output = execution
         .output_value()
         .expect("Execution should have output");
@@ -576,12 +594,13 @@ async fn test_update_execution_output_with_version() {
 #[tokio::test]
 async fn test_recovery_scenario_node_crash() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -598,7 +617,7 @@ async fn test_recovery_scenario_node_crash() {
 
     // Find RUNNING executions on node-1
     let running = storage
-        .list_executions_by_status(
+        .list_executions_by_status(&ctx, 
             vec![ExecutionStatus::ExecutionStatusRunning],
             Some("node-1"),
         )
@@ -614,19 +633,20 @@ async fn test_recovery_scenario_node_crash() {
         .await
         .unwrap();
 
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(execution.node_id, "node-2");
 }
 
 #[tokio::test]
 async fn test_recovery_scenario_concurrent_ownership_transfer() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -651,12 +671,13 @@ async fn test_recovery_scenario_concurrent_ownership_transfer() {
 #[tokio::test]
 async fn test_heartbeat_updates_health_monitoring() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution_with_node(
+        .create_execution_with_node(&ctx, 
             "test-workflow",
             "1.0",
             json!({}),
@@ -680,7 +701,7 @@ async fn test_heartbeat_updates_health_monitoring() {
     }
 
     // Verify execution is still running
-    let execution = storage.get_execution(&execution_id).await.unwrap();
+    let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusRunning
@@ -690,22 +711,25 @@ async fn test_heartbeat_updates_health_monitoring() {
 #[tokio::test]
 async fn test_get_nonexistent_execution() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
-    let result = storage.get_execution("nonexistent-id").await;
+    let result = storage.get_execution(&ctx, "nonexistent-id").await;
     assert!(matches!(result, Err(WorkflowError::NotFound(_))));
 }
 
 #[tokio::test]
 async fn test_get_nonexistent_definition() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
-    let result = storage.get_definition("nonexistent", "1.0").await;
+    let result = storage.get_definition(&ctx, "nonexistent", "1.0").await;
     assert!(matches!(result, Err(WorkflowError::NotFound(_))));
 }
 
 #[tokio::test]
 async fn test_get_nonexistent_step_execution() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let result = storage.get_step_execution("nonexistent-id").await;
     assert!(matches!(result, Err(WorkflowError::NotFound(_))));
@@ -714,12 +738,13 @@ async fn test_get_nonexistent_step_execution() {
 #[tokio::test]
 async fn test_multiple_signals_same_name() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 
@@ -764,9 +789,10 @@ async fn test_multiple_signals_same_name() {
 #[tokio::test]
 async fn test_list_executions_empty() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let running = storage
-        .list_executions_by_status(vec![ExecutionStatus::ExecutionStatusRunning], None)
+        .list_executions_by_status(&ctx, vec![ExecutionStatus::ExecutionStatusRunning], None)
         .await
         .unwrap();
 
@@ -776,6 +802,7 @@ async fn test_list_executions_empty() {
 #[tokio::test]
 async fn test_list_stale_executions_empty() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let stale = storage
         .list_stale_executions(300, vec![ExecutionStatus::ExecutionStatusRunning])
@@ -788,12 +815,13 @@ async fn test_list_stale_executions_empty() {
 #[tokio::test]
 async fn test_step_execution_history_empty() {
     let storage = WorkflowStorage::new_in_memory().await.unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("test-workflow", "Test Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await.unwrap();
+    storage.save_definition(&ctx, &definition).await.unwrap();
 
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({}), HashMap::new())
+        .create_execution(&ctx, "test-workflow", "1.0", json!({}), HashMap::new())
         .await
         .unwrap();
 

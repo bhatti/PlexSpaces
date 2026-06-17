@@ -269,10 +269,12 @@ JWT authentication provides secure access to user-facing APIs:
 
 The JWT middleware:
 
-- Validates JWT signature and expiration (industry-standard: HS256 algorithm pinned, `exp` and `iat` checked)
+- Validates JWT signature and expiration
+- Supports **ES256** (ECDSA P-256, asymmetric, preferred) and **HS256** (HMAC-SHA256, symmetric, legacy fallback)
 - Extracts `tenant_id`, `roles`, `groups`, and `is_admin` from claims
 - Sets request metadata from claims only (prevents header injection)
 - Propagates tenant context via RequestContext
+- Exposes a **JWKS endpoint** (`GET /.well-known/jwks.json`) for ES256 public key discovery
 
 ### JWT Claims (HTTP and gRPC)
 
@@ -318,42 +320,59 @@ The CLI prints the token and a usage hint. Use it in HTTP requests as `Authoriza
 
 ### Configuration
 
-Configure JWT in your `release.yaml`:
+Configure JWT in your `release.yaml` (or `release-auth.yaml`):
 
 ```yaml
 runtime:
   security:
     jwt:
       enable_jwt: true
-      # Secret should be empty in config - use PLEXSPACES_JWT_SECRET env var
-      secret: ""  # Will be read from PLEXSPACES_JWT_SECRET env var
-      issuer: "https://auth.example.com"
-      jwks_url: "https://auth.example.com/.well-known/jwks.json"  # For RS256 (no secret needed)
+      algorithm: "ES256"              # ES256 (preferred) or HS256 (legacy)
+      private_key_pem: ""             # Inline PEM → reads PLEXSPACES_JWT_PRIVATE_KEY env var
+      private_key_file: ""            # Path to PEM → reads PLEXSPACES_JWT_PRIVATE_KEY_FILE env var
+      auto_generate_key: true         # Auto-generate ES256 key on first start (dev mode)
+      secret: ""                      # HS256 fallback → reads PLEXSPACES_JWT_SECRET env var
+      issuer: "plexspaces"
+      jwks_url: ""                    # External JWKS URL for validation (optional)
       allowed_audiences:
         - "plexspaces-api"
-      tenant_id_claim: "tenant_id"  # JWT claim name for tenant_id
-      user_id_claim: "sub"  # JWT claim name for user_id
+      tenant_id_claim: "tenant_id"
+      user_id_claim: "sub"
 ```
 
-### Secret Management
+### Key Management
 
-**CRITICAL**: Secrets must be in environment variables, never in config files.
+**ES256 (Asymmetric, Preferred):**
+
+PlexSpaces uses ECDSA P-256 (ES256) by default. The private key signs tokens; the corresponding public key verifies them and is exposed via the JWKS endpoint.
+
+**Key Resolution Order** (first match wins):
+1. `PLEXSPACES_JWT_PRIVATE_KEY` env var — inline PEM string (for Docker/K8s secrets)
+2. `PLEXSPACES_JWT_PRIVATE_KEY_FILE` env var or `private_key_file` config — path to PEM file
+3. Auto-generate: if `auto_generate_key: true` and no key exists, generate a new P-256 key pair and save to the configured file path
+4. `PLEXSPACES_JWT_SECRET` env var — fall back to HS256 symmetric signing
+
+**Generate a key manually:**
+```bash
+openssl ecparam -genkey -name prime256v1 -noout -out jwt-es256.pem
+```
+
+**JWKS Endpoint:** `GET /.well-known/jwks.json` returns the ES256 public key in JWK format. External services can use this to verify PlexSpaces-issued tokens without sharing secrets.
+
+**HS256 (Symmetric, Legacy Fallback):**
+
+If only `PLEXSPACES_JWT_SECRET` is set (and no private key is available), PlexSpaces falls back to HS256 symmetric signing. This requires all verifiers to share the same secret.
 
 ```bash
-# Set JWT secret via env var (required for HS256)
-export PLEXSPACES_JWT_SECRET="your-secret-key-here"
-
-# Or use JWKS for RS256 (no secret needed)
-# Just configure jwks_url in SecurityConfig
+export PLEXSPACES_JWT_SECRET="your-secret-key-at-least-32-chars"
 ```
 
-**Priority for JWT Secret:**
-1. `PLEXSPACES_JWT_SECRET` environment variable (recommended)
-2. `secret` field in config (fallback, not recommended for production)
-
 **Validation:**
-- If JWT is enabled and no secret/JWKS is provided, the HTTP gateway returns 503 with a message directing you to set the secret or disable auth for testing
+- If JWT is enabled and no key material is available (no private key, no secret, auto-generate disabled), the HTTP gateway returns 503
 - If `PLEXSPACES_DISABLE_AUTH=1` is set, auth is disabled (testing only)
+
+**Multi-Node Clusters:**
+All nodes in a cluster must share the same JWT signing key so tokens issued by one node are valid on all others. The default `scripts/server.sh` uses a shared path (`./certs/jwt-es256.pem`) regardless of port. In production, distribute the same PEM file to all nodes (via Kubernetes secrets, Vault, etc.) or set `PLEXSPACES_JWT_PRIVATE_KEY` from a shared secret store.
 
 ### Tenant Extraction (No Client-Sent tenant_id When Auth On)
 
@@ -376,8 +395,8 @@ The middleware sets (from JWT only when auth on):
 
 JWT tokens are validated against:
 
-1. **Algorithm**: Pinned to the key type (HS256 for shared secret, RS256 for RSA). The token’s `alg` header is not trusted (algorithm confusion prevention).
-2. **Signature**: Verified with the configured secret or public key.
+1. **Algorithm**: Pinned to the configured key type (ES256 for EC key pair, HS256 for shared secret). The token’s `alg` header is not trusted (algorithm confusion prevention).
+2. **Signature**: Verified with the EC public key (ES256) or shared secret (HS256).
 3. **Expiration**: `exp` is checked (tokens are rejected when expired).
 4. **Issuer** (if configured)
 5. **Audience** (if configured)
@@ -412,6 +431,312 @@ cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:8
 ```
 
 Then call HTTP or gRPC without a token (when the node is configured to allow it).
+
+## OAuth/OIDC Authentication
+
+### Overview
+
+PlexSpaces supports OAuth 2.0 / OpenID Connect (OIDC) for user authentication. Users authenticate via any OIDC-compliant provider (Google, Okta, Auth0, Keycloak, etc.), and PlexSpaces issues a short-lived session JWT stored in an HttpOnly cookie.
+
+### How It Works
+
+```
+Browser                PlexSpaces Node              OIDC Provider
+  │                        │                            │
+  │  GET /api/v1/auth/oidc/login                        │
+  ├───────────────────────►│                            │
+  │                        │  302 Redirect to provider  │
+  │◄───────────────────────┤                            │
+  │                        │                            │
+  │  (User authenticates at provider)                   │
+  │────────────────────────────────────────────────────►│
+  │                        │                            │
+  │  GET /api/v1/auth/oidc/callback?code=...&state=...  │
+  │◄────────────────────────────────────────────────────│
+  ├───────────────────────►│                            │
+  │                        │  Exchange code for tokens  │
+  │                        ├───────────────────────────►│
+  │                        │◄───────────────────────────│
+  │                        │                            │
+  │                        │  Extract claims, upsert user/tenant
+  │                        │  Issue session JWT (15m TTL)
+  │  Set-Cookie: psx_session=<JWT>; HttpOnly; Secure    │
+  │◄───────────────────────┤                            │
+  │  302 → /dashboard      │                            │
+```
+
+### Configuration
+
+```yaml
+security:
+  disable_auth: false
+  oidc:
+    enabled: true
+    discovery_url: "https://accounts.google.com/.well-known/openid-configuration"
+    client_id: "YOUR_CLIENT_ID"          # or PLEXSPACES_OIDC_CLIENT_ID env var
+    client_secret: "YOUR_SECRET"         # or PLEXSPACES_OIDC_CLIENT_SECRET env var
+    redirect_uri: "http://localhost:8091/api/v1/auth/oidc/callback"
+    scopes: ["openid", "email", "profile"]
+    tenant_claim: "hd"                   # OIDC claim that maps to tenant slug
+    admin_groups: ["platform-admins"]    # OIDC groups that grant admin privilege
+    default_tenant_id: "default"         # Fallback when tenant_claim is absent
+  jwt:
+    enable_jwt: true
+    secret: ""                           # Use PLEXSPACES_JWT_SECRET env var
+    issuer: "plexspaces"
+    token_ttl: "15m"
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PLEXSPACES_OIDC_CLIENT_ID` | OAuth client ID (overrides config) |
+| `PLEXSPACES_OIDC_CLIENT_SECRET` | OAuth client secret (overrides config) |
+| `PLEXSPACES_JWT_PRIVATE_KEY` | Inline ES256 PEM private key (preferred) |
+| `PLEXSPACES_JWT_PRIVATE_KEY_FILE` | Path to ES256 PEM file (auto-generates if missing) |
+| `PLEXSPACES_JWT_SECRET` | HS256 fallback secret for signing session JWTs |
+| `PLEXSPACES_DISABLE_AUTH` | Set to `1` to disable all auth (dev only) |
+
+### Provider Examples
+
+**Google Workspace:**
+```yaml
+oidc:
+  discovery_url: "https://accounts.google.com/.well-known/openid-configuration"
+  tenant_claim: "hd"    # Google hosted domain → tenant slug
+  scopes: ["openid", "email", "profile"]
+```
+Setup: [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → Create OAuth 2.0 Client ID → Add redirect URI.
+
+**Okta:**
+```yaml
+oidc:
+  discovery_url: "https://YOUR_ORG.okta.com/.well-known/openid-configuration"
+  tenant_claim: "org"
+  scopes: ["openid", "email", "profile", "groups"]
+```
+
+**Auth0:**
+```yaml
+oidc:
+  discovery_url: "https://YOUR_DOMAIN.auth0.com/.well-known/openid-configuration"
+  tenant_claim: "org_id"
+  scopes: ["openid", "email", "profile"]
+```
+
+**Keycloak (self-hosted):**
+```yaml
+oidc:
+  discovery_url: "http://localhost:8180/realms/plexspaces/.well-known/openid-configuration"
+  tenant_claim: "org"
+  scopes: ["openid", "email", "profile"]
+```
+
+### User → Tenant Mapping
+
+When a user authenticates via OIDC:
+
+1. The `tenant_claim` (e.g., `hd`, `org`, `org_id`) is extracted from the ID token claims.
+2. `get_or_create_tenant(slug)` creates the tenant if it doesn't exist (idempotent upsert).
+3. `get_or_create_user(email, tenant_id)` creates or updates the user record.
+4. A session JWT is issued with `tenant_id`, `sub`, `roles`, `is_admin`, and stored as an HttpOnly cookie.
+
+If the `tenant_claim` is absent from the ID token, the `default_tenant_id` from config is used.
+
+### Admin Detection
+
+Users are granted admin privileges when their OIDC groups claim includes any group listed in `admin_groups`:
+
+```yaml
+oidc:
+  admin_groups: ["platform-admins", "infra-team"]
+```
+
+The `is_admin` flag is stored on the user record and included in all session JWTs.
+
+---
+
+## API Tokens (Programmatic Access)
+
+### Overview
+
+API tokens provide long-lived programmatic access for CI/CD pipelines, scripts, and SDKs. They follow the GitHub Personal Access Token (PAT) pattern:
+
+- **Format**: `psx_<64 hex chars>` (32 random bytes, hex-encoded)
+- **Storage**: Only the SHA-256 hash is stored in the database
+- **Display**: Plaintext is shown exactly once at creation time
+- **Validation**: Token is hashed → looked up in `api_tokens` table → checked for revocation/expiry
+
+### Creating API Tokens
+
+**Via Dashboard:**
+Visit `/dashboard/tokens` → Click "Create Token" → Set name, scopes, and TTL → Copy the plaintext token immediately.
+
+**Via API (with session JWT or existing API token):**
+```bash
+curl -X POST http://localhost:8091/api/v1/auth/tokens \
+  -H "Authorization: Bearer <session-jwt-or-psx-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci-pipeline", "scopes": ["read", "write"], "ttl_seconds": 7776000}'
+```
+
+Response:
+```json
+{
+  "token": {
+    "token_id": "01J...",
+    "name": "ci-pipeline",
+    "prefix": "psx_abc1",
+    "scopes": ["read", "write"]
+  },
+  "plaintext": "psx_a1b2c3d4e5f6..."
+}
+```
+
+### Using API Tokens
+
+Pass the token as a Bearer token in the `Authorization` header:
+
+```bash
+# List users
+curl -H "Authorization: Bearer psx_a1b2c3d4e5f6..." \
+  http://localhost:8091/api/v1/auth/users
+
+# Send a message to an actor
+curl -H "Authorization: Bearer psx_a1b2c3d4e5f6..." \
+  -X POST http://localhost:8091/api/v1/actors/my-actor/messages \
+  -H "Content-Type: application/json" \
+  -d '{"payload": "hello"}'
+```
+
+### Token Lifecycle
+
+| Operation | Endpoint | Method |
+|-----------|----------|--------|
+| Create | `/api/v1/auth/tokens` | POST |
+| List (own tokens) | `/api/v1/auth/tokens` | GET |
+| Revoke | `/api/v1/auth/tokens/:token_id` | DELETE |
+
+### Security Properties
+
+- **`is_admin` snapshotted at creation**: The token carries the admin status of the user at creation time. If a user is later demoted, existing tokens retain their original privilege level (revoke and re-create to reflect new permissions).
+- **SHA-256 stored, plaintext never persisted**: Even if the database is compromised, tokens cannot be recovered.
+- **`last_used_at` tracking**: Updated asynchronously on each use for audit purposes.
+- **Scoped**: Tokens carry explicit scopes (e.g., `read`, `write`) checked by handlers.
+
+### Unified Auth Design
+
+All three authentication methods produce the same downstream `JwtClaims` interface:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Incoming Request                        │
+│                                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
+│  │ Session JWT │  │ psx_ Token  │  │ mTLS Certificate│  │
+│  │ (cookie)    │  │ (Bearer)    │  │ (gRPC node)     │  │
+│  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘  │
+│         │                │                   │           │
+│         ▼                ▼                   ▼           │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │              JwtClaims (uniform)                  │    │
+│  │  sub, tenant_id, roles, groups, is_admin         │    │
+│  └──────────────────────────────────────────────────┘    │
+│         │                                                │
+│         ▼                                                │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │           Downstream Handlers                     │    │
+│  │  (auth-method-agnostic, same code path)           │    │
+│  └──────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Testing Authentication
+
+### Development Mode (Auth Disabled)
+
+For local development, disable auth entirely:
+
+```bash
+export PLEXSPACES_DISABLE_AUTH=1
+cargo run -p plexspaces-cli -- start --node-id dev-node --listen-addr 0.0.0.0:8091
+```
+
+All endpoints return data as superadmin — no login or token needed:
+
+```bash
+curl http://localhost:8091/api/v1/auth/users
+curl http://localhost:8091/api/v1/auth/tenants
+curl -X POST http://localhost:8091/api/v1/auth/tokens \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test-token"}'
+```
+
+### Testing OIDC Login Flow
+
+1. Configure OIDC provider credentials (see [Provider Examples](#provider-examples) above).
+2. Start the node with auth enabled.
+3. Open browser: `http://localhost:8091/api/v1/auth/oidc/login`
+4. Authenticate with your provider.
+5. Verify redirect to `/dashboard` with session cookie set.
+
+### Testing API Tokens End-to-End
+
+```bash
+# 1. Create a token (requires active session or auth disabled)
+TOKEN_RESPONSE=$(curl -s -X POST http://localhost:8091/api/v1/auth/tokens \
+  -H "Content-Type: application/json" \
+  -d '{"name": "e2e-test", "scopes": ["read","write"], "ttl_seconds": 3600}')
+
+PLAINTEXT=$(echo "$TOKEN_RESPONSE" | jq -r '.plaintext')
+TOKEN_ID=$(echo "$TOKEN_RESPONSE" | jq -r '.token.token_id')
+
+# 2. Use the token
+curl -H "Authorization: Bearer $PLAINTEXT" \
+  http://localhost:8091/api/v1/auth/users
+
+# 3. List tokens
+curl -H "Authorization: Bearer $PLAINTEXT" \
+  http://localhost:8091/api/v1/auth/tokens
+
+# 4. Revoke the token
+curl -H "Authorization: Bearer $PLAINTEXT" \
+  -X DELETE http://localhost:8091/api/v1/auth/tokens/$TOKEN_ID
+
+# 5. Verify revoked token is rejected (should return 401)
+curl -H "Authorization: Bearer $PLAINTEXT" \
+  http://localhost:8091/api/v1/auth/users
+```
+
+### Testing Access Control
+
+```bash
+# Non-admin user: only sees own tenant's data
+curl -H "Authorization: Bearer $USER_TOKEN" \
+  http://localhost:8091/api/v1/auth/users
+# → Returns only users in the token holder's tenant
+
+# Admin user: sees all tenants
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:8091/api/v1/auth/users
+# → Returns all users across all tenants (paginated)
+
+# Non-admin attempting to filter by another tenant (ignored):
+curl -H "Authorization: Bearer $USER_TOKEN" \
+  "http://localhost:8091/api/v1/auth/users?tenant_id=other-tenant"
+# → Still returns only own tenant's users (filter silently overridden)
+```
+
+### Dashboard UI Testing
+
+With the node running, visit:
+- `http://localhost:8091/dashboard/tokens` — Create, view, and revoke API tokens
+- `http://localhost:8091/dashboard/users` — Browse users and tenants with pagination
+
+---
 
 ## Tenant Isolation
 
@@ -701,9 +1026,11 @@ PLEXSPACES_MTLS_SERVER_KEY_PATH=/certs/server.key
 PLEXSPACES_MTLS_AUTO_GENERATE=true
 PLEXSPACES_MTLS_CERT_DIR=/app/certs
 
-# JWT
+# JWT (ES256 preferred, HS256 fallback)
 PLEXSPACES_JWT_ENABLED=true
-PLEXSPACES_JWT_SECRET=...  # Secret - env var only
+PLEXSPACES_JWT_PRIVATE_KEY=...          # Inline ES256 PEM (for Docker/K8s secrets)
+PLEXSPACES_JWT_PRIVATE_KEY_FILE=...     # Path to ES256 PEM file
+PLEXSPACES_JWT_SECRET=...               # HS256 fallback secret (if no EC key configured)
 PLEXSPACES_JWT_ISSUER=https://auth.example.com
 PLEXSPACES_JWT_JWKS_URL=https://auth.example.com/.well-known/jwks.json
 PLEXSPACES_JWT_TENANT_ID_CLAIM=tenant_id
@@ -1281,9 +1608,18 @@ Client Request
 - [RequestContext](crates/common/src/request_context.rs) - RequestContext with auth header propagation (see `with_bearer_token()`, `with_api_key_header()`, `with_header()`)
 - [Common Proto](proto/plexspaces/v1/common.proto) - RequestContext proto definition with `headers` field (tag 11) and OpenAPI security definitions
 - [Security Proto](proto/plexspaces/v1/security/security.proto) - Security API proto with OpenAPI security schemes
+- [User Proto](proto/plexspaces/v1/security/user.proto) - User, Tenant, and ApiToken message definitions
 - [WIT Types](wit/plexspaces-actor/types.wit) - WIT `context` record with `headers: list<tuple<string, string>>`
 - [HTTP JWT validation](crates/node/src/http_jwt.rs) - HTTP gateway JWT validation
+- [Auth Routes](crates/node/src/http_routes/auth_routes.rs) - OAuth/OIDC login, API token CRUD, user/tenant listing
+- [OIDC Implementation](crates/services/src/user_service/oidc.rs) - OIDC discovery, login redirect, callback handling
+- [API Token Repository](crates/services/src/user_service/api_token_repository.rs) - Token storage, validation, revocation
+- [Tenant Repository](crates/services/src/user_service/tenant_repository.rs) - Tenant CRUD and upsert
 - [gRPC Auth Interceptor](crates/grpc-middleware/src/auth.rs) - JWT/mTLS middleware for gRPC
 - [InterceptorChain](crates/grpc-middleware/src/chain.rs) - Composable gRPC middleware chain
 - [mTLS Certificate Generation](crates/grpc-middleware/src/cert_gen.rs) - Certificate generation
+- [mTLS Server](crates/node/src/tls_server.rs) - TLS accept loop for HTTPS serving
+- [gRPC Client TLS](crates/node/src/grpc_client.rs) - `connect_with_tls()` for mTLS outbound connections
 - [CLI jwt create](crates/cli/src/security.rs) - CLI helper to create JWT tokens
+- [Dashboard: Tokens](crates/dashboard/static/dashboard/tokens.html) - API token management UI
+- [Dashboard: Users](crates/dashboard/static/dashboard/users.html) - User/tenant listing UI

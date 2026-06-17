@@ -22,6 +22,7 @@
 //! Tests error paths and edge cases to achieve 95%+ coverage.
 //! These tests target uncovered lines identified by tarpaulin.
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_workflow::*;
 use serde_json::json;
 
@@ -29,6 +30,7 @@ use serde_json::json;
 #[tokio::test]
 async fn test_choice_greater_than_operator() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-greater-than",
@@ -73,13 +75,13 @@ async fn test_choice_greater_than_operator() -> Result<(), Box<dyn std::error::E
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-greater-than", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-greater-than", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -97,6 +99,7 @@ async fn test_choice_greater_than_operator() -> Result<(), Box<dyn std::error::E
 #[tokio::test]
 async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-less-than",
@@ -141,12 +144,12 @@ async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Erro
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-less-than", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-less-than", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -164,6 +167,7 @@ async fn test_choice_less_than_operator() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "wait-invalid-timestamp",
@@ -179,13 +183,13 @@ async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>>
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "wait-invalid-timestamp", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "wait-invalid-timestamp", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusFailed
@@ -208,6 +212,7 @@ async fn test_wait_invalid_timestamp() -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test]
 async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "signal-missing-config",
@@ -223,13 +228,13 @@ async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> 
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "signal-missing-config", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "signal-missing-config", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusFailed
@@ -242,6 +247,7 @@ async fn test_signal_missing_config() -> Result<(), Box<dyn std::error::Error>> 
 #[tokio::test]
 async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "wait-missing-duration",
@@ -257,13 +263,13 @@ async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> 
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "wait-missing-duration", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "wait-missing-duration", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusFailed
@@ -286,6 +292,7 @@ async fn test_wait_missing_duration() -> Result<(), Box<dyn std::error::Error>> 
 #[tokio::test]
 async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-non-numeric",
@@ -330,12 +337,12 @@ async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-non-numeric", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-non-numeric", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -353,6 +360,7 @@ async fn test_choice_non_numeric_comparison() -> Result<(), Box<dyn std::error::
 #[tokio::test]
 async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-float-gt",
@@ -397,12 +405,12 @@ async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Erro
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-float-gt", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-gt", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -419,6 +427,7 @@ async fn test_choice_float_greater_than() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-float-lt",
@@ -463,12 +472,12 @@ async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>>
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-float-lt", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-float-lt", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -485,12 +494,13 @@ async fn test_choice_float_less_than() -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test]
 async fn test_execute_from_state_empty_workflow() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition("empty-workflow", "Empty Workflow", "1.0", vec![]);
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "empty-workflow",
             "1.0",
             json!({}),
@@ -502,9 +512,9 @@ async fn test_execute_from_state_empty_workflow() -> Result<(), Box<dyn std::err
         .update_execution_status(&execution_id, ExecutionStatus::ExecutionStatusRunning)
         .await?;
 
-    WorkflowExecutor::execute_from_state(&storage, &execution_id).await?;
+    WorkflowExecutor::execute_from_state(&storage, &ctx, &execution_id).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -517,6 +527,7 @@ async fn test_execute_from_state_empty_workflow() -> Result<(), Box<dyn std::err
 #[tokio::test]
 async fn test_choice_invalid_next_step() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-invalid-next",
@@ -543,13 +554,13 @@ async fn test_choice_invalid_next_step() -> Result<(), Box<dyn std::error::Error
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-invalid-next", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-invalid-next", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -562,6 +573,7 @@ async fn test_choice_invalid_next_step() -> Result<(), Box<dyn std::error::Error
 #[tokio::test]
 async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-no-match",
@@ -597,12 +609,12 @@ async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Err
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-no-match", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-no-match", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -619,6 +631,7 @@ async fn test_choice_no_match_no_default() -> Result<(), Box<dyn std::error::Err
 #[tokio::test]
 async fn test_choice_path_invalid_next() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-path-invalid",
@@ -663,13 +676,13 @@ async fn test_choice_path_invalid_next() -> Result<(), Box<dyn std::error::Error
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-path-invalid", "1.0", json!({}))
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-path-invalid", "1.0", json!({}))
             .await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted

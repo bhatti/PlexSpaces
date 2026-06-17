@@ -38,7 +38,7 @@ use async_trait::async_trait;
 use plexspaces_actor::{
     object_registry_helpers, ApplicationManager as ApplicationManagerTrait, Service,
 };
-use plexspaces_common::{RequestContext, RequestContextExt};
+use plexspaces_common::{dialable_node_address, RequestContext, RequestContextExt};
 use plexspaces_proto::application::v1::ApplicationSpec;
 use plexspaces_proto::supervision::v1::SupervisorSpec;
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
@@ -401,7 +401,7 @@ impl ApplicationManagerImpl {
                         &name,
                         &version,
                         node_context.id(),
-                        &format!("http://{}", node_context.listen_addr()),
+                        &dialable_node_address(node_context.listen_addr()),
                     )
                     .await
                     {

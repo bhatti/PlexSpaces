@@ -41,6 +41,19 @@ from .decorators import (
 )
 
 
+def _to_snake_case(name: str) -> str:
+    """Convert PascalCase/camelCase to snake_case.
+
+    The framework stores actor_type as snake_case in app-config.toml
+    (e.g. "inference_worker") while Python classes use PascalCase
+    (e.g. "InferenceWorker").
+    """
+    import re
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+    s = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s)
+    return s.lower()
+
+
 def build_class_map(
     actor_classes: List[Type],
     actor_roles: Optional[Dict[str, Type]] = None,
@@ -49,6 +62,8 @@ def build_class_map(
 
     Keys are exact strings the framework places in ``actor_type`` or ``role``:
     - Each class is registered under its exact ``__name__``.
+    - Each class is also registered under its snake_case form to match the
+      framework's TOML convention (e.g. "InferenceWorker" -> "inference_worker").
     - Explicit ``actor_roles`` entries are registered under their exact key
       (for same-class multi-instance cases like ``ephemeral``/``channel``).
     """
@@ -57,6 +72,9 @@ def build_class_map(
     # Class names first (lower priority — roles may override for same-class dispatch)
     for cls in actor_classes:
         class_map[cls.__name__] = cls
+        snake = _to_snake_case(cls.__name__)
+        if snake != cls.__name__:
+            class_map[snake] = cls
 
     # Explicit role overrides (only valid when multiple children share actor_type)
     if actor_roles:
@@ -209,6 +227,7 @@ def generate_wrapper(
         "",
         "        try:",
         "            state = get_state_dict(_instance)",
+        "            state['__actor_class__'] = type(_instance).__name__",
         "            state_safe = _sanitize_payload_for_wasm(state)",
         '            return json.dumps(state_safe).encode("utf-8")',
         "        except Exception as e:",
@@ -216,13 +235,16 @@ def generate_wrapper(
         "",
         "    def set_state(self, state_data):",
         '        """Restore actor state from JSON bytes."""',
-        "        global _instance",
-        "        if _instance is None:",
-        "            _instance = _actor_class()",
+        "        global _instance, _actor_class",
         "",
         "        try:",
         "            state_json = self._decode(state_data)",
         "            state = json.loads(state_json)",
+        "            cls_name = state.pop('__actor_class__', None)",
+        "            if cls_name and cls_name in _CLASS_MAP:",
+        "                _actor_class = _CLASS_MAP[cls_name]",
+        "            if _instance is None:",
+        "                _instance = _actor_class()",
         "            # Recursively restore stringified numbers back to numeric types.",
         "            # get_state sanitizes floats to strings for WASM JSON safety;",
         "            # _desanitize_from_wasm reverses this for lists, dicts, and scalars.",

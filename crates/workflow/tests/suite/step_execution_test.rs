@@ -22,6 +22,7 @@
 //! Tests for tracking individual step executions within workflows.
 //! Following TDD principles - these tests are written FIRST.
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_workflow::*;
 use serde_json::json;
 
@@ -29,6 +30,7 @@ use serde_json::json;
 #[tokio::test]
 async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "step-test",
@@ -44,10 +46,10 @@ async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Er
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "step-test",
             "1.0",
             json!({}),
@@ -72,6 +74,7 @@ async fn test_record_step_execution_start() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "completion-test",
@@ -87,10 +90,10 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "completion-test",
             "1.0",
             json!({}),
@@ -123,6 +126,7 @@ async fn test_record_step_execution_completion() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "failure-test",
@@ -138,10 +142,10 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "failure-test",
             "1.0",
             json!({}),
@@ -173,6 +177,7 @@ async fn test_record_step_execution_failure() -> Result<(), Box<dyn std::error::
 #[tokio::test]
 async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "retry-test",
@@ -188,10 +193,10 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "retry-test",
             "1.0",
             json!({}),
@@ -227,6 +232,7 @@ async fn test_step_execution_retry_tracking() -> Result<(), Box<dyn std::error::
 #[tokio::test]
 async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "history-test",
@@ -253,10 +259,10 @@ async fn test_get_step_execution_history() -> Result<(), Box<dyn std::error::Err
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id = storage
-        .create_execution(
+        .create_execution(&ctx, 
             "history-test",
             "1.0",
             json!({}),

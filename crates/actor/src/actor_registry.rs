@@ -1013,13 +1013,33 @@ impl ActorRegistry {
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
 
+        // Validate caller's tenant matches the virtual actor's stored tenant.
+        // Both empty = system/internal (allowed). Both set = must match.
+        // Caller set + actor empty = allowed (system actor). Caller empty + actor set = denied.
+        if let Some(metadata) = manager.get_metadata(actor_id).await {
+            let caller_tenant = ctx.tenant_id();
+            let actor_tenant = &metadata.spec.tenant_id;
+            if !caller_tenant.is_empty() && !actor_tenant.is_empty() && caller_tenant != actor_tenant {
+                return Err(ActorRegistryError::SendFailed(format!(
+                    "Tenant isolation violation: caller tenant '{}' cannot access virtual actor in tenant '{}'",
+                    caller_tenant, actor_tenant
+                )));
+            }
+            if caller_tenant.is_empty() && !actor_tenant.is_empty() && !ctx.is_internal() {
+                return Err(ActorRegistryError::SendFailed(format!(
+                    "Tenant isolation violation: unauthenticated caller cannot access virtual actor in tenant '{}'",
+                    actor_tenant
+                )));
+            }
+        }
+
         let mut should_activate = true;
         if let Ok(facet_arc) = manager.get_facet(actor_id).await {
             let facet_guard = facet_arc.read().await;
             should_activate = facet_guard.start_activation().await;
         }
 
-        manager.queue_message(actor_id, message, ctx).await;
+        manager.queue_message(ctx, actor_id, message).await;
 
         if should_activate {
             let actor_factory = self.require_actor_factory().await?;

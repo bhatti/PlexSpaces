@@ -10,6 +10,12 @@ This guide will help you get started with PlexSpaces in minutes. You'll learn ho
 ## Prerequisites
 
 - **Rust 1.70+**: [Install Rust](https://www.rust-lang.org/tools/install)
+- **Python 3.8+** with venv: Required for test JWT generation (ES256 signing)
+  ```bash
+  python3 -m venv ~/venv
+  source ~/venv/bin/activate
+  pip install cryptography
+  ```
 - **Docker** (optional): For containerized deployment
 - **Protocol Buffers compiler** (optional): For proto generation (`buf` CLI recommended)
 
@@ -76,6 +82,70 @@ See [Installation Guide](installation.md) for detailed setup instructions.
 See [Testing Guide](testing.md) for how to run unit tests, integration tests, Rust SDK crates, and Python/TypeScript/Go SDK tests.
 
 **Note**: For actors using non-memory channels (Redis, Kafka, SQLite, NATS), graceful shutdown is automatically handled. When an actor stops, it completes all in-progress messages before terminating. See [Durability Guide](durability.md) for details on graceful shutdown and message recovery.
+
+## Authentication Setup
+
+PlexSpaces supports three authentication methods that all produce the same downstream identity:
+
+| Method | Use Case | Format |
+|--------|----------|--------|
+| **OIDC/OAuth** | Browser-based dashboard login | Session JWT in HttpOnly cookie |
+| **API Tokens** | CI/CD, scripts, SDKs | `psx_<64 hex>` as Bearer token |
+| **mTLS** | Node-to-node gRPC | Client certificate |
+
+### Quick Start (Development)
+
+For local development, disable auth:
+
+```bash
+export PLEXSPACES_DISABLE_AUTH=1
+cargo run -p plexspaces-cli -- start --node-id dev-node --listen-addr 0.0.0.0:8091
+```
+
+### Quick Start (OAuth/OIDC)
+
+1. Register an OAuth client with your provider (Google, Okta, Auth0, Keycloak).
+2. Set redirect URI to `http://localhost:8091/api/v1/auth/oidc/callback`.
+3. Configure in your `release.yaml` or environment:
+
+```bash
+export PLEXSPACES_OIDC_CLIENT_ID="your-client-id"
+export PLEXSPACES_OIDC_CLIENT_SECRET="your-client-secret"
+# ES256 key auto-generates on first start (./certs/jwt-es256.pem)
+# For HS256 fallback: export PLEXSPACES_JWT_SECRET="your-256-bit-secret"
+```
+
+```yaml
+security:
+  oidc:
+    enabled: true
+    discovery_url: "https://accounts.google.com/.well-known/openid-configuration"
+    redirect_uri: "http://localhost:8091/api/v1/auth/oidc/callback"
+    scopes: ["openid", "email", "profile"]
+    tenant_claim: "hd"
+    default_tenant_id: "default"
+```
+
+4. Start the node and visit `http://localhost:8091/api/v1/auth/oidc/login`.
+
+### Quick Start (API Tokens)
+
+After logging in (or with auth disabled), create a long-lived token:
+
+```bash
+curl -X POST http://localhost:8091/api/v1/auth/tokens \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-script", "scopes": ["read","write"], "ttl_seconds": 7776000}'
+# → {"plaintext": "psx_...", "token": {...}}
+```
+
+Use it for all subsequent API calls:
+
+```bash
+curl -H "Authorization: Bearer psx_..." http://localhost:8091/api/v1/auth/users
+```
+
+See the full [Security Guide](security.md) for detailed configuration, provider examples, and testing instructions.
 
 ## Your First Actor
 

@@ -737,8 +737,10 @@ impl WasmInstance {
                             drop(state);
 
                             let new_state = if is_simple_actor {
+                                // Post-birth re-instantiation: call init() because this is
+                                // the actor's actual birth, not a per-message restore.
                                 instance
-                                    .create_fresh_simple_actor_state(&instance_ctx)
+                                    .create_fresh_simple_actor_state_with_init(&instance_ctx)
                                     .await?
                             } else {
                                 instance
@@ -1534,9 +1536,38 @@ impl WasmInstance {
     /// Wasmtime traps "cannot enter component instance" on the second sequential call on the same
     /// store (see wasmtime#8943); replacing state after each SimpleActor handle() avoids re-entry.
     #[cfg(feature = "component-model")]
+    /// Creates a fresh ComponentState (new Store + SimpleActor instance).
+    ///
+    /// `call_init`: when true, replays `init(original_config)` on the fresh instance.
+    /// This is ONLY used for the post-init re-instantiation (the very first re-instantiation
+    /// immediately after actor birth, needed to work around wasmtime#8943). In this case,
+    /// init() is the actor's actual birth — its side effects (timer scheduling, PG joins)
+    /// are intended to run exactly once.
+    ///
+    /// When false (the per-message re-instantiation path), init() is skipped entirely.
+    /// The caller restores state via set_state() after this function returns. This
+    /// maintains the actor lifecycle contract: init() runs exactly once at birth.
+    /// See the ARCHITECTURE NOTE in the function body for full rationale.
     async fn create_fresh_simple_actor_state(
         &self,
         instance_ctx: &InstanceContext,
+    ) -> WasmResult<ComponentState> {
+        self.create_fresh_simple_actor_state_impl(instance_ctx, false)
+            .await
+    }
+
+    async fn create_fresh_simple_actor_state_with_init(
+        &self,
+        instance_ctx: &InstanceContext,
+    ) -> WasmResult<ComponentState> {
+        self.create_fresh_simple_actor_state_impl(instance_ctx, true)
+            .await
+    }
+
+    async fn create_fresh_simple_actor_state_impl(
+        &self,
+        instance_ctx: &InstanceContext,
+        call_init: bool,
     ) -> WasmResult<ComponentState> {
         let engine = self.reinstantiation_engine.as_ref().ok_or_else(|| {
             WasmError::ActorFunctionError("Reinstantiation engine not set".to_string())
@@ -1641,31 +1672,74 @@ impl WasmInstance {
         .map_err(|e| {
             WasmError::InstantiationError(format!("Simple-actor re-instantiation failed: {}", e))
         })?;
-        let empty_config = Vec::new();
-        let init_config = self.original_init_config.as_ref().unwrap_or(&empty_config);
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                actor_id = %self.actor_id,
-                config_len = init_config.len(),
-                has_original_config = self.original_init_config.is_some(),
-                "Re-instantiating actor-world component with original init config"
-            );
-        }
-        let result = simple_bindings
-            .plexspaces_actor_actor()
-            .call_init(&mut component_store, init_config)
-            .await
-            .map_err(|e| {
-                WasmError::ActorFunctionError(format!(
-                    "actor-world init() on fresh state failed: {}",
-                    e
-                ))
-            })?;
-        if let Err(error_msg) = result {
-            return Err(WasmError::ActorFunctionError(format!(
-                "actor-world init() on fresh state returned error: {}",
-                error_msg
-            )));
+        if call_init {
+            // Post-birth re-instantiation: this is part of the actor's initial spawn.
+            // init() runs here because it IS the actor's birth — its side effects (timers,
+            // PG joins) should execute exactly once.
+            let empty_config = Vec::new();
+            let init_config = self.original_init_config.as_ref().unwrap_or(&empty_config);
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    actor_id = %self.actor_id,
+                    config_len = init_config.len(),
+                    "Post-birth re-instantiation: calling init() (actor's first and only init)"
+                );
+            }
+            let result = simple_bindings
+                .plexspaces_actor_actor()
+                .call_init(&mut component_store, init_config)
+                .await
+                .map_err(|e| {
+                    WasmError::ActorFunctionError(format!(
+                        "actor-world init() on fresh state failed: {}",
+                        e
+                    ))
+                })?;
+            if let Err(error_msg) = result {
+                return Err(WasmError::ActorFunctionError(format!(
+                    "actor-world init() on fresh state returned error: {}",
+                    error_msg
+                )));
+            }
+        } else {
+            // Re-instantiation after handle(): call init() with is_replaying=true to
+            // suppress side effects (timers, PG joins) while allowing the component to
+            // set up internal routing state (TypeScript ActorRouter.active, Python dispatch
+            // tables, etc.). Without this, set_state() on the fresh instance fails because
+            // the component's internal router has no active actor instance.
+            //
+            // This matches Erlang's approach: gen_server re-creation after code_change
+            // re-initializes the module state without re-triggering init-time side effects.
+            let empty_config = Vec::new();
+            let init_config = self.original_init_config.as_ref().unwrap_or(&empty_config);
+            instance_ctx
+                .host_functions
+                .is_replaying
+                .store(true, std::sync::atomic::Ordering::Release);
+            let init_result = simple_bindings
+                .plexspaces_actor_actor()
+                .call_init(&mut component_store, init_config)
+                .await;
+            instance_ctx
+                .host_functions
+                .is_replaying
+                .store(false, std::sync::atomic::Ordering::Release);
+            match init_result {
+                Ok(Ok(())) => {}
+                Ok(Err(error_msg)) => {
+                    tracing::warn!(
+                        actor_id = %self.actor_id,
+                        error = %error_msg,
+                        "Re-instantiation init() returned error (state will be restored via set_state)"
+                    );
+                }
+                Err(e) => {
+                    return Err(WasmError::ActorFunctionError(format!(
+                        "Re-instantiation init() trapped: {}",
+                        e
+                    )));
+                }
+            }
         }
         Ok(ComponentState {
             store: component_store,
@@ -2231,7 +2305,13 @@ impl WasmInstance {
                     } else {
                         None
                     };
-                    Self::create_fresh_simple_actor_state(self, &instance_ctx).await
+                    // When saved_state is available, create without init (state will be restored via set_state).
+                    // When saved_state is None (handle failed), call init() so the actor is usable.
+                    if saved_state.is_some() {
+                        Self::create_fresh_simple_actor_state(self, &instance_ctx).await
+                    } else {
+                        Self::create_fresh_simple_actor_state_with_init(self, &instance_ctx).await
+                    }
                 }
                     .map_err(|e| {
                         let error_msg = e.to_string();
@@ -2267,15 +2347,7 @@ impl WasmInstance {
                             .call_set_state(new_store, state_bytes)
                             .await
                         {
-                            Ok(Ok(())) => {
-                                if tracing::enabled!(tracing::Level::TRACE) {
-                                    tracing::trace!(
-                                        actor_id = %self.actor_id,
-                                        message_id = %message_id,
-                                        "State restored on new instance after re-instantiation"
-                                    );
-                                }
-                            }
+                            Ok(Ok(())) => {}
                             Ok(Err(error_msg)) => {
                                 tracing::warn!(
                                     actor_id = %self.actor_id,

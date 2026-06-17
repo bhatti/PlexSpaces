@@ -35,22 +35,19 @@ type webCrawlActor struct {
 	plexspaces.BaseActor
 	actorID       string
 	applicationID string
-	role          string
-	// fetcher state
-	fetchCount int
-	// analyzer state
-	index        map[string]int
-	urlsAnalyzed int
-	// orchestrator state
-	pagesCrawled int
-	totalLinks   int
-	topWords     [][2]any
+	Role          string         `json:"role"`
+	FetchCount    int            `json:"fetch_count"`
+	Index         map[string]int `json:"index"`
+	UrlsAnalyzed  int            `json:"urls_analyzed"`
+	PagesCrawled  int            `json:"pages_crawled"`
+	TotalLinks    int            `json:"total_links"`
+	TopWords      [][2]any       `json:"top_words"`
 }
 
 func newWebCrawlActor() plexspaces.Actor {
 	a := &webCrawlActor{
-		role:  "fetcher",
-		index: make(map[string]int),
+		Role:  "fetcher",
+		Index: make(map[string]int),
 	}
 	a.SetSelf(a)
 	return a
@@ -69,10 +66,10 @@ func (a *webCrawlActor) Init(configJSON string) string {
 	a.applicationID = appIDFromActorID(cfg.ActorID)
 	if cfg.Args != nil {
 		if role, ok := cfg.Args["role"].(string); ok {
-			a.role = role
+			a.Role = role
 		}
 	}
-	a.index = make(map[string]int)
+	a.Index = make(map[string]int)
 	return ""
 }
 
@@ -90,9 +87,9 @@ func (a *webCrawlActor) Handle(_ string, msgType, payloadJSON string) string {
 	case "status":
 		return marshal(map[string]any{
 			"actor_id":      a.actorID,
-			"role":          a.role,
-			"pages_crawled": a.pagesCrawled,
-			"total_links":   a.totalLinks,
+			"role":          a.Role,
+			"pages_crawled": a.PagesCrawled,
+			"total_links":   a.TotalLinks,
 		})
 	default:
 		return marshal(map[string]any{"error": "unknown op: " + msgType})
@@ -110,7 +107,7 @@ func (a *webCrawlActor) handleFetch(payload map[string]any) string {
 	}
 	links := simulateLinks(url)
 	wordCounts := simulateWordCounts(url)
-	a.fetchCount++
+	a.FetchCount++
 	return marshal(map[string]any{
 		"status":      "ok",
 		"url":         url,
@@ -155,16 +152,16 @@ func (a *webCrawlActor) handleAnalyze(payload map[string]any) string {
 				for word, cnt := range wc {
 					switch v := cnt.(type) {
 					case float64:
-						a.index[word] += int(v)
+						a.Index[word] += int(v)
 					case int:
-						a.index[word] += v
+						a.Index[word] += v
 					}
 				}
 			}
-			a.urlsAnalyzed++
+			a.UrlsAnalyzed++
 		}
 	}
-	return marshal(map[string]any{"status": "ok", "urls_analyzed": a.urlsAnalyzed})
+	return marshal(map[string]any{"status": "ok", "urls_analyzed": a.UrlsAnalyzed})
 }
 
 func (a *webCrawlActor) handleTopWords(payload map[string]any) string {
@@ -173,8 +170,8 @@ func (a *webCrawlActor) handleTopWords(payload map[string]any) string {
 		Word  string
 		Count int
 	}
-	pairs := make([]kv, 0, len(a.index))
-	for w, c := range a.index {
+	pairs := make([]kv, 0, len(a.Index))
+	for w, c := range a.Index {
 		pairs = append(pairs, kv{w, c})
 	}
 	sort.Slice(pairs, func(i, j int) bool { return pairs[i].Count > pairs[j].Count })
@@ -253,12 +250,12 @@ func (a *webCrawlActor) handleCrawl(payload map[string]any) string {
 			for _, l := range links {
 				if link, ok := l.(string); ok && !visited[link] {
 					queue = append(queue, urlDepth{link, item.Depth + 1})
-					a.totalLinks++
+					a.TotalLinks++
 				}
 			}
 		}
 		allResults = append(allResults, resultMap)
-		a.pagesCrawled++
+		a.PagesCrawled++
 
 		// Mark done in TupleSpace
 		host.TS().Write([]any{"url_queue", item.URL, "done"})
@@ -332,12 +329,12 @@ func (a *webCrawlActor) handleCrawl(payload map[string]any) string {
 	for i, p := range pairs {
 		topWords[i] = [2]any{p.Word, p.Count}
 	}
-	a.topWords = topWords
+	a.TopWords = topWords
 
 	return marshal(map[string]any{
 		"status":        "ok",
-		"pages_crawled": a.pagesCrawled,
-		"total_links":   a.totalLinks,
+		"pages_crawled": a.PagesCrawled,
+		"total_links":   a.TotalLinks,
 		"top_words":     topWords,
 	})
 }

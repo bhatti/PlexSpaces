@@ -21,6 +21,7 @@
 //! Tests the HTTP multipart endpoint for deploying and undeploying WASM applications.
 //! Uses both the calculator_actor.wasm (large Python-based) and hello.wasm (small C-based) examples.
 
+use chrono::Utc;
 use plexspaces_actor::ApplicationManager;
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::v1::application::ApplicationState;
@@ -441,6 +442,333 @@ async fn test_http_deploy_wasm_application() {
     // Shutdown node
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
+}
+
+#[tokio::test]
+async fn test_dashboard_applications_api_lists_deployed_app() {
+    let node = Arc::new(
+        NodeBuilder::new("test-node-dashboard-apps".to_string())
+            .with_listen_addr("127.0.0.1:8007".to_string())
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
+
+    let node_clone = node.clone();
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+
+    sleep(Duration::from_millis(2000)).await;
+
+    let http_url = "http://127.0.0.1:8007";
+    if !wait_for_http_server(http_url, 10).await {
+        let _ = node.shutdown(Duration::from_secs(5)).await;
+        start_handle.abort();
+        panic!("HTTP server not ready");
+    }
+
+    let wat = r#"
+(module
+    (memory (export "memory") 1)
+    (func (export "init") (param i32 i32) (result i32)
+        (i32.const 0)
+    )
+    (func (export "handle_message")
+          (param $from_ptr i32) (param $from_len i32)
+          (param $msg_type_ptr i32) (param $msg_type_len i32)
+          (param $payload_ptr i32) (param $payload_len i32)
+          (result i32)
+        (i32.const 0)
+    )
+    (func (export "snapshot_state") (result i32 i32)
+        (i32.const 0)
+        (i32.const 0)
+    )
+)
+"#;
+    let wasm_bytes = wat::parse_str(wat).expect("Failed to parse WAT");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+
+    let app_id = "dashboard-test-app";
+    let form = reqwest::multipart::Form::new()
+        .text("application_id", app_id)
+        .text("name", "dashboard-test-app")
+        .text("version", "1.0.0")
+        .part(
+            "wasm_file",
+            reqwest::multipart::Part::bytes(wasm_bytes)
+                .file_name("test.wasm")
+                .mime_str("application/wasm")
+                .unwrap(),
+        );
+
+    let response = client
+        .post(&format!("{}/api/v1/applications/deploy", http_url))
+        .multipart(form)
+        .send()
+        .await
+        .expect("Deploy request failed");
+
+    assert!(
+        response.status().is_success(),
+        "Deploy failed: {:?}",
+        response.text().await
+    );
+
+    sleep(Duration::from_millis(1500)).await;
+
+    // Query the dashboard applications API (same endpoint the UI uses)
+    let dashboard_response = client
+        .get(&format!("{}/api/v1/dashboard/applications", http_url))
+        .send()
+        .await
+        .expect("Dashboard applications request failed");
+
+    assert!(
+        dashboard_response.status().is_success(),
+        "Dashboard API returned error: {}",
+        dashboard_response.status()
+    );
+
+    let body: serde_json::Value = dashboard_response.json().await.unwrap();
+    let apps = body["applications"].as_array().expect("applications should be an array");
+
+    let found = apps.iter().any(|app| {
+        app["application_id"].as_str() == Some(app_id)
+            || app["name"].as_str() == Some("dashboard-test-app")
+    });
+    assert!(
+        found,
+        "Deployed app should appear in dashboard applications API. Got: {}",
+        serde_json::to_string_pretty(&body).unwrap()
+    );
+
+    // Cleanup
+    let _ = client
+        .delete(&format!("{}/api/v1/applications/{}", http_url, app_id))
+        .send()
+        .await;
+
+    let _ = node.shutdown(Duration::from_secs(5)).await;
+    start_handle.abort();
+}
+
+#[tokio::test]
+async fn test_dashboard_applications_api_with_auth_enabled() {
+    // Tests that the dashboard applications API works with auth ENABLED,
+    // using both Bearer token and cookie-based authentication.
+    // This exercises the same path the browser uses after OIDC login.
+
+    // Use the repo's ES256 key for test (same key used by gen-test-jwt.sh).
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root")
+        .to_path_buf();
+    let key_file = repo_root.join("certs/jwt-es256.pem");
+    assert!(key_file.exists(), "certs/jwt-es256.pem must exist");
+    std::env::set_var("PLEXSPACES_JWT_PRIVATE_KEY_FILE", key_file.to_str().unwrap());
+    let private_pem = fs::read_to_string(&key_file).expect("read key file");
+    let key_pair = plexspaces_grpc_middleware::JwtKeyPair::from_ec_pem(&private_pem)
+        .expect("ES256 key pair from PEM");
+
+    let node = Arc::new(
+        NodeBuilder::new("test-node-dashboard-auth".to_string())
+            .with_listen_addr("127.0.0.1:8008".to_string())
+            // NOT calling with_auth_disabled() — auth is ENABLED
+            .build()
+            .await,
+    );
+
+    let node_clone = node.clone();
+    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+
+    sleep(Duration::from_millis(2000)).await;
+
+    let http_url = "http://127.0.0.1:8008";
+    if !wait_for_http_server(http_url, 10).await {
+        let _ = node.shutdown(Duration::from_secs(5)).await;
+        start_handle.abort();
+        std::env::remove_var("PLEXSPACES_JWT_PRIVATE_KEY_FILE");
+        panic!("HTTP server not ready");
+    }
+
+    // Generate a valid JWT token using the same ES256 key pair
+    let now = Utc::now().timestamp();
+    let claims = plexspaces_grpc_middleware::JwtClaims {
+        sub: "admin-user".to_string(),
+        exp: now + 3600,
+        iat: now,
+        iss: "plexspaces".to_string(),
+        aud: vec![],
+        tenant_id: "test-tenant".to_string(),
+        roles: vec!["admin".to_string()],
+        groups: vec![],
+        is_admin: true,
+        jti: None,
+    };
+    let token = plexspaces_grpc_middleware::sign_jwt_with_keypair(&key_pair, &claims)
+        .expect("JWT signing should succeed");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+
+    // Deploy an app first (with Bearer auth)
+    let wat = r#"
+(module
+    (memory (export "memory") 1)
+    (func (export "init") (param i32 i32) (result i32) (i32.const 0))
+    (func (export "handle_message")
+          (param $from_ptr i32) (param $from_len i32)
+          (param $msg_type_ptr i32) (param $msg_type_len i32)
+          (param $payload_ptr i32) (param $payload_len i32)
+          (result i32)
+        (i32.const 0))
+    (func (export "snapshot_state") (result i32 i32) (i32.const 0) (i32.const 0))
+)
+"#;
+    let wasm_bytes = wat::parse_str(wat).expect("Failed to parse WAT");
+
+    let app_id = "auth-test-app";
+    let form = reqwest::multipart::Form::new()
+        .text("application_id", app_id)
+        .text("name", "auth-test-app")
+        .text("version", "1.0.0")
+        .part(
+            "wasm_file",
+            reqwest::multipart::Part::bytes(wasm_bytes)
+                .file_name("test.wasm")
+                .mime_str("application/wasm")
+                .unwrap(),
+        );
+
+    let deploy_resp = client
+        .post(&format!("{}/api/v1/applications/deploy", http_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .multipart(form)
+        .send()
+        .await
+        .expect("Deploy request failed");
+
+    assert!(
+        deploy_resp.status().is_success(),
+        "Deploy with Bearer token should succeed: {:?}",
+        deploy_resp.text().await
+    );
+
+    sleep(Duration::from_millis(1500)).await;
+
+    // Test 1: Dashboard API with Bearer token
+    let bearer_resp = client
+        .get(&format!("{}/api/v1/dashboard/applications", http_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .expect("Bearer request failed");
+
+    assert!(
+        bearer_resp.status().is_success(),
+        "Dashboard API with Bearer should return 200, got: {}",
+        bearer_resp.status()
+    );
+
+    let body: serde_json::Value = bearer_resp.json().await.unwrap();
+    let apps = body["applications"].as_array().expect("applications array");
+    assert!(
+        apps.iter().any(|a| a["name"].as_str() == Some("auth-test-app")),
+        "Deployed app should appear with Bearer auth. Got: {}",
+        serde_json::to_string_pretty(&body).unwrap()
+    );
+
+    // Test 2: Dashboard API with cookie (same as browser after OIDC login)
+    let cookie_resp = client
+        .get(&format!("{}/api/v1/dashboard/applications", http_url))
+        .header("Cookie", format!("plexspaces_token={}", token))
+        .send()
+        .await
+        .expect("Cookie request failed");
+
+    assert!(
+        cookie_resp.status().is_success(),
+        "Dashboard API with cookie should return 200, got: {}",
+        cookie_resp.status()
+    );
+
+    let body2: serde_json::Value = cookie_resp.json().await.unwrap();
+    let apps2 = body2["applications"].as_array().expect("applications array");
+    assert!(
+        apps2.iter().any(|a| a["name"].as_str() == Some("auth-test-app")),
+        "Deployed app should appear with cookie auth. Got: {}",
+        serde_json::to_string_pretty(&body2).unwrap()
+    );
+
+    // Test 3: Dashboard API WITHOUT auth should return 401
+    let no_auth_resp = client
+        .get(&format!("{}/api/v1/dashboard/applications", http_url))
+        .send()
+        .await
+        .expect("No-auth request failed");
+
+    assert_eq!(
+        no_auth_resp.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "Dashboard API without auth should return 401"
+    );
+
+    // Test 4: Admin with DIFFERENT tenant_id should still see ALL apps
+    // (simulates OIDC admin whose org claim differs from deployed app's tenant)
+    let cross_tenant_claims = plexspaces_grpc_middleware::JwtClaims {
+        sub: "admin-other-org".to_string(),
+        exp: now + 3600,
+        iat: now,
+        iss: "plexspaces".to_string(),
+        aud: vec![],
+        tenant_id: "completely-different-tenant".to_string(),
+        roles: vec!["admin".to_string()],
+        groups: vec![],
+        is_admin: true,
+        jti: None,
+    };
+    let cross_tenant_token =
+        plexspaces_grpc_middleware::sign_jwt_with_keypair(&key_pair, &cross_tenant_claims)
+            .expect("JWT signing should succeed");
+
+    let cross_resp = client
+        .get(&format!("{}/api/v1/dashboard/applications", http_url))
+        .header("Authorization", format!("Bearer {}", cross_tenant_token))
+        .send()
+        .await
+        .expect("Cross-tenant admin request failed");
+
+    assert!(
+        cross_resp.status().is_success(),
+        "Cross-tenant admin should get 200, got: {}",
+        cross_resp.status()
+    );
+
+    let body3: serde_json::Value = cross_resp.json().await.unwrap();
+    let apps3 = body3["applications"].as_array().expect("applications array");
+    assert!(
+        apps3.iter().any(|a| a["name"].as_str() == Some("auth-test-app")),
+        "Admin should see ALL apps regardless of their own tenant_id. Got: {}",
+        serde_json::to_string_pretty(&body3).unwrap()
+    );
+
+    // Cleanup
+    let _ = client
+        .delete(&format!("{}/api/v1/applications/{}", http_url, app_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await;
+
+    let _ = node.shutdown(Duration::from_secs(5)).await;
+    start_handle.abort();
+    std::env::remove_var("PLEXSPACES_JWT_PRIVATE_KEY_FILE");
 }
 
 #[tokio::test]

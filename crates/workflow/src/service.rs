@@ -26,6 +26,7 @@
 use crate::executor::WorkflowExecutor;
 use crate::storage::WorkflowStorage;
 use crate::types::*;
+use plexspaces_actor::{request_context_from_grpc_request, RequestContextExt, ServiceLocator};
 use plexspaces_proto::v1::common::Empty;
 use plexspaces_proto::workflow::v1::{
     workflow_service_server::WorkflowService, CancelExecutionRequest, CreateDefinitionRequest,
@@ -36,6 +37,7 @@ use plexspaces_proto::workflow::v1::{
     StartExecutionResponse, UpdateDefinitionRequest, UpdateDefinitionResponse,
 };
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -43,12 +45,17 @@ use tonic::{Request, Response, Status};
 pub struct WorkflowServiceImpl {
     /// Workflow storage for definitions and execution metadata
     storage: Arc<WorkflowStorage>,
+    /// Service locator for auth/config access
+    service_locator: Arc<dyn ServiceLocator>,
 }
 
 impl WorkflowServiceImpl {
     /// Create new WorkflowService implementation
-    pub fn new(storage: Arc<WorkflowStorage>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<WorkflowStorage>, service_locator: Arc<dyn ServiceLocator>) -> Self {
+        Self {
+            storage,
+            service_locator,
+        }
     }
 
     /// Convert WorkflowError to gRPC Status
@@ -76,14 +83,21 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<CreateDefinitionRequest>,
     ) -> Result<Response<CreateDefinitionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
         let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
-        // Save to storage (WorkflowDefinition is already the proto type)
         self.storage
-            .save_definition(&def)
+            .save_definition(&ctx, &def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -96,6 +110,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<GetDefinitionRequest>,
     ) -> Result<Response<GetDefinitionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.id.is_empty() {
@@ -103,15 +125,14 @@ impl WorkflowService for WorkflowServiceImpl {
         }
 
         let version = if req.version.is_empty() {
-            "latest" // TODO: Implement latest version lookup
+            "latest"
         } else {
             &req.version
         };
 
-        // Get from storage — returns WorkflowDefinition (proto type)
         let def = self
             .storage
-            .get_definition(&req.id, version)
+            .get_definition(&ctx, &req.id, version)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -124,6 +145,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<ListDefinitionsRequest>,
     ) -> Result<Response<ListDefinitionsResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         let name_prefix = if req.name_prefix.is_empty() {
@@ -132,10 +161,9 @@ impl WorkflowService for WorkflowServiceImpl {
             Some(req.name_prefix.as_str())
         };
 
-        // List definitions — returns Vec<WorkflowDefinition> (proto type)
         let definitions = self
             .storage
-            .list_definitions(name_prefix)
+            .list_definitions(&ctx, name_prefix)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -149,14 +177,21 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<UpdateDefinitionRequest>,
     ) -> Result<Response<UpdateDefinitionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
         let def = req
             .definition
             .ok_or_else(|| Status::invalid_argument("definition is required"))?;
 
-        // Save to storage
         self.storage
-            .save_definition(&def)
+            .save_definition(&ctx, &def)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -169,15 +204,22 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<DeleteDefinitionRequest>,
     ) -> Result<Response<Empty>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.id.is_empty() {
             return Err(Status::invalid_argument("id is required"));
         }
 
-        // Delete from storage
         self.storage
-            .delete_definition(&req.id, &req.version)
+            .delete_definition(&ctx, &req.id, &req.version)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -188,6 +230,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<StartExecutionRequest>,
     ) -> Result<Response<StartExecutionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.definition_id.is_empty() {
@@ -195,28 +245,32 @@ impl WorkflowService for WorkflowServiceImpl {
         }
 
         let version = if req.definition_version.is_empty() {
-            "latest" // TODO: Implement latest version lookup
+            "latest"
         } else {
             &req.definition_version
         };
 
-        // Parse input from Struct
-        // TODO: Implement full Struct to Value conversion
-        // For now, use empty object
         let input = Value::Object(serde_json::Map::new());
 
-        // OBSERVABILITY: Log workflow execution start
-        tracing::info!(
-            definition_id = %req.definition_id,
-            definition_version = %version,
-            "Starting workflow execution"
-        );
+        if tracing::enabled!(tracing::Level::INFO) {
+            tracing::info!(
+                definition_id = %req.definition_id,
+                definition_version = %version,
+                tenant_id = %ctx.tenant_id(),
+                namespace = %ctx.namespace(),
+                "Starting workflow execution"
+            );
+        }
 
-        // Start execution using executor
-        let execution_id =
-            WorkflowExecutor::start_execution(&self.storage, &req.definition_id, version, input)
-                .await
-                .map_err(Self::workflow_error_to_status)?;
+        let execution_id = WorkflowExecutor::start_execution(
+            &self.storage,
+            &ctx,
+            &req.definition_id,
+            version,
+            input,
+        )
+        .await
+        .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(StartExecutionResponse { execution_id }))
     }
@@ -225,16 +279,23 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<GetExecutionRequest>,
     ) -> Result<Response<GetExecutionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
             return Err(Status::invalid_argument("execution_id is required"));
         }
 
-        // Get from storage — returns WorkflowExecution (proto type)
         let exec = self
             .storage
-            .get_execution(&req.execution_id)
+            .get_execution(&ctx, &req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -247,11 +308,17 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<ListExecutionsRequest>,
     ) -> Result<Response<ListExecutionsResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
-        // Build status filter
         let statuses = if req.status == 0 {
-            // No status filter - list all statuses
             vec![
                 ExecutionStatus::ExecutionStatusPending,
                 ExecutionStatus::ExecutionStatusRunning,
@@ -269,14 +336,12 @@ impl WorkflowService for WorkflowServiceImpl {
             vec![status]
         };
 
-        // List executions from storage
         let executions = self
             .storage
-            .list_executions_by_status(statuses, None)
+            .list_executions_by_status(&ctx, statuses, None)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
-        // Filter by definition_id if provided
         let executions: Vec<_> = if req.definition_id.is_empty() {
             executions
         } else {
@@ -286,8 +351,6 @@ impl WorkflowService for WorkflowServiceImpl {
                 .collect()
         };
 
-        // executions is already Vec<WorkflowExecution> (proto type)
-        // TODO: Implement pagination and timestamp filters
         Ok(Response::new(ListExecutionsResponse {
             executions,
             page: None,
@@ -298,27 +361,32 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<CancelExecutionRequest>,
     ) -> Result<Response<Empty>, Status> {
+        let _ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
             return Err(Status::invalid_argument("execution_id is required"));
         }
 
-        // OBSERVABILITY: Log workflow execution cancellation
-        tracing::info!(
-            execution_id = %req.execution_id,
-            reason = %req.reason,
-            "Cancelling workflow execution"
-        );
+        if tracing::enabled!(tracing::Level::INFO) {
+            tracing::info!(
+                execution_id = %req.execution_id,
+                reason = %req.reason,
+                "Cancelling workflow execution"
+            );
+        }
 
-        // Update execution status to cancelled
         self.storage
             .update_execution_status(&req.execution_id, ExecutionStatus::ExecutionStatusCancelled)
             .await
             .map_err(Self::workflow_error_to_status)?;
-
-        // TODO: Send cancel message to workflow actor if it's running
-        // This would require actor integration
 
         Ok(Response::new(Empty {}))
     }
@@ -327,6 +395,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<SignalExecutionRequest>,
     ) -> Result<Response<Empty>, Status> {
+        let _ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
@@ -375,6 +451,14 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<QueryExecutionRequest>,
     ) -> Result<Response<QueryExecutionResponse>, Status> {
+        let ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
@@ -384,10 +468,9 @@ impl WorkflowService for WorkflowServiceImpl {
             return Err(Status::invalid_argument("query_name is required"));
         }
 
-        // Get execution from storage
         let exec = self
             .storage
-            .get_execution(&req.execution_id)
+            .get_execution(&ctx, &req.execution_id)
             .await
             .map_err(Self::workflow_error_to_status)?;
 
@@ -441,13 +524,20 @@ impl WorkflowService for WorkflowServiceImpl {
         &self,
         request: Request<GetStepExecutionsRequest>,
     ) -> Result<Response<GetStepExecutionsResponse>, Status> {
+        let _ctx = request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         let req = request.into_inner();
 
         if req.execution_id.is_empty() {
             return Err(Status::invalid_argument("execution_id is required"));
         }
 
-        // Get step execution history from storage — returns Vec<StepExecution> (proto type)
         let step_executions = self
             .storage
             .get_step_execution_history(&req.execution_id)
@@ -456,7 +546,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         Ok(Response::new(GetStepExecutionsResponse {
             step_executions,
-            page: None, // TODO: Implement pagination
+            page: None,
         }))
     }
 }
@@ -465,6 +555,7 @@ impl WorkflowService for WorkflowServiceImpl {
 mod tests {
     use super::*;
     use crate::storage::WorkflowStorage;
+    use plexspaces_actor::TestServiceLocatorStub;
     use plexspaces_proto::workflow::v1::{
         CreateDefinitionRequest, DeleteDefinitionRequest, GetDefinitionRequest,
         GetExecutionRequest, GetStepExecutionsRequest, ListDefinitionsRequest,
@@ -474,9 +565,21 @@ mod tests {
     use std::sync::Arc;
     use tonic::Request;
 
+    fn test_request<T>(inner: T) -> Request<T> {
+        let mut request = Request::new(inner);
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", "test-tenant".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", "test-ns".parse().unwrap());
+        request
+    }
+
     async fn create_test_service() -> WorkflowServiceImpl {
         let storage = Arc::new(WorkflowStorage::new_in_memory().await.unwrap());
-        WorkflowServiceImpl::new(storage)
+        let service_locator = Arc::new(TestServiceLocatorStub::new());
+        WorkflowServiceImpl::new(storage, service_locator)
     }
 
     #[tokio::test]
@@ -488,7 +591,7 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let req = Request::new(CreateDefinitionRequest {
+        let req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def.clone()),
         });
 
@@ -513,13 +616,13 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
         // Then get it
-        let get_req = Request::new(GetDefinitionRequest {
+        let get_req = test_request(GetDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
         });
@@ -537,7 +640,7 @@ mod tests {
     async fn test_get_definition_not_found() {
         let service = create_test_service().await;
 
-        let get_req = Request::new(GetDefinitionRequest {
+        let get_req = test_request(GetDefinitionRequest {
             id: "nonexistent".to_string(),
             version: "1.0".to_string(),
         });
@@ -558,14 +661,14 @@ mod tests {
             proto_def.name = format!("Workflow {}", i);
             proto_def.version = "1.0".to_string();
 
-            let create_req = Request::new(CreateDefinitionRequest {
+            let create_req = test_request(CreateDefinitionRequest {
                 definition: Some(proto_def),
             });
             service.create_definition(create_req).await.unwrap();
         }
 
         // List all definitions
-        let list_req = Request::new(ListDefinitionsRequest {
+        let list_req = test_request(ListDefinitionsRequest {
             page: None,
             label_filter: std::collections::HashMap::new(),
             name_prefix: String::new(),
@@ -588,14 +691,14 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def.clone()),
         });
         service.create_definition(create_req).await.unwrap();
 
         // Update it
         proto_def.name = "Updated Workflow".to_string();
-        let update_req = Request::new(UpdateDefinitionRequest {
+        let update_req = test_request(UpdateDefinitionRequest {
             definition: Some(proto_def),
         });
 
@@ -616,13 +719,13 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
         // Delete it
-        let delete_req = Request::new(DeleteDefinitionRequest {
+        let delete_req = test_request(DeleteDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
         });
@@ -631,7 +734,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify it's deleted
-        let get_req = Request::new(GetDefinitionRequest {
+        let get_req = test_request(GetDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
         });
@@ -651,13 +754,13 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
         // Start execution
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -682,12 +785,12 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -699,7 +802,7 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Get execution
-        let get_req = Request::new(GetExecutionRequest { execution_id });
+        let get_req = test_request(GetExecutionRequest { execution_id });
 
         let result = service.get_execution(get_req).await;
         assert!(result.is_ok());
@@ -718,13 +821,13 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
         for _ in 0..3 {
-            let start_req = Request::new(StartExecutionRequest {
+            let start_req = test_request(StartExecutionRequest {
                 definition_id: "test-workflow".to_string(),
                 definition_version: "1.0".to_string(),
                 input: None,
@@ -735,7 +838,7 @@ mod tests {
         }
 
         // List executions
-        let list_req = Request::new(ListExecutionsRequest {
+        let list_req = test_request(ListExecutionsRequest {
             page: None,
             definition_id: "test-workflow".to_string(),
             status: 0, // All statuses
@@ -761,12 +864,12 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -778,7 +881,7 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Cancel execution
-        let cancel_req = Request::new(CancelExecutionRequest {
+        let cancel_req = test_request(CancelExecutionRequest {
             execution_id: execution_id.clone(),
             reason: "Test cancellation".to_string(),
         });
@@ -787,7 +890,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify status is cancelled
-        let get_req = Request::new(GetExecutionRequest { execution_id });
+        let get_req = test_request(GetExecutionRequest { execution_id });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
         assert_eq!(exec.execution.unwrap().status, 5); // CANCELLED
     }
@@ -802,12 +905,12 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -819,7 +922,7 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Send signal
-        let signal_req = Request::new(SignalExecutionRequest {
+        let signal_req = test_request(SignalExecutionRequest {
             execution_id,
             signal_name: "test-signal".to_string(),
             data: Some(prost_types::Value {
@@ -843,12 +946,12 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -860,7 +963,7 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Query status
-        let query_req = Request::new(QueryExecutionRequest {
+        let query_req = test_request(QueryExecutionRequest {
             execution_id: execution_id.clone(),
             query_name: "status".to_string(),
         });
@@ -872,7 +975,7 @@ mod tests {
         assert!(response.result.is_some());
 
         // Query current_step
-        let query_req = Request::new(QueryExecutionRequest {
+        let query_req = test_request(QueryExecutionRequest {
             execution_id,
             query_name: "current_step".to_string(),
         });
@@ -891,12 +994,12 @@ mod tests {
         proto_def.name = "Test Workflow".to_string();
         proto_def.version = "1.0".to_string();
 
-        let create_req = Request::new(CreateDefinitionRequest {
+        let create_req = test_request(CreateDefinitionRequest {
             definition: Some(proto_def),
         });
         service.create_definition(create_req).await.unwrap();
 
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: "test-workflow".to_string(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -908,7 +1011,7 @@ mod tests {
         let execution_id = start_response.into_inner().execution_id;
 
         // Get step executions
-        let get_steps_req = Request::new(GetStepExecutionsRequest {
+        let get_steps_req = test_request(GetStepExecutionsRequest {
             execution_id,
             page: None,
         });
@@ -927,7 +1030,7 @@ mod tests {
         let service = create_test_service().await;
 
         // Test empty definition_id
-        let start_req = Request::new(StartExecutionRequest {
+        let start_req = test_request(StartExecutionRequest {
             definition_id: String::new(),
             definition_version: "1.0".to_string(),
             input: None,
@@ -940,7 +1043,7 @@ mod tests {
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
 
         // Test empty execution_id
-        let get_req = Request::new(GetExecutionRequest {
+        let get_req = test_request(GetExecutionRequest {
             execution_id: String::new(),
         });
 

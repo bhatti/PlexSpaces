@@ -582,7 +582,6 @@ pub async fn deploy_all_from_directory(
     let apps = scan_wasm_apps_directory(base_path)?;
 
     if apps.is_empty() {
-        tracing::info!("No WASM applications found for auto-deploy");
         return Ok(vec![]);
     }
 

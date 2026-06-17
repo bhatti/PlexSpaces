@@ -60,7 +60,9 @@ pub fn node_addresses_equivalent(left: &str, right: &str) -> bool {
 ///
 /// Bind addresses like `0.0.0.0` or `[::]` are valid for listeners but not for clients.
 /// For loopback aliases we canonicalize to `localhost` and always return an explicit
-/// HTTP endpoint that can be used by gRPC connection managers.
+/// `http://` endpoint. The gRPC connection manager applies mTLS at the transport layer
+/// (via `ClientTlsConfig`) independently of the URL scheme — the server listens on
+/// plain TCP in single-port mode.
 pub fn dialable_node_address(address: &str) -> String {
     let trimmed = address.trim();
     let without_scheme = trimmed

@@ -462,6 +462,7 @@ impl NodeBuilder {
             use plexspaces_proto::node::v1::SecurityConfig;
             let security = SecurityConfig {
                 disable_auth: true,
+                oidc: None,
                 ..Default::default()
             };
             sl.register_security_config(security).await;
@@ -471,13 +472,9 @@ impl NodeBuilder {
         // (`Node::start` also sets this from config). `NodeBuilder::build` skips `start`, so set
         // it here from `listen_addr` for tests and embedded nodes.
         if let Some(registry) = node.service_locator().actor_registry().await {
-            let addr = node.config().listen_addr.trim();
-            let base = if addr.starts_with("http://") || addr.starts_with("https://") {
-                addr.to_string()
-            } else {
-                format!("http://{}", addr)
-            };
-            registry.set_local_listen_addr(base).await;
+            registry.set_local_listen_addr(
+                plexspaces_common::dialable_node_address(node.config().listen_addr.trim()),
+            ).await;
         }
 
         node

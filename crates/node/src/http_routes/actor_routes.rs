@@ -29,8 +29,8 @@ pub struct ActorRouteState {
     pub actor_service: Arc<ActorServiceImpl>,
     /// True when auth is disabled (e.g. local testing).
     pub auth_disabled: bool,
-    /// JWT secret for validating bearer tokens when auth is enabled.
-    pub jwt_secret: Option<String>,
+    /// JWT key pair for validating bearer tokens when auth is enabled.
+    pub jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
 }
 
 /// Resolve the effective tenant_id from JWT claims or request headers.
@@ -42,7 +42,7 @@ pub struct ActorRouteState {
 fn effective_tenant_id(
     jwt: &Option<axum::extract::Extension<JwtClaims>>,
     auth_disabled: bool,
-    jwt_secret: Option<&str>,
+    jwt_key_pair: Option<&plexspaces_grpc_middleware::JwtKeyPair>,
     headers: &axum::http::HeaderMap,
 ) -> Result<String, (StatusCode, Json<Value>)> {
     // JWT middleware already validated the token — use the extracted claims.
@@ -59,17 +59,17 @@ fn effective_tenant_id(
         return Ok(tenant);
     }
     // Auth is enabled but the middleware did not inject claims — try the raw header.
-    let secret = jwt_secret.ok_or_else(|| {
+    let kp = jwt_key_pair.ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"error": "Auth enabled but JWT secret not configured"})),
+            Json(serde_json::json!({"error": "Auth enabled but JWT key not configured"})),
         )
     })?;
     let auth = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    crate::http_jwt::validate_bearer_token(secret, auth.as_deref())
+    crate::http_jwt::validate_bearer_token_with_keypair(kp, auth.as_deref())
         .map(|claims| claims.tenant_id)
         .map_err(|e| {
             (
@@ -90,7 +90,7 @@ async fn handle_ask(
     subpath: &str,
     body: Option<axum::body::Bytes>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let tenant_id = effective_tenant_id(&jwt, s.auth_disabled, s.jwt_secret.as_deref(), &headers)?;
+    let tenant_id = effective_tenant_id(&jwt, s.auth_disabled, s.jwt_key_pair.as_deref(), &headers)?;
     let path = if subpath.is_empty() {
         format!("/api/v1/actors/{}/{}", namespace, actor_type)
     } else {
@@ -112,12 +112,12 @@ async fn handle_ask(
 pub fn actor_router(
     actor_service: Arc<ActorServiceImpl>,
     auth_disabled: bool,
-    jwt_secret: Option<String>,
+    jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
 ) -> Router {
     let state = ActorRouteState {
         actor_service,
         auth_disabled,
-        jwt_secret,
+        jwt_key_pair,
     };
 
     Router::new()
@@ -206,7 +206,7 @@ pub fn actor_router(
                         let tenant_id = effective_tenant_id(
                             &jwt,
                             s.auth_disabled,
-                            s.jwt_secret.as_deref(),
+                            s.jwt_key_pair.as_deref(),
                             &headers,
                         )?;
                         crate::http_gateway::stop_actor_http_request(

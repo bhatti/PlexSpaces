@@ -28,10 +28,11 @@ def test_build_class_map_registers_exact_class_names():
     assert cm["GuildActor"] is GuildActor
 
 
-def test_build_class_map_no_aliases_generated():
+def test_build_class_map_includes_snake_case():
     cm = build_class_map([SessionActor])
-    # Only the exact class name — no snake_case / kebab-case aliases
-    assert set(cm.keys()) == {"SessionActor"}
+    # Class name + automatic snake_case alias for framework TOML convention
+    assert set(cm.keys()) == {"SessionActor", "session_actor"}
+    assert cm["session_actor"] is SessionActor
 
 
 def test_build_class_map_actor_roles_override_for_same_class():

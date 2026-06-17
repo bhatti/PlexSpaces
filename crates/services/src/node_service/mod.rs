@@ -1022,13 +1022,6 @@ impl NodeServiceTrait for NodeServiceImpl {
 impl NodeServiceImpl {
     const UNKNOWN_NODE_ID_PREFIX: &'static str = "_unknown_";
 
-    fn normalize_node_address(address: &str) -> String {
-        if address.starts_with("http://") || address.starts_with("https://") {
-            address.to_string()
-        } else {
-            format!("http://{}", address)
-        }
-    }
 
     async fn local_node_address_keys(&self) -> Vec<String> {
         let mut keys = Vec::new();
@@ -1067,7 +1060,7 @@ impl NodeServiceImpl {
 
         NodeRegistration {
             node_id: Self::unknown_node_id(),
-            node_address: Self::normalize_node_address(address),
+            node_address: dialable_node_address(address),
             capabilities,
             status: NodeStatus::NodeStatusReady as i32,
             last_heartbeat: Some(Timestamp {
@@ -1147,7 +1140,7 @@ impl NodeServiceImpl {
         ctx: &RequestContext,
         address: &str,
     ) -> Result<Option<NodeRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let normalized_address = Self::normalize_node_address(address);
+        let normalized_address = dialable_node_address(address);
         let (nodes, _) = node_registry.list_nodes(ctx, None, 0, "").await?;
         for reg in nodes {
             if node_addresses_equivalent(&reg.node_address, &normalized_address) {
@@ -1484,13 +1477,13 @@ mod tests {
     // ============================================================================
 
     #[test]
-    fn test_normalize_node_address() {
+    fn test_dialable_node_address_adds_scheme() {
         assert_eq!(
-            NodeServiceImpl::normalize_node_address("localhost:8091"),
+            dialable_node_address("localhost:8091"),
             "http://localhost:8091"
         );
         assert_eq!(
-            NodeServiceImpl::normalize_node_address("http://localhost:8091"),
+            dialable_node_address("http://localhost:8091"),
             "http://localhost:8091"
         );
     }
@@ -1619,6 +1612,7 @@ mod tests {
     ) {
         let config = plexspaces_proto::node::v1::SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         };
         service_locator.register_security_config(config).await;

@@ -7,6 +7,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/agentic_rag_pipeline_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -71,6 +90,7 @@ ask() {
   curl -s --max-time "$timeout" -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 
@@ -104,11 +124,12 @@ _deployed=0
 for _attempt in 1 2 3; do
   response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+    -F "config=@$TEMP_CONFIG" 2>&1) || true
   http_code=$(echo "$response" | tail -n1)
   body=$(echo "$response" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -278,6 +299,52 @@ print('  Validations run: {}, Pass: {}, Fail: {}'.format(
     p.get('fail_count', 0),
 ))
 " 2>/dev/null || echo "  Stats: $VAL_STATS"
+
+send_actor() {
+  local actor="$1" payload="$2" timeout="${3:-20}"
+  ask "$actor" "$payload" "$timeout"
+}
+
+assert_actor_ok() {
+  local step="$1" raw="$2"
+  if ! ASSERT_STEP="$step" ASSERT_JSON="$raw" python3 - <<'PY'
+import json, os, sys
+raw = os.environ.get("ASSERT_JSON", "")
+step = os.environ.get("ASSERT_STEP", "?")
+try:
+    d = json.loads(raw)
+except Exception as e:
+    print(f"FAIL [{step}]: invalid JSON: {e}", file=sys.stderr); sys.exit(1)
+def find_err(obj):
+    if isinstance(obj, dict):
+        if obj.get("success") is False: return str(obj.get("error") or "request failed")
+        if obj.get("status") == "error": return str(obj.get("error") or "error status")
+        if obj.get("error"): return str(obj["error"])
+        for v in obj.values():
+            e = find_err(v)
+            if e: return e
+    return None
+err = find_err(d)
+if err: print(f"FAIL [{step}]: {err}", file=sys.stderr); sys.exit(1)
+PY
+  then
+    echo -e "${RED}Assertion failed: $step${NC}"
+    echo "  Raw: $(echo "$raw" | head -c 400)"
+    exit 1
+  fi
+}
+
+echo ""
+echo "Step 12: Smoke test indexer and retriever"
+echo "  Testing get_stats on indexer..."
+R="$(send_actor "indexer" '{"op":"get_stats"}' 20)"
+assert_actor_ok "indexer get_stats" "$R"
+echo "  ✓ indexer get_stats OK"
+
+echo "  Testing retrieve on retriever..."
+R="$(send_actor "retriever" '{"op":"retrieve","query":"actor","max_results":3,"mode":"single"}' 20)"
+assert_actor_ok "retriever retrieve" "$R"
+echo "  ✓ retriever retrieve OK"
 
 echo ""
 echo "================================================================"

@@ -22,6 +22,7 @@
 //! Tests for complex workflows combining multiple step types.
 //! Tests cross-feature interactions.
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_workflow::*;
 use serde_json::json;
 
@@ -29,6 +30,7 @@ use serde_json::json;
 #[tokio::test]
 async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "choice-parallel",
@@ -82,12 +84,12 @@ async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Er
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "choice-parallel", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "choice-parallel", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -114,6 +116,7 @@ async fn test_choice_to_parallel_workflow() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn test_map_to_choice_workflow() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "map-choice",
@@ -167,12 +170,12 @@ async fn test_map_to_choice_workflow() -> Result<(), Box<dyn std::error::Error>>
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "map-choice", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "map-choice", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted
@@ -194,6 +197,7 @@ async fn test_map_to_choice_workflow() -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test]
 async fn test_complex_multi_step_workflow() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "complex",
@@ -238,12 +242,12 @@ async fn test_complex_multi_step_workflow() -> Result<(), Box<dyn std::error::Er
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
     let execution_id =
-        WorkflowExecutor::start_execution(&storage, "complex", "1.0", json!({})).await?;
+        WorkflowExecutor::start_execution(&storage, &ctx, "complex", "1.0", json!({})).await?;
 
-    let execution = storage.get_execution(&execution_id).await?;
+    let execution = storage.get_execution(&ctx, &execution_id).await?;
     assert_eq!(
         execution.execution_status(),
         ExecutionStatus::ExecutionStatusCompleted

@@ -20,16 +20,34 @@ use plexspaces_proto::node::v1::node_service_server::NodeService as NodeServiceT
 use plexspaces_proto::node::v1::ListConnectedNodesRequest;
 use plexspaces_services::node_service::NodeServiceImpl;
 use serde_json::Value;
+use tonic::metadata::MetadataValue;
+
+#[derive(Clone)]
+pub struct NodeRouteState {
+    pub service_locator: Arc<dyn ServiceLocator>,
+    pub auth_disabled: bool,
+    pub jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
+}
 
 /// Build the node HTTP bridge router.
-pub fn node_router(service_locator: Arc<dyn ServiceLocator>) -> Router {
+pub fn node_router(
+    service_locator: Arc<dyn ServiceLocator>,
+    auth_disabled: bool,
+    jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
+) -> Router {
+    let state = NodeRouteState {
+        service_locator,
+        auth_disabled,
+        jwt_key_pair,
+    };
     Router::new()
         .route("/api/v1/nodes", get(list_connected_nodes))
-        .with_state(service_locator)
+        .with_state(state)
 }
 
 async fn list_connected_nodes(
-    State(service_locator): State<Arc<dyn ServiceLocator>>,
+    State(s): State<NodeRouteState>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let cluster = params.get("cluster").cloned().unwrap_or_default();
@@ -41,22 +59,29 @@ async fn list_connected_nodes(
         .unwrap_or(100);
     let page_token = params.get("page_token").cloned().unwrap_or_default();
 
-    // NodeServiceImpl is lightweight (wraps Arc); local_node_id is resolved once per call
-    // via the in-memory service registry — no I/O involved.
-    let local_node_id = service_locator
+    let tenant_id = crate::http_jwt::extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_key_pair.as_deref())?;
+
+    let local_node_id = s
+        .service_locator
         .get_node_config()
         .await
         .map(|c| c.id)
         .unwrap_or_default();
 
-    let node_service = NodeServiceImpl::new(service_locator, local_node_id);
+    let node_service = NodeServiceImpl::new(s.service_locator, local_node_id);
+    let mut grpc_request = tonic::Request::new(ListConnectedNodesRequest {
+        cluster,
+        page_size,
+        page_token,
+        include_health: false,
+    });
+    grpc_request.metadata_mut().insert(
+        "x-tenant-id",
+        MetadataValue::try_from(tenant_id.as_str())
+            .unwrap_or_else(|_| MetadataValue::from_static("")),
+    );
     let resp = node_service
-        .list_connected_nodes(tonic::Request::new(ListConnectedNodesRequest {
-            cluster,
-            page_size,
-            page_token,
-            include_health: false,
-        }))
+        .list_connected_nodes(grpc_request)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.message().to_string()))?
         .into_inner();
@@ -83,3 +108,4 @@ async fn list_connected_nodes(
         "total_count": resp.total_count,
     })))
 }
+

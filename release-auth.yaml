@@ -1,31 +1,61 @@
-# PlexSpaces Release Configuration - Auth enabled (for e2e testing)
-# Use with: PLEXSPACES_JWT_SECRET=your-secret target/debug/plexspaces start --release-config release-auth.yaml ...
+# PlexSpaces Release Configuration - Full Auth (OAuth/OIDC + JWT + mTLS + API Tokens)
+#
+# All secrets are read from environment variables. Never hardcode secrets here.
+# Empty string values in this file trigger env var fallback in the config loader.
+#
+# Required env vars:
+#   PLEXSPACES_JWT_PRIVATE_KEY_FILE - Path to ES256 PEM private key (auto-generated if missing)
+#   PLEXSPACES_OIDC_CLIENT_ID      - OAuth client ID from your OIDC provider
+#   PLEXSPACES_OIDC_CLIENT_SECRET  - OAuth client secret from your OIDC provider
+#   PLEXSPACES_OIDC_DISCOVERY_URL  - OIDC discovery endpoint (e.g. https://accounts.google.com/.well-known/openid-configuration)
+#
+# Optional env vars (override config values):
+#   PLEXSPACES_JWT_PRIVATE_KEY     - Inline ES256 PEM private key (for Docker/K8s secrets)
+#   PLEXSPACES_NODE_ID             - Node identifier (overrides node.id below)
+#   PLEXSPACES_LISTEN_ADDR         - Listen address (overrides node.listen_addr below)
+#   PLEXSPACES_GRPC_ADDRESS        - gRPC address (overrides runtime.grpc.address below)
+#   PLEXSPACES_OIDC_REDIRECT_URI   - OAuth callback URL (default: /api/v1/auth/oidc/callback)
+#   PLEXSPACES_MTLS_CERT_DIR       - Certificate directory (default: ./certs)
+#   PLEXSPACES_MTLS_CA_CERT        - Path to CA certificate (production)
+#   PLEXSPACES_MTLS_SERVER_CERT    - Path to server certificate (production)
+#   PLEXSPACES_MTLS_SERVER_KEY     - Path to server private key (production)
+#
+# Usage:
+#   export PLEXSPACES_OIDC_CLIENT_ID="your-client-id"
+#   export PLEXSPACES_OIDC_CLIENT_SECRET="your-client-secret"
+#   export PLEXSPACES_OIDC_DISCOVERY_URL="https://accounts.google.com/.well-known/openid-configuration"
+#   ./scripts/server.sh
+#   # or: cargo run -p plexspaces-cli -- start --release-config release-auth.yaml --listen-addr 0.0.0.0:8091
 
 name: my-cluster
 version: 1.0.0
-description: "PlexSpaces release for node my-node (auth enabled)"
+description: "PlexSpaces release with full auth (OIDC + JWT + mTLS + API tokens)"
 
 node:
   id: my-node
-  listen_addr: 0.0.0.0:8093
+  listen_addr: 0.0.0.0:8091
   cluster_seed_nodes: []
-  wasm_apps_directory: "/app/wasm"
+  wasm_apps_directory: ""
 
 runtime:
   db:
-    connection_string: "sqlite:///tmp/plexspaces-my-node-auth.db?mode=rwc"
+    connection_string: ""
     pool_size: 10
     auto_migrate: true
 
+  service_links:
+    - name: weather-api
+      transport: HTTP
+      base_url: "https://api.open-meteo.com"
+      publish_to_registry: false
+
   grpc:
     enabled: true
-    address: 0.0.0.0:8093
+    address: 0.0.0.0:8091
     max_connections: 100
     keepalive_interval_seconds: 30
     middleware: []
-  
-  # Blob storage configuration for local development.
-  # Uses local filesystem backend; set backend: embedded for auto-started embedded object store.
+
   blob:
     backend: local
     bucket: plexspaces-blobs
@@ -34,29 +64,81 @@ runtime:
     access_key_id: ""
     secret_access_key: ""
     use_ssl: false
-    prefix: "/tmp/plexspaces-blobs-auth"
-  
+    prefix: ""
+
   health:
     heartbeat_interval_seconds: 5
     heartbeat_timeout_seconds: 30
     registry_url: ""
-  
+
   security:
+    # ─── JWT (session tokens + validation) ─────────────────────────────
+    # ES256 (asymmetric) is preferred. Set private key via env var:
+    #   PLEXSPACES_JWT_PRIVATE_KEY       - inline PEM (for Docker/K8s secrets)
+    #   PLEXSPACES_JWT_PRIVATE_KEY_FILE  - path to PEM file (auto-generates if missing)
     jwt:
       enable_jwt: true
-      secret: ""  # Set via PLEXSPACES_JWT_SECRET env var
-      issuer: ""
-      jwks_url: ""
+      algorithm: "ES256"
+      secret: ""
+      private_key_pem: ""                    # → reads PLEXSPACES_JWT_PRIVATE_KEY env var
+      private_key_file: ""                   # → reads PLEXSPACES_JWT_PRIVATE_KEY_FILE env var
+      auto_generate_key: true                # Auto-generate ES256 key on first start (dev mode)
+      issuer: "plexspaces"
+      jwks_url: ""                           # Set for external JWKS validation
       allowed_audiences:
         - "plexspaces-api"
       tenant_id_claim: "tenant_id"
       user_id_claim: "sub"
-    
+
+    # ─── mTLS (node-to-node communication) ─────────────────────────────
     mtls:
       enable_mtls: true
-      auto_generate_certs: true
+      auto_generate_certs: true              # Auto-generate for dev; use real certs in prod
       cert_dir: "./certs"
-    
+      # Production: provide cert paths via env vars or config:
+      # ca_certificate_path: ""              # → reads PLEXSPACES_MTLS_CA_CERT
+      # server_certificate_path: ""          # → reads PLEXSPACES_MTLS_SERVER_CERT
+      # server_key_path: ""                  # → reads PLEXSPACES_MTLS_SERVER_KEY
+
+    # ─── OAuth/OIDC (browser-based dashboard login) ────────────────────
+    # Users authenticate via OIDC provider → PlexSpaces issues a session JWT
+    # in an HttpOnly cookie. The session JWT has the same claims as any other
+    # JWT and is validated by the standard JWT middleware.
+    #
+    # Empty client_id/client_secret/discovery_url trigger env var fallback:
+    #   PLEXSPACES_OIDC_CLIENT_ID
+    #   PLEXSPACES_OIDC_CLIENT_SECRET
+    #   PLEXSPACES_OIDC_DISCOVERY_URL
+    #   PLEXSPACES_OIDC_REDIRECT_URI (default: /api/v1/auth/oidc/callback)
+    oidc:
+      enabled: true
+      discovery_url: ""                      # → reads PLEXSPACES_OIDC_DISCOVERY_URL
+      client_id: ""                          # → reads PLEXSPACES_OIDC_CLIENT_ID
+      client_secret: ""                      # → reads PLEXSPACES_OIDC_CLIENT_SECRET
+      redirect_uri: ""                       # → reads PLEXSPACES_OIDC_REDIRECT_URI (default: /api/v1/auth/oidc/callback)
+      scopes:
+        - "openid"
+        - "email"
+        - "profile"
+      # Which OIDC claim maps to tenant_id (varies by provider):
+      #   Google: "hd" (hosted domain)
+      #   Okta/Auth0: "org" or "org_id"
+      #   Keycloak: "org" or custom claim
+      tenant_claim: "hd"
+      # OIDC groups that grant admin privilege
+      admin_groups:
+        - "platform-admins"
+      # Fallback tenant when tenant_claim is absent from ID token
+      default_tenant_id: "default"
+
+    # ─── API Tokens (programmatic access) ──────────────────────────────
+    # No additional config needed. API tokens (psx_ prefix) are:
+    # - Created via POST /api/v1/auth/tokens (or /dashboard/tokens UI)
+    # - Validated by hashing + DB lookup (uses same JWT claims interface)
+    # - Scoped, expirable, revocable
+    # - Stored as SHA-256 hash only (plaintext shown once at creation)
+
+    # Auth master switch - NEVER set to true in production
     disable_auth: false
 
 system_applications: []

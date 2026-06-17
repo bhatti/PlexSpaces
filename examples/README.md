@@ -2,6 +2,32 @@
 
 Examples live under `examples/<language>/{apps,embedded}/<name>/`. Each directory should include a **README** that states purpose, which PlexSpaces APIs and SDK features are used, and how to build and test.
 
+## Running Examples
+
+### Prerequisites
+
+```bash
+# 1. Build the framework
+make build
+
+# 2. Python venv with cryptography (for ES256 JWT generation)
+source ~/venv/bin/activate
+pip install cryptography
+
+# 3. Start one or two PlexSpaces nodes (auth enabled by default, ES256 key auto-generated)
+./scripts/server.sh 8091        # primary node
+./scripts/server.sh 8094        # optional second node (shares same JWT key)
+
+# 4. Run all examples
+./examples/test_all.sh
+
+# Or run a single example
+./examples/go/apps/web_crawl/test.sh
+./examples/go/apps/web_crawl/test.sh 8094   # against second node
+```
+
+Each `test.sh` automatically generates an ES256 JWT token using the shared signing key at `./certs/jwt-es256.pem`. Both nodes share the same key so tokens work on either port.
+
 **Framework migration:** Examples named `migrating_*` show how to model workloads that originally used another framework (Temporal, Merlin, Ray, Dapr, and so on). Treat them as migration guides, not generic tutorials.
 
 **Parallelism, collectives, scatter/gather, and workload / ML-style demos:** For MPI-style shard-group collectives, multi-node benchmarks, and ring/allreduce-style training narratives, start with **Go `mpi_collectives`**, **Rust embedded `matrix_vector_mpi`**, **Rust apps `ring_allreduce`**, **`data_parallel_worker`**, **`parameter_server`** (Rust, Python, Go), **`batch_image_classification`**, **`genomics_pipeline`**, **`heat_diffusion`** (apps and embedded), **`data_lake_rag`**, and **Python `job_processing`** (TupleSpace scatter/gather). **Rust embedded `event_analytics`** and **`realtime_stream_processor`** illustrate shard groups and streaming analytics at scale. **`web_crawl`** (all five targets: Go, Python, Rust WASM, Rust embedded, TypeScript) demonstrates ElasticPool + TupleSpace + ShardGroup in a BFS web crawler with map-reduce word frequency — modeled after Ray's web-crawl and map-reduce examples.

@@ -42,7 +42,6 @@ use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::time::Duration;
 
-// NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
 /// Wrapper that adapts TupleSpace to TupleSpaceProvider trait
 ///

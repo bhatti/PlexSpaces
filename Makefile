@@ -1589,3 +1589,40 @@ restore:
 		echo "TupleSpace database restored"; \
 	fi
 	@echo "Restore complete!"
+
+# ─── mTLS Certificate Generation ───────────────────────────────────────────────
+# Generate per-node certs with shared CA. Usage:
+#   make gen-certs                    # CA + cert for default node (8091)
+#   make gen-certs PORT=8094          # cert for second node
+#   make gen-certs-force              # regenerate everything
+PORT ?= 8091
+
+gen-certs:
+	@mkdir -p ./certs/$(PORT)
+	@if [ ! -f "./certs/ca.crt" ]; then \
+		echo "Generating CA + node-$(PORT) certificate..."; \
+		target/debug/plexspaces generate-mtls \
+			--output ./certs \
+			--ca-common-name "PlexObject Solutions CA" \
+			--server-common-name "node-$(PORT).plexobject.com" \
+			--validity-days 365; \
+		cp ./certs/server.crt ./certs/$(PORT)/server.crt; \
+		cp ./certs/server.key ./certs/$(PORT)/server.key; \
+	elif [ ! -f "./certs/$(PORT)/server.crt" ]; then \
+		echo "Generating node-$(PORT) certificate (CA exists)..."; \
+		target/debug/plexspaces generate-mtls \
+			--output ./certs/$(PORT) \
+			--ca-common-name "PlexObject Solutions CA" \
+			--server-common-name "node-$(PORT).plexobject.com" \
+			--validity-days 365; \
+	else \
+		echo "  Certificates exist for node-$(PORT). Use gen-certs-force to regenerate."; \
+	fi
+	@echo "  ✓ CA:     ./certs/ca.crt"
+	@echo "  ✓ Node:   ./certs/$(PORT)/server.crt + ./certs/$(PORT)/server.key"
+
+gen-certs-force:
+	@echo "Regenerating all mTLS certificates..."
+	@rm -rf ./certs
+	@$(MAKE) gen-certs PORT=8091
+	@$(MAKE) gen-certs PORT=8094

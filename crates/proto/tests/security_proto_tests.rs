@@ -84,6 +84,10 @@ mod tests {
             }),
             tenant_id_claim: "tenant_id".to_string(),
             user_id_claim: "sub".to_string(),
+            algorithm: "ES256".to_string(),
+            private_key_pem: String::new(),
+            private_key_file: String::new(),
+            auto_generate_key: true,
         };
 
         assert!(config.enable_jwt);

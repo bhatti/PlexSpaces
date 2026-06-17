@@ -29,6 +29,7 @@
 //! - Workflow execution with supervision
 //! - Workflow state persistence in actor state
 
+use plexspaces_actor::{RequestContext, RequestContextExt};
 use plexspaces_workflow::*;
 use serde_json::json;
 
@@ -36,6 +37,7 @@ use serde_json::json;
 #[tokio::test]
 async fn test_workflow_actor_basic_execution() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "simple-workflow",
@@ -51,9 +53,9 @@ async fn test_workflow_actor_basic_execution() -> Result<(), Box<dyn std::error:
             None,
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
-    let actor = WorkflowActor::new("workflow-actor-1", storage.clone()).await?;
+    let actor = WorkflowActor::new(ctx.clone(), "workflow-actor-1", storage.clone()).await?;
 
     let start_msg = WorkflowMessage::Start {
         definition_id: "simple-workflow".to_string(),
@@ -100,6 +102,7 @@ async fn test_workflow_actor_basic_execution() -> Result<(), Box<dyn std::error:
 #[tokio::test]
 async fn test_workflow_actor_multi_step() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "multi-step",
@@ -135,9 +138,9 @@ async fn test_workflow_actor_multi_step() -> Result<(), Box<dyn std::error::Erro
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
-    let actor = WorkflowActor::new("workflow-actor-2", storage.clone()).await?;
+    let actor = WorkflowActor::new(ctx.clone(), "workflow-actor-2", storage.clone()).await?;
 
     let start_msg = WorkflowMessage::Start {
         definition_id: "multi-step".to_string(),
@@ -166,6 +169,7 @@ async fn test_workflow_actor_multi_step() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "long-workflow",
@@ -192,9 +196,9 @@ async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Er
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
-    let actor = WorkflowActor::new("workflow-actor-3", storage.clone()).await?;
+    let actor = WorkflowActor::new(ctx.clone(), "workflow-actor-3", storage.clone()).await?;
 
     let start_msg = WorkflowMessage::Start {
         definition_id: "long-workflow".to_string(),
@@ -211,7 +215,7 @@ async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Er
         let cancel_response = actor.handle_message(cancel_msg).await?;
 
         if let WorkflowResponse::Cancelled = cancel_response {
-            let execution = storage.get_execution(&execution_id).await?;
+            let execution = storage.get_execution(&ctx, &execution_id).await?;
             assert_eq!(
                 execution.execution_status(),
                 ExecutionStatus::ExecutionStatusCancelled
@@ -230,6 +234,7 @@ async fn test_workflow_actor_cancellation() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let definition = make_workflow_definition(
         "signal-workflow",
@@ -265,9 +270,9 @@ async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Err
             ),
         ],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
-    let actor = WorkflowActor::new("workflow-actor-4", storage.clone()).await?;
+    let actor = WorkflowActor::new(ctx.clone(), "workflow-actor-4", storage.clone()).await?;
 
     let start_msg = WorkflowMessage::Start {
         definition_id: "signal-workflow".to_string(),
@@ -292,7 +297,7 @@ async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Err
             };
             actor.handle_message(resume_msg).await?;
 
-            let execution = storage.get_execution(&execution_id).await?;
+            let execution = storage.get_execution(&ctx, &execution_id).await?;
             assert_eq!(
                 execution.execution_status(),
                 ExecutionStatus::ExecutionStatusCompleted
@@ -311,6 +316,7 @@ async fn test_workflow_actor_with_signal() -> Result<(), Box<dyn std::error::Err
 #[tokio::test]
 async fn test_workflow_actor_failure_retry() -> Result<(), Box<dyn std::error::Error>> {
     let storage = WorkflowStorage::new_in_memory().await?;
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
 
     let retry_config = RetryConfig {
         max_attempts: 3,
@@ -334,9 +340,9 @@ async fn test_workflow_actor_failure_retry() -> Result<(), Box<dyn std::error::E
             Some(retry_config),
         )],
     );
-    storage.save_definition(&definition).await?;
+    storage.save_definition(&ctx, &definition).await?;
 
-    let actor = WorkflowActor::new("workflow-actor-5", storage.clone()).await?;
+    let actor = WorkflowActor::new(ctx.clone(), "workflow-actor-5", storage.clone()).await?;
 
     let start_msg = WorkflowMessage::Start {
         definition_id: "flaky-workflow".to_string(),
@@ -347,7 +353,7 @@ async fn test_workflow_actor_failure_retry() -> Result<(), Box<dyn std::error::E
     let response = actor.handle_message(start_msg).await?;
 
     if let WorkflowResponse::Started { execution_id } = response {
-        let execution = storage.get_execution(&execution_id).await?;
+        let execution = storage.get_execution(&ctx, &execution_id).await?;
         assert_eq!(
             execution.execution_status(),
             ExecutionStatus::ExecutionStatusCompleted

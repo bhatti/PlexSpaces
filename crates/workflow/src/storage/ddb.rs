@@ -359,12 +359,14 @@ impl DynamoDBWorkflowStorage {
         )
         .record(duration.as_secs_f64());
 
-        debug!(
-            table_prefix = %table_prefix,
-            region = %region,
-            duration_ms = duration.as_millis(),
-            "DynamoDB WorkflowStorage initialized"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                table_prefix = %table_prefix,
+                region = %region,
+                duration_ms = duration.as_millis(),
+                "DynamoDB WorkflowStorage initialized"
+            );
+        }
 
         Ok(Self {
             client,
@@ -404,7 +406,9 @@ impl DynamoDBWorkflowStorage {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -436,7 +440,9 @@ impl DynamoDBWorkflowStorage {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB table");
+        }
 
         // Create table
         let pk_key_schema = KeySchemaElement::builder()
@@ -480,13 +486,17 @@ impl DynamoDBWorkflowStorage {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table created successfully");
+                }
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
             }
             Err(e) => {
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -508,7 +518,9 @@ impl DynamoDBWorkflowStorage {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -540,7 +552,9 @@ impl DynamoDBWorkflowStorage {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB executions table with GSIs");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB executions table with GSIs");
+        }
 
         // Create table with GSIs for status and node queries
         let pk_key_schema = KeySchemaElement::builder()
@@ -671,13 +685,17 @@ impl DynamoDBWorkflowStorage {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB executions table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB executions table created successfully");
+                }
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
             }
             Err(e) => {
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -699,7 +717,9 @@ impl DynamoDBWorkflowStorage {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -731,7 +751,9 @@ impl DynamoDBWorkflowStorage {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB step_executions table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB step_executions table");
+        }
 
         let pk_key_schema = KeySchemaElement::builder()
             .attribute_name("pk")
@@ -774,13 +796,17 @@ impl DynamoDBWorkflowStorage {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB step_executions table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB step_executions table created successfully");
+                }
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
             }
             Err(e) => {
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -802,7 +828,9 @@ impl DynamoDBWorkflowStorage {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -834,7 +862,9 @@ impl DynamoDBWorkflowStorage {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB signals table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB signals table");
+        }
 
         let pk_key_schema = KeySchemaElement::builder()
             .attribute_name("pk")
@@ -877,13 +907,17 @@ impl DynamoDBWorkflowStorage {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB signals table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB signals table created successfully");
+                }
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
             }
             Err(e) => {
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -918,7 +952,9 @@ impl DynamoDBWorkflowStorage {
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
                     TableStatus::Active => {
-                        debug!(table_name = %table_name, "Table is now active");
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(table_name = %table_name, "Table is now active");
+                        }
                         return Ok(());
                     }
                     TableStatus::Creating => {
@@ -1746,12 +1782,14 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     || error_str.contains("conditional")
                     || error_str.contains("condition")
                 {
-                    debug!(
-                        execution_id = %execution_id,
-                        expected_version = ?expected_version,
-                        error_code = %error_code,
-                        "Concurrent update detected"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(
+                            execution_id = %execution_id,
+                            expected_version = ?expected_version,
+                            error_code = %error_code,
+                            "Concurrent update detected"
+                        );
+                    }
                     metrics::counter!(
                         "plexspaces_workflow_ddb_update_execution_status_total",
                         "backend" => "dynamodb",

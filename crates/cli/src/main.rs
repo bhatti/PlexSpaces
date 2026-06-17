@@ -243,9 +243,9 @@ enum Commands {
         #[arg(long, default_value = "24")]
         exp_hours: u32,
 
-        /// JWT secret (default: PLEXSPACES_JWT_SECRET env var)
-        #[arg(long, env = "PLEXSPACES_JWT_SECRET")]
-        secret: Option<String>,
+        /// Path to ES256 private key PEM file (default: PLEXSPACES_JWT_PRIVATE_KEY_FILE env var)
+        #[arg(long, env = "PLEXSPACES_JWT_PRIVATE_KEY_FILE")]
+        private_key_file: Option<String>,
     },
 }
 
@@ -336,9 +336,9 @@ async fn async_main() -> Result<()> {
             groups,
             is_admin,
             exp_hours,
-            secret,
+            private_key_file,
         } => {
-            security::create_jwt_token(tenant_id, sub, roles, groups, is_admin, exp_hours, secret)
+            security::create_jwt_token(tenant_id, sub, roles, groups, is_admin, exp_hours, private_key_file)
                 .await
         }
     }

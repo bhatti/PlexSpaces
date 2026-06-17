@@ -51,20 +51,24 @@ use tracing::{debug, trace, warn};
 /// - Logs at debug level with structured fields
 /// - Can be extended with metrics counters/histograms
 pub fn record_channel_ack(channel_name: &str, message_id: &str, backend: &str) {
-    trace!(
-        channel = %channel_name,
-        message_id = %message_id,
-        backend = %backend,
-        "Channel message acknowledged"
-    );
+    if tracing::enabled!(tracing::Level::TRACE) {
+        trace!(
+            channel = %channel_name,
+            message_id = %message_id,
+            backend = %backend,
+            "Channel message acknowledged"
+        );
+    }
 
-    debug!(
-        channel = %channel_name,
-        message_id = %message_id,
-        backend = %backend,
-        operation = "ack",
-        "✅ Channel ACK: Message acknowledged successfully"
-    );
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        debug!(
+            channel = %channel_name,
+            message_id = %message_id,
+            backend = %backend,
+            operation = "ack",
+            "✅ Channel ACK: Message acknowledged successfully"
+        );
+    }
 
     metrics::counter!(
         "plexspaces_channel_ack_total",
@@ -94,26 +98,30 @@ pub fn record_channel_nack(
     delivery_count: u32,
     backend: &str,
 ) {
-    trace!(
-        channel = %channel_name,
-        message_id = %message_id,
-        requeue = requeue,
-        delivery_count = delivery_count,
-        backend = %backend,
-        "Channel message nacked"
-    );
+    if tracing::enabled!(tracing::Level::TRACE) {
+        trace!(
+            channel = %channel_name,
+            message_id = %message_id,
+            requeue = requeue,
+            delivery_count = delivery_count,
+            backend = %backend,
+            "Channel message nacked"
+        );
+    }
 
-    debug!(
-        channel = %channel_name,
-        message_id = %message_id,
-        requeue = requeue,
-        delivery_count = delivery_count,
-        backend = %backend,
-        operation = "nack",
-        "⚠️ Channel NACK: Message nacked (requeue={}, delivery_count={})",
-        requeue,
-        delivery_count
-    );
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        debug!(
+            channel = %channel_name,
+            message_id = %message_id,
+            requeue = requeue,
+            delivery_count = delivery_count,
+            backend = %backend,
+            operation = "nack",
+            "⚠️ Channel NACK: Message nacked (requeue={}, delivery_count={})",
+            requeue,
+            delivery_count
+        );
+    }
 
     metrics::counter!(
         "plexspaces_channel_nack_total",
@@ -216,13 +224,15 @@ pub fn record_channel_latency(
 ) {
     let latency_us = duration.as_micros() as u64;
 
-    trace!(
-        channel = %channel_name,
-        operation = %operation,
-        latency_us = latency_us,
-        backend = %backend,
-        "Channel operation latency"
-    );
+    if tracing::enabled!(tracing::Level::TRACE) {
+        trace!(
+            channel = %channel_name,
+            operation = %operation,
+            latency_us = latency_us,
+            backend = %backend,
+            "Channel operation latency"
+        );
+    }
 
     metrics::histogram!(
         "plexspaces_channel_operation_duration_seconds",
@@ -274,16 +284,18 @@ pub fn record_channel_stats(
     messages_failed: u64,
     backend: &str,
 ) {
-    debug!(
-        channel = %channel_name,
-        messages_sent = messages_sent,
-        messages_received = messages_received,
-        messages_pending = messages_pending,
-        messages_acked = messages_acked,
-        messages_failed = messages_failed,
-        backend = %backend,
-        "Channel statistics snapshot"
-    );
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        debug!(
+            channel = %channel_name,
+            messages_sent = messages_sent,
+            messages_received = messages_received,
+            messages_pending = messages_pending,
+            messages_acked = messages_acked,
+            messages_failed = messages_failed,
+            backend = %backend,
+            "Channel statistics snapshot"
+        );
+    }
 
     metrics::gauge!(
         "plexspaces_channel_messages_pending",

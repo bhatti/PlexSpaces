@@ -58,9 +58,10 @@ use tonic::Request;
 pub type HttpGatewayState = (
     Arc<ActorServiceImpl>,
     bool,
-    Option<String>,
+    Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
     Arc<dyn ServiceLocator>,
     Option<Arc<DashboardServiceImpl>>,
+    Option<Arc<dyn plexspaces_services::user_service::ApiTokenRepository>>,
 );
 
 /// Create dashboard router with unified gateway state type so node can merge it.
@@ -71,11 +72,15 @@ pub fn create_dashboard_router() -> Router<HttpGatewayState> {
         .route("/dashboard", get(home_page)) // Alias for home
         .route("/dashboard/node/:node_id", get(node_page))
         .route("/node/:node_id", get(node_page)) // Also support without /dashboard prefix
+        .route("/dashboard/metrics", get(metrics_page_local))
         .route("/dashboard/metrics/:node_id", get(metrics_page))
         .route("/dashboard/application/:name", get(application_page))
         .route("/dashboard/tenant/:tenant_id", get(tenant_page))
+        .route("/dashboard/users", get(users_page))
+        .route("/dashboard/tokens", get(tokens_page))
         .route("/static/dashboard.css", get(serve_css))
         .route("/static/dashboard.js", get(serve_js))
+        .route("/static/dashboard/layout.js", get(serve_layout_js))
         .route("/api/v1/dashboard/summary", get(api_summary))
         .route("/api/v1/dashboard/nodes", get(api_nodes))
         .route("/api/v1/dashboard/node/:node_id", get(api_node_dashboard))
@@ -125,7 +130,13 @@ async fn node_page(Path(node_id): Path<String>) -> Result<Html<String>, StatusCo
     Ok(Html(html))
 }
 
-/// Metrics detail page handler.
+/// Global metrics page (uses local node).
+async fn metrics_page_local() -> Html<String> {
+    let html = include_str!("../static/dashboard/metrics.html").replace(":node_id", "local");
+    Html(html)
+}
+
+/// Metrics detail page handler for a specific node.
 async fn metrics_page(Path(node_id): Path<String>) -> Result<Html<String>, StatusCode> {
     let html = include_str!("../static/dashboard/metrics.html").replace(":node_id", &node_id);
     Ok(Html(html))
@@ -144,6 +155,16 @@ async fn tenant_page(Path(tenant_id): Path<String>) -> Result<Html<String>, Stat
     Ok(Html(html))
 }
 
+/// Users and tenants management page.
+async fn users_page() -> Html<&'static str> {
+    Html(include_str!("../static/dashboard/users.html"))
+}
+
+/// API tokens management page.
+async fn tokens_page() -> Html<&'static str> {
+    Html(include_str!("../static/dashboard/tokens.html"))
+}
+
 /// Serve CSS file
 async fn serve_css() -> Response<String> {
     Response::builder()
@@ -159,6 +180,15 @@ async fn serve_js() -> Response<String> {
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/javascript")
         .body(include_str!("../static/dashboard.js").to_string())
+        .unwrap()
+}
+
+/// Serve shared layout JavaScript file
+async fn serve_layout_js() -> Response<String> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/javascript")
+        .body(include_str!("../static/dashboard/layout.js").to_string())
         .unwrap()
 }
 
@@ -414,9 +444,10 @@ async fn api_summary(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -505,9 +536,10 @@ async fn api_nodes(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -549,8 +581,43 @@ async fn api_nodes(
 
     let nodes_response = response.into_inner();
 
-    // Convert nodes to JSON manually
-    let nodes: Vec<serde_json::Value> = nodes_response.nodes.iter().map(node_to_json).collect();
+    // Build node_id → node_address map from node registry
+    let address_map: std::collections::HashMap<String, String> =
+        if let Some(node_registry) = _service_locator.get_node_registry().await {
+            let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
+                .with_admin(true);
+            node_registry
+                .list_nodes(&ctx, None, 1000, "")
+                .await
+                .map(|(regs, _)| {
+                    regs.into_iter()
+                        .map(|r| (r.node_id, r.node_address))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+    // Convert nodes to JSON with address
+    let nodes: Vec<serde_json::Value> = nodes_response
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut json = node_to_json(node);
+            if let Some(obj) = json.as_object_mut() {
+                let addr = address_map
+                    .get(&node.id)
+                    .cloned()
+                    .unwrap_or_default();
+                obj.insert(
+                    "node_address".to_string(),
+                    serde_json::Value::String(addr),
+                );
+            }
+            json
+        })
+        .collect();
 
     let mut json = serde_json::Map::new();
     json.insert("nodes".to_string(), serde_json::Value::Array(nodes));
@@ -585,9 +652,10 @@ async fn api_node_dashboard(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(node_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
@@ -613,8 +681,24 @@ async fn api_node_dashboard(
     let mut json = serde_json::Map::new();
 
     // Convert node
-    if let Some(node) = dashboard.node {
-        json.insert("node".to_string(), node_to_json(&node));
+    if let Some(node) = &dashboard.node {
+        let mut node_json = node_to_json(node);
+        if let Some(obj) = node_json.as_object_mut() {
+            let addr = if let Some(nr) = _service_locator.get_node_registry().await {
+                let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), String::new())
+                    .with_admin(true);
+                nr.lookup_node(&ctx, &node.id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|r| r.node_address)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            obj.insert("node_address".to_string(), serde_json::Value::String(addr));
+        }
+        json.insert("node".to_string(), node_json);
     }
 
     // Convert node metrics
@@ -659,9 +743,10 @@ async fn api_local_recorder_summary(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -716,9 +801,10 @@ async fn api_applications(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -839,9 +925,10 @@ async fn api_tenants(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         service_locator,
         _dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -992,9 +1079,10 @@ async fn api_actors(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1080,9 +1168,10 @@ async fn api_dependencies(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1151,9 +1240,10 @@ async fn api_application_detail(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(name): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
@@ -1307,9 +1397,10 @@ async fn api_actor_detail(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(actor_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
@@ -1446,9 +1537,10 @@ async fn api_actor_stop(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         service_locator,
         _dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(actor_id): Path<String>,
     headers: HeaderMap,
@@ -1482,9 +1574,10 @@ async fn api_objects(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1585,9 +1678,10 @@ async fn api_keyvalues(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1662,9 +1756,10 @@ async fn api_tuplespaces(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1737,9 +1832,10 @@ async fn api_blobs(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1825,9 +1921,10 @@ async fn api_blob_presigned_url(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(blob_id): Path<String>,
     Query(params): Query<HashMap<String, String>>,
@@ -1863,9 +1960,10 @@ async fn api_blob_download(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         service_locator,
         _dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Path(blob_id): Path<String>,
     Query(params): Query<HashMap<String, String>>,
@@ -1901,9 +1999,10 @@ async fn api_service_links(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -1947,9 +2046,10 @@ async fn api_metrics_table(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -2021,17 +2121,31 @@ async fn api_metrics_table(
     Ok(Json(serde_json::json!({ "metrics": metrics })))
 }
 
-/// API: Get system info (version, build date, git commit)
-/// Uses build-time constants from build.rs
+/// API: Get system info (version, build date, git commit, security status)
+/// Uses build-time constants from build.rs and runtime security config.
 async fn api_system_info(
     axum::extract::State((
         _actor_svc,
         _auth_disabled,
-        _jwt_secret,
+        _jwt_key_pair,
         _service_locator,
         _dashboard_service_opt,
+        _token_repo,
     )): axum::extract::State<HttpGatewayState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let security_config = _service_locator.get_security_config().await;
+    let mtls_enabled = security_config
+        .as_ref()
+        .and_then(|sc| sc.mtls.as_ref())
+        .map(|m| m.enable_mtls)
+        .unwrap_or(false);
+    let auth_enabled = !_auth_disabled;
+    let oidc_enabled = security_config
+        .as_ref()
+        .and_then(|sc| sc.oidc.as_ref())
+        .map(|o| o.enabled)
+        .unwrap_or(false);
+
     let mut json = serde_json::Map::new();
     json.insert(
         "version".to_string(),
@@ -2052,6 +2166,18 @@ async fn api_system_info(
                 .unwrap_or("unknown")
                 .to_string(),
         ),
+    );
+    json.insert(
+        "mtls_enabled".to_string(),
+        serde_json::Value::Bool(mtls_enabled),
+    );
+    json.insert(
+        "auth_enabled".to_string(),
+        serde_json::Value::Bool(auth_enabled),
+    );
+    json.insert(
+        "oidc_enabled".to_string(),
+        serde_json::Value::Bool(oidc_enabled),
     );
     Ok(Json(serde_json::Value::Object(json)))
 }

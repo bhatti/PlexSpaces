@@ -457,8 +457,8 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         offset: usize,
         limit: usize,
     ) -> RepositoryResult<Vec<ObjectRegistration>> {
-        let tenant_scoped = !ctx.is_admin() || !ctx.tenant_id().is_empty();
-        let namespace_scoped = !ctx.is_admin() || !ctx.namespace().is_empty();
+        let tenant_scoped = !ctx.is_admin() && !ctx.tenant_id().is_empty();
+        let namespace_scoped = !ctx.is_admin() && !ctx.namespace().is_empty();
 
         if !tenant_scoped || !namespace_scoped {
             let mut expression_values: HashMap<String, AttributeValue> = HashMap::new();

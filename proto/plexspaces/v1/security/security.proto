@@ -212,6 +212,57 @@ message JwtConfig {
 
   // JWT claim name for user_id extraction (default: "sub")
   string user_id_claim = 9;
+
+  // ─── ES256 Asymmetric JWT (preferred over HS256 secret) ─────────────
+  // When configured, ES256 is used for both signing and verification.
+  // If only `secret` is set, falls back to HS256 (legacy mode).
+
+  // Algorithm: "ES256" (default, auto-selected when private_key_pem is set) or "HS256"
+  string algorithm = 10;
+
+  // EC P-256 private key in PEM format (for signing).
+  // Security: Never store in config — set via PLEXSPACES_JWT_PRIVATE_KEY env var
+  // or point to a file via PLEXSPACES_JWT_PRIVATE_KEY_FILE.
+  string private_key_pem = 11;
+
+  // Path to EC P-256 private key file. Auto-generates key if file doesn't exist.
+  // Set via PLEXSPACES_JWT_PRIVATE_KEY_FILE env var or config.
+  string private_key_file = 12;
+
+  // Whether to auto-generate an ES256 key pair on startup when no key is configured.
+  // Default: true (dev-friendly). Set to false in production to enforce explicit keys.
+  bool auto_generate_key = 13;
+}
+
+// OIDC provider configuration for dashboard OAuth login.
+// Only active when security.disable_auth = false.
+message OidcConfig {
+  // Enable OIDC login (only when auth is enabled; non-auth mode = everyone is admin)
+  bool enabled = 1;
+
+  // OpenID Connect discovery URL (e.g., "https://accounts.google.com/.well-known/openid-configuration")
+  string discovery_url = 2;
+
+  // OAuth2 client ID
+  string client_id = 3;
+
+  // OAuth2 client secret (production: use env var PLEXSPACES_OIDC_CLIENT_SECRET)
+  string client_secret = 4;
+
+  // Redirect URI for OIDC callback (e.g., "/api/v1/auth/oidc/callback")
+  string redirect_uri = 5;
+
+  // Scopes to request (default: ["openid", "email", "profile"])
+  repeated string scopes = 6;
+
+  // OIDC claim name that maps to tenant_id (e.g., "org", "tenant")
+  string tenant_claim = 7;
+
+  // OIDC groups that grant admin access (e.g., ["platform-admins"])
+  repeated string admin_groups = 8;
+
+  // Default tenant_id for users without a tenant claim
+  string default_tenant_id = 9;
 }
 
 // API key for service authentication

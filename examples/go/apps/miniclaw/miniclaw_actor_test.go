@@ -1049,7 +1049,12 @@ func TestHealthMonitorGetStats(t *testing.T) {
 	plexspaces.ResetStubs()
 	actor := newHealthMonitorActor()
 	actor.Init(`{"actor_id":"health_monitor:test@node","args":{}}`)
+
+	// Advance time between polls so debounce doesn't skip the second tick.
+	// PollInterval defaults to 5000ms; debounce threshold is PollInterval/2 = 2500ms.
+	plexspaces.SetStubNowMs(10000)
 	actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
+	plexspaces.SetStubNowMs(15001) // 5001ms later — beyond debounce window
 	actor.Handle("caller", "poll_tick", `{"op":"poll_tick"}`)
 
 	raw := actor.Handle("caller", "get_stats", `{"op":"get_stats"}`)

@@ -8,6 +8,7 @@ pub mod error_handling_test;
 pub mod integration_workflow_test;
 pub mod step_execution_test;
 pub mod storage_integration_test;
+pub mod tenant_isolation_test;
 pub mod workflow_actor_test;
 pub mod workflow_ref_test;
 pub mod workflow_types_tests;

@@ -67,6 +67,10 @@ mod tests {
             }),
             tenant_id_claim: "tenant_id".to_string(),
             user_id_claim: "sub".to_string(),
+            algorithm: "ES256".to_string(),
+            private_key_pem: String::new(),
+            private_key_file: String::new(),
+            auto_generate_key: true,
         };
 
         let api_key = ApiKey {
@@ -89,6 +93,7 @@ mod tests {
             jwt: Some(jwt_config),
             api_keys: vec![api_key],
             disable_auth: false,
+            oidc: None,
         };
 
         assert!(security_config.service_identity.is_some());
@@ -111,6 +116,7 @@ mod tests {
             jwt: None,
             api_keys: vec![],
             disable_auth: false,
+            oidc: None,
         };
 
         let runtime_config = RuntimeConfig {
@@ -155,6 +161,7 @@ mod tests {
             jwt: None,
             api_keys: vec![],
             disable_auth: false,
+            oidc: None,
         };
 
         let runtime_config = RuntimeConfig {

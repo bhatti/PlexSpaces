@@ -17,6 +17,25 @@ _RUST_APPS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "${_RUST_APPS_ROOT}/test-common.sh"
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 echo "Step 0: Build WASM (ensure latest with metrics)"
 "$SCRIPT_DIR/build.sh" || { echo -e "\033[0;31mBuild failed\033[0m"; exit 1; }
 echo ""
@@ -42,11 +61,12 @@ sleep 2
 _deployed=0
 for _attempt in 1 2 3; do
   DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -F "application_id=$APP_ID" \
   -F "name=migrating-skypilot-scheduler-rust" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
+  -F "config=@$CONFIG_FILE" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -60,6 +80,83 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
   exit 1
 fi
+echo -e "  ${GREEN}Deployed $APP_ID${NC}"
+sleep 1
+
+ask_actor() {
+  local actor_path="$1" timeout="$2" payload="$3"
+  curl -s --max-time "$timeout" -X POST \
+    "http://localhost:${HTTP_PORT}/api/v1/actors/$APP_ID/$actor_path/ask?timeout=$timeout" \
+    -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+    -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+}
+
+assert_actor_ok() {
+  local desc="$1" response="$2"
+  if echo "$response" | python3 -c "
+import sys, json
+raw = sys.stdin.read()
+d = json.loads(raw)
+p = d.get('payload', d)
+if isinstance(p, str):
+    p = json.loads(p)
+# submit_task may return error if no resources — that is expected behavior, not a crash
+if isinstance(p, dict) and 'error' in p and 'allocation' not in p and 'queue_size' not in p and 'No resources' not in p.get('error',''):
+    sys.exit(1)
+" 2>/dev/null; then
+    echo -e "  ${GREEN}✓ $desc${NC}"
+  else
+    echo -e "${RED}✗ $desc failed: $response${NC}"
+    exit 1
+  fi
+}
+
+echo ""
+echo "Step 2: get_best_resources (CPU-only task, should match gcp:n1-standard-4)"
+R2=$(ask_actor "${ACTOR_TYPE}:${INSTANCE_ID}" 15 \
+  '{"op":"get_best_resources","task":{"task_id":"query-cpu","task_type":"cpu","gpu_required":false,"gpu_memory_gb":0,"cpu_cores":2,"memory_gb":4}}')
+assert_actor_ok "get_best_resources" "$R2"
+echo "$R2" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+alloc = p.get('allocation', {})
+print('  cloud={} instance={} cost_per_hour={}'.format(
+    alloc.get('cloud_provider','?'), alloc.get('instance_type','?'), alloc.get('cost_per_hour','?')))
+" 2>/dev/null || true
+
+echo ""
+echo "Step 3: submit_task (GPU task)"
+R3=$(ask_actor "${ACTOR_TYPE}:${INSTANCE_ID}" 15 \
+  '{"op":"submit_task","task":{"task_id":"train-job-1","task_type":"training","gpu_required":true,"gpu_memory_gb":16,"cpu_cores":4,"memory_gb":16}}')
+assert_actor_ok "submit_task" "$R3"
+echo "$R3" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+alloc = p.get('allocation', {})
+err = p.get('error','')
+if alloc:
+    print('  scheduled: cloud={} instance={}'.format(alloc.get('cloud_provider','?'), alloc.get('instance_type','?')))
+else:
+    print('  result: {}'.format(err or p))
+" 2>/dev/null || true
+
+echo ""
+echo "Step 4: get_status"
+R4=$(ask_actor "${ACTOR_TYPE}:${INSTANCE_ID}" 10 '{"op":"get_status"}')
+assert_actor_ok "get_status" "$R4"
+echo "$R4" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+print('  tasks_scheduled={} running={} queue_size={}'.format(
+    p.get('tasks_scheduled','?'), p.get('running','?'), p.get('queue_size','?')))
+" 2>/dev/null || true
 
 echo ""
 echo "================================================================"

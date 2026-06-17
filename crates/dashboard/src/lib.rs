@@ -31,6 +31,5 @@
 
 pub mod dashboard_handlers;
 
-// Dashboard service moved to plexspaces-services crate
 pub use dashboard_handlers::create_dashboard_router;
 pub use plexspaces_services::dashboard_service::{DashboardServiceImpl, HealthReporterAccess};

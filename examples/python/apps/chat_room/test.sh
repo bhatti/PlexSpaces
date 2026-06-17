@@ -24,6 +24,25 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 ask_actor() {
   local actor="$1"
   local payload="$2"
@@ -31,6 +50,7 @@ ask_actor() {
   curl -s --max-time "$timeout" -X POST \
     "http://$HTTP_HOST:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 
@@ -134,11 +154,12 @@ sleep 2
 _deployed=0
 for _attempt in 1 2 3; do
   DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://$HTTP_HOST:$HTTP_PORT/api/v1/applications/deploy" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -F "application_id=$APP_ID" \
   -F "name=chat-room-large-scale" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
+  -F "config=@$CONFIG_FILE" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -152,6 +173,55 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
   exit 1
 fi
+
+sleep 1
+
+echo ""
+echo "Step 3: Test GuildActor — create channel"
+echo "  Creating general channel in guild-acme..."
+R="$(ask_actor "$GUILD_ACTOR" '{"op":"create_channel","channel_id":"general"}' 20)"
+assert_actor_ok "create_channel" "$R"
+echo "  ✓ create_channel OK: $(echo "$R" | head -c 100)"
+
+echo ""
+echo "Step 4: Test SessionActor — connect alice"
+echo "  Connecting alice to guild-acme/general..."
+R="$(ask_actor "$ALICE_SESSION" '{"op":"connect","user_id":"alice","guild_id":"guild-acme","channels":["general"]}' 20)"
+assert_actor_ok "alice connect" "$R"
+echo "  ✓ alice connect OK: $(echo "$R" | head -c 100)"
+
+echo ""
+echo "Step 5: Test ChannelActor — post message"
+echo "  Posting message from alice to general channel..."
+R="$(ask_actor "$CHANNEL_ACTOR" '{"op":"post_message","user_id":"alice","text":"Hello from alice","session_id":"alice-mobile"}' 20)"
+assert_actor_ok "post_message" "$R"
+echo "  ✓ post_message OK: $(echo "$R" | head -c 100)"
+
+echo ""
+echo "Step 6: Test ChannelActor — channel history"
+echo "  Fetching channel history..."
+R="$(ask_actor "$CHANNEL_ACTOR" '{"op":"history","limit":5}' 20)"
+assert_actor_ok "channel history" "$R"
+echo "  ✓ channel history OK: $(echo "$R" | head -c 100)"
+
+echo ""
+echo "Step 7: Test PresenceActor — set and get presence"
+echo "  Setting alice presence to online..."
+R="$(ask_actor "$PRESENCE_ACTOR" '{"op":"set_presence","user_id":"alice","guild_id":"guild-acme","status":"online","ttl_ms":60000}' 20)"
+assert_actor_ok "set_presence" "$R"
+echo "  ✓ set_presence OK: $(echo "$R" | head -c 100)"
+
+echo ""
+echo "Step 8: Test ConnectionFSM — transition and status"
+echo "  Transitioning FSM to connected..."
+R="$(ask_actor "$FSM_ACTOR" '{"op":"transition","to":"connected"}' 20)"
+assert_actor_ok "fsm transition connected" "$R"
+echo "  ✓ fsm transition connected OK: $(echo "$R" | head -c 100)"
+
+echo "  Checking FSM status..."
+R="$(ask_actor "$FSM_ACTOR" '{"op":"status"}' 20)"
+assert_actor_ok "fsm status" "$R"
+echo "  ✓ fsm status OK: $(echo "$R" | head -c 100)"
 
 echo ""
 echo -e "${GREEN}Python large-scale chat example passed${NC}"

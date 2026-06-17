@@ -264,6 +264,20 @@ Request/reply (OTP-style). Trait: `plexspaces_behavior::GenServer`. Implements `
 
 **Location**: `crates/behavior/src/mod.rs` (lines 97-342)
 
+**Error Reply Semantics (Erlang/Orleans model)**:
+
+When a GenServer handler returns `Err(BehaviorError)`, the framework sends an immediate **error reply** (`message_type: "error_reply"`) to the caller rather than letting the caller time out. The actor itself survives and continues processing subsequent messages. This matches:
+- **Erlang gen_server**: `handle_call` failure → caller gets `{error, Reason}`, process continues (or restarts via supervisor)
+- **Orleans**: grain method throws → caller's `Task` faults immediately, grain remains active
+- **Akka**: `StatusReply.error()` → caller gets immediate failure, actor survives
+
+The error reply carries a JSON payload `{"error": "<message>", "success": false}`. On the receiving side:
+- **Local calls** (`ask`): The `ReplyWaiter` resolves with the error reply message (callers check `message_type == "error_reply"`)
+- **Remote calls** (gRPC): The `AskReplyResponse` returns `success: false` with `error_message` populated; `route_remote` reconstructs the reply with `message_type: "error_reply"`
+- **Scatter-gather**: Error replies from individual shards are classified as shard failures, contributing to partial-failure tolerance
+
+The `send_reply` method has an idempotency guard (AtomicBool) ensuring exactly one reply per message cycle — the error reply path and normal reply path cannot both fire.
+
 **SDK Usage**:
 ```rust
 #[gen_server_actor]
@@ -2631,8 +2645,9 @@ impl GrpcClientPool {
 - All actors have `namespace` (optional, can be empty, from RequestContext)
 - Path parameters `{namespace}` and `{actor_type}` are extracted from the URL
 - Actor HTTP routes use `/api/v1/actors/{namespace}/{actor_type}` and `/ask`
-- JWT authentication extracts `tenant_id` from claims
+- JWT authentication (ES256 or HS256) extracts `tenant_id` from claims
 - Access control uses the JWT-derived `tenant_id`
+- JWKS endpoint (`/.well-known/jwks.json`) exposes ES256 public key for external verification
 - Admin/internal contexts with empty namespace bypass namespace filtering for cross-namespace queries
 
 **Default Behavior**:

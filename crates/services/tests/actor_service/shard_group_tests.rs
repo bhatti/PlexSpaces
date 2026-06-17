@@ -18,8 +18,8 @@ use plexspaces_actor::Message;
 use plexspaces_actor::{
     actor_context::ObjectRegistry as ObjectRegistryTrait,
     Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType,
-    InitializableServiceLocator, NodeRegistryTrait, RequestContext, RequestContextExt,
-    ServiceLocator,
+    InitializableServiceLocator, NodeRegistryTrait, RequestContext,
+    RequestContextExt, ServiceLocator,
 };
 use plexspaces_actor::behavior::GenServer;
 use plexspaces_common::ServiceNameExt;
@@ -234,10 +234,31 @@ impl ActorTrait for CounterActor {
 impl GenServer for CounterActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
-        _msg: Message,
+        ctx: &ActorContext,
+        msg: Message,
     ) -> Result<(), BehaviorError> {
         self.count += 1;
+        // Send reply with current count (required for scatter-gather)
+        if !msg.sender_id.is_empty() && !msg.correlation_id.is_empty() {
+            let reply_payload = serde_json::json!({ "count": self.count });
+            let reply = Message {
+                id: format!("res-{}", ulid::Ulid::new()),
+                payload: serde_json::to_vec(&reply_payload).unwrap_or_default(),
+                message_type: "reply".to_string(),
+                ..Default::default()
+            };
+            let actor_id = ctx.self_ref()
+                .map(|r| r.id().clone())
+                .or_else(|| plexspaces_actor::ActorId::from_canonical(&msg.receiver_id).ok());
+            if let Some(actor_id) = actor_id {
+                let _ = ctx.send_reply(
+                    Some(&msg.correlation_id),
+                    &msg.sender_id,
+                    actor_id,
+                    reply,
+                ).await;
+            }
+        }
         Ok(())
     }
 }
@@ -447,40 +468,17 @@ async fn create_test_actor_service(
 ) {
     use plexspaces_node::create_default_service_locator;
 
-    let actor_registry = Arc::new(ActorRegistry::new(node_id.to_string()));
-
-    // Use create_default_service_locator which doesn't call blocking code
+    // create_default_service_locator calls initialize_services which creates a fully-wired
+    // ActorRegistry (with ActorFactory, ReplyWaiterRegistry, VirtualActorManager, etc.)
     let service_locator = create_default_service_locator(Some(node_id.to_string()), None).await;
-    service_locator
-        .register_service(actor_registry.clone())
-        .await;
 
-    // Register ActorFactory (required for spawn_actor to work)
-    use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_actor::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
-    let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
-        FacetManager::new(),
-    )));
-    service_locator
-        .register_service(virtual_actor_manager)
-        .await;
-    service_locator.register_service(facet_manager).await;
-    let actor_factory = ActorFactoryImpl::new_arc(
-        service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>
-    )
-    .await;
-    service_locator
-        .register_service_by_name(
-            plexspaces_actor::ServiceName::ServiceNameActorFactoryImpl.as_str(),
-            actor_factory.clone(),
-        )
-        .await;
-    let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
-    service_locator.register_actor_factory(factory_trait).await;
+    // Retrieve the ActorRegistry that initialize_services already created and wired
+    let actor_registry: Arc<ActorRegistry> = service_locator
+        .actor_registry()
+        .await
+        .expect("ActorRegistry should be created by initialize_services");
 
     // Register BehaviorRegistry and behavior for "counter" actor type
-    // Note: BehaviorRegistry needs to be registered so ActorFactory can create actors
     use plexspaces_actor::behavior_factory::BehaviorRegistry;
     let behavior_registry = BehaviorRegistry::new();
     behavior_registry
@@ -497,6 +495,7 @@ async fn create_test_actor_service(
     // Disable auth for tests
     let config = plexspaces_proto::node::v1::SecurityConfig {
         disable_auth: true,
+        oidc: None,
         ..Default::default()
     };
     service_locator.register_security_config(config).await;
@@ -1535,7 +1534,7 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
     );
 
     let discover_ctx =
-        RequestContext::new_without_auth(String::new(), "heat-diffusion-rust".to_string());
+        RequestContext::new_without_auth("test-tenant".to_string(), "heat-diffusion-rust".to_string());
     let discovered = node2_registry
         .discover_actors_by_type(&discover_ctx, "counter")
         .await;
@@ -1755,9 +1754,29 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         msg.message_type = "call".to_string();
         msg
     };
+    // Find partition keys that map to different shards (hash-based partitioning).
+    // With 2 shards, we try keys until we find one for each shard.
+    use plexspaces_services::actor_service::partition::calculate_shard_id;
+    let mut shard_keys: HashMap<u32, String> = HashMap::new();
+    for i in 0u32..100 {
+        let key = format!("region-{}", i);
+        let shard_id = calculate_shard_id(
+            key.as_bytes(),
+            PartitionStrategy::PartitionStrategyHash as i32,
+            2,
+            None,
+        )
+        .unwrap();
+        shard_keys.entry(shard_id).or_insert(key);
+        if shard_keys.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(shard_keys.len(), 2, "should find keys for both shards");
     let mut updates = HashMap::new();
-    updates.insert("0".to_string(), init_message(0));
-    updates.insert("1".to_string(), init_message(1));
+    for (shard_id, key) in &shard_keys {
+        updates.insert(key.clone(), init_message(*shard_id as usize));
+    }
 
     let bulk_resp = node1_service
         .bulk_update_shard_group(test_request(BulkUpdateShardGroupRequest {
@@ -1805,9 +1824,10 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
     }
 
     assert_eq!(payloads.len(), 2);
-    assert!(payloads
-        .iter()
-        .all(|payload| payload.get("error").is_none()));
+    assert!(
+        payloads.iter().all(|payload| payload.get("error").is_none()),
+        "Expected no errors in payloads, got: {:?}", payloads
+    );
     assert!(payloads
         .iter()
         .all(|payload| payload.get("compute_time_ms").and_then(|v| v.as_u64()) == Some(7)));

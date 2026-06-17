@@ -163,6 +163,10 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
                 jwks_url: jwt_yaml.jwks_url.clone(),
                 allowed_audiences: jwt_yaml.allowed_audiences.clone(),
                 disable_auth_for_testing: jwt_yaml.disable_auth_for_testing,
+                algorithm: String::new(),
+                private_key_pem: String::new(),
+                private_key_file: String::new(),
+                auto_generate_key: true,
             })
         })
     } else {
@@ -190,12 +194,49 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
         None
     };
 
+    let oidc = yaml.oidc.map(|o| {
+        use plexspaces_proto::security::v1::OidcConfig;
+        let client_id = if o.client_id.is_empty() {
+            std::env::var("PLEXSPACES_OIDC_CLIENT_ID").unwrap_or_default()
+        } else {
+            o.client_id
+        };
+        let client_secret = if o.client_secret.is_empty() {
+            std::env::var("PLEXSPACES_OIDC_CLIENT_SECRET").unwrap_or_default()
+        } else {
+            o.client_secret
+        };
+        let discovery_url = if o.discovery_url.is_empty() {
+            std::env::var("PLEXSPACES_OIDC_DISCOVERY_URL").unwrap_or_default()
+        } else {
+            o.discovery_url
+        };
+        let redirect_uri = if o.redirect_uri.is_empty() {
+            std::env::var("PLEXSPACES_OIDC_REDIRECT_URI")
+                .unwrap_or_else(|_| "/api/v1/auth/oidc/callback".to_string())
+        } else {
+            o.redirect_uri
+        };
+        OidcConfig {
+            enabled: o.enabled,
+            discovery_url,
+            client_id,
+            client_secret,
+            redirect_uri,
+            scopes: o.scopes,
+            tenant_claim: o.tenant_claim,
+            admin_groups: o.admin_groups,
+            default_tenant_id: o.default_tenant_id,
+        }
+    });
+
     Ok(SecurityConfig {
         service_identity: yaml.service_identity.map(convert_service_identity),
         mtls,
         jwt,
         api_keys: yaml.api_keys.into_iter().map(convert_api_key).collect(),
         disable_auth: yaml.disable_auth,
+        oidc,
     })
 }
 
@@ -256,7 +297,6 @@ fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            // Fallback to config value (warn if used)
             if !yaml.secret.is_empty() {
                 tracing::warn!(
                     "JWT secret found in config file. For production, use PLEXSPACES_JWT_SECRET env var instead."
@@ -267,6 +307,27 @@ fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
             }
         });
 
+    // ES256 private key: env var takes priority over config
+    let private_key_pem = std::env::var("PLEXSPACES_JWT_PRIVATE_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| yaml.private_key_pem.clone());
+
+    let private_key_file = std::env::var("PLEXSPACES_JWT_PRIVATE_KEY_FILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| yaml.private_key_file.clone());
+
+    let algorithm = if !yaml.algorithm.is_empty() {
+        yaml.algorithm.clone()
+    } else if !private_key_pem.is_empty() || !private_key_file.is_empty() {
+        "ES256".to_string()
+    } else if !secret.is_empty() {
+        "HS256".to_string()
+    } else {
+        "ES256".to_string() // Default to ES256 (auto-generate)
+    };
+
     JwtConfig {
         enable_jwt: yaml.enable_jwt,
         secret,
@@ -275,8 +336,12 @@ fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
         allowed_audiences: yaml.allowed_audiences,
         token_ttl: None,
         refresh_token_ttl: None,
-        tenant_id_claim: "tenant_id".to_string(), // Default claim name
-        user_id_claim: "sub".to_string(),         // Default claim name
+        tenant_id_claim: "tenant_id".to_string(),
+        user_id_claim: "sub".to_string(),
+        algorithm,
+        private_key_pem,
+        private_key_file,
+        auto_generate_key: yaml.auto_generate_key,
     }
 }
 

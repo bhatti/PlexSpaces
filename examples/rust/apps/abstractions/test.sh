@@ -26,13 +26,40 @@ _RUST_APPS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=/dev/null
 source "${_RUST_APPS_ROOT}/test-common.sh"
 
+# Auto-generate JWT if not provided
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+  echo "  Token: ${PLEXSPACES_TEST_TOKEN:0:20}..."
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+echo "AUTH_HEADER set: $([ -n "$AUTH_HEADER" ] && echo YES || echo NO)"
 
 send_actor() {
   local actor="$1" payload="$2" timeout="${3:-20}"
-  curl -s --max-time "$timeout" -X POST \
-    "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
-    -H "Content-Type: application/json" \
-    -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  if [ -n "$AUTH_HEADER" ]; then
+    curl -s --max-time "$timeout" -X POST \
+      "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
+      -H "Content-Type: application/json" \
+      -H "$AUTH_HEADER" \
+      -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  else
+    curl -s --max-time "$timeout" -X POST \
+      "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
+      -H "Content-Type: application/json" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+  fi
 }
 
 assert_actor_ok() {
@@ -205,7 +232,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$SCRIPT_DIR/../../../.." && p
 cargo test --manifest-path "$SCRIPT_DIR/Cargo.toml"
 echo ""
 
-HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
+HTTP_CHECK=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Start node with ./scripts/server.sh and re-run this test${NC}"
   exit 1
@@ -231,19 +258,32 @@ echo "Step 2: Deploy"
 sleep 2
 _deployed=0
 for _attempt in 1 2 3; do
-  DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
-  -F "application_id=$APP_ID" \
-  -F "name=abstractions-rust" \
-  -F "version=1.0.0" \
-  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
+  echo "  Deploy attempt $_attempt..."
+  if [ -n "$AUTH_HEADER" ]; then
+    DEPLOY_OUT=$(curl -s --max-time 500 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    -H "$AUTH_HEADER" \
+    -F "application_id=$APP_ID" \
+    -F "name=abstractions-rust" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$CONFIG_FILE" 2>&1) || true
+  else
+    DEPLOY_OUT=$(curl -s --max-time 500 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+    -F "application_id=$APP_ID" \
+    -F "name=abstractions-rust" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+    -F "config=@$CONFIG_FILE" 2>&1) || true
+  fi
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
+  echo "  HTTP $HTTP_CODE: $(echo "$RESPONSE" | head -c 300)"
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
     _deployed=1
     break
   fi
-  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  echo -e "  ${RED}Deploy attempt $_attempt FAILED${NC}"
   sleep 3
 done
 if [ "$_deployed" -eq 0 ]; then

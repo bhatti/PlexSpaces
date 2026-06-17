@@ -58,6 +58,9 @@ tonic = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tokio-stream = { version = "0.1", features = ["net"] }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "any", "migrate"] }
 tonic-health = { workspace = true }
 tonic-web = { workspace = true }  # For gRPC-Web and gRPC-Gateway HTTP access
@@ -66,6 +69,7 @@ futures-util = "0.3"  # For StreamExt in multipart handling
 tower = { version = "0.4", features = ["util", "timeout", "load"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs"] }
 hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server"] }
 http-body-util = "0.1"
 axum = { version = "0.7", features = ["multipart"] }
 url = "2.5"

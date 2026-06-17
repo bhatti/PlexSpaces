@@ -183,7 +183,9 @@ impl DynamoDBKVStore {
         // Check if table exists
         match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table already exists");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table already exists");
+                }
                 return Ok(());
             }
             Err(e) => {
@@ -215,7 +217,9 @@ impl DynamoDBKVStore {
             }
         }
 
-        debug!(table_name = %table_name, "Creating DynamoDB table");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(table_name = %table_name, "Creating DynamoDB table");
+        }
 
         // Create table with composite key for tenant isolation
         let pk_key_schema = KeySchemaElement::builder()
@@ -302,7 +306,9 @@ impl DynamoDBKVStore {
 
         match create_table_result {
             Ok(_) => {
-                debug!(table_name = %table_name, "DynamoDB table created successfully");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "DynamoDB table created successfully");
+                }
                 // Wait for table to be active
                 Self::wait_for_table_active(client, table_name).await?;
                 Ok(())
@@ -310,7 +316,9 @@ impl DynamoDBKVStore {
             Err(e) => {
                 // Check if table was created concurrently
                 if e.to_string().contains("ResourceInUseException") {
-                    debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "Table created concurrently, waiting for active");
+                    }
                     Self::wait_for_table_active(client, table_name).await?;
                     Ok(())
                 } else {
@@ -342,7 +350,9 @@ impl DynamoDBKVStore {
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
                     TableStatus::Active => {
-                        debug!(table_name = %table_name, "Table is now active");
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(table_name = %table_name, "Table is now active");
+                        }
                         return Ok(());
                     }
                     TableStatus::Creating => {
@@ -388,14 +398,18 @@ impl DynamoDBKVStore {
             .await
         {
             Ok(_) => {
-                debug!(table_name = %table_name, "TTL enabled for automatic expiration cleanup");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(table_name = %table_name, "TTL enabled for automatic expiration cleanup");
+                }
                 Ok(())
             }
             Err(e) => {
                 let error_str = e.to_string();
                 // TTL might already be enabled, ignore that error
                 if error_str.contains("TimeToLiveAlreadyEnabled") {
-                    debug!(table_name = %table_name, "TTL already enabled");
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(table_name = %table_name, "TTL already enabled");
+                    }
                     Ok(())
                 } else {
                     warn!(
@@ -683,12 +697,14 @@ impl KeyValueStore for DynamoDBKVStore {
                 )
                 .increment(1);
 
-                debug!(
-                    key = %key,
-                    value_len = value.len(),
-                    duration_ms = duration.as_millis(),
-                    "Key-value pair stored successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        key = %key,
+                        value_len = value.len(),
+                        duration_ms = duration.as_millis(),
+                        "Key-value pair stored successfully"
+                    );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -746,11 +762,13 @@ impl KeyValueStore for DynamoDBKVStore {
                 )
                 .increment(1);
 
-                debug!(
-                    key = %key,
-                    duration_ms = duration.as_millis(),
-                    "Key deleted successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        key = %key,
+                        duration_ms = duration.as_millis(),
+                        "Key deleted successfully"
+                    );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -981,12 +999,14 @@ impl KeyValueStore for DynamoDBKVStore {
                 )
                 .increment(1);
 
-                debug!(
-                    key = %key,
-                    ttl_secs = ttl.as_secs(),
-                    duration_ms = duration.as_millis(),
-                    "Key-value pair stored with TTL"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        key = %key,
+                        ttl_secs = ttl.as_secs(),
+                        duration_ms = duration.as_millis(),
+                        "Key-value pair stored with TTL"
+                    );
+                }
                 Ok(())
             }
             Err(e) => {
@@ -1106,12 +1126,14 @@ impl KeyValueStore for DynamoDBKVStore {
                             || (error_str.contains("service error") && expected.is_none())
                         {
                             // For None expected, service error likely means key already exists
-                            debug!(
-                                key = %key,
-                                error_code = %error_code,
-                                error_message = %error_message,
-                                "CAS failed: condition not met (key may already exist)"
-                            );
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                debug!(
+                                    key = %key,
+                                    error_code = %error_code,
+                                    error_message = %error_message,
+                                    "CAS failed: condition not met (key may already exist)"
+                                );
+                            }
                             metrics::counter!(
                                 "plexspaces_keyvalue_ddb_cas_total",
                                 "backend" => "dynamodb",
@@ -1190,11 +1212,13 @@ impl KeyValueStore for DynamoDBKVStore {
                                     || error_str.contains("conditional")
                                     || error_str.contains("condition")
                                 {
-                                    debug!(
-                                        key = %key,
-                                        error_code = %error_code,
-                                        "CAS failed: condition not met"
-                                    );
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!(
+                                            key = %key,
+                                            error_code = %error_code,
+                                            "CAS failed: condition not met"
+                                        );
+                                    }
                                     metrics::counter!(
                                         "plexspaces_keyvalue_ddb_cas_total",
                                         "backend" => "dynamodb",
@@ -1358,13 +1382,15 @@ impl KeyValueStore for DynamoDBKVStore {
                 )
                 .increment(1);
 
-                debug!(
-                    key = %key,
-                    delta = %delta,
-                    new_value = %new_value,
-                    duration_ms = duration.as_millis(),
-                    "Key incremented successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        key = %key,
+                        delta = %delta,
+                        new_value = %new_value,
+                        duration_ms = duration.as_millis(),
+                        "Key incremented successfully"
+                    );
+                }
                 Ok(new_value)
             }
             Err(_e) => {

@@ -17,6 +17,24 @@ if [[ "${1:-}" == "--contract-only" ]]; then
   HTTP_PORT=""
 fi
 
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 source "$PROJECT_ROOT/examples/rust/apps/test-common.sh"
 
 GREEN='\033[0;32m'
@@ -54,11 +72,12 @@ sleep 2
 _deployed=0
 for _attempt in 1 2 3; do
   DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+  ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
   -F "application_id=$APP_ID" \
   -F "name=$APP_ID" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1)
+  -F "config=@$CONFIG_FILE" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -72,6 +91,61 @@ if [ "$_deployed" -eq 0 ]; then
   echo -e "${RED}Deploy failed: $RESPONSE${NC}"
   exit 1
 fi
+
+send_actor() {
+  local actor="$1" payload="$2" timeout="${3:-20}"
+  curl -s --max-time "$timeout" -X POST \
+    "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
+    -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+    -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
+}
+
+assert_actor_ok() {
+  local step="$1" raw="$2"
+  if ! ASSERT_STEP="$step" ASSERT_JSON="$raw" python3 - <<'PY'
+import json, os, sys
+raw = os.environ.get("ASSERT_JSON", "")
+step = os.environ.get("ASSERT_STEP", "?")
+try:
+    d = json.loads(raw)
+except Exception as e:
+    print(f"FAIL [{step}]: invalid JSON: {e}", file=sys.stderr); sys.exit(1)
+def find_err(obj):
+    if isinstance(obj, dict):
+        if obj.get("success") is False: return str(obj.get("error") or "request failed")
+        if obj.get("status") == "error": return str(obj.get("error") or "error status")
+        if obj.get("error"): return str(obj["error"])
+        for v in obj.values():
+            e = find_err(v)
+            if e: return e
+    return None
+err = find_err(d)
+if err: print(f"FAIL [{step}]: {err}", file=sys.stderr); sys.exit(1)
+PY
+  then
+    echo -e "${RED}Assertion failed: $step${NC}"
+    echo "  Raw: $(echo "$raw" | head -c 400)"
+    exit 1
+  fi
+}
+
+echo ""
+echo "Step 3: Smoke test weather actor"
+echo "  Testing cache_stats..."
+R="$(send_actor "weather" '{"op":"cache_stats"}' 20)"
+assert_actor_ok "cache_stats" "$R"
+echo "  ✓ cache_stats OK"
+
+echo "  Testing get_weather..."
+R="$(send_actor "weather" '{"op":"get_weather","city":"London"}' 20)"
+assert_actor_ok "get_weather" "$R"
+echo "  ✓ get_weather OK"
+
+echo "  Testing clear_cache..."
+R="$(send_actor "weather" '{"op":"clear_cache"}' 20)"
+assert_actor_ok "clear_cache" "$R"
+echo "  ✓ clear_cache OK"
 
 echo ""
 echo "================================================================"

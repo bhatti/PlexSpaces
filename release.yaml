@@ -12,11 +12,11 @@ node:
   id: my-node
   listen_addr: 0.0.0.0:8091
   cluster_seed_nodes: []
-  wasm_apps_directory: "/app/wasm"
+  wasm_apps_directory: ""
 
 runtime:
   db:
-    connection_string: "sqlite:///tmp/plexspaces-my-node.db?mode=rwc"
+    connection_string: ""
     pool_size: 10
     auto_migrate: true
 

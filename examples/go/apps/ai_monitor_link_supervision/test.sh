@@ -8,6 +8,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/ai_monitor_link_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8091 localhost:8094"
 elif [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -74,6 +93,7 @@ ask() {
   curl -s --max-time "$timeout" -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 
@@ -83,6 +103,7 @@ tell() {
   curl -s --max-time 10 -X POST \
     "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$actor/tell" \
     -H "Content-Type: application/json" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -d "$payload" >/dev/null 2>&1 || true
 }
 
@@ -115,6 +136,7 @@ _deployed=0
 for _attempt in 1 2 3; do
     response=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST \
       "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
@@ -372,6 +394,52 @@ print('  Supervisor: dispatched={}, monitor_count={}, down_events={}'.format(
     p.get('down_events_received', 0),
 ))
 " 2>/dev/null || echo "  Pipeline status: $PIPE_STATUS"
+
+send_actor() {
+  local actor="$1" payload="$2" timeout="${3:-20}"
+  ask "$actor" "$payload" "$timeout"
+}
+
+assert_actor_ok() {
+  local step="$1" raw="$2"
+  if ! ASSERT_STEP="$step" ASSERT_JSON="$raw" python3 - <<'PY'
+import json, os, sys
+raw = os.environ.get("ASSERT_JSON", "")
+step = os.environ.get("ASSERT_STEP", "?")
+try:
+    d = json.loads(raw)
+except Exception as e:
+    print(f"FAIL [{step}]: invalid JSON: {e}", file=sys.stderr); sys.exit(1)
+def find_err(obj):
+    if isinstance(obj, dict):
+        if obj.get("success") is False: return str(obj.get("error") or "request failed")
+        if obj.get("status") == "error": return str(obj.get("error") or "error status")
+        if obj.get("error"): return str(obj["error"])
+        for v in obj.values():
+            e = find_err(v)
+            if e: return e
+    return None
+err = find_err(d)
+if err: print(f"FAIL [{step}]: {err}", file=sys.stderr); sys.exit(1)
+PY
+  then
+    echo -e "${RED}Assertion failed: $step${NC}"
+    echo "  Raw: $(echo "$raw" | head -c 400)"
+    exit 1
+  fi
+}
+
+echo ""
+echo "Step 17: Smoke test inference worker and pipeline supervisor"
+echo "  Testing inference_worker_a status..."
+R="$(send_actor "inference_worker_a" '{"op":"status"}' 20)"
+assert_actor_ok "worker_a status" "$R"
+echo "  ✓ inference_worker_a status OK"
+
+echo "  Testing pipeline_supervisor status..."
+R="$(send_actor "pipeline_supervisor" '{"op":"status"}' 20)"
+assert_actor_ok "pipeline_supervisor status" "$R"
+echo "  ✓ pipeline_supervisor status OK"
 
 echo ""
 echo "================================================================"

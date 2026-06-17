@@ -184,7 +184,7 @@ impl MemoizeFacet {
     }
 
     /// Read cached result bytes if present and not expired. Returns `None` on miss.
-    async fn read_cache(&self, key: &str, ctx: &RequestContext) -> Option<Vec<u8>> {
+    async fn read_cache(&self, ctx: &RequestContext, key: &str) -> Option<Vec<u8>> {
         let raw = self.kv_store.get(ctx, key).await.ok()??;
         let envelope: Value = serde_json::from_slice(&raw).ok()?;
         let exp = envelope.get("exp").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -197,7 +197,7 @@ impl MemoizeFacet {
     }
 
     /// Write result bytes to cache with TTL / max_entries enforcement.
-    async fn write_cache(&self, key: &str, result: &[u8], actor_id: &str, ctx: &RequestContext) {
+    async fn write_cache(&self, ctx: &RequestContext, key: &str, result: &[u8], actor_id: &str) {
         let exp = if self.ttl_seconds > 0 {
             Self::now_ms() + (self.ttl_seconds as u64) * 1000
         } else {
@@ -224,12 +224,12 @@ impl MemoizeFacet {
 
         // Update LRU list and enforce max_entries
         if self.max_entries > 0 {
-            self.enforce_max_entries(key, actor_id, ctx).await;
+            self.enforce_max_entries(ctx, key, actor_id).await;
         }
     }
 
     /// Append `key` to LRU list and evict oldest if over `max_entries`.
-    async fn enforce_max_entries(&self, key: &str, actor_id: &str, ctx: &RequestContext) {
+    async fn enforce_max_entries(&self, ctx: &RequestContext, key: &str, actor_id: &str) {
         let lru_key = self.lru_list_key(actor_id);
 
         let mut list: Vec<String> = match self.kv_store.get(ctx, &lru_key).await {
@@ -331,7 +331,7 @@ impl Facet for MemoizeFacet {
         let ctx = RequestContext::new_without_auth(tenant_id, namespace);
         let key = self.cache_key(&actor_id, method, args, headers);
 
-        if let Some(cached) = self.read_cache(&key, &ctx).await {
+        if let Some(cached) = self.read_cache(&ctx, &key).await {
             let mut hits = self.hits.write().await;
             *hits += 1;
             tracing::debug!(
@@ -388,7 +388,7 @@ impl Facet for MemoizeFacet {
         let ctx = RequestContext::new_without_auth(tenant_id, namespace);
         let key = self.cache_key(&actor_id, method, args, headers);
 
-        self.write_cache(&key, result, &actor_id, &ctx).await;
+        self.write_cache(&ctx, &key, result, &actor_id).await;
 
         Ok(InterceptResult::Continue)
     }

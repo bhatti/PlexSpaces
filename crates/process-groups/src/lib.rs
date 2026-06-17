@@ -213,7 +213,9 @@ impl ProcessGroupRegistry {
         let namespace = ctx.namespace().to_string();
         let span = tracing::span!(tracing::Level::DEBUG, "process_group.create", group_name = %group_name, tenant_id = %tenant_id);
         let _guard = span.enter();
-        trace!("Creating process group");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Creating process group");
+        }
 
         let key = Self::group_key(&tenant_id, &group_name);
 
@@ -250,7 +252,9 @@ impl ProcessGroupRegistry {
         metrics::histogram!("plexspaces_process_groups_create_duration_seconds")
             .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_created_total", "tenant" => tenant_id.to_string()).increment(1);
-        debug!(duration_ms = duration.as_millis(), "Process group created");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(duration_ms = duration.as_millis(), "Process group created");
+        }
 
         Ok(group)
     }
@@ -276,7 +280,9 @@ impl ProcessGroupRegistry {
         let start = std::time::Instant::now();
         let tenant_id = ctx.tenant_id();
         let _span = tracing::span!(tracing::Level::DEBUG, "process_group.delete", group_name = %group_name, tenant_id = %tenant_id);
-        trace!("Deleting process group");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Deleting process group");
+        }
 
         // Get namespace from group metadata (searches if admin/internal)
         // If group doesn't exist, return Ok (idempotent delete)
@@ -320,12 +326,14 @@ impl ProcessGroupRegistry {
         metrics::histogram!("plexspaces_process_groups_delete_duration_seconds")
             .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_deleted_total", "tenant" => tenant_id.to_string()).increment(1);
-        debug!(
-            duration_ms = duration.as_millis(),
-            members_deleted = member_count,
-            messages_deleted = message_count,
-            "Process group deleted"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                duration_ms = duration.as_millis(),
+                members_deleted = member_count,
+                messages_deleted = message_count,
+                "Process group deleted"
+            );
+        }
 
         Ok(())
     }
@@ -357,7 +365,9 @@ impl ProcessGroupRegistry {
         let start = std::time::Instant::now();
         let tenant_id = ctx.tenant_id();
         let _span = tracing::span!(tracing::Level::DEBUG, "process_group.join", group_name = %group_name, tenant_id = %tenant_id, actor_id = %actor_id, topics = ?topics);
-        trace!("Joining process group");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Joining process group");
+        }
 
         // Verify group exists
         let group_key = Self::group_key(tenant_id, group_name);
@@ -423,10 +433,12 @@ impl ProcessGroupRegistry {
         metrics::histogram!("plexspaces_process_groups_join_duration_seconds")
             .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_joins_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
-        debug!(
-            duration_ms = duration.as_millis(),
-            "Actor joined process group"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                duration_ms = duration.as_millis(),
+                "Actor joined process group"
+            );
+        }
 
         Ok(())
     }
@@ -455,7 +467,9 @@ impl ProcessGroupRegistry {
         let start = std::time::Instant::now();
         let tenant_id = ctx.tenant_id();
         let _span = tracing::span!(tracing::Level::DEBUG, "process_group.leave", group_name = %group_name, tenant_id = %tenant_id, actor_id = %actor_id);
-        trace!("Leaving process group");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Leaving process group");
+        }
 
         // Get namespace from group metadata (searches if admin/internal)
         let namespace = self.get_group_namespace(ctx, group_name).await?;
@@ -504,10 +518,12 @@ impl ProcessGroupRegistry {
         metrics::histogram!("plexspaces_process_groups_leave_duration_seconds")
             .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_leaves_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
-        debug!(
-            duration_ms = duration.as_millis(),
-            "Actor left process group"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                duration_ms = duration.as_millis(),
+                "Actor left process group"
+            );
+        }
 
         Ok(())
     }
@@ -690,7 +706,9 @@ impl ProcessGroupRegistry {
     ) -> Result<Vec<ActorId>, ProcessGroupError> {
         let start = std::time::Instant::now();
         let tenant_id = ctx.tenant_id();
-        trace!("Publishing message to process group");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Publishing message to process group");
+        }
 
         // Get namespace from group metadata (searches if admin/internal)
         let namespace = self.get_group_namespace(ctx, group_name).await?;
@@ -792,12 +810,14 @@ impl ProcessGroupRegistry {
             .record(duration.as_secs_f64());
         metrics::histogram!("plexspaces_process_groups_fanout_size").record(fanout_size as f64);
         metrics::counter!("plexspaces_process_groups_publish_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
-        debug!(
-            duration_ms = duration.as_millis(),
-            fanout_size = fanout_size,
-            topic = ?topic,
-            "Message published to process group"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                duration_ms = duration.as_millis(),
+                fanout_size = fanout_size,
+                topic = ?topic,
+                "Message published to process group"
+            );
+        }
 
         Ok(recipients)
     }

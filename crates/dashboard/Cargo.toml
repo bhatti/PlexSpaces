@@ -12,11 +12,13 @@ description = "Dashboard service and UI for PlexSpaces monitoring"
 [dependencies]
 # Core dependencies
 plexspaces-proto = { workspace = true }
+plexspaces-common = { workspace = true }
 plexspaces-object-registry = { workspace = true }
 plexspaces-facet = { workspace = true }
 plexspaces-application = { path = "../application" }
 plexspaces-actor = { workspace = true }
 plexspaces-services = { path = "../services" }
+plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 plexspaces-workflow = { workspace = true, optional = true }
 
 # Async runtime

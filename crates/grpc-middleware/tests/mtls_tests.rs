@@ -58,6 +58,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         // This should succeed (even if mTLS implementation is not complete yet)
@@ -77,6 +78,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -109,6 +111,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec!["scheduler-service".to_string()], // Only trust scheduler-service
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -142,6 +145,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec!["scheduler-service".to_string()], // Trust scheduler-service
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();

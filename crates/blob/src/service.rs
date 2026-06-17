@@ -184,7 +184,7 @@ impl BlobService {
         repository: Arc<dyn BlobRepository>,
     ) -> Self {
         let prefix = if config.prefix.is_empty() {
-            "/plexspaces".to_string()
+            std::env::var("HOME").map(|h| format!("{}/plexspaces/blob", h)).unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
         } else {
             config.prefix.clone()
         };
@@ -204,7 +204,7 @@ impl BlobService {
 
         // Set default prefix if empty
         let prefix = if config.prefix.is_empty() {
-            "/plexspaces".to_string()
+            std::env::var("HOME").map(|h| format!("{}/plexspaces/blob", h)).unwrap_or_else(|_| "/tmp/plexspaces/blob".to_string())
         } else {
             config.prefix.clone()
         };
@@ -285,7 +285,15 @@ impl BlobService {
                 })?)
             }
             "local" => {
-                // Local filesystem for testing
+                // Local filesystem — prefix is used as absolute path prefix by get_storage_path().
+                // Ensure the base directory exists.
+                if !prefix.is_empty() {
+                    std::fs::create_dir_all(&prefix).map_err(|e| {
+                        BlobError::ConfigError(format!(
+                            "Failed to create blob directory '{}': {}", prefix, e
+                        ))
+                    })?;
+                }
                 Arc::new(LocalFileSystem::new_with_prefix("/").map_err(|e| {
                     BlobError::ConfigError(format!(
                         "Failed to create local filesystem store: {}",

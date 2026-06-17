@@ -68,15 +68,16 @@ pub const MAX_WASM_FILE_SIZE: usize = 100 * 1024 * 1024;
 /// ## Components
 /// - `ActorServiceImpl`: For actor ask/tell handling
 /// - `bool`: auth_disabled flag
-/// - `Option<String>`: JWT secret (None if not configured)
+/// - `Option<Arc<JwtKeyPair>>`: JWT key pair for signing/verification (None if not configured)
 /// - `Arc<dyn ServiceLocator>`: Service locator for config access
 /// - `Option<DashboardServiceImpl>`: Dashboard service (if enabled)
 pub type HttpGatewayState = (
     Arc<ActorServiceImpl>,
-    bool,           // auth_disabled
-    Option<String>, // jwt_secret
+    bool,                              // auth_disabled
+    Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>, // jwt_key_pair
     Arc<dyn plexspaces_actor::ServiceLocator>,
     Option<Arc<DashboardServiceImpl>>,
+    Option<Arc<dyn plexspaces_services::user_service::ApiTokenRepository>>, // token revocation
 );
 
 /// Create gateway state from service locator and services
@@ -94,34 +95,74 @@ pub async fn create_gateway_state(
     dashboard_service: Option<Arc<DashboardServiceImpl>>,
 ) -> HttpGatewayState {
     let auth_disabled = service_locator.is_auth_disabled().await;
-    let jwt_secret = service_locator
+    let jwt_config = service_locator
         .get_security_config()
         .await
-        .and_then(|c| c.jwt)
-        .and_then(|j| {
-            if j.secret.is_empty() {
-                None
-            } else {
-                Some(j.secret)
+        .and_then(|c| c.jwt);
+
+    let jwt_key_pair = match jwt_config {
+        Some(ref cfg) => {
+            tracing::info!(
+                private_key_file = %cfg.private_key_file,
+                has_private_key_pem = !cfg.private_key_pem.is_empty(),
+                has_secret = !cfg.secret.is_empty(),
+                auto_generate_key = cfg.auto_generate_key,
+                "Resolving JWT key pair from config"
+            );
+            match plexspaces_grpc_middleware::JwtKeyPair::from_config(
+                &cfg.private_key_pem,
+                &cfg.private_key_file,
+                &cfg.secret,
+                cfg.auto_generate_key,
+            ) {
+                Ok(kp) => {
+                    tracing::info!(algorithm = ?kp.algorithm(), kid = %kp.kid(), "JWT key pair loaded");
+                    Some(Arc::new(kp))
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to load JWT key pair from config");
+                    None
+                }
             }
-        });
+        }
+        None => {
+            tracing::warn!("No JWT config in SecurityConfig, trying env vars");
+            match plexspaces_grpc_middleware::JwtKeyPair::from_env(None) {
+                Ok(kp) => Some(Arc::new(kp)),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to load JWT key pair from env");
+                    None
+                }
+            }
+        }
+    };
 
     (
         actor_service,
         auth_disabled,
-        jwt_secret,
+        jwt_key_pair,
         service_locator,
         dashboard_service,
+        None,
     )
 }
 
 /// Stamp validated JWT claims into request headers for downstream HTTP and tonic handlers.
 ///
-/// This keeps the HTTP gateway as the single place that translates authenticated identity
-/// into the normalized header contract used across dashboard and actor APIs.
+/// Mirrors the gRPC AuthInterceptor pattern: explicitly remove client-provided headers
+/// to prevent injection, then set ONLY from validated JWT claims.
 pub(crate) fn apply_jwt_claim_headers(headers: &mut axum::http::HeaderMap, claims: &JwtClaims) {
+    headers.remove("x-tenant-id");
+    headers.remove("x-user-id");
+    headers.remove("x-admin");
+    headers.remove("x-user-roles");
+    headers.remove("x-user-groups");
+
     if let Ok(value) = axum::http::HeaderValue::from_str(&claims.tenant_id) {
         headers.insert("x-tenant-id", value);
+    }
+    if let Ok(value) = axum::http::HeaderValue::from_str(&claims.sub) {
+        headers.insert("x-user-id", value);
     }
     if let Ok(value) =
         axum::http::HeaderValue::from_str(if claims.is_admin { "true" } else { "false" })
@@ -131,8 +172,10 @@ pub(crate) fn apply_jwt_claim_headers(headers: &mut axum::http::HeaderMap, claim
     if let Ok(value) = axum::http::HeaderValue::from_str(&claims.roles.join(",")) {
         headers.insert("x-user-roles", value);
     }
-    if claims.is_admin {
-        headers.insert("x-user-role", axum::http::HeaderValue::from_static("admin"));
+    if !claims.groups.is_empty() {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&claims.groups.join(",")) {
+            headers.insert("x-user-groups", value);
+        }
     }
 }
 
@@ -147,7 +190,7 @@ pub(crate) fn apply_jwt_claim_headers(headers: &mut axum::http::HeaderMap, claim
 /// ## Arguments
 /// * `jwt` - Optional JWT claims extension (set by auth middleware)
 /// * `auth_disabled` - Whether auth is disabled
-/// * `jwt_secret` - Optional JWT secret for validation
+/// * `jwt_key_pair` - Optional JWT key pair for validation
 /// * `headers` - Request headers
 ///
 /// ## Returns
@@ -155,7 +198,7 @@ pub(crate) fn apply_jwt_claim_headers(headers: &mut axum::http::HeaderMap, claim
 pub fn effective_tenant_id_from_jwt_or_headers(
     jwt: &Option<axum::extract::Extension<JwtClaims>>,
     auth_disabled: bool,
-    jwt_secret: Option<&str>,
+    jwt_key_pair: Option<&plexspaces_grpc_middleware::JwtKeyPair>,
     headers: &HeaderMap,
 ) -> String {
     // If we have validated JWT claims, use them
@@ -165,13 +208,13 @@ pub fn effective_tenant_id_from_jwt_or_headers(
 
     // If auth is not disabled, try to validate from Authorization header
     if !auth_disabled {
-        if let Some(secret) = jwt_secret {
+        if let Some(kp) = jwt_key_pair {
             let auth_header = headers
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             if let Ok(claims) =
-                crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref())
+                crate::http_jwt::validate_bearer_token_with_keypair(kp, auth_header.as_deref())
             {
                 return claims.tenant_id;
             }
@@ -202,7 +245,7 @@ pub fn effective_tenant_id_from_jwt_or_headers(
 /// - Returns 401 if token validation fails
 /// - Sets JwtClaims extension on success
 pub async fn http_auth_middleware(
-    axum::extract::State((_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<
+    axum::extract::State((_svc, auth_disabled, jwt_key_pair, _sl, _ds, token_repo)): axum::extract::State<
         HttpGatewayState,
     >,
     mut req: axum::extract::Request,
@@ -210,8 +253,23 @@ pub async fn http_auth_middleware(
 ) -> Response {
     let path = req.uri().path().to_string();
 
-    // Skip auth for routes that do not use JWT-backed tenant visibility.
-    if !path.starts_with("/api/v1/actors") && !path.starts_with("/api/v1/dashboard") {
+    // Skip auth for public routes (OIDC login/callback, health, static assets, dashboard HTML pages).
+    // Dashboard pages serve static HTML; actual data is fetched via /api/ calls that carry the session cookie.
+    if path.starts_with("/api/v1/auth/oidc/")
+        || path == "/api/v1/auth/logout"
+        || path.starts_with("/health")
+        || path.starts_with("/ready")
+        || path.starts_with("/static/")
+        || path.starts_with("/dashboard")
+        || path == "/"
+        || path == "/favicon.ico"
+        || path == "/.well-known/jwks.json"
+    {
+        return next.run(req).await;
+    }
+
+    // All other /api/ routes require auth when enabled.
+    if !path.starts_with("/api/") {
         return next.run(req).await;
     }
 
@@ -220,14 +278,14 @@ pub async fn http_auth_middleware(
         return next.run(req).await;
     }
 
-    // Check JWT secret is configured
-    let secret = match &jwt_secret {
-        Some(s) => s.as_str(),
+    // Require JWT key pair to be configured.
+    let kp = match &jwt_key_pair {
+        Some(kp) => kp,
         None => {
-            tracing::warn!(path = %path, "HTTP auth: JWT secret not configured (returning 503)");
+            tracing::warn!(path = %path, "HTTP auth: JWT key not configured (returning 503)");
             let body = serde_json::json!({
                 "code": 503,
-                "message": "Auth enabled but JWT secret not configured. Set PLEXSPACES_JWT_SECRET or security.jwt.secret. For local testing, set PLEXSPACES_DISABLE_AUTH=1."
+                "message": "Auth enabled but JWT key not configured. Set PLEXSPACES_JWT_PRIVATE_KEY_FILE or PLEXSPACES_JWT_SECRET. For local testing, set PLEXSPACES_DISABLE_AUTH=1."
             });
             return Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
@@ -237,7 +295,7 @@ pub async fn http_auth_middleware(
         }
     };
 
-    // Extract and validate token
+    // Extract token from Authorization header or plexspaces_token cookie.
     let auth_header = req
         .headers()
         .get("authorization")
@@ -248,14 +306,50 @@ pub async fn http_auth_middleware(
         .map(|h| h.starts_with("Bearer "))
         .unwrap_or(false);
 
-    match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
+    // Fall back to session cookie when no Authorization header is present.
+    let auth_header = if auth_header.is_none() || !has_bearer {
+        req.headers()
+            .get_all("cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|s| s.split(';'))
+            .find_map(|c| {
+                let c = c.trim();
+                c.strip_prefix("plexspaces_token=")
+                    .map(|token| format!("Bearer {}", token))
+            })
+            .or(auth_header)
+    } else {
+        auth_header
+    };
+
+    match crate::http_jwt::validate_bearer_token_with_keypair(kp, auth_header.as_deref()) {
         Ok(claims) => {
+            if let Some(ref repo) = token_repo {
+                if let Some(ref jti) = claims.jti {
+                    if let Ok(true) = repo.is_revoked(jti).await {
+                        let body = serde_json::json!({ "code": 401, "message": "Token has been revoked" });
+                        return Response::builder()
+                            .status(StatusCode::UNAUTHORIZED)
+                            .header("content-type", "application/json")
+                            .body(Body::from(serde_json::to_string(&body).unwrap()))
+                            .unwrap();
+                    }
+                }
+            }
             apply_jwt_claim_headers(req.headers_mut(), &claims);
             req.extensions_mut().insert(claims);
             next.run(req).await
         }
         Err(e) => {
-            tracing::debug!(path = %path, has_bearer = %has_bearer, "HTTP auth: JWT validation failed (401)");
+            let has_cookie = auth_header.as_ref().map_or(false, |h| h.len() > 7);
+            tracing::warn!(
+                path = %path,
+                has_bearer = %has_bearer,
+                has_cookie = %has_cookie,
+                error = %e,
+                "HTTP auth: JWT validation failed (401)"
+            );
             let body = serde_json::json!({ "code": 401, "message": e });
             Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
@@ -592,8 +686,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant-id", "test-tenant".parse().unwrap());
 
+        let kp = plexspaces_grpc_middleware::JwtKeyPair::from_secret("secret");
         let result =
-            effective_tenant_id_from_jwt_or_headers(&None, false, Some("secret"), &headers);
+            effective_tenant_id_from_jwt_or_headers(&None, false, Some(&kp), &headers);
         assert_eq!(result, "");
     }
 }

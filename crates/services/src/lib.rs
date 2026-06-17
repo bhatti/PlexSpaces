@@ -75,6 +75,7 @@ pub mod system_service;
 pub mod tuple_service;
 pub mod wasm_file_saver;
 pub mod object_registry_service;
+pub mod user_service;
 pub mod workflow_service;
 
 // Re-export ProcessGroupServiceImpl for convenience

@@ -1202,6 +1202,7 @@ mod tests {
         service_locator
             .register_security_config(SecurityConfig {
                 disable_auth: false,
+                oidc: None,
                 ..Default::default()
             })
             .await;

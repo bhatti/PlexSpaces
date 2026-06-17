@@ -76,6 +76,7 @@ async fn test_middleware_chain_with_auth_permissive() {
         allow_unauthenticated: true, // Permissive mode
         mtls_ca_certificate: String::new(),
         mtls_trusted_services: vec![],
+        ..Default::default()
     };
 
     let config = MiddlewareConfig {
@@ -118,6 +119,7 @@ async fn test_middleware_chain_with_auth_strict() {
         allow_unauthenticated: false, // Strict mode
         mtls_ca_certificate: String::new(),
         mtls_trusted_services: vec![],
+        ..Default::default()
     };
 
     let config = MiddlewareConfig {
@@ -168,6 +170,7 @@ async fn test_middleware_chain_execution_order() {
                         allow_unauthenticated: true,
                         mtls_ca_certificate: String::new(),
                         mtls_trusted_services: vec![],
+                        ..Default::default()
                     },
                 )),
             },
@@ -218,6 +221,7 @@ async fn test_middleware_chain_disabled_middleware_skipped() {
                     allow_unauthenticated: false, // Would deny if enabled
                     mtls_ca_certificate: String::new(),
                     mtls_trusted_services: vec![],
+                    ..Default::default()
                 },
             )),
         }],
@@ -275,6 +279,7 @@ async fn test_auth_interceptor_with_valid_jwt() {
         allow_unauthenticated: false,
         mtls_ca_certificate: String::new(),
         mtls_trusted_services: vec![],
+        ..Default::default()
     };
 
     let config = MiddlewareConfig {
@@ -343,6 +348,7 @@ async fn test_auth_interceptor_with_expired_jwt() {
         allow_unauthenticated: false,
         mtls_ca_certificate: String::new(),
         mtls_trusted_services: vec![],
+        ..Default::default()
     };
 
     let config = MiddlewareConfig {
@@ -412,6 +418,7 @@ async fn test_auth_interceptor_with_invalid_signature() {
         allow_unauthenticated: false,
         mtls_ca_certificate: String::new(),
         mtls_trusted_services: vec![],
+        ..Default::default()
     };
 
     let config = MiddlewareConfig {

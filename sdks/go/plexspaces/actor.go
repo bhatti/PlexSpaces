@@ -71,29 +71,73 @@ type BaseActor struct {
 	applicationID string
 }
 
+// stateEnvelope wraps actor state with runtime metadata so that metadata survives
+// WASM re-instantiation (wasmtime#8943 workaround) without re-calling Init().
+// The "_meta" key is reserved by the framework; actor state lives under "_state".
+type stateEnvelope struct {
+	Meta  *stateMeta      `json:"_meta,omitempty"`
+	State json.RawMessage `json:"_state"`
+}
+
+// stateMeta holds framework-owned identity that must persist across re-instantiation.
+type stateMeta struct {
+	ActorID       string `json:"actor_id"`
+	ApplicationID string `json:"application_id"`
+}
+
 // Init is a no-op default. Override in your actor if needed.
 func (b *BaseActor) Init(configJSON string) string {
 	return ""
 }
 
-// GetState serializes the actor to JSON. Override for custom serialization.
+// GetState serializes the actor to JSON wrapped in a state envelope that includes
+// runtime metadata (actor_id, application_id). The envelope ensures metadata survives
+// WASM re-instantiation without requiring init() to be re-called — matching the actor
+// lifecycle contract where Init() runs exactly once at birth (like Erlang's init/1).
 func (b *BaseActor) GetState() string {
-	if b.self != nil {
-		data, err := json.Marshal(b.self)
-		if err != nil {
-			return `{"error":"` + err.Error() + `"}`
-		}
-		return string(data)
+	if b.self == nil {
+		return "{}"
 	}
-	return "{}"
+	actorState, err := json.Marshal(b.self)
+	if err != nil {
+		return `{"error":"` + err.Error() + `"}`
+	}
+	envelope := stateEnvelope{
+		Meta: &stateMeta{
+			ActorID:       b.actorID,
+			ApplicationID: b.applicationID,
+		},
+		State: actorState,
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return `{"error":"` + err.Error() + `"}`
+	}
+	return string(data)
 }
 
-// SetState deserializes JSON into the actor. Override for custom deserialization.
+// SetState restores actor state from the state envelope produced by GetState.
+// Handles both envelope format (with _meta) and legacy bare-JSON for backward
+// compatibility with actors that override GetState/SetState.
 func (b *BaseActor) SetState(stateJSON string) string {
-	if b.self != nil {
-		if err := json.Unmarshal([]byte(stateJSON), b.self); err != nil {
-			return "ERROR: " + err.Error()
+	if b.self == nil {
+		return ""
+	}
+	var envelope stateEnvelope
+	if err := json.Unmarshal([]byte(stateJSON), &envelope); err == nil && envelope.Meta != nil {
+		// Envelope format: restore metadata then deserialize actor state.
+		b.actorID = envelope.Meta.ActorID
+		b.applicationID = envelope.Meta.ApplicationID
+		if envelope.State != nil {
+			if err := json.Unmarshal(envelope.State, b.self); err != nil {
+				return "ERROR: " + err.Error()
+			}
 		}
+		return ""
+	}
+	// Legacy format: bare actor JSON without envelope (backward compatible).
+	if err := json.Unmarshal([]byte(stateJSON), b.self); err != nil {
+		return "ERROR: " + err.Error()
 	}
 	return ""
 }

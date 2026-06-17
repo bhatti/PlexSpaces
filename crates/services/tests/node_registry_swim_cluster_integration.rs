@@ -67,6 +67,7 @@ async fn spawn_gossip_node(
     service_locator
         .register_security_config(SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         })
         .await;

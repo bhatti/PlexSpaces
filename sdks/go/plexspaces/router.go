@@ -30,6 +30,16 @@ import (
 	"strings"
 )
 
+// routerStateEnvelope wraps the active actor's state with the router's dispatch
+// metadata (factory key, actor ID). This enables the restore-without-init path:
+// after WASM re-instantiation, SetState uses the factory_key to recreate the
+// correct actor without calling Init() again.
+type routerStateEnvelope struct {
+	FactoryKey string          `json:"_factory_key"`
+	ActorID    string          `json:"_actor_id"`
+	ActorState json.RawMessage `json:"_actor_state"`
+}
+
 // ActorFactory is a function that creates a new Actor instance.
 type ActorFactory func() Actor
 
@@ -48,6 +58,7 @@ type ActorRouter struct {
 	definitions map[string]ActorDefinition
 	active      Actor
 	actorID     string
+	factoryKey  string // which factory key was resolved during Init() — persisted for restore
 }
 
 // NewActorRouter creates a new multi-actor router.
@@ -87,17 +98,19 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	// 1. role — exact match (checked first so same-module multi-role variants win)
-	if config.Role != "" {
-		if factory, ok := r.factories[config.Role]; ok {
+	// 1. actor_type — exact match (the WASM module type name, highest priority)
+	if config.ActorType != "" {
+		if factory, ok := r.factories[config.ActorType]; ok {
+			r.factoryKey = config.ActorType
 			r.active = factory()
 			return r.active.Init(configJSON)
 		}
 	}
 
-	// 2. actor_type — exact match (the WASM module type name)
-	if config.ActorType != "" {
-		if factory, ok := r.factories[config.ActorType]; ok {
+	// 2. role — exact match (same-module multi-role variants)
+	if config.Role != "" {
+		if factory, ok := r.factories[config.Role]; ok {
+			r.factoryKey = config.Role
 			r.active = factory()
 			return r.active.Init(configJSON)
 		}
@@ -107,6 +120,7 @@ func (r *ActorRouter) Init(configJSON string) string {
 	if config.Role != "" {
 		for key, factory := range r.factories {
 			if strings.HasPrefix(config.Role, key) {
+				r.factoryKey = key
 				r.active = factory()
 				return r.active.Init(configJSON)
 			}
@@ -124,18 +138,54 @@ func (r *ActorRouter) Handle(fromActor, msgType, payloadJSON string) string {
 	return r.active.Handle(fromActor, msgType, payloadJSON)
 }
 
-// GetState delegates to the active actor.
+// GetState delegates to the active actor, wrapping in a router envelope that includes
+// the resolved factory key. This allows SetState to recreate the correct actor after
+// re-instantiation without calling Init().
 func (r *ActorRouter) GetState() string {
 	if r.active == nil {
 		return "{}"
 	}
-	return r.active.GetState()
+	actorState := r.active.GetState()
+	envelope := routerStateEnvelope{
+		FactoryKey: r.factoryKey,
+		ActorID:    r.actorID,
+		ActorState: json.RawMessage(actorState),
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return r.active.GetState()
+	}
+	return string(data)
 }
 
-// SetState delegates to the active actor.
+// SetState restores the router and active actor from the router state envelope.
+// When called after re-instantiation (without init), active may be nil. In that
+// case, the envelope's factory_key identifies which factory to use — the router
+// recreates the actor without calling Init(), avoiding duplicate side effects
+// (timer scheduling, PG joins, etc.).
 func (r *ActorRouter) SetState(stateJSON string) string {
+	var envelope routerStateEnvelope
+	if err := json.Unmarshal([]byte(stateJSON), &envelope); err == nil && envelope.FactoryKey != "" {
+		// Router envelope format: restore factory key, create actor if needed,
+		// then delegate actor state restoration.
+		r.factoryKey = envelope.FactoryKey
+		r.actorID = envelope.ActorID
+		if r.active == nil {
+			if factory, ok := r.factories[envelope.FactoryKey]; ok {
+				r.active = factory()
+			}
+		}
+		if r.active == nil {
+			return "ERROR: no factory registered for key '" + envelope.FactoryKey + "'"
+		}
+		if envelope.ActorState != nil {
+			return r.active.SetState(string(envelope.ActorState))
+		}
+		return ""
+	}
+	// Legacy format (pre-router-envelope): delegate directly.
 	if r.active == nil {
-		return "ERROR: no active actor"
+		return "ERROR: no active actor (set_state before init and no router envelope in state)"
 	}
 	return r.active.SetState(stateJSON)
 }

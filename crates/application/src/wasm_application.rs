@@ -107,8 +107,9 @@ fn parse_behavior_kind(s: Option<&str>) -> plexspaces_actor::BehaviorType {
 /// - Handles serialization/deserialization of messages
 struct WasmActorBehavior {
     instance: Arc<WasmInstance>,
-    actor_type: String, // Actor type for dashboard grouping (e.g., application name or child spec id)
-    behavior_kind: plexspaces_actor::BehaviorType, // OTP-style kind for logging (GenServer, GenEvent, etc.)
+    actor_type: String,
+    behavior_kind: plexspaces_actor::BehaviorType,
+    is_replaying: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait]
@@ -234,11 +235,47 @@ impl Actor for WasmActorBehavior {
                 Ok(())
             }
             Err(e) => {
-                tracing::debug!(
+                tracing::warn!(
                     message_id = %message_id,
                     error = %e,
                     "WasmActor handle_message: WASM call failed"
                 );
+                // Send error reply so callers don't timeout waiting for a response
+                // that will never come. Without this, ask() callers silently wait
+                // until timeout — hiding the real error.
+                if !message.sender_id.is_empty() && !message.correlation_id.is_empty() {
+                    let error_payload = serde_json::json!({
+                        "success": false,
+                        "error": format!("WASM handle_message failed: {}", e),
+                    });
+                    let reply_message = Message {
+                        id: format!("res-{}", ulid::Ulid::new()),
+                        payload: serde_json::to_vec(&error_payload).unwrap_or_default(),
+                        message_type: "error_reply".to_string(),
+                        ..Default::default()
+                    };
+
+                    let current_actor_id = ctx
+                        .self_ref()
+                        .map(|r| r.id().clone())
+                        .or_else(|| ActorId::from_canonical(&message.receiver_id).ok());
+
+                    if let Some(actor_id) = current_actor_id {
+                        let correlation_id_opt = if message.correlation_id.is_empty() {
+                            None
+                        } else {
+                            Some(message.correlation_id.as_str())
+                        };
+                        let _ = ctx
+                            .send_reply(
+                                correlation_id_opt,
+                                &message.sender_id,
+                                actor_id,
+                                reply_message,
+                            )
+                            .await;
+                    }
+                }
                 Err(BehaviorError::ProcessingError(format!(
                     "WASM handle_message failed: {}",
                     e
@@ -254,6 +291,10 @@ impl Actor for WasmActorBehavior {
 
     fn behavior_kind(&self) -> BehaviorType {
         self.behavior_kind.clone()
+    }
+
+    fn replay_signal(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        Some(self.is_replaying.clone())
     }
 
     async fn capture_checkpoint_state(
@@ -662,7 +703,7 @@ impl WasmApplication {
                 }),
                 role: child_spec.role.clone(),
                 namespace: namespace.clone(),
-                tenant_id: String::new(), // overridden at service layer
+                tenant_id: tenant_id.clone(),
                 visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),
@@ -697,7 +738,7 @@ impl WasmApplication {
                 }),
                 role: child_spec.role.clone(),
                 namespace: namespace.clone(),
-                tenant_id: String::new(),
+                tenant_id: tenant_id.clone(),
                 visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),
@@ -819,12 +860,14 @@ impl WasmApplication {
                             .as_ref()
                             .map(|i| i.actor_type.clone())
                             .unwrap_or_default();
+                        let is_replaying = instance.host_functions().await.is_replaying.clone();
                         Ok(Box::new(WasmActorBehavior {
                             instance,
                             actor_type: wasm_dispatch_type,
                             behavior_kind: parse_behavior_kind(
                                 if spec.behavior_kind.is_empty() { None } else { Some(spec.behavior_kind.as_str()) }
                             ),
+                            is_replaying,
                         }) as Box<dyn CoreActor>)
                     })
                 })
@@ -1440,10 +1483,12 @@ impl WasmApplication {
         )
         .await?;
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
+        let is_replaying = wasm_instance.host_functions().await.is_replaying.clone();
         let behavior: Box<dyn CoreActor> = Box::new(WasmActorBehavior {
             instance: wasm_instance.clone(),
             actor_type: identity.actor_type.clone(),
             behavior_kind,
+            is_replaying,
         });
 
         let mut actor = ActorBuilder::new(behavior)
@@ -1474,6 +1519,7 @@ impl WasmApplication {
         // Use tenant_id/namespace from API request (passed as parameters), not "internal"
         // Clone namespace before moving it (needed later for virtual actor type registration)
         let namespace_for_registration = namespace.clone();
+        let tenant_id_for_registration = tenant_id.clone();
         let actor_context = plexspaces_actor::ActorContext::new(
             local_node_id.to_string(),
             tenant_id,
@@ -1560,7 +1606,7 @@ impl WasmApplication {
                 }),
                 role: child_spec.role.clone(),
                 namespace: namespace_for_type,
-                tenant_id: String::new(),
+                tenant_id: tenant_id_for_registration.clone(),
                 visibility: 0,
                 behavior_kind: child_spec.behavior_kind.clone().unwrap_or_default(),
                 args: child_spec.args.clone(),

@@ -96,6 +96,14 @@ func (a *AgentActor) Handle(fromActor, msgType, payloadJSON string) string {
 		return a.compactContext(10)
 	case "get_capabilities":
 		return marshal(map[string]any{"status": "ok", "capabilities": a.Capabilities})
+	case "get_stats":
+		return marshal(map[string]any{
+			"status":      "ok",
+			"total_chats": a.TotalChats,
+			"loop_count":  a.LoopCount,
+			"history_len": len(a.Messages),
+			"agent_name":  a.AgentName,
+		})
 	default:
 		return marshal(map[string]any{"error": "unknown_op", "op": op})
 	}

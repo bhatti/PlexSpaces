@@ -692,6 +692,7 @@ mod tests {
     async fn test_validate_security_config_disabled_in_config() {
         let config = SecurityConfig {
             disable_auth: true,
+            oidc: None,
             jwt: Some(JwtConfig {
                 enable_jwt: true,
                 secret: String::new(),

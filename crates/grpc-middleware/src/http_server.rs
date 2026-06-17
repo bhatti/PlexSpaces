@@ -33,6 +33,8 @@
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use tokio::net::TcpListener;
@@ -40,6 +42,75 @@ use tonic::body::BoxBody;
 use tonic::server::NamedService;
 use tonic::service::Routes;
 use tower::Service;
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::timeout::TimeoutLayer;
+
+/// mTLS configuration for the gRPC/HTTP server.
+#[derive(Clone)]
+pub struct MtlsServerConfig {
+    pub cert_pem: Vec<u8>,
+    pub key_pem: Vec<u8>,
+    pub ca_pem: Vec<u8>,
+}
+
+impl MtlsServerConfig {
+    /// Load mTLS config from PEM files.
+    pub fn from_files(
+        cert_path: &str,
+        key_path: &str,
+        ca_path: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self {
+            cert_pem: std::fs::read(cert_path)
+                .map_err(|e| format!("Cannot read cert {}: {}", cert_path, e))?,
+            key_pem: std::fs::read(key_path)
+                .map_err(|e| format!("Cannot read key {}: {}", key_path, e))?,
+            ca_pem: std::fs::read(ca_path)
+                .map_err(|e| format!("Cannot read CA {}: {}", ca_path, e))?,
+        })
+    }
+
+    /// Build a rustls `ServerConfig` from the loaded PEM data.
+    pub fn build_rustls_config(
+        &self,
+    ) -> Result<Arc<rustls::ServerConfig>, Box<dyn std::error::Error + Send + Sync>> {
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use rustls_pemfile::{certs, private_key};
+        use std::io::Cursor;
+
+        let server_certs: Vec<CertificateDer<'static>> =
+            certs(&mut Cursor::new(&self.cert_pem))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Invalid server cert PEM: {}", e))?;
+
+        let key: PrivateKeyDer<'static> = private_key(&mut Cursor::new(&self.key_pem))
+            .map_err(|e| format!("Invalid server key PEM: {}", e))?
+            .ok_or("No private key found in key PEM")?;
+
+        // Build root cert store for client cert verification (mutual TLS)
+        let mut root_store = rustls::RootCertStore::empty();
+        for ca_cert in certs(&mut Cursor::new(&self.ca_pem)).flatten() {
+            root_store.add(ca_cert).map_err(|e| format!("Invalid CA cert: {}", e))?;
+        }
+        let client_verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(root_store))
+            .build()
+            .map_err(|e| format!("Client verifier: {}", e))?;
+
+        let config = rustls::ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(server_certs, key)
+            .map_err(|e| format!("TLS config error: {}", e))?;
+
+        Ok(Arc::new(config))
+    }
+}
+
+/// Public return type for the TLS server (listener + router + optional TLS acceptor).
+pub struct BuiltServer {
+    pub listener: TcpListener,
+    pub app: Router,
+    pub tls_config: Option<Arc<rustls::ServerConfig>>,
+}
 
 /// Errors that can occur during server assembly or binding.
 #[derive(thiserror::Error, Debug)]
@@ -108,14 +179,25 @@ impl GrpcHttpServerBuilder {
     /// Returns `(TcpListener, Router<()>)`. Caller drives with
     /// `axum::serve(listener, app).await`.
     pub async fn build(self) -> Result<(TcpListener, Router), ServerBuildError> {
-        // tonic 0.12: Routes::into_axum_router() returns axum::Router.
-        // gRPC and HTTP are multiplexed by content-type automatically.
         let grpc_router: Router = match self.routes {
             Some(routes) => routes.into_axum_router(),
             None => Router::new(),
         };
 
-        let app = grpc_router.merge(self.http_routes);
+        // CORS applied to HTTP routes only (not gRPC which uses HTTP/2 and is
+        // exempt from CORS). Permissive for dashboard dev; production should
+        // override via reverse proxy (nginx/envoy) with strict allow-origin.
+        let cors = CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+
+        // Timeout on HTTP REST routes (not gRPC streaming). 5 minutes allows WASM file uploads.
+        let http_with_timeout = self.http_routes.layer(TimeoutLayer::new(Duration::from_secs(300)));
+
+        let app = grpc_router
+            .merge(http_with_timeout)
+            .layer(cors);
 
         let listener = TcpListener::bind(self.addr)
             .await

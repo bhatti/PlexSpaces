@@ -488,6 +488,8 @@ impl DurabilityFacet {
         // happens when we replay MessageReceived through the handler
         let replay_handler = self.replay_handler.read().await;
         if let Some(handler) = replay_handler.as_ref() {
+            handler.on_replay_start().await;
+
             // Count messages to replay
             let messages_to_replay: Vec<_> = entries
                 .iter()
@@ -537,13 +539,15 @@ impl DurabilityFacet {
                     // Replay message through handler.
                     // The handler carries its own ActorContext internally;
                     // no context parameter is passed here.
-                    handler
-                        .replay_message(message)
-                        .await
-                        .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;
+                    if let Err(e) = handler.replay_message(message).await {
+                        handler.on_replay_end().await;
+                        return Err(JournalError::Replay(format!("Replay failed: {}", e)));
+                    }
                     replayed_count += 1;
                 }
             }
+
+            handler.on_replay_end().await;
 
             if replayed_count > 0 {
                 tracing::info!(
@@ -1795,6 +1799,87 @@ mod tests {
         // Sequence should be restored
         let seq = *facet2.message_sequence.read().await;
         assert_eq!(seq, 6); // 3 * (before + after)
+    }
+
+    #[tokio::test]
+    async fn test_replay_handler_lifecycle_hooks_called() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+        struct TrackingReplayHandler {
+            replay_signal: Arc<AtomicBool>,
+            start_count: Arc<AtomicU32>,
+            end_count: Arc<AtomicU32>,
+        }
+
+        #[async_trait::async_trait]
+        impl crate::ReplayHandler for TrackingReplayHandler {
+            async fn on_replay_start(&self) {
+                self.replay_signal.store(true, Ordering::Release);
+                self.start_count.fetch_add(1, Ordering::Relaxed);
+            }
+            async fn on_replay_end(&self) {
+                self.replay_signal.store(false, Ordering::Release);
+                self.end_count.fetch_add(1, Ordering::Relaxed);
+            }
+            async fn replay_message(
+                &self,
+                _message: plexspaces_proto::common::v1::Message,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                assert!(
+                    self.replay_signal.load(Ordering::Acquire),
+                    "replay_signal should be true during replay"
+                );
+                Ok(())
+            }
+        }
+
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage_clone = storage.clone();
+        let mut config = create_test_config();
+        config.replay_on_activation = false;
+
+        let mut facet1 = DurabilityFacet::new(storage_clone.clone(), config_to_value(&config), 50);
+        facet1
+            .on_attach("actor-replay-hooks", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        for i in 0..2 {
+            facet1
+                .before_method(&format!("op_{}", i), &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+            facet1
+                .after_method(&format!("op_{}", i), &[], &[], &std::collections::HashMap::new())
+                .await
+                .unwrap();
+        }
+        facet1.on_detach("actor-replay-hooks").await.unwrap();
+
+        // Reattach with replay enabled and a tracking handler
+        config.replay_on_activation = true;
+        let mut facet2 = DurabilityFacet::new(storage_clone, config_to_value(&config), 50);
+
+        let signal = Arc::new(AtomicBool::new(false));
+        let start_count = Arc::new(AtomicU32::new(0));
+        let end_count = Arc::new(AtomicU32::new(0));
+
+        let handler = TrackingReplayHandler {
+            replay_signal: signal.clone(),
+            start_count: start_count.clone(),
+            end_count: end_count.clone(),
+        };
+        facet2.set_replay_handler(Box::new(handler)).await;
+
+        let result = facet2
+            .on_attach("actor-replay-hooks", serde_json::json!({}))
+            .await;
+        assert!(result.is_ok(), "on_attach should succeed: {:?}", result);
+
+        assert_eq!(start_count.load(Ordering::Relaxed), 1, "on_replay_start called once");
+        assert_eq!(end_count.load(Ordering::Relaxed), 1, "on_replay_end called once");
+        assert!(!signal.load(Ordering::Acquire), "signal should be false after replay");
     }
 
     #[tokio::test]

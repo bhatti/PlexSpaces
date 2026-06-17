@@ -477,6 +477,8 @@ export PLEXSPACES_DISABLE_AUTH=1
 | Variable | Description | Required When |
 |----------|-------------|---------------|
 | `PLEXSPACES_JWT_SECRET` | JWT secret for HS256 signing | JWT enabled (unless using JWKS) |
+| `PLEXSPACES_OIDC_CLIENT_ID` | OAuth/OIDC client ID | OIDC enabled |
+| `PLEXSPACES_OIDC_CLIENT_SECRET` | OAuth/OIDC client secret | OIDC enabled |
 | `PLEXSPACES_MTLS_CA_CERT` | Path to CA certificate file | mTLS enabled (unless auto-generating) |
 | `PLEXSPACES_MTLS_SERVER_CERT` | Path to server certificate file | mTLS enabled (unless auto-generating) |
 | `PLEXSPACES_MTLS_SERVER_KEY` | Path to server private key file | mTLS enabled (unless auto-generating) |
@@ -525,6 +527,48 @@ export PLEXSPACES_JWT_SECRET="your-secret-key-here"
 # Or use JWKS for RS256 (no secret needed)
 # Configure jwks_url in SecurityConfig
 ```
+
+#### OAuth/OIDC Configuration
+
+PlexSpaces supports OAuth 2.0 / OpenID Connect for browser-based authentication. Configure your OIDC provider:
+
+```bash
+# Required environment variables
+export PLEXSPACES_OIDC_CLIENT_ID="your-oauth-client-id"
+export PLEXSPACES_OIDC_CLIENT_SECRET="your-oauth-client-secret"
+export PLEXSPACES_JWT_SECRET="your-jwt-signing-secret"
+```
+
+```yaml
+# In release.yaml
+runtime:
+  security:
+    oidc:
+      enabled: true
+      discovery_url: "https://accounts.google.com/.well-known/openid-configuration"
+      redirect_uri: "http://localhost:8091/api/v1/auth/oidc/callback"
+      scopes: ["openid", "email", "profile"]
+      tenant_claim: "hd"                 # Claim that maps to tenant (varies by provider)
+      admin_groups: ["platform-admins"]  # Groups that grant admin privilege
+      default_tenant_id: "default"       # Fallback when tenant_claim is absent
+```
+
+Supported providers: Google, Okta, Auth0, Keycloak, or any OIDC-compliant provider. See [Security Guide](security.md#provider-examples) for provider-specific configuration.
+
+#### API Token Configuration
+
+API tokens (`psx_` prefix) provide long-lived programmatic access. No additional configuration is needed beyond enabling JWT (tokens are validated by hashing and looking up in the database).
+
+Create tokens via the dashboard (`/dashboard/tokens`) or API:
+
+```bash
+curl -X POST http://localhost:8091/api/v1/auth/tokens \
+  -H "Authorization: Bearer <session-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci-token", "scopes": ["read","write"], "ttl_seconds": 7776000}'
+```
+
+See [Security Guide](security.md#api-tokens-programmatic-access) for full details.
 
 #### mTLS Configuration
 

@@ -467,6 +467,7 @@ graph TB
 - **Location Transparency**: `is_actor_local()` determines locality by comparing node_id from actor_id with local_node_id
 - **RequestContext Required**: All routing functions require RequestContext for tenant/namespace isolation
 - **Ask Pattern**: Uses temporary sender ActorRef + ReplyWaiterRegistry for request-reply semantics
+- **Error Reply Propagation**: Handler failures produce `message_type: "error_reply"` — conveyed through gRPC via `AskReplyResponse.success=false` and reconstructed on the caller side, giving immediate failure notification (Erlang/Orleans semantics) without caller timeout
 
 ### Component Interaction Diagram
 
@@ -1402,6 +1403,30 @@ PlexSpaces enforces mandatory tenant isolation through:
 - **Resource quotas**: Per-tenant resource limits (CPU, memory, storage)
 
 See [Multi-Tenancy Architecture](#multi-tenancy-architecture) and [Security Guide](security.md) for details.
+
+### Authentication (JWT)
+
+PlexSpaces supports two JWT signing algorithms with automatic key management:
+
+- **ES256 (preferred)**: Asymmetric ECDSA P-256 signing. Private key signs tokens; public key verifies. Supports JWKS endpoint for external validation.
+- **HS256 (legacy fallback)**: Symmetric HMAC-SHA256. Single shared secret for signing and verification.
+
+**Key Resolution Order** (first match wins):
+1. `PLEXSPACES_JWT_PRIVATE_KEY` env var (inline PEM for Docker/K8s secrets)
+2. `PLEXSPACES_JWT_PRIVATE_KEY_FILE` env var or config (path to PEM file)
+3. Auto-generate ES256 key pair and save to file (if `auto_generate_key: true`)
+4. `PLEXSPACES_JWT_SECRET` env var (HS256 fallback)
+
+**JWKS Endpoint**: `GET /.well-known/jwks.json` exposes the ES256 public key in JWK format for external services to verify PlexSpaces-issued tokens.
+
+**Configuration** (in `release-auth.yaml`):
+```yaml
+security:
+  jwt:
+    algorithm: "ES256"
+    auto_generate_key: true
+    private_key_file: ""   # reads PLEXSPACES_JWT_PRIVATE_KEY_FILE
+```
 
 ### Network Security
 

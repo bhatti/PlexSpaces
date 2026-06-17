@@ -10,6 +10,7 @@ description = "CLI tool for PlexSpaces framework management"
 plexspaces-proto = { workspace = true }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-node = { workspace = true }
+plexspaces-grpc-middleware = { path = "../grpc-middleware" }
 plexspaces-common = { path = "../common" }
 plexspaces-services = { path = "../services" }
 tonic = { workspace = true }

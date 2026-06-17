@@ -252,6 +252,7 @@ pub struct ActorContext {
     /// - Understanding supervision hierarchy
     /// - Reporting to parent supervisor
     pub parent_ref: Option<ActorRef>,
+
 }
 
 impl ActorContext {
@@ -316,6 +317,7 @@ impl ActorContext {
     pub fn is_trapping_exits(&self) -> bool {
         self.trap_exit
     }
+
 
     /// Get self ActorRef
     pub fn self_ref(&self) -> Option<&ActorRef> {
@@ -383,7 +385,7 @@ impl ActorContext {
         let reply_message_id = reply_message.id.clone();
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
+            tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}",
                 sender_id, target_actor_id_clone, correlation_id, reply_message_id);
         }
 

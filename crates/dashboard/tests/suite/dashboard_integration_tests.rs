@@ -138,6 +138,7 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
     node.service_locator()
         .register_security_config(SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         })
         .await;
@@ -174,6 +175,7 @@ async fn create_file_backed_test_node(node_id: &str) -> (Arc<Node>, String) {
     node.service_locator()
         .register_security_config(SecurityConfig {
             disable_auth: true,
+            oidc: None,
             ..Default::default()
         })
         .await;
@@ -711,6 +713,7 @@ async fn test_get_applications_respects_authenticated_tenant_scope() {
     node.service_locator()
         .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
             disable_auth: false,
+            oidc: None,
             ..Default::default()
         })
         .await;
@@ -809,6 +812,7 @@ async fn test_get_actors_respects_authenticated_tenant_scope() {
     node.service_locator()
         .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
             disable_auth: false,
+            oidc: None,
             ..Default::default()
         })
         .await;
@@ -868,8 +872,9 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
     let storage = WorkflowStorage::new_sqlite(&connection_string)
         .await
         .unwrap();
+    let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-ns".into());
     storage
-        .save_definition(&WorkflowDefinition {
+        .save_definition(&ctx, &WorkflowDefinition {
             id: "order-approval".to_string(),
             name: "Order Approval".to_string(),
             version: "1.0.0".to_string(),
@@ -884,6 +889,7 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
         .unwrap();
     let execution_id = storage
         .create_execution_with_node(
+            &ctx,
             "order-approval",
             "1.0.0",
             serde_json::json!({"order_id": "123"}),

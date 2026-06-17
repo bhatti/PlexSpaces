@@ -326,6 +326,9 @@ pub struct HostFunctions {
     /// Shared send_after timer handles for this actor across all re-instantiations.
     /// Aborted en-masse on application undeploy so stale timers don't fire after cleanup.
     pub timer_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// When true, side-effecting host calls (send_after, send_message) are suppressed.
+    /// Set during journal replay to prevent re-scheduling timers that would cause reentrance traps.
+    pub is_replaying: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HostFunctions {
@@ -345,6 +348,7 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -379,6 +383,7 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
         }
@@ -398,6 +403,7 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
         }
@@ -420,6 +426,7 @@ impl HostFunctions {
             elastic_pool_service: None,
             outbound_http_client: None,
             timer_handles: Arc::new(Mutex::new(Vec::new())),
+            is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
         }
@@ -455,6 +462,7 @@ impl HostFunctions {
             elastic_pool_service,
             outbound_http_client,
             timer_handles,
+            is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 

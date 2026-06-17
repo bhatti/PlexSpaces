@@ -218,13 +218,14 @@ where
                             .await
                             .and_then(|c| c.jwt)
                             .and_then(|j| if j.secret.is_empty() { None } else { Some(j.secret) });
+                        let local_key_pair = plexspaces_grpc_middleware::JwtKeyPair::from_env(jwt_secret.as_deref()).ok();
 
                         let tenant_id = req.headers()
                             .get("authorization")
                             .and_then(|v| v.to_str().ok())
                             .and_then(|auth| {
-                                jwt_secret.as_deref().and_then(|secret| {
-                                    crate::http_jwt::validate_bearer_token(secret, Some(auth))
+                                local_key_pair.as_ref().and_then(|kp| {
+                                    crate::http_jwt::validate_bearer_token_with_keypair(kp, Some(auth))
                                         .ok()
                                         .map(|claims| claims.tenant_id)
                                 })

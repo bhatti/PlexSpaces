@@ -15,6 +15,7 @@ use axum::{
     Router,
 };
 use plexspaces_actor::{NodeConnectivity, ServiceLocator};
+use plexspaces_services::user_service::TenantRepository;
 
 const MAX_WASM_BODY_SIZE: usize = 100 * 1024 * 1024; // 100MB
 
@@ -27,8 +28,10 @@ pub struct DeployRouteState {
     pub node_connectivity: Arc<dyn NodeConnectivity>,
     /// Whether authentication is disabled
     pub auth_disabled: bool,
-    /// JWT secret for token validation
-    pub jwt_secret: Option<String>,
+    /// JWT key pair for token validation
+    pub jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
+    /// Tenant repository for ensuring tenants exist on deploy
+    pub tenant_repo: Option<Arc<dyn TenantRepository>>,
 }
 
 /// Build the deploy/undeploy HTTP router.
@@ -36,13 +39,15 @@ pub fn deploy_router(
     service_locator: Arc<dyn ServiceLocator>,
     node_connectivity: Arc<dyn NodeConnectivity>,
     auth_disabled: bool,
-    jwt_secret: Option<String>,
+    jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>>,
+    tenant_repo: Option<Arc<dyn TenantRepository>>,
 ) -> Router {
     let state = DeployRouteState {
         service_locator,
         node_connectivity,
         auth_disabled,
-        jwt_secret,
+        jwt_key_pair,
+        tenant_repo,
     };
 
     Router::new()
@@ -207,7 +212,16 @@ async fn handle_deploy(
     };
 
     let tenant_id =
-        extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
+        crate::http_jwt::extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_key_pair.as_deref())?;
+
+    if let Some(ref tenant_repo) = s.tenant_repo {
+        match tenant_repo.get_or_create_by_slug(&tenant_id, &tenant_id).await {
+            Ok(_) => tracing::info!(tenant_id = %tenant_id, "Tenant ensured on deploy"),
+            Err(e) => tracing::warn!(tenant_id = %tenant_id, error = %e, "Failed to ensure tenant exists on deploy"),
+        }
+    } else if !tenant_id.is_empty() {
+        tracing::warn!(tenant_id = %tenant_id, "tenant_repo not available, cannot auto-create tenant on deploy");
+    }
 
     let app_service =
         ApplicationServiceImpl::new(s.service_locator.clone(), Some(s.node_connectivity.clone()));
@@ -252,7 +266,7 @@ async fn handle_undeploy(
     use tonic::metadata::MetadataValue;
 
     let tenant_id =
-        extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_secret.as_deref())?;
+        crate::http_jwt::extract_tenant_id_from_headers(&headers, s.auth_disabled, s.jwt_key_pair.as_deref())?;
 
     let app_service = ApplicationServiceImpl::new(s.service_locator.clone(), None);
     let mut grpc_request = tonic::Request::new(UndeployApplicationRequest {
@@ -285,30 +299,3 @@ async fn handle_undeploy(
     })))
 }
 
-fn extract_tenant_id_from_headers(
-    headers: &axum::http::HeaderMap,
-    auth_disabled: bool,
-    jwt_secret: Option<&str>,
-) -> Result<String, (StatusCode, String)> {
-    if auth_disabled {
-        return Ok(String::new());
-    }
-    let secret = jwt_secret.ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Auth enabled but JWT secret not configured".to_string(),
-        )
-    })?;
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref())
-        .map(|claims| claims.tenant_id)
-        .map_err(|e| {
-            (
-                StatusCode::UNAUTHORIZED,
-                format!("Deploy requires valid JWT: {}", e),
-            )
-        })
-}

@@ -119,23 +119,41 @@ func TestBaseActorGetState(t *testing.T) {
 	counter := newCounterActor()
 	counter.Value = 42
 	counter.Name = "test"
+	counter.SetRuntimeMetadata("ns//app::actor@node")
 
 	state := counter.GetState()
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(state), &parsed); err != nil {
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(state), &envelope); err != nil {
 		t.Fatalf("GetState should return valid JSON: %v", err)
 	}
 
+	// State envelope wraps actor state under "_state" and metadata under "_meta"
+	stateRaw, ok := envelope["_state"]
+	if !ok {
+		t.Fatal("GetState envelope missing _state key")
+	}
+	parsed := stateRaw.(map[string]any)
 	if parsed["value"].(float64) != 42 {
 		t.Errorf("expected value=42, got %v", parsed["value"])
 	}
 	if parsed["name"].(string) != "test" {
 		t.Errorf("expected name=test, got %v", parsed["name"])
 	}
+
+	// Verify metadata is included
+	meta, ok := envelope["_meta"]
+	if !ok {
+		t.Fatal("GetState envelope missing _meta key")
+	}
+	metaMap := meta.(map[string]any)
+	if metaMap["actor_id"].(string) != "ns//app::actor@node" {
+		t.Errorf("expected actor_id in meta, got %v", metaMap["actor_id"])
+	}
 }
 
 func TestBaseActorSetState(t *testing.T) {
 	counter := newCounterActor()
+	// Legacy bare JSON (backward compatible)
 	err := counter.SetState(`{"value":99,"name":"restored"}`)
 	if err != "" {
 		t.Errorf("SetState should return empty string on success, got %q", err)
@@ -146,6 +164,37 @@ func TestBaseActorSetState(t *testing.T) {
 	}
 	if counter.Name != "restored" {
 		t.Errorf("expected name=restored after SetState, got %q", counter.Name)
+	}
+}
+
+func TestBaseActorStateRoundTrip(t *testing.T) {
+	// Verify GetState/SetState round-trip preserves both state AND metadata.
+	// This is the re-instantiation path: init() sets metadata once, then
+	// every handle() cycle does get_state → re-instantiate → set_state.
+	counter := newCounterActor()
+	counter.SetRuntimeMetadata("tenant//app::counter@node-1")
+	counter.Value = 77
+	counter.Name = "roundtrip"
+
+	state := counter.GetState()
+
+	// Simulate re-instantiation: fresh actor, no init() call
+	fresh := newCounterActor()
+	if errMsg := fresh.SetState(state); errMsg != "" {
+		t.Fatalf("SetState failed: %s", errMsg)
+	}
+
+	if fresh.Value != 77 {
+		t.Errorf("expected value=77, got %d", fresh.Value)
+	}
+	if fresh.Name != "roundtrip" {
+		t.Errorf("expected name=roundtrip, got %q", fresh.Name)
+	}
+	if fresh.ActorID() != "tenant//app::counter@node-1" {
+		t.Errorf("expected metadata preserved, got actor_id=%q", fresh.ActorID())
+	}
+	if fresh.ApplicationID() != "counter" {
+		t.Errorf("expected application_id=counter, got %q", fresh.ApplicationID())
 	}
 }
 
@@ -679,10 +728,17 @@ func TestActorRouterGetStateDelegates(t *testing.T) {
 	router.Handle("sender", "increment", "{}")
 
 	state := router.GetState()
-	var parsed map[string]any
-	json.Unmarshal([]byte(state), &parsed)
-	if parsed["value"].(float64) != 1 {
-		t.Errorf("expected value=1 in state, got %v", parsed["value"])
+	var envelope map[string]any
+	json.Unmarshal([]byte(state), &envelope)
+	if envelope["_factory_key"].(string) != "Counter" {
+		t.Errorf("expected factory_key=Counter, got %v", envelope["_factory_key"])
+	}
+	// Actor state is nested under _actor_state (which itself is the BaseActor envelope)
+	actorStateRaw := envelope["_actor_state"].(map[string]any)
+	// The actor's GetState returns its own envelope with _meta and _state
+	innerState := actorStateRaw["_state"].(map[string]any)
+	if innerState["value"].(float64) != 1 {
+		t.Errorf("expected value=1 in state, got %v", innerState["value"])
 	}
 }
 
@@ -691,7 +747,8 @@ func TestActorRouterSetStateDelegates(t *testing.T) {
 	router.Route("Counter", func() Actor { return newCounterActor() })
 	router.Init(`{"actor_type":"Counter","actor_id":"c1//Counter::ns@node"}`)
 
-	result := router.SetState(`{"value":99,"name":"restored"}`)
+	// Use router envelope format for SetState
+	result := router.SetState(`{"_factory_key":"Counter","_actor_id":"c1//Counter::ns@node","_actor_state":{"_meta":{"actor_id":"c1//Counter::ns@node","application_id":""},"_state":{"value":99,"name":"restored"}}}`)
 	if result != "" {
 		t.Errorf("SetState should return empty on success, got %q", result)
 	}
@@ -699,6 +756,33 @@ func TestActorRouterSetStateDelegates(t *testing.T) {
 	state := router.GetState()
 	if !strings.Contains(state, `"value":99`) {
 		t.Errorf("expected value=99 in state, got %q", state)
+	}
+}
+
+func TestActorRouterRestoreWithoutInit(t *testing.T) {
+	// Simulates WASM re-instantiation: fresh router, NO init() call, only set_state.
+	// The router envelope's _factory_key identifies which factory to use.
+	router := NewActorRouter()
+	router.Route("Counter", func() Actor { return newCounterActor() })
+
+	// Router state envelope as produced by GetState after init+handle
+	stateJSON := `{"_factory_key":"Counter","_actor_id":"ns//Counter::app@node","_actor_state":{"_meta":{"actor_id":"ns//Counter::app@node","application_id":"Counter"},"_state":{"value":55,"name":"restored-no-init"}}}`
+
+	result := router.SetState(stateJSON)
+	if result != "" {
+		t.Fatalf("SetState (restore without init) should succeed, got %q", result)
+	}
+
+	// Actor should be active and handle messages
+	reply := router.Handle("test", "increment", "{}")
+	if !strings.Contains(reply, `"value":56`) {
+		t.Errorf("expected value=56 after increment, got %q", reply)
+	}
+
+	// Factory key and actor_id should be preserved in GetState
+	state := router.GetState()
+	if !strings.Contains(state, `"_factory_key":"Counter"`) {
+		t.Errorf("expected factory_key in state, got %q", state)
 	}
 }
 

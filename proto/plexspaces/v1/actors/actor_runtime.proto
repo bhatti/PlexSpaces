@@ -592,8 +592,6 @@ message Actor {
   }];
 }
 
-// ActorState, ExitReason, ExitAction, ExitReasonDetails moved to types.proto (same package).
-
 // Actor configuration
 message ActorConfig {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
@@ -1454,8 +1452,6 @@ enum ConsistencyLevel {
   CONSISTENCY_LEVEL_READ_COMMITTED = 3; // Read committed isolation
   CONSISTENCY_LEVEL_LINEARIZABLE = 4; // Strict consistency (coordination required)
 }
-
-// SupervisionStrategy moved to supervision.proto (plexspaces.supervision.v1).
 
 // Actor performance metrics
 message ActorMetrics {

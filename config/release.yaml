@@ -41,7 +41,6 @@ runtime:
       auto_generate_certs: false
     jwt:
       enable_jwt: false
-      # JWT secret should be set via PLEXSPACES_JWT_SECRET env var
       secret: ""
       issuer: ""
       jwks_url: ""
@@ -57,7 +56,7 @@ runtime:
     access_key_id: "${BLOB_ACCESS_KEY_ID:-}"
     # secret_access_key should be set via PLEXSPACES_BLOB_SECRET_ACCESS_KEY env var
     use_ssl: false
-    prefix: "${BLOB_PREFIX:-/app/data/blob}"
+    prefix: "${BLOB_PREFIX:-${HOME}/plexspaces/blob}"
   
   # Shared relational database for scheduler, workflow, object-registry, journaling, blob
   # Defaults to SQLite for easier local development, can be overridden to PostgreSQL

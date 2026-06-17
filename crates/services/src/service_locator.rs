@@ -260,8 +260,6 @@ impl Service for ServiceStorage {
     }
 }
 
-// Service trait moved to plexspaces-core::Service
-
 /// ServiceLocator implementation for centralized service registration and gRPC client caching
 #[derive(Clone)]
 pub struct ServiceLocatorImpl {
@@ -1939,15 +1937,19 @@ async fn initialize_services_impl(
     let final_runtime_config = release_config
         .as_ref()
         .and_then(|r| r.runtime.clone())
-        .unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
-            db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
-                connection_string: plexspaces_common::config_manager::default_shared_db_url(
-                    &plexspaces_common::config_manager::get_default_base_dir(),
-                ),
-                auto_migrate: true,
+        .unwrap_or_else(|| {
+            let mut spec = plexspaces_proto::node::v1::ReleaseSpec::default();
+            plexspaces_common::config_manager::initialize(&mut spec);
+            spec.runtime.unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
+                db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
+                    connection_string: plexspaces_common::config_manager::default_shared_db_url(
+                        &plexspaces_common::config_manager::get_default_base_dir(),
+                    ),
+                    auto_migrate: true,
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
+            })
         });
 
     let shared_db = final_runtime_config.db.as_ref().unwrap_or_else(|| {
@@ -2368,15 +2370,48 @@ async fn initialize_services_impl(
         service_locator.register_security_config(security).await;
     }
 
-    // Create and register GrpcConnectionManager with connection pooling
-    // Tenant comes from auth (JWT/mTLS); namespace from application/actor.
+    // Create and register GrpcConnectionManager with connection pooling.
+    // Configure mTLS from environment variables if cert files are present.
     use plexspaces_actor::GrpcConnectionManager;
     let pool_size = final_node_config.grpc_connection_pool_size;
-    let connection_manager = Arc::new(GrpcConnectionManager::new(if pool_size > 0 {
+    let base_manager = GrpcConnectionManager::new(if pool_size > 0 {
         Some(pool_size)
     } else {
         None
-    }));
+    });
+    let connection_manager = {
+        let ca = std::env::var("PLEXSPACES_MTLS_CA_CERT").ok();
+        let cert = std::env::var("PLEXSPACES_MTLS_SERVER_CERT").ok();
+        let key = std::env::var("PLEXSPACES_MTLS_SERVER_KEY").ok();
+        match (ca, cert, key) {
+            (Some(ca), Some(cert), Some(key))
+                if std::path::Path::new(&ca).exists()
+                    && std::path::Path::new(&cert).exists()
+                    && std::path::Path::new(&key).exists() =>
+            {
+                match base_manager.with_mtls(&ca, &cert, &key) {
+                    Ok(m) => {
+                        tracing::info!("mTLS enabled for node-to-node gRPC connections");
+                        Arc::new(m)
+                    }
+                    Err(e) => {
+                        tracing::warn!("mTLS cert load failed, using plain gRPC: {}", e);
+                        Arc::new(GrpcConnectionManager::new(if pool_size > 0 {
+                            Some(pool_size)
+                        } else {
+                            None
+                        }))
+                    }
+                }
+            }
+            _ => {
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("mTLS not configured, using plain gRPC for node-to-node");
+                }
+                Arc::new(base_manager)
+            }
+        }
+    };
     service_locator
         .register_grpc_connection_manager(connection_manager)
         .await;

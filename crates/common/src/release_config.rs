@@ -91,22 +91,27 @@ pub async fn create_default_release_config(
         jwt: Some(JwtConfig {
             enable_jwt: true,
             secret: jwt_secret,
-            issuer: String::new(),   // Can be set via env var or config
-            jwks_url: String::new(), // For RS256, set this instead of secret
+            issuer: String::new(),
+            jwks_url: String::new(),
             allowed_audiences: vec!["plexspaces-api".to_string()],
             token_ttl: Some(Duration {
-                seconds: 900, // 15 minutes
+                seconds: 900,
                 nanos: 0,
             }),
             refresh_token_ttl: Some(Duration {
-                seconds: 604800, // 7 days
+                seconds: 604800,
                 nanos: 0,
             }),
             tenant_id_claim: "tenant_id".to_string(),
             user_id_claim: "sub".to_string(),
+            algorithm: "ES256".to_string(),
+            private_key_pem: String::new(),
+            private_key_file: String::new(),
+            auto_generate_key: true,
         }),
         api_keys: vec![],
-        disable_auth: false, // Production: false, testing: can be enabled via PLEXSPACES_DISABLE_AUTH env var
+        disable_auth: false,
+        oidc: None,
     });
 
     // Create default node config
@@ -123,7 +128,7 @@ pub async fn create_default_release_config(
         grpc_connection_pool_size: 2,
         metadata: std::collections::HashMap::new(),
         node_registry: None,
-        grpc_address: format!("http://{}", listen_addr),
+        grpc_address: crate::dialable_node_address(&listen_addr),
         blob_http_port: 0,
     };
 

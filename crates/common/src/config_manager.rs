@@ -475,6 +475,7 @@ pub fn default_shared_db_url(base_dir: &str) -> String {
     format!("sqlite://{}/db/plexspaces.db?mode=rwc", base_dir)
 }
 
+
 /// Mask sensitive parts of a database URL for logging
 fn mask_db_url(url: &str) -> String {
     // Mask password in URLs like postgres://user:password@host/db
@@ -1099,6 +1100,7 @@ mod tests {
             runtime: Some(RuntimeConfig {
                 security: Some(SecurityConfig {
                     disable_auth: false,
+                    oidc: None,
                     jwt: Some(JwtConfig {
                         enable_jwt: true,
                         secret: String::new(),

@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     execution_id TEXT PRIMARY KEY,
     definition_id TEXT NOT NULL,
     definition_version TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT '',
+    namespace TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL,
     current_step_id TEXT,
     input_json TEXT,
@@ -26,3 +28,4 @@ CREATE INDEX IF NOT EXISTS idx_workflow_executions_node ON workflow_executions(n
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_created ON workflow_executions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_heartbeat ON workflow_executions(status, last_heartbeat) WHERE status IN ('RUNNING', 'PENDING');
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_version ON workflow_executions(execution_id, version);
+CREATE INDEX IF NOT EXISTS idx_workflow_executions_tenant ON workflow_executions(tenant_id, namespace);

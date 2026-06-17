@@ -53,6 +53,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config);
@@ -70,6 +71,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -119,6 +121,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -164,6 +167,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -208,6 +212,7 @@ mod tests {
             allow_unauthenticated: true, // Permissive mode
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -243,6 +248,7 @@ mod tests {
             allow_unauthenticated: false, // Strict mode
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -286,6 +292,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();
@@ -350,6 +357,7 @@ mod tests {
             allow_unauthenticated: false,
             mtls_ca_certificate: String::new(),
             mtls_trusted_services: vec![],
+            ..Default::default()
         };
 
         let interceptor = AuthInterceptor::new(config).unwrap();

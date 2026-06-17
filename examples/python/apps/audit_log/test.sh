@@ -25,6 +25,25 @@ ACTOR_TYPE="$APP_ID"
 #     curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
 # }
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║        Audit Log - Event Handler (GenEvent)                   ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
@@ -58,6 +77,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 _deployed=0
 for _attempt in 1 2 3; do
   DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
@@ -85,6 +105,7 @@ send_post() {
     local payload="$2"
     RESPONSE=$(curl -s --max-time 10 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
+        ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
     BODY=$(echo "$RESPONSE" | sed '$d')

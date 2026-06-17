@@ -842,6 +842,33 @@ fn build_go_abstractions_example_wasm() -> Vec<u8> {
     })
 }
 
+fn build_go_web_crawl_example_wasm() -> Vec<u8> {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root")
+        .to_path_buf();
+    let example_dir = repo_root.join("examples/go/apps/web_crawl");
+    let output_path = repo_root.join("target/examples/go/web_crawl/web_crawl_actor.wasm");
+
+    // Always rebuild to pick up source changes
+    let status = Command::new("bash")
+        .arg("build.sh")
+        .current_dir(&example_dir)
+        .env("GOCACHE", "/tmp/plexspaces-go-cache")
+        .status()
+        .expect("Go web_crawl build.sh should start");
+    assert!(status.success(), "Go web_crawl build.sh should succeed");
+
+    std::fs::read(&output_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load built Go web_crawl wasm {}: {}",
+            output_path.display(),
+            e
+        )
+    })
+}
+
 fn build_python_abstractions_example_wasm() -> Vec<u8> {
     let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1820,6 +1847,360 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
 
 #[tokio::test]
 #[ignore = "requires Go toolchain and external WASM build"]
+async fn test_go_wasm_role_dispatch_virtual_actor_reactivation() {
+    // Mimics web_crawl pattern: actor_type doesn't match any factory key,
+    // but role matches. Verifies state persists across re-instantiation
+    // when dispatch resolves via role (not actor_type).
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "role-dispatch-go-sdk-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_go_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![ChildSpec {
+            actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                name: "ephemeral".to_string(),
+                actor_type: "abstractions_wasm".to_string(), // Does NOT match factory key
+            }),
+            role: "ephemeral".to_string(), // Matches factory key via role dispatch
+            args: HashMap::from([
+                ("role".to_string(), "ephemeral".to_string()),
+                ("initial_count".to_string(), "5".to_string()),
+            ]),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 5,
+                nanos: 0,
+            }),
+            facets: vec![Facet {
+                r#type: "virtual_actor".to_string(),
+                config: HashMap::from([
+                    ("idle_timeout".to_string(), "10m".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                priority: 0,
+                state: HashMap::new(),
+                metadata: None,
+            }],
+            behavior_kind: Some("GenServer".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        version: "1.0.0".to_string(),
+        description: "Go SDK role-dispatch reactivation test".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        required_service_links: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    // First message: activates the actor (dispatches via role since actor_type doesn't match)
+    let initial_status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(initial_status["count"], serde_json::json!(5));
+    assert_eq!(initial_status["role"], serde_json::json!("ephemeral"));
+
+    // Second message: tests re-instantiation state restore (set_state must work)
+    let incremented = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "increment", "amount": 3 }),
+    )
+    .await;
+    assert_eq!(
+        incremented["count"],
+        serde_json::json!(8),
+        "State must persist across re-instantiation. Got: {:?}",
+        incremented
+    );
+
+    // Third message: further state persistence
+    let third = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(
+        third["count"],
+        serde_json::json!(8),
+        "State must persist across multiple re-instantiations. Got: {:?}",
+        third
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Go toolchain and external WASM build"]
+async fn test_go_wasm_web_crawl_reactivation() {
+    // Tests the actual web_crawl WASM binary with the exact dispatch pattern from app-config.toml:
+    // actor_type="web_crawl_wasm" (doesn't match factory), role="orchestrator" (matches factory).
+    // This is the test that exercises the real web_crawl code path.
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "go-web-crawl-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_go_web_crawl_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "orchestrator".to_string(),
+                    actor_type: "web_crawl_wasm".to_string(),
+                }),
+                role: "orchestrator".to_string(),
+                args: HashMap::from([("role".to_string(), "orchestrator".to_string())]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 30,
+                    nanos: 0,
+                }),
+                behavior_kind: Some("GenServer".to_string()),
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "30m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 100,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                ..Default::default()
+            },
+            ChildSpec {
+                actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
+                    name: "fetcher-0".to_string(),
+                    actor_type: "web_crawl_wasm".to_string(),
+                }),
+                role: "fetcher".to_string(),
+                args: HashMap::from([
+                    ("role".to_string(), "fetcher".to_string()),
+                    ("pool_slot".to_string(), "0".to_string()),
+                ]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 10,
+                    nanos: 0,
+                }),
+                behavior_kind: Some("GenServer".to_string()),
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "5m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 100,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        version: "1.0.0".to_string(),
+        description: "Go web_crawl integration test".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        required_service_links: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    // Send crawl command to orchestrator
+    let crawl_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "orchestrator",
+        serde_json::json!({
+            "op": "crawl",
+            "seed_urls": ["https://example.com"],
+            "max_pages": 5,
+            "max_depth": 1
+        }),
+    )
+    .await;
+    assert_eq!(
+        crawl_result["status"],
+        serde_json::json!("ok"),
+        "Crawl should succeed. Got: {:?}",
+        crawl_result
+    );
+
+    // Second message to orchestrator: status (tests re-instantiation state restore)
+    let status_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "orchestrator",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert!(
+        status_result.get("error").is_none()
+            || status_result["error"].as_str() != Some("no active actor (init not called)"),
+        "Orchestrator must stay active across re-instantiation. Got: {:?}",
+        status_result
+    );
+    assert_eq!(
+        status_result["role"],
+        serde_json::json!("orchestrator"),
+        "Orchestrator role must persist. Got: {:?}",
+        status_result
+    );
+
+    // Third message: another status (third re-instantiation cycle)
+    let status_result2 = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "orchestrator",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert!(
+        status_result2.get("error").is_none()
+            || status_result2["error"].as_str() != Some("no active actor (init not called)"),
+        "Orchestrator must stay active across multiple re-instantiations. Got: {:?}",
+        status_result2
+    );
+
+    // Test fetcher too
+    let fetch_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "fetcher-0",
+        serde_json::json!({ "op": "fetch", "url": "https://example.com" }),
+    )
+    .await;
+    assert_eq!(
+        fetch_result["status"],
+        serde_json::json!("ok"),
+        "Fetch should succeed. Got: {:?}",
+        fetch_result
+    );
+
+    // Fetcher status after re-instantiation
+    let fetcher_status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "fetcher-0",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert!(
+        fetcher_status.get("error").is_none()
+            || fetcher_status["error"].as_str() != Some("no active actor (init not called)"),
+        "Fetcher must stay active across re-instantiation. Got: {:?}",
+        fetcher_status
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Go toolchain and external WASM build"]
 async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
     let (node, _) = create_test_node_with_service().await;
     let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
@@ -1851,7 +2232,7 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
                     actor_type: "controller".to_string(),
                 }),
 
-                role: "worker".to_string(),
+                role: String::new(),
                 args: HashMap::from([("role".to_string(), "controller".to_string())]),
                 restart: RestartPolicy::RestartPolicyPermanent.into(),
                 shutdown_timeout: Some(ProstDuration {
@@ -1864,10 +2245,10 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
             ChildSpec {
                 actor_identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                     name: "ephemeral".to_string(),
-                    actor_type: "abstractions_wasm".to_string(),
+                    actor_type: "ephemeral".to_string(),
                 }),
 
-                role: "worker".to_string(),
+                role: String::new(),
                 args: HashMap::from([
                     ("role".to_string(), "ephemeral".to_string()),
                     ("initial_count".to_string(), "5".to_string()),
@@ -2779,5 +3160,217 @@ async fn test_multi_actor_dispatch_by_actor_type() {
         serde_json::json!("hello"),
         "EchoActor 'echo' must return echoed=hello, got: {:?}",
         echo_reply
+    );
+}
+
+/// Reproduce: Two sequential messages to the same durable WASM actor where the first
+/// calls host.sendAfter() should NOT cause the second to trap with "cannot enter component instance".
+/// This tests the scenario from typescript/apps/abstractions test.sh Step 4 (timers and reminders).
+#[tokio::test]
+async fn test_typescript_wasm_sequential_send_after_no_reentrance_trap() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "abstractions-ts-sendafter-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_typescript_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let mut app_spec = load_typescript_abstractions_example_config();
+    app_spec.name = app_id.to_string();
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    // Sanity check: verify basic message handling works
+    let status_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(status_result["count"], serde_json::json!(0), "status should work, got: {:?}", status_result);
+
+    // First message: schedule_timer (calls host.sendAfter internally)
+    let timer_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "schedule_timer", "delay_ms": 100 }),
+    )
+    .await;
+    assert!(
+        timer_result.get("error").is_none(),
+        "schedule_timer should succeed, got: {:?}",
+        timer_result
+    );
+    assert!(
+        timer_result.get("timer_id").is_some(),
+        "schedule_timer should return timer_id, got: {:?}",
+        timer_result
+    );
+
+    // Second message: schedule_reminder (also calls host.sendAfter internally)
+    // This MUST NOT trap with "cannot enter component instance"
+    let reminder_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "schedule_reminder", "delay_ms": 140 }),
+    )
+    .await;
+    assert!(
+        reminder_result.get("error").is_none(),
+        "schedule_reminder should succeed (no reentrance trap), got: {:?}",
+        reminder_result
+    );
+    assert!(
+        reminder_result.get("reminder_id").is_some(),
+        "schedule_reminder should return reminder_id, got: {:?}",
+        reminder_result
+    );
+
+    // Verify timer fires after delay
+    sleep(Duration::from_millis(300)).await;
+    let status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(
+        status["timer_ticks"],
+        serde_json::json!(1),
+        "timer should have fired once, got: {:?}",
+        status
+    );
+}
+
+/// Reproduce: After journal replay (stop + reactivation), sequential messages
+/// that call host.sendAfter should still work without "cannot enter" traps.
+#[tokio::test]
+async fn test_typescript_wasm_send_after_works_after_journal_replay() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "abstractions-ts-replay-sendafter-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_typescript_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let mut app_spec = load_typescript_abstractions_example_config();
+    app_spec.name = app_id.to_string();
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    // Send an initial message to create journal entries
+    let initial = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "increment", "amount": 1 }),
+    )
+    .await;
+    assert_eq!(initial["count"], serde_json::json!(1));
+
+    // Stop the actor (journal entries persist)
+    let self_id = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    let actor_id_str = self_id["self_id"]
+        .as_str()
+        .expect("self_id must be present")
+        .to_string();
+    let actor_id = plexspaces_actor::ActorId::from_canonical(&actor_id_str)
+        .expect("self_id must be valid");
+    let stop_ctx =
+        plexspaces_actor::RequestContext::new_without_auth(String::new(), app_id.to_string());
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .expect("ActorFactory must be available")
+        .stop_actor(&stop_ctx, &actor_id)
+        .await
+        .expect("stop_actor must succeed");
+    sleep(Duration::from_millis(300)).await;
+
+    // After reactivation (with journal replay), send schedule_timer + schedule_reminder
+    let timer_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "schedule_timer", "delay_ms": 100 }),
+    )
+    .await;
+    assert!(
+        timer_result.get("error").is_none(),
+        "schedule_timer after replay should succeed, got: {:?}",
+        timer_result
+    );
+
+    let reminder_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "abstractions:cart-1",
+        serde_json::json!({ "op": "schedule_reminder", "delay_ms": 140 }),
+    )
+    .await;
+    assert!(
+        reminder_result.get("error").is_none(),
+        "schedule_reminder after replay should succeed (no reentrance trap), got: {:?}",
+        reminder_result
     );
 }

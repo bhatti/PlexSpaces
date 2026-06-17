@@ -2,6 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RUST_APPS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=/dev/null
+source "${_RUST_APPS_ROOT}/test-common.sh"
 WASM_FILE="$SCRIPT_DIR/parameter_server_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
@@ -38,6 +41,25 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Auto-generate JWT if not provided
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+  echo "  Token: ${PLEXSPACES_TEST_TOKEN:0:20}..."
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+echo "AUTH_HEADER set: $([ -n "$AUTH_HEADER" ] && echo YES || echo NO)"
+
 read -ra NODE_LIST <<< "$NODES"
 ENTRY_NODE="${NODE_LIST[0]}"
 ENTRY_HOST="${ENTRY_NODE%%:*}"
@@ -46,14 +68,15 @@ TEMP_CONFIG=""
 
 
 grpc_seed_nodes() {
-  local seed_list=()
-  local joined=""
-  local sep=""
-  for entry in ${seed_list[@]+"${seed_list[@]}"}; do
-    joined="${joined}${sep}${entry}"
-    sep=", "
+  # Build quoted list of all node addresses for cluster discovery
+  local result=""
+  for _n in "${NODE_LIST[@]}"; do
+    local _h="${_n%%:*}"
+    local _p="${_n##*:}"
+    [ -n "$result" ] && result="${result}, "
+    result="${result}\"http://${_h}:${_p}\""
   done
-  printf '%s' "$joined"
+  printf '%s' "$result"
 }
 
 render_config() {
@@ -94,7 +117,11 @@ for node in "${NODE_LIST[@]}"; do
   port="${node##*:}"
   http_code="000"
   for _i in 1 2 3; do
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" "http://${host}:${port}/" 2>/dev/null) || http_code="000"
+    if [ -n "$AUTH_HEADER" ]; then
+      http_code=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" -H "$AUTH_HEADER" "http://${host}:${port}/" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "http://${host}:${port}/" 2>/dev/null) || http_code="000"
+    fi
     [ "$http_code" != "000" ] && break
     sleep 2
   done
@@ -118,19 +145,31 @@ for node in "${NODE_LIST[@]}"; do
   port="${node##*:}"
   _deployed=0
   for _attempt in 1 2 3; do
-    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
-      -F "application_id=$APP_ID" \
-      -F "name=$APP_NAME" \
-      -F "version=1.0.0" \
-      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+    if [ -n "$AUTH_HEADER" ]; then
+      deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+        -H "$AUTH_HEADER" \
+        -F "application_id=$APP_ID" \
+        -F "name=$APP_NAME" \
+        -F "version=1.0.0" \
+        -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+        -F "config=@$TEMP_CONFIG" 2>&1) || true
+    else
+      deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${host}:${port}/api/v1/applications/deploy" \
+        ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+        -F "application_id=$APP_ID" \
+        -F "name=$APP_NAME" \
+        -F "version=1.0.0" \
+        -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+        -F "config=@$TEMP_CONFIG" 2>&1) || true
+    fi
     http_code=$(echo "$deploy_output" | tail -n1)
     response=$(echo "$deploy_output" | sed '$d')
     if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
       _deployed=1
       break
     fi
-    echo "  Deploy attempt $_attempt to ${host}:${port} failed, retrying in 3s..."
+    echo "  Deploy attempt $_attempt to ${host}:${port} failed (HTTP $http_code), retrying in 3s..."
+    echo "  Response: $(echo "$response" | head -c 200)"
     sleep 3
   done
   if [ "$_deployed" -eq 0 ]; then
@@ -140,19 +179,32 @@ for node in "${NODE_LIST[@]}"; do
 done
 _deployed=0
 for _attempt in 1 2 3; do
-  deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
-    -F "application_id=$APP_ID" \
-    -F "name=$APP_NAME" \
-    -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+  if [ -n "$AUTH_HEADER" ]; then
+    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -H "$AUTH_HEADER" \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
+  else
+    deploy_output=$(curl -s --connect-timeout 10 --max-time 180 -w "\n%{http_code}" -X POST "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -F "application_id=$APP_ID" \
+      -F "name=$APP_NAME" \
+      -F "version=1.0.0" \
+      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
+      -F "config=@$TEMP_CONFIG" 2>&1) || true
+  fi
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
     _deployed=1
     break
   fi
-  echo "  Deploy attempt $_attempt failed, retrying in 3s..."
+  echo "  Deploy attempt $_attempt failed (HTTP $http_code), retrying in 3s..."
+  echo "  Response: $(echo "$response" | head -c 200)"
   sleep 3
 done
 if [ "$_deployed" -eq 0 ]; then
@@ -160,7 +212,9 @@ if [ "$_deployed" -eq 0 ]; then
   exit 1
 fi
 echo -e "  ${GREEN}Deployed${NC}"
-sleep 2
+echo "Step 1b: Wait for cluster node discovery (async SWIM reconcile)"
+wait_for_registry_membership "${#NODE_LIST[@]}" 5 2
+echo -e "  ${GREEN}All ${#NODE_LIST[@]} nodes discovered${NC}"
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
 
@@ -174,10 +228,20 @@ run_attempt=1
 run_attempt_limit=10
 run_start=$(date +%s%N)
 while true; do
-  run_response=$(curl -s --max-time 240 -X POST \
-    "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=240" \
-    -H "Content-Type: application/json" \
-    -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
+  if [ -n "$AUTH_HEADER" ]; then
+    run_response=$(curl -s --max-time 240 -X POST \
+      "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=240" \
+      -H "$AUTH_HEADER" \
+      -H "Content-Type: application/json" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
+  else
+    run_response=$(curl -s --max-time 240 -X POST \
+      "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=240" \
+      -H "Content-Type: application/json" \
+      ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
+      -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
+  fi
 
   if [[ "$run_response" != *"Placement produced no target nodes"* ]]; then
     break

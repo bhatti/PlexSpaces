@@ -282,11 +282,15 @@ impl BlobKVStore {
                 // parts[0] = tenant, parts[1] = namespace, parts[2..] = key (may have /)
                 Some(parts[2..].join("/"))
             } else {
-                debug!(path = %path, "Path doesn't have enough parts after keyvalue/");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(path = %path, "Path doesn't have enough parts after keyvalue/");
+                }
                 None
             }
         } else {
-            debug!(path = %path, "Path doesn't contain /keyvalue/");
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                debug!(path = %path, "Path doesn't contain /keyvalue/");
+            }
             None
         }
     }
@@ -302,7 +306,9 @@ impl BlobKVStore {
             ctx.namespace(),
             key_prefix
         );
-        trace!(list_path = %path, key_prefix = %key_prefix, "Listing with prefix path");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(list_path = %path, key_prefix = %key_prefix, "Listing with prefix path");
+        }
         ObjectPath::from(path)
     }
 
@@ -321,7 +327,9 @@ impl KeyValueStore for BlobKVStore {
     #[instrument(skip(self), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), key = %key))]
     async fn get(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Vec<u8>>> {
         let start = Instant::now();
-        trace!("Getting key from object store");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Getting key from object store");
+        }
         let path = self.storage_path(ctx, key);
 
         // Try to get object metadata first (to check if exists)
@@ -339,15 +347,19 @@ impl KeyValueStore for BlobKVStore {
                     KVError::StorageError(format!("Failed to read object bytes: {}", e))
                 })?;
 
-                debug!(
-                    duration_ms = start.elapsed().as_millis(),
-                    size_bytes = bytes.len(),
-                    "Key retrieved successfully"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        duration_ms = start.elapsed().as_millis(),
+                        size_bytes = bytes.len(),
+                        "Key retrieved successfully"
+                    );
+                }
                 Ok(Some(bytes.to_vec()))
             }
             Err(object_store::Error::NotFound { .. }) => {
-                debug!(duration_ms = start.elapsed().as_millis(), "Key not found");
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(duration_ms = start.elapsed().as_millis(), "Key not found");
+                }
                 Ok(None)
             }
             Err(e) => {
@@ -363,7 +375,9 @@ impl KeyValueStore for BlobKVStore {
     #[instrument(skip(self, value), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), key = %key, value_size = value.len()))]
     async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> KVResult<()> {
         let start = Instant::now();
-        trace!("Putting key-value pair to object store");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Putting key-value pair to object store");
+        }
         let path = self.storage_path(ctx, key);
 
         // Delete existing object if any (for overwrite)
@@ -393,7 +407,9 @@ impl KeyValueStore for BlobKVStore {
     #[instrument(skip(self), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), key = %key))]
     async fn delete(&self, ctx: &RequestContext, key: &str) -> KVResult<()> {
         let start = Instant::now();
-        trace!("Deleting key from object store");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Deleting key from object store");
+        }
         let path = self.storage_path(ctx, key);
 
         match self.object_store.delete(&path).await {
@@ -406,11 +422,13 @@ impl KeyValueStore for BlobKVStore {
                 Ok(())
             }
             Err(object_store::Error::NotFound { .. }) => {
-                debug!(
-                    duration_ms = start.elapsed().as_millis(),
-                    key = %key,
-                    "Key not found (idempotent delete)"
-                );
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!(
+                        duration_ms = start.elapsed().as_millis(),
+                        key = %key,
+                        "Key not found (idempotent delete)"
+                    );
+                }
                 Ok(()) // Idempotent - succeed even if not found
             }
             Err(e) => {
@@ -438,7 +456,9 @@ impl KeyValueStore for BlobKVStore {
     #[instrument(skip(self), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), prefix = %prefix))]
     async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>> {
         let start = Instant::now();
-        trace!("Listing keys with prefix");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!("Listing keys with prefix");
+        }
 
         // List all objects for this tenant/namespace, then filter by key prefix
         // This is simpler than trying to match the exact prefix path
@@ -471,11 +491,13 @@ impl KeyValueStore for BlobKVStore {
 
         keys.sort();
         keys.dedup();
-        debug!(
-            duration_ms = start.elapsed().as_millis(),
-            count = keys.len(),
-            "Listed keys successfully"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            debug!(
+                duration_ms = start.elapsed().as_millis(),
+                count = keys.len(),
+                "Listed keys successfully"
+            );
+        }
         Ok(keys)
     }
 

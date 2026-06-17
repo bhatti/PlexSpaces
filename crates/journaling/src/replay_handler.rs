@@ -79,4 +79,13 @@ pub trait ReplayHandler: Send + Sync {
         &self,
         message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Called before replay begins.
+    /// Implementations should suppress side effects (timers, outbound messages)
+    /// to prevent reentrance into the execution context during replay.
+    async fn on_replay_start(&self) {}
+
+    /// Called after replay completes (success or failure).
+    /// Implementations should re-enable side effects.
+    async fn on_replay_end(&self) {}
 }

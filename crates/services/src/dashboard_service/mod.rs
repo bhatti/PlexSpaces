@@ -84,6 +84,9 @@ pub struct DashboardServiceImpl {
     /// Optional health reporter access (to avoid circular dependency)
     health_reporter_access: Option<Arc<dyn HealthReporterAccess>>,
 
+    /// Optional tenant repository for accurate tenant count in summary.
+    tenant_repo: tokio::sync::RwLock<Option<Arc<dyn crate::user_service::TenantRepository>>>,
+
     /// Reused process sampler for local node dashboard metrics.
     process_sampler: Arc<std::sync::Mutex<ProcessResourceSampler>>,
 }
@@ -94,6 +97,7 @@ impl DashboardServiceImpl {
         Self {
             service_locator,
             health_reporter_access: None,
+            tenant_repo: tokio::sync::RwLock::new(None),
             process_sampler: Arc::new(std::sync::Mutex::new(
                 ProcessResourceSampler::new()
                     .expect("process metrics sampler must initialize for current process"),
@@ -109,11 +113,17 @@ impl DashboardServiceImpl {
         Self {
             service_locator,
             health_reporter_access: Some(health_reporter_access),
+            tenant_repo: tokio::sync::RwLock::new(None),
             process_sampler: Arc::new(std::sync::Mutex::new(
                 ProcessResourceSampler::new()
                     .expect("process metrics sampler must initialize for current process"),
             )),
         }
+    }
+
+    /// Set tenant repository for accurate tenant count in dashboard summary.
+    pub async fn set_tenant_repo(&self, repo: Arc<dyn crate::user_service::TenantRepository>) {
+        *self.tenant_repo.write().await = Some(repo);
     }
 
     /// Get service locator reference
@@ -529,13 +539,6 @@ impl DashboardServiceImpl {
         request
     }
 
-    fn normalize_grpc_endpoint(address: &str) -> String {
-        if address.starts_with("http://") || address.starts_with("https://") {
-            address.to_string()
-        } else {
-            format!("http://{address}")
-        }
-    }
 
     async fn application_rows_from_registry(
         &self,
@@ -649,7 +652,7 @@ impl DashboardServiceImpl {
                 } else if let Ok(mut remote_info) = self
                     .query_remote_application_status(
                         &registration.node_id,
-                        &Self::normalize_grpc_endpoint(&registration.grpc_address),
+                        &plexspaces_common::dialable_node_address(&registration.grpc_address),
                         &registration.object_name,
                         tenant_id,
                         Some(registration.namespace.as_str()),
@@ -953,7 +956,7 @@ impl DashboardServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
 
-        let addr = Self::normalize_grpc_endpoint(&registration.grpc_address);
+        let addr = plexspaces_common::dialable_node_address(&registration.grpc_address);
         let conn_mgr = self
             .service_locator
             .get_grpc_connection_manager()
@@ -988,12 +991,14 @@ impl DashboardService for DashboardServiceImpl {
         // Create a new Request with the metadata for context methods
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        let tenant_id = if req.tenant_id.is_empty() {
-            self.get_tenant_id_from_context(&request_for_context)
-        } else {
-            Some(req.tenant_id.clone())
-        };
         let is_admin = self.is_admin(&request_for_context).await;
+        let tenant_id = if !req.tenant_id.is_empty() {
+            Some(req.tenant_id.clone())
+        } else if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
+        };
 
         // Get since timestamp (default: now - 24 hours)
         let since = req.since.unwrap_or_else(Self::default_since);
@@ -1051,7 +1056,13 @@ impl DashboardService for DashboardServiceImpl {
             )
             .await?;
 
-        let total_tenants = if is_admin {
+        let total_tenants = if let Some(ref tenant_repo) = *self.tenant_repo.read().await {
+            // DB table is the authoritative source for tenant count.
+            match tenant_repo.list_tenants(0, 1).await {
+                Ok((_, total)) => total as u32,
+                Err(_) => 0,
+            }
+        } else if is_admin {
             let mut tenant_ids: HashSet<String> = summary_applications
                 .iter()
                 .filter_map(|app| (!app.tenant_id.is_empty()).then_some(app.tenant_id.clone()))
@@ -1060,11 +1071,7 @@ impl DashboardService for DashboardServiceImpl {
                 tenant_ids.extend(actor_registry.registered_tenant_ids().await);
             }
             let count = tenant_ids.len() as u32;
-            if count == 0 && total_nodes > 0 {
-                1
-            } else {
-                count
-            }
+            if count == 0 && total_nodes > 0 { 1 } else { count }
         } else {
             tenant_id
                 .as_ref()
@@ -1132,10 +1139,13 @@ impl DashboardService for DashboardServiceImpl {
         let req = request.into_inner();
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        let tenant_id = if req.tenant_id.is_empty() {
-            self.get_tenant_id_from_context(&request_for_context)
-        } else {
+        let is_admin = self.is_admin(&request_for_context).await;
+        let tenant_id = if !req.tenant_id.is_empty() {
             Some(req.tenant_id.clone())
+        } else if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
         };
         let cluster_id = if req.cluster_id.is_empty() {
             None
@@ -1170,8 +1180,12 @@ impl DashboardService for DashboardServiceImpl {
 
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        let tenant_id = self.get_tenant_id_from_context(&request_for_context);
         let is_admin = self.is_admin(&request_for_context).await;
+        let tenant_id = if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
+        };
         let ctx = self
             .request_context_for_dashboard(tenant_id.clone(), None)
             .await;
@@ -1260,8 +1274,13 @@ impl DashboardService for DashboardServiceImpl {
             }
         }
 
-        // Count unique tenants from actors
-        let total_tenants = if is_admin {
+        // Count tenants from DB (authoritative source)
+        let total_tenants = if let Some(ref tenant_repo) = *self.tenant_repo.read().await {
+            match tenant_repo.list_tenants(0, 1).await {
+                Ok((_, total)) => total as u32,
+                Err(_) => 0,
+            }
+        } else if is_admin {
             let mut tenant_ids = HashSet::new();
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
                 tenant_ids.extend(actor_registry.registered_tenant_ids().await);
@@ -1308,13 +1327,17 @@ impl DashboardService for DashboardServiceImpl {
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
 
-        // Get tenant_id from request context if not provided
-        let tenant_id = if req.tenant_id.is_empty() {
-            self.get_tenant_id_from_context(&request_for_context)
-        } else {
-            Some(req.tenant_id.clone())
-        };
         let is_admin = self.is_admin(&request_for_context).await;
+
+        // Admin sees all apps unless explicitly filtering by tenant_id query param.
+        // Non-admin is always scoped to their own tenant from JWT context.
+        let tenant_id = if !req.tenant_id.is_empty() {
+            Some(req.tenant_id.clone())
+        } else if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
+        };
 
         let (paginated_apps, page_response) = self
             .application_page_from_registry(&req, tenant_id.as_deref(), is_admin)
@@ -1334,12 +1357,14 @@ impl DashboardService for DashboardServiceImpl {
         let req = request.into_inner();
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        let tenant_filter = if req.tenant_id.is_empty() {
-            self.get_tenant_id_from_context(&request_for_context)
-        } else {
-            Some(req.tenant_id.clone())
-        };
         let is_admin = self.is_admin(&request_for_context).await;
+        let tenant_filter = if !req.tenant_id.is_empty() {
+            Some(req.tenant_id.clone())
+        } else if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
+        };
 
         // Get ActorRegistry
         let actor_registry: Arc<ActorRegistry> = self
@@ -1637,18 +1662,21 @@ impl DashboardService for DashboardServiceImpl {
         let req = request.into_inner();
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        let tenant_filter = if req.tenant_id.is_empty() {
-            self.get_tenant_id_from_context(&request_for_context)
-        } else {
+        let is_admin = self.is_admin(&request_for_context).await;
+        let tenant_filter = if !req.tenant_id.is_empty() {
             Some(req.tenant_id.clone())
+        } else if is_admin {
+            None
+        } else {
+            self.get_tenant_id_from_context(&request_for_context)
         };
-        let _is_admin = self.is_admin(&request_for_context).await;
 
+        let ctx = self.dashboard_ctx_from_metadata(request_for_context.metadata()).await;
         let storage = self.workflow_storage().await?;
         let statuses = Self::workflow_statuses(req.status)?;
         let node_filter = (!req.node_id.is_empty()).then_some(req.node_id.as_str());
         let mut executions = storage
-            .list_executions_by_status(statuses, node_filter)
+            .list_executions_by_status(&ctx, statuses, node_filter)
             .await
             .map_err(|error| {
                 Status::internal(format!("Failed to list workflow executions: {error}"))
@@ -1671,7 +1699,7 @@ impl DashboardService for DashboardServiceImpl {
         let mut workflows = Vec::with_capacity(executions.len());
         for execution in executions {
             let definition = storage
-                .get_definition(&execution.definition_id, &execution.definition_version)
+                .get_definition(&ctx, &execution.definition_id, &execution.definition_version)
                 .await
                 .ok();
             workflows.push(plexspaces_proto::dashboard::v1::WorkflowInfo {
@@ -1898,7 +1926,7 @@ impl DashboardServiceImpl {
     }
 
     pub(crate) fn is_local_node_id(local_id: &str, node_id: &str) -> bool {
-        node_id.is_empty() || node_id == local_id
+        node_id.is_empty() || node_id == "local" || node_id == local_id
     }
 
     /// Build a [`RequestContext`] for dashboard RPCs from gRPC request metadata.
@@ -1951,7 +1979,7 @@ impl DashboardServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Node lookup failed: {e}")))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {node_id}")))?;
-        let addr = Self::normalize_grpc_endpoint(&reg.node_address);
+        let addr = plexspaces_common::dialable_node_address(&reg.node_address);
         let conn_mgr = self
             .service_locator
             .get_grpc_connection_manager()
@@ -2793,5 +2821,10 @@ mod tests {
     #[test]
     fn test_is_local_node_different_id_is_remote() {
         assert!(!DashboardServiceImpl::is_local_node_id("node-a", "node-b"));
+    }
+
+    #[test]
+    fn test_is_local_node_keyword_local() {
+        assert!(DashboardServiceImpl::is_local_node_id("any-node-id", "local"));
     }
 }

@@ -98,17 +98,36 @@ impl RemoteActorClient {
     /// - Connection failures
     /// - Invalid address format
     pub async fn connect(node_address: &str) -> Result<Self, String> {
-        // Ensure HTTP scheme
-        let endpoint =
-            if !node_address.starts_with("http://") && !node_address.starts_with("https://") {
-                format!("http://{}", node_address)
-            } else {
-                node_address.to_string()
-            };
+        Self::connect_with_tls(node_address, None).await
+    }
 
-        // Connect to the gRPC server
-        let channel = Channel::from_shared(endpoint.clone())
-            .map_err(|e| format!("Invalid endpoint: {}", e))?
+    /// Connect with optional mTLS client credentials.
+    ///
+    /// When `tls_config` is `Some`, the connection uses TLS and the client cert
+    /// is presented during the handshake (mutual TLS).
+    pub async fn connect_with_tls(
+        node_address: &str,
+        tls_config: Option<tonic::transport::ClientTlsConfig>,
+    ) -> Result<Self, String> {
+        // Choose scheme based on whether TLS is configured.
+        let endpoint = if node_address.starts_with("http://")
+            || node_address.starts_with("https://")
+        {
+            node_address.to_string()
+        } else if tls_config.is_some() {
+            format!("https://{}", node_address)
+        } else {
+            format!("http://{}", node_address)
+        };
+
+        let mut builder = Channel::from_shared(endpoint.clone())
+            .map_err(|e| format!("Invalid endpoint: {}", e))?;
+
+        if let Some(cfg) = tls_config {
+            builder = builder.tls_config(cfg).map_err(|e| format!("TLS config: {}", e))?;
+        }
+
+        let channel = builder
             .connect()
             .await
             .map_err(|e| format!("Connection failed: {}", e))?;

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Tokens - PlexSpaces</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard/layout.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+
+        <section class="widgets-section">
+            <div class="widget">
+                <div class="widget-header">Active Tokens</div>
+                <div class="widget-value" id="token-count">-</div>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                <h2>Your API Tokens</h2>
+                <button id="create-token-btn" class="action-button">Create Token</button>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Prefix</th>
+                            <th>Scopes</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                            <th>Last Used</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tokens-table-body">
+                        <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Create Token Modal -->
+        <div id="create-modal" class="modal">
+            <div class="modal-content" style="max-width:450px;">
+                <div class="modal-header">
+                    <h2>Create API Token</h2>
+                    <span id="modal-close-x" class="modal-close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-section">
+                        <label>Name</label>
+                        <input id="token-name" type="text" placeholder="e.g. ci-pipeline" style="width:100%;padding:0.5rem;margin-top:0.3rem;border-radius:4px;border:1px solid #ccc;">
+                    </div>
+                    <div class="modal-section">
+                        <label>Scopes (comma-separated)</label>
+                        <input id="token-scopes" type="text" value="read,write" style="width:100%;padding:0.5rem;margin-top:0.3rem;border-radius:4px;border:1px solid #ccc;">
+                    </div>
+                    <div class="modal-section">
+                        <label>TTL (days)</label>
+                        <input id="token-ttl" type="number" value="90" min="1" max="365" style="width:100%;padding:0.5rem;margin-top:0.3rem;border-radius:4px;border:1px solid #ccc;">
+                    </div>
+                    <div id="admin-fields" style="display:none;">
+                        <div class="modal-section">
+                            <label>User ID (admin: create for another user)</label>
+                            <input id="token-user-id" type="text" placeholder="Leave empty for yourself" style="width:100%;padding:0.5rem;margin-top:0.3rem;border-radius:4px;border:1px solid #ccc;">
+                        </div>
+                        <div class="modal-section">
+                            <label>Tenant ID (admin: create for another tenant)</label>
+                            <input id="token-tenant-id" type="text" placeholder="Leave empty for your tenant" style="width:100%;padding:0.5rem;margin-top:0.3rem;border-radius:4px;border:1px solid #ccc;">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:1rem;margin-top:1.5rem;">
+                        <button id="modal-create-btn" class="action-button">Create</button>
+                        <button id="modal-cancel-btn" class="action-button secondary">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plaintext Token Display -->
+        <div id="plaintext-modal" class="modal" style="z-index:1001;">
+            <div class="modal-content" style="max-width:550px;">
+                <div class="modal-header">
+                    <h2>Token Created</h2>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-section">
+                        <p style="color:#d97706;font-weight:500;">Copy this token now. It will not be shown again.</p>
+                        <code id="plaintext-value" style="display:block;padding:1rem;background:#f3f4f6;color:#111;border:1px solid #d1d5db;border-radius:6px;word-break:break-all;margin:1rem 0;user-select:all;font-size:0.85em;"></code>
+                    </div>
+                    <button id="plaintext-close-btn" class="action-button">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const tbody = document.getElementById('tokens-table-body');
+        const countEl = document.getElementById('token-count');
+
+        function handleAuthRequired(res) {
+            if (res.status === 401) {
+                window.location.href = '/api/v1/auth/oidc/login';
+                return true;
+            }
+            return false;
+        }
+
+        async function fetchTokens() {
+            try {
+                const res = await fetch('/api/v1/auth/tokens', { credentials: 'include' });
+                if (handleAuthRequired(res)) return;
+                if (!res.ok) throw new Error(res.statusText);
+                const data = await res.json();
+                countEl.textContent = data.page ? data.page.total_size : data.tokens.length;
+                renderTable(data.tokens || []);
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="7">Error: ' + e.message + '</td></tr>';
+            }
+        }
+
+        function renderTable(tokens) {
+            if (!tokens.length) {
+                tbody.innerHTML = '<tr><td colspan="7">No tokens yet. Create one to get started.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = tokens.map(function(t) {
+                const created = t.created_at ? new Date(t.created_at * 1000).toLocaleDateString() : '-';
+                const expires = t.expires_at ? new Date(t.expires_at * 1000).toLocaleDateString() : 'Never';
+                const lastUsed = t.last_used_at ? new Date(t.last_used_at * 1000).toLocaleDateString() : 'Never';
+                return '<tr>' +
+                    '<td>' + escapeHtml(t.name) + '</td>' +
+                    '<td><code>' + escapeHtml(t.prefix) + '...</code></td>' +
+                    '<td>' + (t.scopes || []).join(', ') + '</td>' +
+                    '<td>' + created + '</td>' +
+                    '<td>' + expires + '</td>' +
+                    '<td>' + lastUsed + '</td>' +
+                    '<td><button class="action-button danger" onclick="revokeToken(\'' + t.token_id + '\')">Revoke</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        window.revokeToken = async function(tokenId) {
+            if (!confirm('Revoke this token? This cannot be undone.')) return;
+            try {
+                const res = await fetch('/api/v1/auth/tokens/' + tokenId, { method: 'DELETE', credentials: 'include' });
+                if (!res.ok) throw new Error((await res.json()).message || res.statusText);
+                fetchTokens();
+            } catch (e) { alert('Revoke failed: ' + e.message); }
+        };
+
+        // Create token modal
+        document.getElementById('create-token-btn').onclick = function() {
+            document.getElementById('create-modal').style.display = 'block';
+        };
+        document.getElementById('modal-cancel-btn').onclick = function() {
+            document.getElementById('create-modal').style.display = 'none';
+        };
+        document.getElementById('modal-close-x').onclick = function() {
+            document.getElementById('create-modal').style.display = 'none';
+        };
+        document.getElementById('modal-create-btn').onclick = async function() {
+            const btn = document.getElementById('modal-create-btn');
+            const name = document.getElementById('token-name').value.trim();
+            if (!name) { alert('Name is required'); return; }
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+            const scopes = document.getElementById('token-scopes').value.split(',').map(s => s.trim()).filter(Boolean);
+            const ttlDays = parseInt(document.getElementById('token-ttl').value) || 90;
+            const payload = { name: name, scopes: scopes, ttl_seconds: ttlDays * 86400 };
+            const userId = (document.getElementById('token-user-id').value || '').trim();
+            const tenantId = (document.getElementById('token-tenant-id').value || '').trim();
+            if (userId) payload.user_id = userId;
+            if (tenantId) payload.tenant_id = tenantId;
+            try {
+                const res = await fetch('/api/v1/auth/tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error((await res.json()).message || res.statusText);
+                const data = await res.json();
+                document.getElementById('create-modal').style.display = 'none';
+                document.getElementById('plaintext-value').textContent = data.token;
+                document.getElementById('plaintext-modal').style.display = 'block';
+                fetchTokens();
+            } catch (e) { alert('Create failed: ' + e.message); }
+            finally { btn.disabled = false; btn.textContent = 'Create'; }
+        };
+        document.getElementById('plaintext-close-btn').onclick = function() {
+            document.getElementById('plaintext-modal').style.display = 'none';
+        };
+
+        function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+        async function checkAdmin() {
+            try {
+                const res = await fetch('/api/v1/auth/me', { credentials: 'include' });
+                if (!res.ok) return;
+                const user = await res.json();
+                if (user.is_admin) {
+                    document.getElementById('admin-fields').style.display = 'block';
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        checkAdmin();
+        fetchTokens();
+    })();
+    </script>
+</body>
+</html>

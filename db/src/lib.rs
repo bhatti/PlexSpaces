@@ -164,6 +164,9 @@ mod tests {
             "tuples",
             "barriers",
             "watchers",
+            "users",
+            "tenants",
+            "api_tokens",
         ];
 
         for table_name in expected_tables {

@@ -1030,6 +1030,7 @@ mod tests {
         service_locator
             .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
                 disable_auth: true,
+                oidc: None,
                 ..Default::default()
             })
             .await;

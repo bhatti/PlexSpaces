@@ -20,6 +20,7 @@ plexspaces-actor = { path = "../actor" }
 tonic = { workspace = true }
 tower = { workspace = true }
 tower-layer = "0.3"
+tower-http = { workspace = true }
 axum = { workspace = true }
 tonic-web = { workspace = true }
 
@@ -39,6 +40,10 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 
 # Auth
 jsonwebtoken = "9.3"
+ring = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
 
 # Rate limiting
 governor = "0.6"
@@ -63,7 +68,12 @@ ulid = { version = "1.1", features = ["serde"] }
 
 # Certificate generation (for mTLS auto-generation)
 rcgen = "0.13"
+time = "0.3"
 tempfile = "3.10"
+
+# TLS server support
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

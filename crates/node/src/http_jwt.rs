@@ -37,8 +37,41 @@
 
 // Re-export everything from grpc-middleware JWT module
 pub use plexspaces_grpc_middleware::jwt::{
-    resolve_tenant_id, validate_bearer_token, validate_jwt_token, JwtClaims, AUTH_REQUIRED_HINT,
+    resolve_tenant_id, sign_jwt_with_keypair, validate_bearer_token,
+    validate_bearer_token_with_keypair, validate_jwt_token, validate_jwt_token_with_keypair,
+    JwtClaims, AUTH_REQUIRED_HINT,
 };
+pub use plexspaces_grpc_middleware::jwt_keys::{JwtKeyError, JwtKeyPair};
+
+/// Extract tenant_id from HTTP request headers using JWT validation.
+/// Shared by all HTTP route handlers that need to forward tenant context to gRPC services.
+pub fn extract_tenant_id_from_headers(
+    headers: &axum::http::HeaderMap,
+    auth_disabled: bool,
+    jwt_key_pair: Option<&JwtKeyPair>,
+) -> Result<String, (axum::http::StatusCode, String)> {
+    if auth_disabled {
+        return Ok(String::new());
+    }
+    let kp = jwt_key_pair.ok_or_else(|| {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Auth enabled but JWT key not configured".to_string(),
+        )
+    })?;
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    validate_bearer_token_with_keypair(kp, auth_header.as_deref())
+        .map(|claims| claims.tenant_id)
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::UNAUTHORIZED,
+                format!("Valid JWT required: {}", e),
+            )
+        })
+}
 
 // ============================================================================
 // TESTS
@@ -171,6 +204,7 @@ mod tests {
             roles: vec!["admin".to_string()],
             groups: vec![],
             is_admin: true,
+            jti: None,
         };
 
         let ctx = claims.to_request_context("my-namespace".to_string(), true);

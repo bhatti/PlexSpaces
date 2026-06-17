@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users &amp; Tenants - PlexSpaces</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard/layout.js"></script>
+    <style>
+        .tabs { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 2px solid #cfe6da; }
+        .tab { padding: 0.75rem 1.5rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #527062; }
+        .tab.active { border-bottom-color: #0f766e; color: #173027; font-weight: 600; }
+        .tab:hover { color: #173027; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .filter-bar { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; }
+        .filter-bar input { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d9e9e0; background: #f9fafb; color: #173027; font-size: 0.9em; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.75rem; }
+        .badge-admin { background: #d4edda; color: #155724; }
+        .badge-role { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+
+        <section class="widgets-section">
+            <div class="widget">
+                <div class="widget-header">Total Users</div>
+                <div class="widget-value" id="user-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Tenants</div>
+                <div class="widget-value" id="tenant-count">-</div>
+            </div>
+        </section>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="users">Users</div>
+            <div class="tab" data-tab="tenants">Tenants</div>
+        </div>
+
+        <!-- Users Tab -->
+        <div id="tab-users" class="tab-content active">
+            <div class="filter-bar">
+                <input id="user-filter" type="text" placeholder="Filter by tenant ID...">
+                <button class="action-btn" onclick="fetchUsers()">Apply</button>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Display Name</th>
+                            <th>Tenant</th>
+                            <th>Provider</th>
+                            <th>Roles</th>
+                            <th>Admin</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body">
+                        <tr><td colspan="6">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="users-pagination" style="margin-top:1rem;display:flex;gap:1rem;align-items:center;"></div>
+        </div>
+
+        <!-- Tenants Tab -->
+        <div id="tab-tenants" class="tab-content">
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Tenant ID</th>
+                            <th>Slug</th>
+                            <th>Display Name</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tenants-table-body">
+                        <tr><td colspan="3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="tenants-pagination" style="margin-top:1rem;display:flex;gap:1rem;align-items:center;"></div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        function handleAuthRequired(res) {
+            if (res.status === 401) {
+                window.location.href = '/api/v1/auth/oidc/login';
+                return true;
+            }
+            return false;
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        var usersOffset = 0, tenantsOffset = 0;
+        var PAGE_SIZE = 50;
+        var tenantMap = {};
+
+        window.fetchUsers = async function() {
+            var tbody = document.getElementById('users-table-body');
+            var filter = document.getElementById('user-filter').value.trim();
+            var url = '/api/v1/auth/users?offset=' + usersOffset + '&limit=' + PAGE_SIZE;
+            if (filter) url += '&tenant_id=' + encodeURIComponent(filter);
+            try {
+                var res = await fetch(url, { credentials: 'include' });
+                if (handleAuthRequired(res)) return;
+                if (!res.ok) throw new Error(res.statusText);
+                var data = await res.json();
+                document.getElementById('user-count').textContent = data.page ? data.page.total_size : data.users.length;
+                renderUsers(data.users || [], data.page);
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="6">Error: ' + e.message + '</td></tr>';
+            }
+        };
+
+        function renderUsers(users, page) {
+            var tbody = document.getElementById('users-table-body');
+            if (!users.length) {
+                tbody.innerHTML = '<tr><td colspan="6">No users found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = users.map(function(u) {
+                var roles = (u.roles || []).map(function(r) { return '<span class="badge badge-role">' + escapeHtml(r) + '</span>'; }).join(' ');
+                var admin = u.admin ? '<span class="badge badge-admin">admin</span>' : '';
+                return '<tr>' +
+                    '<td>' + escapeHtml(u.email) + '</td>' +
+                    '<td>' + escapeHtml(u.display_name || '') + '</td>' +
+                    '<td>' + escapeHtml(tenantMap[u.tenant_id] || u.tenant_id || '') + '</td>' +
+                    '<td>' + escapeHtml(u.provider || '') + '</td>' +
+                    '<td>' + roles + '</td>' +
+                    '<td>' + admin + '</td>' +
+                    '</tr>';
+            }).join('');
+
+            renderPagination('users-pagination', page, function(newOffset) {
+                usersOffset = newOffset;
+                fetchUsers();
+            });
+        }
+
+        async function fetchTenants() {
+            var tbody = document.getElementById('tenants-table-body');
+            var url = '/api/v1/auth/tenants?offset=' + tenantsOffset + '&limit=' + PAGE_SIZE;
+            try {
+                var res = await fetch(url, { credentials: 'include' });
+                if (handleAuthRequired(res)) return;
+                if (!res.ok) {
+                    var errBody = await res.text();
+                    throw new Error(res.status + ': ' + errBody);
+                }
+                var data = await res.json();
+                (data.tenants || []).forEach(function(t) { tenantMap[t.tenant_id] = t.slug || t.display_name || t.tenant_id; });
+                document.getElementById('tenant-count').textContent = data.page ? data.page.total_size : data.tenants.length;
+                renderTenants(data.tenants || [], data.page);
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="3">Error: ' + escapeHtml(e.message) + '</td></tr>';
+            }
+        }
+
+        function renderTenants(tenants, page) {
+            var tbody = document.getElementById('tenants-table-body');
+            if (!tenants.length) {
+                tbody.innerHTML = '<tr><td colspan="3">No tenants found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = tenants.map(function(t) {
+                return '<tr>' +
+                    '<td>' + escapeHtml(t.tenant_id) + '</td>' +
+                    '<td>' + escapeHtml(t.slug || '') + '</td>' +
+                    '<td>' + escapeHtml(t.display_name || '') + '</td>' +
+                    '</tr>';
+            }).join('');
+
+            renderPagination('tenants-pagination', page, function(newOffset) {
+                tenantsOffset = newOffset;
+                fetchTenants();
+            });
+        }
+
+        function renderPagination(containerId, page, onNavigate) {
+            var el = document.getElementById(containerId);
+            if (!page) { el.innerHTML = ''; return; }
+            var html = '';
+            if (page.offset > 0) {
+                html += '<button class="action-btn" id="' + containerId + '-prev">Prev</button>';
+            }
+            html += '<span>Page ' + (Math.floor(page.offset / page.limit) + 1) + ' of ' + Math.ceil(page.total_size / page.limit) + '</span>';
+            if (page.has_next) {
+                html += '<button class="action-btn" id="' + containerId + '-next">Next</button>';
+            }
+            el.innerHTML = html;
+            var prev = document.getElementById(containerId + '-prev');
+            var next = document.getElementById(containerId + '-next');
+            if (prev) prev.onclick = function() { onNavigate(Math.max(0, page.offset - page.limit)); };
+            if (next) next.onclick = function() { onNavigate(page.offset + page.limit); };
+        }
+
+        function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+        fetchTenants().then(function() { fetchUsers(); });
+    })();
+    </script>
+</body>
+</html>

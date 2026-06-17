@@ -25,6 +25,25 @@ ACTOR_TYPE="order-fulfillment"
 NUM_ORDERS=50
 
 
+
+# Auto-generate JWT if not provided
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ] && [ -f "$REPO_ROOT/scripts/gen-test-jwt.sh" ]; then
+  source ~/venv/bin/activate 2>/dev/null || true
+  echo "Generating JWT token..."
+  JWT_OUTPUT="$(PLEXSPACES_JWT_PRIVATE_KEY_FILE="$REPO_ROOT/certs/jwt-es256.pem" "$REPO_ROOT/scripts/gen-test-jwt.sh")"
+  eval "$JWT_OUTPUT"
+  if [ -z "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+    echo "ERROR: gen-test-jwt.sh failed to set PLEXSPACES_TEST_TOKEN"
+    echo "Output was: $JWT_OUTPUT"
+    exit 1
+  fi
+fi
+export AUTH_HEADER=""
+if [ -n "${PLEXSPACES_TEST_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $PLEXSPACES_TEST_TOKEN"
+fi
+
 echo "================================================================"
 echo "  Temporal → PlexSpaces: Order Fulfillment Workflow"
 echo "  TypeScript WASM (run / signal / query)"
@@ -62,11 +81,12 @@ sleep 1
 _deployed=0
 for _attempt in 1 2 3; do
   DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
+    ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
     -F "application_id=$APP_ID" \
     -F "name=temporal-order-fulfillment-ts" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1)
+    -F "config=@$CONFIG_FILE" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -91,6 +111,7 @@ send_op() {
     local timeout="${3:-60}"
     curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE:$instance_id/ask?timeout=$timeout" \
         -H "Content-Type: application/json" \
+        ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
         -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 

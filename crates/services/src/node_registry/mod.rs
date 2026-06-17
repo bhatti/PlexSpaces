@@ -1462,7 +1462,13 @@ impl NodeRegistry {
         Ok(())
     }
 
-    /// Spawns [`Self::probe_node`] so a newly registered seed placeholder reconciles before the next SWIM tick.
+    /// Spawns [`Self::probe_node`] in a background task so a newly registered seed placeholder
+    /// reconciles its `_unknown_` node ID to the remote's real identity asynchronously.
+    ///
+    /// DESIGN NOTE: This is intentionally fire-and-forget (async background). Callers (e.g.
+    /// `connect_to_nodes_impl`) must NOT await reconciliation inline — the SWIM protocol is
+    /// designed for eventual consistency and callers that need fully-resolved node IDs must
+    /// poll the node registry (e.g. via `GET /api/v1/nodes`) until convergence.
     fn kickoff_seed_reconcile_ping_background(&self, node_id: String, node_address: String) {
         let swim = self.swim.clone();
         let cache = self.cache.clone();

@@ -42,6 +42,7 @@ async fn test_security_config_validation_jwt_missing_secret() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 
@@ -71,6 +72,7 @@ async fn test_security_config_validation_jwt_from_env() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 
@@ -98,6 +100,7 @@ async fn test_security_config_validation_mtls_missing_certs() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 
@@ -135,6 +138,7 @@ async fn test_security_config_validation_mtls_auto_generate() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 
@@ -177,6 +181,7 @@ async fn test_security_config_validation_disabled_via_env() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 
@@ -202,6 +207,7 @@ async fn test_security_config_validation_jwt_jwks() {
             ..Default::default()
         }),
         disable_auth: false,
+        oidc: None,
         ..Default::default()
     };
 

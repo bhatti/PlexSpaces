@@ -178,7 +178,7 @@ impl SpecApplication {
             let effective_namespace = self.spec.name.clone();
 
             use plexspaces_actor::{RequestContext, RequestContextExt};
-            let tenant_id = String::new();
+            let tenant_id = self.spec.tenant_id.clone();
             let namespace = effective_namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
             let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> =
@@ -228,7 +228,7 @@ impl SpecApplication {
                     }),
                     role: child.role.clone(),
                     namespace: effective_namespace.clone(),
-                    tenant_id: String::new(),
+                    tenant_id: self.spec.tenant_id.clone(),
                     visibility: 0,
                     behavior_kind: String::new(),
                     args: child.args.clone(),

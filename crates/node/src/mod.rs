@@ -931,7 +931,11 @@ impl Node {
             }
         };
 
+        let local_node_suffix = format!("@{}", self.id.as_str());
         for reg in stale {
+            if reg.object_id.ends_with(&local_node_suffix) || reg.object_id == self.id.as_str() {
+                continue;
+            }
             let tenant_ctx = RequestContext::new_without_auth(
                 reg.tenant_id.clone(),
                 reg.namespace.clone(),
@@ -1202,6 +1206,7 @@ impl Node {
             if let Some(ref runtime) = spec.runtime {
                 if let Some(ref db_config) = runtime.db {
                     if !db_config.connection_string.is_empty() {
+                        tracing::info!(db_url = %db_config.connection_string, "Using shared database from release config");
                         return db_config.connection_string.clone();
                     }
                 }
@@ -1210,7 +1215,9 @@ impl Node {
 
         // Fallback default if spec not initialized (shouldn't happen in normal flow)
         let base_dir = plexspaces_common::config_manager::get_default_base_dir();
-        plexspaces_common::config_manager::default_shared_db_url(&base_dir)
+        let url = plexspaces_common::config_manager::default_shared_db_url(&base_dir);
+        tracing::warn!(db_url = %url, "Using fallback shared database (release config not available)");
+        url
     }
 
     /// Get the shared database config from ReleaseSpec config.
@@ -1429,7 +1436,7 @@ impl Node {
                 .await
         };
         // Use grpc_address (per-node port) if available; fall back to listen_addr.
-        // Normalize 0.0.0.0/127.0.0.1 → localhost and add http:// scheme for gRPC clients.
+        // Normalize 0.0.0.0/127.0.0.1 → localhost for dialable gRPC endpoint.
         let effective_addr = self
             .service_locator
             .get_node_config()
@@ -1516,7 +1523,6 @@ impl Node {
             }
         });
 
-        // TupleSpace removed - not needed
 
         // Parse listen address
         let addr = self
@@ -1630,7 +1636,7 @@ impl Node {
             .await;
 
         actor_registry
-            .set_local_listen_addr(format!("http://{}", self.config.listen_addr))
+            .set_local_listen_addr(plexspaces_common::dialable_node_address(&self.config.listen_addr))
             .await;
 
         ActorRegistry::start_temporary_sender_cleanup(actor_registry.clone());
@@ -1704,7 +1710,6 @@ impl Node {
         );
 
         // Create scheduling service
-        // NOTE: default_tenant_id and default_namespace have been removed.
         // Tenant comes from auth (JWT/mTLS); namespace from request context.
         let scheduling_service = SchedulingServiceImpl::new(
             state_store.clone(),
@@ -1783,14 +1788,7 @@ impl Node {
             tracing::trace!("✅ TaskRouter registered in ServiceLocator");
         }
 
-        tracing::warn!("Node {}: Scheduling service initialized", self.id.as_str());
-
-        // Start gRPC server with all services
-        tracing::warn!(
-            "Node {}: Starting gRPC server on {}",
-            self.id.as_str(),
-            addr
-        );
+        // Logged below after health service registration
 
         // Create shutdown channel for programmatic shutdown
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -1921,7 +1919,12 @@ impl Node {
                 tracing::warn!("Warning: Failed to register built-in dependencies: {}", e);
                 0
             });
-        tracing::info!(count = deps_registered, "Registered built-in dependency health checkers");
+        tracing::warn!(
+            "Node {}: Starting gRPC server on {} (health_checkers={})",
+            self.id.as_str(),
+            addr,
+            deps_registered
+        );
 
         // Register dependencies from object-registry if configured
         // This allows registering dependencies by name/type from the registry
@@ -2215,6 +2218,127 @@ impl Node {
             }
         };
 
+        // Add UserService for OAuth login flow, tenant management, and API token management.
+        // Also builds the AuthRouteState used by the HTTP auth routes module.
+        let (server_builder, auth_route_state) = {
+            use plexspaces_proto::security::v1::user_service_server::UserServiceServer;
+            use plexspaces_services::user_service::{
+                SqlApiTokenRepository, SqlTenantRepository, SqlUserRepository,
+                UserServiceImpl,
+                oidc::build_oidc_state,
+            };
+            use crate::http_routes::AuthRouteState;
+
+            let shared_db = self.get_shared_database_config().await;
+            let user_pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect(&shared_db.connection_string)
+                .await;
+
+            match user_pool {
+                Ok(pool) => {
+                    let user_repo = Arc::new(SqlUserRepository::new(pool.clone()))
+                        as Arc<dyn plexspaces_services::user_service::UserRepository>;
+                    let tenant_repo = Arc::new(SqlTenantRepository::new(pool.clone()))
+                        as Arc<dyn plexspaces_services::user_service::TenantRepository>;
+                    let token_repo = Arc::new(SqlApiTokenRepository::new(pool))
+                        as Arc<dyn plexspaces_services::user_service::ApiTokenRepository>;
+
+                    let user_service = UserServiceImpl::new(
+                        user_repo.clone(),
+                        tenant_repo.clone(),
+                        token_repo.clone(),
+                        self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>,
+                    );
+                    let builder = server_builder.grpc_service(tonic_web::enable(
+                        UserServiceServer::new(user_service)
+                            .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                            .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
+                    ));
+
+                    // Resolve JWT key pair once — used for both OIDC signing and HTTP auth validation.
+                    let jwt_cfg = self.service_locator.get_security_config().await
+                        .and_then(|sc| sc.jwt);
+                    let auth_jwt_key_pair: Option<Arc<plexspaces_grpc_middleware::JwtKeyPair>> = match jwt_cfg {
+                        Some(ref cfg) => {
+                            match plexspaces_grpc_middleware::JwtKeyPair::from_config(
+                                &cfg.private_key_pem,
+                                &cfg.private_key_file,
+                                &cfg.secret,
+                                cfg.auto_generate_key,
+                            ) {
+                                Ok(kp) => {
+                                    Some(Arc::new(kp))
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, "Failed to load JWT key pair from config");
+                                    None
+                                }
+                            }
+                        }
+                        None => {
+                            match plexspaces_grpc_middleware::JwtKeyPair::from_env(None) {
+                                Ok(kp) => {
+                                    Some(Arc::new(kp))
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "No JWT key pair available");
+                                    None
+                                }
+                            }
+                        }
+                    };
+
+                    // Build OidcState — uses the same key pair for signing session JWTs.
+                    let oidc_cfg = self.service_locator.get_security_config().await
+                        .and_then(|sc| sc.oidc);
+                    let oidc_state = if let (Some(cfg), Some(kp)) = (oidc_cfg, auth_jwt_key_pair.clone()) {
+                        match build_oidc_state(&cfg, user_repo.clone(), tenant_repo.clone(), kp).await {
+                            Ok(state) => {
+                                Some(state)
+                            }
+                            Err(e) => {
+                                tracing::info!(reason = %e, "OIDC not mounted");
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                    tracing::info!(
+                        jwt = auth_jwt_key_pair.as_ref().map(|kp| format!("{:?}:{}", kp.algorithm(), kp.kid())).unwrap_or_else(|| "none".into()),
+                        oidc = oidc_state.is_some(),
+                        "Auth configured"
+                    );
+
+                    let auth_state = AuthRouteState {
+                        user_repo,
+                        tenant_repo,
+                        token_repo,
+                        service_locator: self.service_locator.clone()
+                            as Arc<dyn plexspaces_actor::ServiceLocator>,
+                        oidc: oidc_state,
+                        jwt_key_pair: auth_jwt_key_pair,
+                    };
+
+                    (builder, Some(auth_state))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "UserService unavailable: failed to connect to database");
+                    (server_builder, None)
+                }
+            }
+        };
+
+        // Wire tenant_repo into dashboard service for accurate tenant count.
+        #[cfg(feature = "dashboard")]
+        if let Some(ref auth_state) = auth_route_state {
+            if let Some(ref http_dash) = dashboard_service_for_http_opt {
+                http_dash.set_tenant_repo(auth_state.tenant_repo.clone()).await;
+            }
+        }
+
         // Connect to cluster_seed_nodes if configured (non-blocking; node is already listening)
         {
             let node_connectivity =
@@ -2240,10 +2364,12 @@ impl Node {
         }
 
         // Build HTTP routes and assemble single-port gRPC+HTTP server
-        let (auth_disabled, jwt_secret) =
+        let (auth_disabled, jwt_key_pair) =
             plexspaces_grpc_middleware::http_jwt_auth_snapshot(self.service_locator.clone()
                 as Arc<dyn plexspaces_actor::ServiceLocator + Send + Sync>)
             .await;
+        let token_repo_for_gateway: Option<Arc<dyn plexspaces_services::user_service::ApiTokenRepository>> =
+            auth_route_state.as_ref().map(|s| s.token_repo.clone());
         let node_connectivity_for_http =
             node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
         let http_routes = crate::http_routes::all_http_routes(
@@ -2251,21 +2377,51 @@ impl Node {
             self.service_locator.clone(),
             node_connectivity_for_http,
             auth_disabled,
-            jwt_secret.clone(),
+            jwt_key_pair.clone(),
+            auth_route_state,
         );
 
         #[cfg(feature = "dashboard")]
         let http_routes = {
             use plexspaces_dashboard::create_dashboard_router;
-            let dashboard_state = (
+            let gateway_state: crate::http_gateway::HttpGatewayState = (
                 actor_service_for_http,
                 auth_disabled,
-                jwt_secret,
+                jwt_key_pair,
                 self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>,
                 dashboard_service_for_http_opt,
+                token_repo_for_gateway,
             );
-            http_routes.merge(create_dashboard_router().with_state(dashboard_state))
+            let merged = http_routes.merge(create_dashboard_router().with_state(gateway_state.clone()));
+            merged.layer(axum::middleware::from_fn_with_state(
+                gateway_state,
+                crate::http_gateway::http_auth_middleware,
+            ))
         };
+
+        #[cfg(not(feature = "dashboard"))]
+        let http_routes = {
+            let gateway_state: crate::http_gateway::HttpGatewayState = (
+                actor_service_for_http,
+                auth_disabled,
+                jwt_key_pair,
+                self.service_locator.clone() as Arc<dyn plexspaces_actor::ServiceLocator>,
+                None,
+                token_repo_for_gateway,
+            );
+            http_routes.layer(axum::middleware::from_fn_with_state(
+                gateway_state,
+                crate::http_gateway::http_auth_middleware,
+            ))
+        };
+
+        // Server-side mTLS: In single-port mode (shared HTTP+gRPC), we do NOT wrap
+        // the listener in TLS because browsers need plain HTTP access to the dashboard
+        // and OIDC endpoints. mTLS is used for OUTBOUND connections to peer nodes
+        // (see grpc_client.rs::connect_with_tls). If you need inbound mTLS, run a
+        // dedicated gRPC-only port behind a TLS terminator or reverse proxy.
+        let mtls_server_config: Option<std::sync::Arc<rustls::ServerConfig>> = None;
+        let mtls_outbound = std::env::var("PLEXSPACES_MTLS_CA_CERT").is_ok();
 
         let (listener, app) = server_builder
             .http_routes(http_routes)
@@ -2275,6 +2431,8 @@ impl Node {
 
         tracing::info!(
             addr = %listener.local_addr().unwrap_or(addr),
+            mtls_inbound = mtls_server_config.is_some(),
+            mtls_outbound = mtls_outbound,
             "Single-port gRPC+HTTP server ready"
         );
 
@@ -2314,11 +2472,26 @@ impl Node {
             });
         }
 
-        tokio::select! {
-            result = axum::serve(listener, app) => {
-                result.map_err(|e| NodeError::GrpcError(e.to_string()))?;
+        // Server-side mTLS: when cert files are present, wrap the TCP listener with
+        // tokio-rustls so every inbound connection is TLS-authenticated.
+        // Clients (other nodes) must present a cert signed by the configured CA.
+        if let Some(tls_cfg) = mtls_server_config {
+            use tokio_rustls::TlsAcceptor;
+            let acceptor = TlsAcceptor::from(tls_cfg);
+            let service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+            tokio::select! {
+                result = crate::tls_server::serve_tls(listener, acceptor, service) => {
+                    result.map_err(|e| NodeError::GrpcError(e.to_string()))?;
+                }
+                _ = shutdown_signal => {}
             }
-            _ = shutdown_signal => {}
+        } else {
+            tokio::select! {
+                result = axum::serve(listener, app) => {
+                    result.map_err(|e| NodeError::GrpcError(e.to_string()))?;
+                }
+                _ = shutdown_signal => {}
+            }
         }
 
         Ok(())
@@ -3378,7 +3551,6 @@ impl ClusterManager {
 
     /// Leave the cluster
     pub async fn leave(&self) -> Result<(), NodeError> {
-        // TupleSpace removed - not needed
         Ok(())
     }
 }
@@ -3558,8 +3730,6 @@ mod tests {
     async fn test_tuplespace_integration() {
         let node = NodeBuilder::new("test-node").build().await;
 
-        // TupleSpace removed - not needed
-        // Test removed as TupleSpace is no longer part of Node
     }
 
     #[tokio::test]
@@ -3841,8 +4011,6 @@ mod tests {
     async fn test_node_announcement() {
         let node = NodeBuilder::new("test-node").build().await;
 
-        // TupleSpace removed - not needed
-        // Test removed as TupleSpace is no longer part of Node
     }
 
     #[tokio::test]
@@ -3864,8 +4032,6 @@ mod tests {
         // Join cluster
         manager.join().await.unwrap();
 
-        // TupleSpace removed - not needed
-        // Test removed as TupleSpace is no longer part of Node
     }
 
     #[tokio::test]
@@ -3885,8 +4051,6 @@ mod tests {
         manager.join().await.unwrap();
         manager.leave().await.unwrap();
 
-        // TupleSpace removed - not needed
-        // Test removed as TupleSpace is no longer part of Node
     }
 
     // ============================================================================
@@ -3961,7 +4125,6 @@ mod tests {
         );
     }
 
-    // NOTE: test_spawn_actor_monitors_termination removed
     // Known issue: Actors don't terminate automatically - they require explicit stop.
     // Dropping actor_ref doesn't trigger termination notification.
     // TODO: Implement proper actor lifecycle with explicit stop_actor() method
@@ -6068,7 +6231,6 @@ mod tests {
             .register(&app_ctx("test-app"), app)
             .await
             .unwrap();
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6092,7 +6254,6 @@ mod tests {
             .await
             .unwrap();
 
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6117,7 +6278,6 @@ mod tests {
             .register(&app_ctx("test-app"), app)
             .await
             .unwrap();
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6144,7 +6304,6 @@ mod tests {
             .register(&app_ctx("test-app"), app)
             .await
             .unwrap();
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6181,7 +6340,6 @@ mod tests {
                 .unwrap();
         }
 
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone())
             .await;
@@ -6236,7 +6394,6 @@ mod tests {
     async fn test_start_nonexistent_application() {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6279,7 +6436,6 @@ mod tests {
             Some(ApplicationState::ApplicationStateCreated)
         );
 
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6322,7 +6478,6 @@ mod tests {
             .await
             .unwrap();
 
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone())
             .await;
@@ -6362,7 +6517,6 @@ mod tests {
             .register(&app_ctx("test-app"), app)
             .await
             .unwrap();
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6415,7 +6569,6 @@ mod tests {
             .unwrap();
 
         // First start succeeds
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6426,7 +6579,6 @@ mod tests {
         );
 
         // Second start should fail (not in Created state)
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6444,7 +6596,6 @@ mod tests {
             .register(&app_ctx("test-app"), app)
             .await
             .unwrap();
-        // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
             .await;
@@ -6527,8 +6678,7 @@ mod tests {
                 .register(&app_ctx(&format!("app{}", i)), app)
                 .await
                 .unwrap();
-            // node_arc removed - use node.clone() directly
-            node.application_manager()
+                node.application_manager()
                 .ensure_node_context(
                     node.clone() as Arc<dyn plexspaces_application::ApplicationNode>
                 )

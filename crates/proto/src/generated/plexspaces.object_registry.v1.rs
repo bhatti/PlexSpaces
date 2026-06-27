@@ -1203,5 +1203,10 @@ impl HealthStatus {
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 include!("plexspaces.object_registry.v1.tonic.rs");
 // @@protoc_insertion_point(module)

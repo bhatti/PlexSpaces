@@ -1,7 +1,8 @@
 # Web Crawler (Rust WASM)
 
 A parallel web crawler deployed as a WASM component, using ElasticPool (fetcher workers),
-TupleSpace (URL queue), and ShardGroup (map-reduce word frequency).
+TupleSpace (URL queue), ShardGroup (map-reduce word frequency), and a **ScatterGather
+scaling benchmark** (1/4/8/16 workers, Amdahl's Law metrics).
 
 Modeled after [Ray's web-crawl](https://docs.ray.io/en/latest/ray-core/examples/web_crawler.html)
 and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html) examples.
@@ -13,19 +14,28 @@ and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html
 | PlexSpaces Feature | Role |
 |---|---|
 | WIT guest (WASM component) | All actors compiled to `web_crawl_wasm.wasm` |
-| ElasticPool pattern | `fetcher` actors reused round-robin across URLs |
+| ElasticPool pattern | 16 `fetcher` actors; pool_checkout/checkin for BFS crawl |
 | TupleSpace | `url_queue` space: pending → in-flight → done tracking |
 | ShardGroup pattern | `analyzer-0` / `analyzer-1` scatter-gather reduce |
+| `host::create_shard_group` | Provision fetcher shard group for benchmark (protobuf) |
+| `host::scatter_gather` | Dispatch 200 URLs to N parallel fetcher shards (protobuf) |
 | `host::ask` | Actor-to-actor RPC for fetch + analyze calls |
-| `app-config.toml` | Supervisor with orchestrator + fetcher + 2 analyzer shards |
+| `app-config.toml` | Supervisor with orchestrator + 16 fetchers + 2 analyzer shards |
 
 ## Actors
 
 | Actor | Behavior | Role |
 |---|---|---|
-| `orchestrator` | GenServer | BFS crawl loop, coordinates pool + shards |
-| `fetcher` | GenServer (virtual) | Fetches one URL, returns links + word counts |
+| `orchestrator` | GenServer | BFS crawl loop + scaling benchmark |
+| `fetcher-0..15` | GenServer (virtual) | Fetches URL batch (stride-N shard dispatch) |
 | `analyzer-0`, `analyzer-1` | GenServer | Shard: merges word counts, returns top-N words |
+
+## Scaling Benchmark
+
+The `benchmark` handler runs 4 rounds (1, 4, 8, 16 workers) dispatching 200 pages via
+protobuf-encoded `host::create_shard_group` + `host::scatter_gather` WIT calls (same
+pattern as `genomics_pipeline`). Each fetcher processes its own URL slice. Metrics:
+elapsed_ms, coord_ms, fetch_ms, pages_per_sec, speedup, efficiency_pct, parallel_fraction.
 
 ## Build
 

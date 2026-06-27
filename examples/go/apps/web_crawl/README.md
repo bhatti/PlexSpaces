@@ -1,7 +1,8 @@
 # Web Crawler (Go WASM)
 
 A parallel web crawler compiled to WASM with TinyGo, using ElasticPool (fetcher pool),
-TupleSpace (URL queue), and ShardGroup (map-reduce word frequency).
+TupleSpace (URL queue), ShardGroup (map-reduce word frequency), and a **ScatterGather
+scaling benchmark** (1/4/8/16 workers, Amdahl's Law metrics).
 
 Modeled after [Ray's web-crawl](https://docs.ray.io/en/latest/ray-core/examples/web_crawler.html)
 and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html) examples.
@@ -13,19 +14,37 @@ and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html
 | PlexSpaces Feature | Role |
 |---|---|
 | `plexspaces.BaseActor` | Shared actor base (init + handle dispatch) |
-| ElasticPool pattern | 4 fetcher workers, round-robin across URLs |
+| ElasticPool pattern | 16 fetcher workers, round-robin across URLs |
 | TupleSpace | `url_queue` space: write pending, write done |
 | ShardGroup pattern | 2 analyzer shards: scatter + reduce word counts |
+| `host.CreateShardGroup` | Provision fetcher shard group for benchmark |
+| `host.ScatterGather` | Dispatch 200 URLs to N parallel fetcher shards |
 | `host.Ask` | Actor-to-actor RPC for fetch and analyze calls |
-| `app-config.toml` | Supervisor with pool + shard children |
+| `app-config.toml` | Supervisor with 16 fetchers + shard children |
 
 ## Actors
 
 | Actor | Behavior | Role |
 |---|---|---|
-| `orchestrator` | GenServer | BFS crawl loop |
-| `fetcher-0..3` | GenServer (virtual) | Fetch one URL, extract links + words |
+| `orchestrator` | GenServer | BFS crawl loop + scaling benchmark |
+| `fetcher-0..15` | GenServer (virtual) | Fetch URL batch (stride-N shard dispatch) |
 | `analyzer-0..1` | GenServer | Shard: merge counts, return top-N words |
+
+## Scaling Benchmark
+
+The `benchmark` handler runs 4 rounds (1, 4, 8, 16 workers) dispatching 200 pages via
+`host.CreateShardGroup` + `host.ScatterGather`. Each fetcher processes its own URL slice
+(`urls[pool_slot], urls[pool_slot+N], ...`). Metrics reported per round:
+
+| Metric | Description |
+|---|---|
+| `elapsed_ms` | Wall-clock time for the round |
+| `coord_ms` | Coordination overhead (shard setup + TupleSpace writes) |
+| `fetch_ms` | Actual fetch work time |
+| `pages_per_sec` | Throughput |
+| `speedup` | vs 1-worker baseline |
+| `efficiency_pct` | `speedup / N × 100` |
+| `parallel_fraction` | `1 - coord_ms / elapsed_ms` (Amdahl's Law) |
 
 ## Build
 

@@ -32,7 +32,8 @@ fi
 
 echo "================================================================"
 echo "  Web Crawl (Rust Embedded)"
-echo "  ElasticPool + TupleSpace + ShardGroup — single binary"
+echo "  TupleSpace frontier + ElasticPool + ProcessGroup + ShardGroup scatter"
+echo "  Single binary — Node + actors + main() in one process"
 echo "================================================================"
 
 echo ""
@@ -70,11 +71,25 @@ import os, re, sys
 text = os.environ["OUTPUT"]
 pages_m = re.search(r'Pages crawled\s*:\s*(\d+)', text)
 links_m = re.search(r'Total links\s*:\s*(\d+)', text)
+pool_m  = re.search(r'Pool fetches\s*:\s*(\d+)', text)
 pages = int(pages_m.group(1)) if pages_m else 0
 links = int(links_m.group(1)) if links_m else 0
+pool  = int(pool_m.group(1))  if pool_m  else 0
 print(f"  Pages crawled : {pages}")
 print(f"  Total links   : {links}")
-# Extract top words lines (indented with spaces after "Top words:")
+print(f"  Pool fetches  : {pool}")
+# Worker status section
+in_workers = False
+for line in text.splitlines():
+    if 'Worker status' in line:
+        in_workers = True
+        continue
+    if in_workers:
+        if re.match(r'\s{4}\S', line):
+            print(f"  {line.strip()}")
+        else:
+            in_workers = False
+# Extract top words lines
 in_words = False
 for line in text.splitlines():
     if 'Top words' in line:
@@ -87,6 +102,14 @@ for line in text.splitlines():
             in_words = False
 if pages < 1:
     raise SystemExit("Expected at least 1 page crawled")
+# Verify pool fetches present (ElasticPool pattern working)
+if pool < 1:
+    raise SystemExit("Expected pool_fetches >= 1")
+# Check scaling benchmark output
+if 'Scaling benchmark' not in text:
+    raise SystemExit("Expected scaling benchmark table in output")
+if 'Pages/sec' not in text:
+    raise SystemExit("Expected Pages/sec column in benchmark table")
 PY
 
 echo ""
@@ -94,8 +117,11 @@ echo "================================================================"
 echo -e "  ${GREEN}Web Crawl (Rust Embedded) Test Complete${NC}"
 echo ""
 echo "  Key behaviors demonstrated:"
-echo "    ✓ ElasticPool  — 4 PageFetcher actors, round-robin URL dispatch"
-echo "    ✓ TupleSpace   — url_queue pending→done tracking"
-echo "    ✓ ShardGroup   — 2 analyzer shards, scatter/reduce word counts"
-echo "    ✓ Single binary — Node + actors + main() in one process"
+echo "    ✓ TupleSpace frontier — mark-before-enqueue HashSet dedup"
+echo "    ✓ ElasticPool         — channel free-list checkout/checkin"
+echo "    ✓ ProcessGroup        — worker registry broadcast/collect"
+echo "    ✓ ShardGroup scatter  — interleaved i%num_shards assignment"
+echo "    ✓ Scaling benchmark   — 1/4/8/16 workers, pages/sec, speedup, Amdahl efficiency"
+echo "    ✓ Native Rust         — no WASM sandbox overhead, tokio parallel dispatch"
+echo "    ✓ Single binary       — Node + actors + main() in one process"
 echo "================================================================"

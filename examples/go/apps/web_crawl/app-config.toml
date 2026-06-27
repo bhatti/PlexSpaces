@@ -1,4 +1,11 @@
 # Web Crawl (Go WASM): orchestrator + fetcher pool + analyzer shards
+# Demonstrates all four PlexSpaces parallelization primitives:
+#   TupleSpace frontier  — url_queue as live work frontier with TS().Take() atomic claim
+#   ElasticPool          — PoolCheckout/PoolCheckin for rate-limited fetcher dispatch
+#   ProcessGroup         — workers self-register; orchestrator discovers real members
+#   ShardGroup scatter   — interleaved scatter to analyzer shards
+#
+# 16 fetchers support benchmark scaling: 1, 4, 8, 16 concurrent workers
 
 tenant_id = "default"
 
@@ -26,9 +33,10 @@ role = "fetcher"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
-args = { role = "fetcher", pool_slot = "0" }
+args = { role = "fetcher", pool_slot = "0", pool_name = "fetcher_pool" }
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
 ]
 
 [[supervisor.children]]
@@ -38,9 +46,10 @@ role = "fetcher"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
-args = { role = "fetcher", pool_slot = "1" }
+args = { role = "fetcher", pool_slot = "1", pool_name = "fetcher_pool" }
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
 ]
 
 [[supervisor.children]]
@@ -50,9 +59,10 @@ role = "fetcher"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
-args = { role = "fetcher", pool_slot = "2" }
+args = { role = "fetcher", pool_slot = "2", pool_name = "fetcher_pool" }
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
 ]
 
 [[supervisor.children]]
@@ -62,9 +72,166 @@ role = "fetcher"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
-args = { role = "fetcher", pool_slot = "3" }
+args = { role = "fetcher", pool_slot = "3", pool_name = "fetcher_pool" }
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-4"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "4", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-5"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "5", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-6"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "6", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-7"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "7", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-8"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "8", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-9"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "9", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-10"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "10", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-11"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "11", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-12"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "12", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-13"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "13", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-14"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "14", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-15"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "fetcher", pool_slot = "15", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
 ]
 
 [[supervisor.children]]
@@ -87,6 +254,30 @@ restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
 args = { role = "analyzer", shard_id = "1" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "analyzer-2"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "analyzer", shard_id = "2" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "analyzer-3"
+actor_type = "web_crawl_wasm"
+role = "analyzer"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "analyzer", shard_id = "3" }
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
 ]

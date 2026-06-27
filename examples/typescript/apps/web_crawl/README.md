@@ -1,7 +1,8 @@
 # Web Crawler (TypeScript WASM)
 
 A parallel web crawler compiled to WASM with jco/componentize-js, using ElasticPool
-(fetcher pool), TupleSpace (URL queue), and ShardGroup (map-reduce word frequency).
+(fetcher pool), TupleSpace (URL queue), ShardGroup (map-reduce word frequency), and a
+**ScatterGather scaling benchmark** (1/4/8/16 workers, Amdahl's Law metrics).
 
 Modeled after [Ray's web-crawl](https://docs.ray.io/en/latest/ray-core/examples/web_crawler.html)
 and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html) examples.
@@ -14,18 +15,27 @@ and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html
 |---|---|
 | `PlexSpacesActor<State>` | Typed actor base class |
 | `ActorRouter` | Multi-role dispatch (one WASM, three roles) |
-| ElasticPool pattern | 4 fetchers reused round-robin across URLs |
+| ElasticPool pattern | 16 fetchers reused across URLs |
 | TupleSpace | `host.tuplespace.write` for URL queue |
 | ShardGroup pattern | 2 analyzer shards: scatter-gather reduce |
+| `host.createShardGroup` | Provision fetcher shard group for benchmark |
+| `host.scatterGather` | Dispatch 200 URLs to N parallel fetcher shards |
 | `host.ask` | Actor-to-actor async RPC |
 
 ## Actors
 
 | Class | Behavior | Role |
 |---|---|---|
-| `WebCrawlOrchestrator` | GenServer | BFS crawl loop |
-| `PageFetcher` (×4) | GenServer (virtual) | Fetch URL, extract links + words |
+| `WebCrawlOrchestrator` | GenServer | BFS crawl loop + scaling benchmark |
+| `PageFetcher` (×16) | GenServer (virtual) | Fetch URL batch (stride-N shard dispatch) |
 | `LinkAnalyzer` (×2) | GenServer | Shard: merge counts, top-N words |
+
+## Scaling Benchmark
+
+The `benchmark` handler runs 4 rounds (1, 4, 8, 16 workers) dispatching 200 pages via
+`host.createShardGroup` + `host.scatterGather`. Each fetcher processes its own URL slice
+(`urls[pool_slot], urls[pool_slot+N], ...`). Metrics: elapsed_ms, coord_ms, fetch_ms,
+pages_per_sec, speedup, efficiency_pct, parallel_fraction (Amdahl's Law).
 
 ## Build
 

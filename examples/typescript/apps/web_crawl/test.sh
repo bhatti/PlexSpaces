@@ -150,12 +150,24 @@ import json, os
 d = json.loads(os.environ["CRAWL_RESPONSE"])
 p = d.get("payload", d)
 if isinstance(p, str): p = json.loads(p)
-pages = p.get("pages_crawled", 0)
-links = p.get("total_links", 0)
-words = p.get("top_words") or []
-print(f"  Pages crawled : {pages}")
-print(f"  Total links   : {links}")
-print("  Top words     :")
+pages    = p.get("pages_crawled", 0)
+links    = p.get("total_links", 0)
+words    = p.get("top_words") or []
+elapsed  = p.get("elapsed_ms", 0)
+coord    = p.get("coord_time_ms", 0)
+fetch    = p.get("fetch_time_ms", 0)
+tps      = p.get("pages_per_sec", 0.0)
+parallel = p.get("parallel_fraction", 0.0)
+print(f"  Pages crawled     : {pages}")
+print(f"  Total links       : {links}")
+print(f"  ── Performance (Amdahl's Law) ──────────────────────────")
+print(f"  Elapsed           : {elapsed} ms")
+print(f"  Coordination time : {coord} ms  (TupleSpace writes + pool checkout/checkin)")
+print(f"  Fetch time        : {fetch} ms  (actual crawl work)")
+print(f"  Throughput        : {float(tps):.1f} pages/sec")
+print(f"  Parallel fraction : {float(parallel):.2%}  (1 - coord/elapsed)")
+print(f"  ────────────────────────────────────────────────────────")
+print("  Top words         :")
 for entry in words:
     if isinstance(entry, (list, tuple)) and len(entry) >= 2:
         print(f"    {entry[0]:<20} {entry[1]}")
@@ -263,8 +275,8 @@ PY
 }
 
 echo ""
-echo "Step 8: Smoke test orchestrator and analyzer"
-echo "  Testing orchestrator status..."
+echo "Step 8: Smoke test — all four primitives"
+echo "  Testing orchestrator status (pool_metrics, worker_stats)..."
 R="$(send_actor "orchestrator" '{"op":"status"}' 20)"
 assert_actor_ok "orchestrator status" "$R"
 echo "  ✓ orchestrator status OK"
@@ -274,12 +286,90 @@ R="$(send_actor "analyzer-0" '{"op":"top_words","n":5}' 20)"
 assert_actor_ok "analyzer-0 top_words" "$R"
 echo "  ✓ analyzer-0 top_words OK"
 
+echo "  Testing fetcher-0 status_request (ProcessGroup member)..."
+R="$(send_actor "fetcher-0" '{"op":"status_request"}' 20)"
+assert_actor_ok "fetcher-0 status_request" "$R"
+echo "  ✓ fetcher-0 status_request OK"
+
+echo ""
+echo "Step 9: Fetcher work distribution"
+for i in 0 1 2 3; do
+  fs=$(ask "fetcher-${i}" '{"op":"status_request"}' 10)
+  IDX="$i" RESP="$fs" python3 - <<'PY'
+import json, os
+idx = os.environ["IDX"]
+d = json.loads(os.environ["RESP"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+fc = p.get("fetch_count", 0)
+url = p.get("last_url", "")[:50]
+print(f"  fetcher-{idx}: fetch_count={fc}  last_url={url}")
+PY
+done
+
+echo ""
+echo "================================================================"
+echo "  Phase 3: Scaling Benchmark (Amdahl's Law)"
+echo "================================================================"
+echo ""
+echo "Step 10: Benchmark — 1 / 4 / 8 / 16 concurrent workers, 200 pages each"
+bench_response=$(ask "orchestrator" '{
+  "op": "benchmark",
+  "worker_counts": [1, 4, 8, 16],
+  "pages_per_round": 200
+}' 300)
+
+if ! echo "$bench_response" | python3 -c "
+import sys, json
+d = json.loads(sys.stdin.read())
+p = d.get('payload', d)
+if isinstance(p, str): p = json.loads(p)
+exit(0 if p.get('status') == 'ok' else 1)
+" 2>/dev/null; then
+  echo -e "${RED}Benchmark failed: $bench_response${NC}"
+  exit 1
+fi
+
+echo ""
+BENCH_RESPONSE="$bench_response" python3 - <<'PY'
+import json, os
+
+d = json.loads(os.environ["BENCH_RESPONSE"])
+p = d.get("payload", d)
+if isinstance(p, str): p = json.loads(p)
+results = p.get("results", [])
+
+print("  ┌─────────┬────────┬───────────┬──────────┬──────────┬─────────────┬─────────┬──────────┬──────────────┬─────────────┐")
+print("  │ Workers │ Pages  │ Elapsed   │ Coord ms │ Fetch ms │  Pages/sec  │ Speedup │  Eff %   │ Parallel frac│  Word data  │")
+print("  ├─────────┼────────┼───────────┼──────────┼──────────┼─────────────┼─────────┼──────────┼──────────────┼─────────────┤")
+for r in results:
+    w        = r.get("workers", 0)
+    pages    = r.get("pages", 0)
+    elapsed  = r.get("elapsed_ms", 0)
+    coord    = r.get("coord_ms", 0)
+    fetch    = r.get("fetch_ms", 0)
+    pps      = r.get("pages_per_sec", 0.0)
+    speedup  = r.get("speedup", 1.0)
+    eff      = r.get("efficiency_pct", 100.0)
+    pf       = r.get("parallel_fraction", 0.0)
+    tw       = r.get("total_words", 0)
+    uw       = r.get("unique_words", 0)
+    print(f"  │ {w:>7} │ {pages:>6} │ {elapsed:>7} ms │ {coord:>8} │ {fetch:>8} │ {pps:>11.1f} │ {speedup:>7.2f}x │ {eff:>7.1f}% │ {pf:>11.1%} │ {tw:>5}w/{uw:>3}u │")
+print("  └─────────┴────────┴───────────┴──────────┴──────────┴─────────────┴─────────┴──────────┴──────────────┴─────────────┘")
+print()
+print("  Legend: Pages/sec = throughput,  Speedup = vs 1-worker baseline,  Eff % = speedup/N×100")
+print("          Parallel frac = 1 - coord/elapsed (Amdahl's Law)")
+PY
+
 echo ""
 echo "================================================================"
 echo -e "  ${GREEN}Web Crawl (TypeScript WASM) Test Complete${NC}"
 echo ""
 echo "  Key behaviors demonstrated:"
-echo "    ✓ ElasticPool  — 4 PageFetcher actors, round-robin URL dispatch"
-echo "    ✓ TupleSpace   — url_queue pending→done tracking"
-echo "    ✓ ShardGroup   — 2 analyzer shards, scatter/reduce word counts"
+echo "    ✓ TupleSpace frontier — url_queue as live work frontier, ts.take() atomic claim"
+echo "    ✓ ElasticPool         — poolCheckout/poolCheckin, utilization metrics"
+echo "    ✓ ProcessGroup        — workers self-register, orchestrator discovers members"
+echo "    ✓ ShardGroup scatter  — interleaved scatter to 2 analyzer shards"
+echo "    ✓ Scaling benchmark   — 1/4/8/16 workers, ScatterGather parallel dispatch"
+echo "    ✓ Real work           — 12 links/page, 80+ words/page, 200-page corpus"
 echo "================================================================"

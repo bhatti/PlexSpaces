@@ -1,7 +1,8 @@
 # Web Crawler (Rust Embedded)
 
-A single-binary parallel web crawler that demonstrates ElasticPool, TupleSpace, and ShardGroup
-working together — modeled after [Ray's web-crawl](https://docs.ray.io/en/latest/ray-core/examples/web_crawler.html)
+A single-binary parallel web crawler that demonstrates ElasticPool, TupleSpace, ShardGroup,
+and a **native scaling benchmark** using `tokio::spawn` (1/4/8/16 workers, stride-N URL
+dispatch, Amdahl's Law metrics) — modeled after [Ray's web-crawl](https://docs.ray.io/en/latest/ray-core/examples/web_crawler.html)
 and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html) examples.
 
 **This example uses the published SDK from GitHub — no local PlexSpaces checkout needed.**
@@ -15,6 +16,7 @@ and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html
 | ElasticPool | Round-robin pool of PageFetcher workers |
 | TupleSpace pattern | URL queue: pending → in-flight → done tracking |
 | ShardGroup pattern | Scatter results across LinkAnalyzer shards, reduce word counts |
+| Native scaling benchmark | `tokio::spawn` parallel workers, stride-N URL assignment |
 | Single-binary deploy | `NodeBuilder` + `spawn` + `main()` in one binary |
 | `RequestContext` | Tenant isolation (`"demo"` / `"web_crawl"`) |
 
@@ -23,8 +25,15 @@ and [map-reduce](https://docs.ray.io/en/latest/ray-core/examples/map_reduce.html
 | Actor | Behavior | Role |
 |---|---|---|
 | `WebCrawlOrchestrator` | GenServer | Controls BFS crawl, coordinates pool + shards |
-| `PageFetcher` (×4) | GenServer | Fetches one URL, extracts links + word counts |
+| `PageFetcher` | GenServer | Fetches one URL, extracts links + word counts |
 | `LinkAnalyzer` (×2) | GenServer | Shard: merges word counts for assigned URL slice |
+
+## Scaling Benchmark
+
+After the BFS crawl, `run_benchmark` spawns N tokio tasks (1/4/8/16), each processing
+`urls[worker_index], urls[worker_index+N], ...` concurrently. Reports elapsed_ms, coord_ms,
+fetch_ms, pages_per_sec, speedup, efficiency_pct, parallel_fraction — no WASM overhead,
+showing native Tokio throughput as the performance ceiling.
 
 ## Build
 

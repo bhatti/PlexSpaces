@@ -1,4 +1,11 @@
 # Web Crawl (Rust WASM): Orchestrator + fetcher pool + analyzer shards
+# Demonstrates all four PlexSpaces parallelization primitives:
+#   TupleSpace frontier  — url_queue as live work frontier with host::ts_take() atomic claim
+#   ElasticPool          — host::pool_checkout/pool_checkin for rate-limited fetcher dispatch
+#   ProcessGroup         — workers self-register; orchestrator discovers real members
+#   ShardGroup scatter   — interleaved scatter to analyzer shards
+#
+# 16 fetchers support benchmark scaling: 1, 4, 8, 16 concurrent workers
 
 tenant_id = "default"
 
@@ -11,7 +18,6 @@ strategy = "one_for_one"
 max_restarts = 10
 max_restart_window_seconds = 60
 
-# Orchestrator: coordinates BFS crawl
 [[supervisor.children]]
 name = "orchestrator"
 actor_type = "web_crawl_wasm"
@@ -23,19 +29,198 @@ facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
 ]
 
-# Fetcher pool: 4 workers (ElasticPool pattern — reused round-robin across URLs)
 [[supervisor.children]]
-name = "fetcher"
+name = "fetcher-0"
 actor_type = "web_crawl_wasm"
 role = "fetcher"
 restart = "permanent"
 shutdown_timeout_seconds = 10
-args = { role = "fetcher" }
+args = { role = "fetcher", pool_slot = "0", pool_name = "fetcher_pool" }
 facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
 ]
 
-# Analyzer shards (ShardGroup pattern — map-reduce word counts)
+[[supervisor.children]]
+name = "fetcher-1"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "1", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-2"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "2", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-3"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "3", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-4"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "4", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-5"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "5", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-6"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "6", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-7"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "7", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-8"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "8", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-9"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "9", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-10"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "10", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-11"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "11", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-12"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "12", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-13"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "13", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-14"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "14", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+name = "fetcher-15"
+actor_type = "web_crawl_wasm"
+role = "fetcher"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "fetcher", pool_slot = "15", pool_name = "fetcher_pool" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
 [[supervisor.children]]
 name = "analyzer-0"
 actor_type = "web_crawl_wasm"

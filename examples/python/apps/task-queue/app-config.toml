@@ -19,7 +19,6 @@ max_restart_window_seconds = 60
 name = "task-queue"
 tenant_id = "default"
 actor_type = "task_queue_worker"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 

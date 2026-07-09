@@ -60,9 +60,6 @@ pub use actor_visibility::{
     check_actor_visibility_for_messaging, enforce_visibility_for_actor_ref_messaging,
 };
 
-pub mod spawn_init_parse;
-pub use spawn_init_parse::legacy_spawn_init_json_to_role_and_args;
-
 pub mod actor_registry;
 pub use actor_registry::{ActorRegistrationParams, ActorRegistry, ActorRegistryError, TemporarySenderEntry};
 

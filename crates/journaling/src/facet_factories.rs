@@ -308,6 +308,99 @@ impl FacetFactory for MemoizeFacetFactory {
     }
 }
 
+/// Factory for creating `SchemaValidationFacet` instances.
+///
+/// ## Purpose
+/// Creates `SchemaValidationFacet` instances for method-keyed JSON Schema validation.
+/// No external runtime dependencies — schemas are compiled from config at construction
+/// time and fail loudly on invalid JSON or bad schema syntax.
+pub struct SchemaValidationFacetFactory;
+
+#[async_trait]
+impl FacetFactory for SchemaValidationFacetFactory {
+    async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
+        use crate::schema_validation_facet::SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY;
+
+        let priority = config
+            .get("priority")
+            .and_then(|v| v.as_i64())
+            .map(|p| p as i32)
+            .unwrap_or(SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY);
+
+        // SchemaValidationFacet::new fails on invalid schemas — surfaces at deploy time.
+        let facet = crate::SchemaValidationFacet::new(config, priority)?;
+        Ok(Box::new(facet))
+    }
+
+    fn metadata(&self) -> FacetMetadata {
+        FacetMetadata {
+            facet_type: "schema_validation".to_string(),
+            attached_at: std::time::Instant::now(),
+            config: serde_json::Value::Null,
+            priority: crate::schema_validation_facet::SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY,
+        }
+    }
+}
+
+/// Factory for creating `ExecutionTraceFacet` instances.
+///
+/// ## Purpose
+/// Creates `ExecutionTraceFacet` instances that record ordered method-call traces.
+/// When a `KeyValueStore` is available in the `ServiceLocator`, uses
+/// `KvTraceExporter` for persistent storage.  Falls back to `NoopTraceExporter`
+/// when no KV store is configured (e.g. during testing without a full node).
+pub struct ExecutionTraceFacetFactory {
+    service_locator: Arc<dyn ServiceLocatorBase>,
+}
+
+impl ExecutionTraceFacetFactory {
+    /// Create a new `ExecutionTraceFacetFactory`.
+    pub fn new(service_locator: Arc<dyn ServiceLocatorBase>) -> Self {
+        Self { service_locator }
+    }
+}
+
+#[async_trait]
+impl FacetFactory for ExecutionTraceFacetFactory {
+    async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
+        use crate::execution_trace_facet::EXECUTION_TRACE_FACET_DEFAULT_PRIORITY;
+        use crate::{ExecutionTraceFacet, KvTraceExporter, NoopTraceExporter};
+
+        let priority = config
+            .get("priority")
+            .and_then(|v| v.as_i64())
+            .map(|p| p as i32)
+            .unwrap_or(EXECUTION_TRACE_FACET_DEFAULT_PRIORITY);
+
+        // Use KvTraceExporter when KV is available; otherwise Noop.
+        let exporter: Arc<dyn crate::TraceExporter> =
+            match self.service_locator.get_keyvalue_store().await {
+                Some(kv) => Arc::new(KvTraceExporter::new(kv)),
+                None => {
+                    tracing::warn!(
+                        "ExecutionTraceFacetFactory: no KeyValueStore in ServiceLocator, \
+                         traces will be discarded (NoopTraceExporter). \
+                         Register a KeyValueStore for persistent traces."
+                    );
+                    Arc::new(NoopTraceExporter)
+                }
+            };
+
+        Ok(Box::new(ExecutionTraceFacet::with_exporter(
+            config, priority, exporter,
+        )))
+    }
+
+    fn metadata(&self) -> FacetMetadata {
+        FacetMetadata {
+            facet_type: "execution_trace".to_string(),
+            attached_at: std::time::Instant::now(),
+            config: serde_json::Value::Null,
+            priority: crate::execution_trace_facet::EXECUTION_TRACE_FACET_DEFAULT_PRIORITY,
+        }
+    }
+}
+
 /// Factory for creating EventSourcingFacet instances
 ///
 /// ## Purpose
@@ -849,5 +942,92 @@ mod tests {
         let config = serde_json::json!({ "priority": 500 });
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 500);
+    }
+
+    #[tokio::test]
+    async fn test_schema_validation_facet_factory() {
+        let factory = SchemaValidationFacetFactory;
+
+        let config = serde_json::json!({
+            "validation_mode": "strict",
+            "method_schemas": {
+                "web_search": r#"{"type":"object","required":["query"]}"#
+            }
+        });
+
+        let facet = factory.create(config).await;
+        assert!(facet.is_ok());
+        let facet = facet.unwrap();
+        assert_eq!(facet.facet_type(), "schema_validation");
+
+        let metadata = factory.metadata();
+        assert_eq!(metadata.facet_type, "schema_validation");
+        assert_eq!(
+            metadata.priority,
+            crate::schema_validation_facet::SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY
+        );
+    }
+
+    #[tokio::test]
+    async fn test_schema_validation_facet_factory_custom_priority() {
+        let factory = SchemaValidationFacetFactory;
+        let config = serde_json::json!({ "priority": 97 });
+        let facet = factory.create(config).await.unwrap();
+        assert_eq!(facet.get_priority(), 97);
+    }
+
+    #[tokio::test]
+    async fn test_schema_validation_facet_factory_invalid_schema_fails() {
+        let factory = SchemaValidationFacetFactory;
+        let config = serde_json::json!({
+            "method_schemas": { "m": "not-valid-json{{" }
+        });
+        let result = factory.create(config).await;
+        assert!(result.is_err(), "invalid schema must fail at factory.create()");
+    }
+
+    #[tokio::test]
+    async fn test_execution_trace_facet_factory_with_kv() {
+        let service_locator = create_test_service_locator().await;
+        let factory = ExecutionTraceFacetFactory::new(service_locator);
+
+        let config = serde_json::json!({
+            "include_payloads": true,
+            "max_steps": 500,
+        });
+
+        let facet = factory.create(config).await;
+        assert!(facet.is_ok(), "factory.create failed: {:?}", facet.err().map(|e| e.to_string()));
+        let facet = facet.unwrap();
+        assert_eq!(facet.facet_type(), "execution_trace");
+
+        let metadata = factory.metadata();
+        assert_eq!(metadata.facet_type, "execution_trace");
+        assert_eq!(
+            metadata.priority,
+            crate::execution_trace_facet::EXECUTION_TRACE_FACET_DEFAULT_PRIORITY
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_trace_facet_factory_without_kv_falls_back_to_noop() {
+        // No KV store registered → falls back to NoopTraceExporter (should not error)
+        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        let factory = ExecutionTraceFacetFactory::new(service_locator);
+
+        let config = serde_json::json!({});
+        let facet = factory.create(config).await;
+        assert!(facet.is_ok(), "should succeed even without KV (uses NoopTraceExporter)");
+        let facet = facet.unwrap();
+        assert_eq!(facet.facet_type(), "execution_trace");
+    }
+
+    #[tokio::test]
+    async fn test_execution_trace_facet_factory_custom_priority() {
+        let service_locator = create_test_service_locator().await;
+        let factory = ExecutionTraceFacetFactory::new(service_locator);
+        let config = serde_json::json!({ "priority": 80 });
+        let facet = factory.create(config).await.unwrap();
+        assert_eq!(facet.get_priority(), 80);
     }
 }

@@ -35,7 +35,6 @@ facets = [
 [[supervisor.children]]
 name = "validator_agent"
 actor_type = "validator_agent"
-role = "validator_agent"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
@@ -47,7 +46,6 @@ facets = [
 [[supervisor.children]]
 name = "pipeline_supervisor"
 actor_type = "pipeline_supervisor"
-role = "pipeline_supervisor"
 restart = "permanent"
 shutdown_timeout_seconds = 15
 behavior_kind = "GenServer"
@@ -59,7 +57,6 @@ facets = [
 [[supervisor.children]]
 name = "audit_log"
 actor_type = "audit_log"
-role = "audit_log"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 behavior_kind = "GenEvent"

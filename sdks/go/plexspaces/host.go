@@ -142,13 +142,28 @@ func (h *Host) SelfID() string {
 // ========================================================================
 
 // Spawn creates a new actor via the node's actor management.
-// moduleRef is the actor type/module reference (must be a deployed WASM module).
-// actorID is the unique ID for the new actor (empty = auto-generated ULID).
-// initConfig is JSON-serialized and passed to the new actor's Init().
-// Returns the spawned actor ID (may be auto-generated if actorID was empty).
-func (h *Host) Spawn(moduleRef, actorID string, initConfig any) (string, error) {
-	configJSON := marshalPayload(initConfig)
-	result := hostSpawn(moduleRef, actorID, configJSON)
+// Returns the canonical actor ID assigned by the framework — use this ID (not actorName)
+// for all subsequent Ask/Send/Stop calls.
+//
+// moduleRef: actor type/module reference (must be a deployed WASM module).
+// actorName: requested name for the new actor. The framework forms the full canonical ID
+//            from this name, moduleRef, namespace and node. Pass empty string to let the
+//            framework auto-generate a ULID name.
+// role: disambiguation key used ONLY when multiple actors in the same supervisor share the
+//       same actor_type (moduleRef). Pass empty string when moduleRef is unique.
+// args: key-value init arguments forwarded to the new actor's Init().
+func (h *Host) Spawn(moduleRef, actorName, role string, args map[string]string) (string, error) {
+	var argsJSON string
+	if len(args) == 0 {
+		argsJSON = "{}"
+	} else {
+		data, err := json.Marshal(args)
+		if err != nil {
+			return "", fmt.Errorf("Spawn: marshal args: %w", err)
+		}
+		argsJSON = string(data)
+	}
+	result := hostSpawn(moduleRef, actorName, role, argsJSON)
 	if isHostError(result) {
 		return "", &HostError{result}
 	}

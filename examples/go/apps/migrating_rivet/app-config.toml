@@ -24,7 +24,6 @@ max_restart_window_seconds = 60
 name = "game-room"
 tenant_id = "default"
 actor_type = "migrating_rivet_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 facets = [

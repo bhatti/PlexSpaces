@@ -800,36 +800,45 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
     /// Spawn a new actor. Delegates to HostFunctions::spawn_actor() which calls
     /// ActorServiceMessageSender → ActorService → ActorFactory::spawn_actor().
     ///
-    /// If actor_id is empty, the framework generates a ULID-based ID automatically.
-    /// Returns the actual spawned actor ID on success (important when auto-generated),
-    /// or "ERROR:message" on failure.
+    /// role: discriminator used only when multiple actors share the same module_ref.
+    ///       Pass empty string when the module_ref is unique.
+    /// args: key-value init arguments forwarded to the new actor's Init() payload.
+    ///
+    /// Returns the canonical spawned actor ID on success (use this ID for subsequent Ask calls).
     async fn spawn(
         &mut self,
         module_ref: String,
-        actor_id: String,
-        init_config: Vec<u8>,
+        actor_name: String,
+        role: String,
+        args_json: String,
     ) -> Result<String, String> {
         metrics::counter!("plexspaces_wasm_spawn_total").increment(1);
         let self_id = self.actor_id.to_string();
-        // Pass None for empty actor_id so the framework generates a ULID
-        let requested_id = if actor_id.is_empty() {
+        let requested_name = if actor_name.is_empty() {
             None
         } else {
-            Some(actor_id.clone())
+            Some(actor_name.clone())
+        };
+        let args: Vec<(String, String)> = if args_json.is_empty() || args_json == "{}" {
+            vec![]
+        } else {
+            match serde_json::from_str::<std::collections::HashMap<String, String>>(&args_json) {
+                Ok(map) => map.into_iter().collect(),
+                Err(_) => vec![],
+            }
         };
         tracing::debug!(
             actor_id = %self_id, module_ref = %module_ref,
-            new_actor_id = %actor_id, "simple actor spawn"
+            actor_name = %actor_name, role = %role, "simple actor spawn"
         );
         match self
             .host_functions
             .spawn_actor(
                 &self_id,
                 &module_ref,
-                init_config,
-                requested_id,
-                vec![], // labels not exposed in actor-world WIT
-                false,  // durability configured at framework level via facets
+                role,
+                args,
+                requested_name,
             )
             .await
         {
@@ -839,7 +848,6 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
                     actor_id = %self_id, spawned_id = %spawned_id,
                     "simple actor spawn success"
                 );
-                // Return the actual spawned actor ID (may differ from requested if auto-generated)
                 Ok(spawned_id)
             }
             Err(e) => {
@@ -1669,10 +1677,9 @@ mod tests {
             &self,
             _from: &str,
             _module_ref: &str,
-            _initial_state: Vec<u8>,
-            _actor_id: Option<String>,
-            _labels: Vec<(String, String)>,
-            _durable: bool,
+            _role: String,
+            _args: Vec<(String, String)>,
+            _actor_name: Option<String>,
         ) -> Result<String, String> {
             Ok("worker-1".to_string())
         }

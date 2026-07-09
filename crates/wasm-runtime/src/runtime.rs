@@ -565,6 +565,7 @@ impl WasmRuntime {
             config.shared_timer_pool,
             config.tenant_id,
             config.default_namespace,
+            config.node_grpc_address,
         )
         .await
     }
@@ -823,6 +824,7 @@ impl plexspaces_actor::WasmRuntimeTrait for WasmRuntime {
             wasm_config.shared_timer_pool,
             wasm_config.tenant_id,
             wasm_config.default_namespace,
+            wasm_config.node_grpc_address,
         )
         .await?;
 

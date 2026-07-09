@@ -337,9 +337,26 @@ pub use reminder_facet::{ReminderError, ReminderFacet, REMINDER_FACET_DEFAULT_PR
 mod memoize_facet;
 pub use memoize_facet::{MemoizeFacet, MEMOIZE_FACET_DEFAULT_PRIORITY};
 
+// SchemaValidationFacet — method-keyed JSON Schema validation (full draft-7 via jsonschema crate)
+mod schema_validation_facet;
+pub use schema_validation_facet::{
+    SchemaValidationFacet, ValidationMode, SCHEMA_VALIDATION_FACET_DEFAULT_PRIORITY,
+};
+
+// TraceExporter trait + KvTraceExporter + NoopTraceExporter + ExecutionTrace/TraceStep types
+mod trace_exporter;
+pub use trace_exporter::{
+    ExecutionTrace, KvTraceExporter, NoopTraceExporter, TraceExporter, TraceStep,
+};
+
+// ExecutionTraceFacet — ordered method-call trace capture for any actor lifecycle
+mod execution_trace_facet;
+pub use execution_trace_facet::{ExecutionTraceFacet, EXECUTION_TRACE_FACET_DEFAULT_PRIORITY};
+
 // Facet factories for journaling-related facets
 pub mod facet_factories;
 pub use facet_factories::{
-    DurabilityFacetFactory, EventSourcingFacetFactory, MemoizeFacetFactory, ReminderFacetFactory,
-    TimerFacetFactory, VirtualActorFacetFactory,
+    DurabilityFacetFactory, EventSourcingFacetFactory, ExecutionTraceFacetFactory,
+    MemoizeFacetFactory, ReminderFacetFactory, SchemaValidationFacetFactory, TimerFacetFactory,
+    VirtualActorFacetFactory,
 };

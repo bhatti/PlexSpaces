@@ -255,6 +255,7 @@ impl WasmInstance {
         shared_timer_pool: Option<Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>>,
         tenant_id: String,
         default_namespace: String,
+        node_grpc_address: String,
     ) -> WasmResult<Self> {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_instance_creation_attempts_total").increment(1);
@@ -280,7 +281,8 @@ impl WasmInstance {
             outbound_http_client,
             shared_timer_pool,
         )
-        .with_tenant(tenant_id, default_namespace);
+        .with_tenant(tenant_id, default_namespace)
+        .with_node_grpc_address(node_grpc_address);
 
         // Store host_functions in Arc for sharing between traditional and component contexts
         let host_functions_arc = Arc::new(host_functions);

@@ -12,7 +12,6 @@ max_restart_window_seconds = 60
 name = "document-processing"
 tenant_id = "default"
 actor_type = "migrating_azure_durable_functions_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "Workflow"

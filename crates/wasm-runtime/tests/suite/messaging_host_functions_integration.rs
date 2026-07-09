@@ -65,10 +65,9 @@ mod tests {
             &self,
             _from: &str,
             _module_ref: &str,
-            _initial_state: Vec<u8>,
-            _actor_id: Option<String>,
-            _labels: Vec<(String, String)>,
-            _durable: bool,
+            _role: String,
+            _args: Vec<(String, String)>,
+            _actor_name: Option<String>,
         ) -> Result<String, String> {
             Ok("spawned-actor".to_string())
         }

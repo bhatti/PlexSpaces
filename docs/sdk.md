@@ -412,6 +412,7 @@ Client code should usually provide only the actor name or logical key and let th
 | `@fsm_actor(states=[...], initial="...")` | FSM actor with explicit state list and initial state | `@fsm_actor(states=["idle","running","done"], initial="idle") class OrderFSM:` |
 | `@gen_server_actor` | Explicit GenServer (same as `@actor`) | `@gen_server_actor class Worker:` |
 | `@workflow_actor` | Workflow/orchestration actor | `@workflow_actor class Pipeline:` |
+| `@workflow_actor` + `AgentLoop` | Agent loop: OODA + trajectory + token budget (see `AgentLoop` below) | `@workflow_actor class ResearchAgent:` |
 | `@handler(*msg_types)` | Route messages to this method | `@handler("deposit")` |
 | `state(default=None, default_factory=None)` | Define persistent state field | `balance: int = state(default=0)` |
 | `@init_handler` | Custom initialization handler | `@init_handler def on_init(self, config):` |
@@ -428,6 +429,54 @@ All behavior decorators support an optional `facets` parameter:
 | `@event_actor` | GenEvent | Fire-and-forget event handlers | `cast` |
 | `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
 | `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
+**`AgentLoop` — Standalone Agent Harness Utility**
+
+`AgentLoop` is a **plain class** (no class injection, no decorator magic) that provides structured step tracking, token budget enforcement, and suspend/resume helpers for agent harness workflows. Use it with `@workflow_actor` for durable agent execution.
+
+```python
+from plexspaces import workflow_actor, state, init_handler, run_handler, host
+from plexspaces import AgentLoop, AgentStepKind, AgentConfig
+
+@workflow_actor
+class ResearchAgent:
+    task: str = state(default="")
+
+    @run_handler
+    def run(self, task: str = "") -> dict:
+        self.task = task
+        config = AgentConfig(max_iterations=10, token_budget=4096)
+        loop = AgentLoop(actor_id=host.actor_id(), config=config)
+
+        while not loop.iteration_limit_reached() and not loop.budget_exceeded():
+            obs    = loop.observe({"task": self.task})
+            plan   = loop.orient(obs)
+            action = loop.decide(plan)
+            result = loop.act(action)
+            loop.increment_iteration()
+            if result.get("done"):
+                break
+
+        trajectory = loop.finalize_trajectory("completed", "task done")
+        return trajectory.to_dict()
+```
+
+**`AgentLoop` methods** (Python SDK — same API across all SDKs):
+
+| Method | Description |
+|--------|-------------|
+| `observe(input)` | Record an OBSERVE step |
+| `orient(input)` | Record an ORIENT step |
+| `decide(input)` | Record a DECIDE step |
+| `act(input)` | Record an ACT step |
+| `tool_call(name, args, result, started_at_ms)` | Record a TOOL_CALL step |
+| `suspend(reason)` | Mark trajectory as SUSPEND |
+| `budget_exceeded()` | True if tokens ≥ token_budget |
+| `iteration_limit_reached()` | True if iterations ≥ max_iterations |
+| `increment_iteration()` | Call once per OODA cycle (not per step) |
+| `finalize_trajectory(outcome, detail)` | Close and return the `AgentTrajectory` |
+| `get_trajectory()` | Return current in-progress trajectory |
+
+**For execution tracing at the framework level**, use `ExecutionTraceFacet` (priority 85) via `facets = ["execution_trace"]` in app-config.toml — it records every method call automatically without any actor code changes.
 
 **GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, request-reply handlers use call semantics automatically. You don't need to specify that explicitly:
 

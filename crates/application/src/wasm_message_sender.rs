@@ -363,30 +363,23 @@ impl MessageSender for ActorServiceMessageSender {
         &self,
         from: &str,
         module_ref: &str,
-        initial_state: Vec<u8>,
-        actor_id: Option<String>,
-        labels: Vec<(String, String)>,
-        _durable: bool,
+        role: String,
+        args: Vec<(String, String)>,
+        actor_name: Option<String>,
     ) -> Result<String, String> {
-        // For now, use module_ref as actor_type
-        // TODO: Resolve module_ref to get actual actor_type
         let actor_type = module_ref.to_string();
-
         let ctx = self
             .request_context_from_registered_sender_actor(from)
             .await?;
-        let labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
-        // WASM host still supplies legacy JSON bytes for `initial_state`; map into spec fields.
-        let (role_hint, args_map) =
-            plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
+        let args_map: std::collections::HashMap<String, String> = args.into_iter().collect();
         use plexspaces_proto::actor::v1::{ActorSpawnSpec, ActorVisibility};
         use plexspaces_proto::common::v1::ActorIdentity;
         let spec = ActorSpawnSpec {
             identity: Some(ActorIdentity {
-                name: actor_id.unwrap_or_else(|| ulid::Ulid::new().to_string()),
+                name: actor_name.unwrap_or_else(|| ulid::Ulid::new().to_string()),
                 actor_type,
             }),
-            role: role_hint.unwrap_or_default(),
+            role,
             namespace: String::new(),
             tenant_id: String::new(),
             visibility: ActorVisibility::ActorVisibilityPublic as i32,
@@ -394,7 +387,7 @@ impl MessageSender for ActorServiceMessageSender {
             args: args_map,
             facets: vec![],
             config: None,
-            labels: labels_map,
+            labels: std::collections::HashMap::new(),
             ..Default::default()
         };
         let spawned_id = self

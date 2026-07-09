@@ -28,7 +28,17 @@ interface host {
     send: func(to: string, msg-type: string, payload: payload) -> result<_, actor-error>;
     ask: func(to: string, msg-type: string, payload: payload, timeout-ms: u64) -> result<payload, actor-error>;
     self-id: func() -> string;
-    spawn: func(module-ref: string, actor-id: string, init-config: payload) -> result<string, actor-error>;
+    /// Spawn a new actor. Returns the canonical actor ID assigned by the framework.
+    /// Use the returned ID (not actor-name) for all subsequent ask/send/stop calls.
+    ///
+    /// actor-name: Requested name for the new actor (used as the `name` field of ActorIdentity).
+    ///             The framework forms the full canonical ID from this name, module-ref, namespace
+    ///             and node. Pass empty string to let the framework auto-generate a ULID name.
+    /// role: Disambiguator used ONLY when multiple actors in the same supervisor share the same
+    ///       module-ref (actor_type). Pass empty string when the module-ref is unique.
+    /// args-json: JSON-encoded key-value init arguments forwarded to the new actor's Init().
+    ///            Pass "{}" or "" when there are no arguments.
+    spawn: func(module-ref: string, actor-name: string, role: string, args-json: string) -> result<string, actor-error>;
     stop: func(actor-id: string) -> result<_, actor-error>;
 
     link: func(actor-id: string) -> result<_, actor-error>;

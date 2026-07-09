@@ -63,6 +63,9 @@ pub use plexspaces_sdk_macros::signal_handler;
 /// `#[query_handler("name")]` - Mark method as workflow query handler
 pub use plexspaces_sdk_macros::query_handler;
 
+pub mod agent;
+pub use agent::*;
+
 pub mod simple_actor;
 pub use simple_actor::pg_first;
 
@@ -587,7 +590,7 @@ pub async fn spawn_with_behavior_type(
     actor_name: impl Into<String>,
     _namespace: impl AsRef<str>,
     behavior_type: impl AsRef<str>,
-    initial_state: Vec<u8>,
+    _initial_state: Vec<u8>,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
     let actor_name = actor_name.into();
@@ -612,9 +615,6 @@ pub async fn spawn_with_behavior_type(
     )
     .map_err(|e| format!("Failed to construct actor ID: {}", e))?;
 
-    let (role_from_init, args_from_init) =
-        plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
-
     let spawn_spec = {
         use plexspaces_actor::ActorSpawnSpec;
         use plexspaces_proto::common::v1::ActorIdentity;
@@ -623,12 +623,12 @@ pub async fn spawn_with_behavior_type(
                 name: actor_id.name().to_string(),
                 actor_type: behavior_type.clone(),
             }),
-            role: role_from_init.unwrap_or_default(),
+            role: String::new(),
             namespace: ctx.namespace().to_string(),
             tenant_id: ctx.tenant_id().to_string(),
             visibility: 0,
             behavior_kind: String::new(),
-            args: args_from_init,
+            args: std::collections::HashMap::new(),
             facets: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
@@ -1065,7 +1065,7 @@ mod tests {
     async fn actor_ref_from_sender_returns_actor_ref() {
         let service_locator: Arc<dyn ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
         let actor_ref = ActorRef::remote(
-            "sdk-test@remote-node",
+            "sdk-test//SdkTestActor::default@remote-node",
             "",
             "test",
             "remote-node",

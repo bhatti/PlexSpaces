@@ -35,6 +35,7 @@
 
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
+use plexspaces_common::dialable_node_address;
 use plexspaces_actor::actor_types::Actor;
 use plexspaces_actor::{
     wasm_root_supervisor_actor_type_from_application_name,
@@ -530,12 +531,28 @@ impl WasmApplication {
             service_locator.get_process_group_registry().await;
 
         let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
+
+        let node_grpc_address = service_locator
+            .get_node_config()
+            .await
+            .map(|c| {
+                if !c.grpc_address.is_empty() {
+                    dialable_node_address(&c.grpc_address)
+                } else if !c.listen_addr.is_empty() {
+                    dialable_node_address(&c.listen_addr)
+                } else {
+                    String::new()
+                }
+            })
+            .unwrap_or_default();
+
         // Derive WasmConfig from spec.facets — durability enabled when spec carries a durability facet.
         let wasm_config = plexspaces_wasm_runtime::WasmConfig {
             durability_enabled: spec.facets.iter().any(|f| f.r#type == "durability"),
             shared_timer_pool,
             tenant_id,
             default_namespace,
+            node_grpc_address,
             ..Default::default()
         };
         let config_any: Arc<dyn std::any::Any + Send + Sync> = Arc::new(wasm_config);

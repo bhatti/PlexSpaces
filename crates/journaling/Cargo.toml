@@ -63,6 +63,9 @@ ulid = { version = "1.1", features = ["serde"] }
 tracing = "0.1"
 chrono = "0.4"
 
+# JSON Schema validation (full draft-7) — used by SchemaValidationFacet
+jsonschema = { version = "0.17", default-features = false }
+
 # Observability
 metrics = "0.23"
 

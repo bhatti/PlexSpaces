@@ -275,6 +275,7 @@ async fn test_handle_request_error() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -343,6 +344,7 @@ async fn test_handle_event_error() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -434,6 +436,7 @@ async fn test_channel_host_function_error_handling() {
         None,  // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

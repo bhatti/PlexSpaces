@@ -82,22 +82,20 @@ pub trait MessageSender: Send + Sync {
     ///
     /// ## Arguments
     /// * `from` - Spawning actor ID
-    /// * `module_ref` - Module reference (name@version or hash)
-    /// * `initial_state` - Initial state bytes
-    /// * `actor_id` - Optional actor ID (if None, system generates)
-    /// * `labels` - Optional labels for the actor
-    /// * `durable` - Whether actor should be durable
+    /// * `module_ref` - Module reference / actor_type name
+    /// * `role` - Role discriminator; non-empty only when multiple actors share the same module_ref
+    /// * `args` - Key-value init arguments forwarded to the new actor's Init()
+    /// * `actor_id` - Optional actor ID (if None, system generates a ULID)
     ///
     /// ## Returns
-    /// Spawned actor ID or error
+    /// Canonical spawned actor ID or error
     async fn spawn_actor(
         &self,
         from: &str,
         module_ref: &str,
-        initial_state: Vec<u8>,
-        actor_id: Option<String>,
-        labels: Vec<(String, String)>,
-        durable: bool,
+        role: String,
+        args: Vec<(String, String)>,
+        actor_name: Option<String>,
     ) -> Result<String, String>;
 
     /// Stop an actor gracefully
@@ -302,6 +300,9 @@ pub struct HostFunctions {
     /// Default namespace from ApplicationSpec. WASM guests may request a different namespace,
     /// but tenant_id is always injected from this field.
     pub default_namespace: String,
+    /// Node's own gRPC address, filled from NodeConfig at instantiation time.
+    /// Auto-injected into object registry registrations when the WASM guest omits grpc_address.
+    pub node_grpc_address: String,
     /// Message sender for routing messages (optional)
     message_sender: Option<Arc<dyn MessageSender>>,
     /// Channel service for queue/topic patterns (optional)
@@ -337,6 +338,7 @@ impl HostFunctions {
         Self {
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
             message_sender: None,
             channel_service: None,
             keyvalue_store: None,
@@ -356,6 +358,13 @@ impl HostFunctions {
     pub fn with_tenant(mut self, tenant_id: String, default_namespace: String) -> Self {
         self.tenant_id = tenant_id;
         self.default_namespace = default_namespace;
+        self
+    }
+
+    /// Set the node's own gRPC address (from NodeConfig). Auto-injected into object registry
+    /// registrations when the WASM guest omits grpc_address.
+    pub fn with_node_grpc_address(mut self, addr: String) -> Self {
+        self.node_grpc_address = addr;
         self
     }
 
@@ -386,6 +395,7 @@ impl HostFunctions {
             is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 
@@ -406,6 +416,7 @@ impl HostFunctions {
             is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 
@@ -429,6 +440,7 @@ impl HostFunctions {
             is_replaying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 
@@ -451,6 +463,7 @@ impl HostFunctions {
         Self {
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
             message_sender: sender,
             channel_service,
             keyvalue_store,
@@ -666,14 +679,13 @@ impl HostFunctions {
         &self,
         from: &str,
         module_ref: &str,
-        initial_state: Vec<u8>,
-        actor_id: Option<String>,
-        labels: Vec<(String, String)>,
-        durable: bool,
+        role: String,
+        args: Vec<(String, String)>,
+        actor_name: Option<String>,
     ) -> Result<String, String> {
         if let Some(sender) = &self.message_sender {
             sender
-                .spawn_actor(from, module_ref, initial_state, actor_id, labels, durable)
+                .spawn_actor(from, module_ref, role, args, actor_name)
                 .await
         } else {
             Err("Message sender not configured for spawn_actor".to_string())

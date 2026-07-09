@@ -474,6 +474,8 @@ graph LR
 | **LoggingFacet** | `logging` | Observability | `crates/facet/src/mod.rs` |
 | **CachingFacet** | `caching` | Performance | `crates/facet/src/mod.rs` |
 | **MetricsFacet** | `metrics` | Observability | `crates/facet/src/metrics_facet.rs` |
+| **SchemaValidationFacet** | `schema_validation` | Safety | `crates/journaling/src/schema_validation_facet.rs` |
+| **ExecutionTraceFacet** | `execution_trace` | Observability | `crates/journaling/src/execution_trace_facet.rs` |
 | **MobilityFacet** | `mobility` | Distribution | (mobility crate) |
 | **BlobStorageFacet** | `blob_storage` | Storage | (blob crate) |
 | **SecretsFacet** | `secrets` | Security | (secrets facet) |
@@ -520,6 +522,12 @@ This is a deliberate design choice - the name itself communicates durability sem
 **Integration Facets** - External systems:
 - `HttpClientFacet`: HTTP client for external APIs
 - `SecretsFacet`: Secure credential access
+
+**Safety Facets** - Method-level input validation:
+- `SchemaValidationFacet`: Full JSON Schema draft-7 validation (via `jsonschema` crate) of handler input at priority 95. Schemas are method-keyed (`method_name → JSON Schema`), not tool_call-field-keyed. Invalid inputs are short-circuited before the actor sees them and before `DurabilityFacet` journals them. Supports `strict` (reject), `warn` (log + pass), and `permissive` modes. Schemas are compiled at construction time — invalid schema JSON is detected at deploy time, not runtime.
+
+**Execution Trace Facets** - Ordered lifecycle capture:
+- `ExecutionTraceFacet`: Records a `TraceStep` for every `before_method` / `after_method` pair at priority 85. Captures real wall-clock duration (not zero-duration), caller-supplied semantic labels via `x-trace-label` header, and arbitrary step metadata via `x-trace-*` headers. On actor termination, exports the complete `ExecutionTrace` via `KvTraceExporter` (persistent KV: `trace:{id}`, `trace_index:{actor_id}`) or `NoopTraceExporter` (testing). ExitReason mapped to outcome string ("completed"/"error"/"killed"). Bounded by `max_steps` and `max_retained_traces` (oldest evicted, no unbounded growth).
 
 **Observability Facets** - Monitoring:
 - `LoggingFacet`: Structured logging
@@ -636,6 +644,18 @@ Facets execute in priority order (higher = runs first):
 - **800-899**: Metrics facets
 - **100-500**: Domain logic facets
 - **1-99**: Persistence facets (run last, commit after business logic)
+
+**Recommended priority chain** (defined constants in `crates/journaling/`):
+
+| Priority | Facet | Why this order |
+|----------|-------|----------------|
+| 100 | `VirtualActorFacet` | Lifecycle gate — reject if not activated |
+| 95 | `SchemaValidationFacet` | Validate method input before anything is journaled |
+| 90 | `DurabilityFacet` | Journal only valid, accepted messages |
+| 85 | `ExecutionTraceFacet` | Capture steps after durability commits them |
+| 80 | `MetricsFacet` | Count after the message is fully processed |
+
+This ordering ensures: (1) invalid messages are never journaled (`SchemaValidationFacet` runs before `DurabilityFacet`), and (2) execution trace steps reflect real durable execution (`ExecutionTraceFacet` runs after durability).
 
 ### Infrastructure Facets
 

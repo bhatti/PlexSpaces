@@ -147,6 +147,7 @@ async fn test_wasm_component_instantiation() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     let actor_id = ActorId::new("test-calculator-actor", "wasm", "default", "test-node").unwrap();
@@ -253,6 +254,7 @@ async fn test_component_init_function() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     let actor_id = ActorId::new("test-calculator-init", "wasm", "default", "test-node").unwrap();
@@ -325,6 +327,7 @@ async fn test_component_handle_message() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     let actor_id = ActorId::new("test-calculator-handle", "wasm", "default", "test-node").unwrap();
@@ -461,6 +464,7 @@ async fn test_component_empty_initial_state() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     // ACT: Instantiate with empty initial state (with timeout)
@@ -529,6 +533,7 @@ async fn test_component_observability() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     // ACT: Instantiate and call handle_message (with timeout)
@@ -606,6 +611,7 @@ async fn test_component_different_message_types() {
         shared_timer_pool: None,
         tenant_id: String::new(),
         default_namespace: String::new(),
+        node_grpc_address: String::new(),
     };
 
     let actor_id_msg = ActorId::new("test-message-types", "wasm", "default", "test-node").unwrap();

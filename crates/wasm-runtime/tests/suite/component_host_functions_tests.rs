@@ -203,10 +203,9 @@ mod tests {
                 &self,
                 _from: &str,
                 _module_ref: &str,
-                _initial_state: Vec<u8>,
-                _actor_id: Option<String>,
-                _labels: Vec<(String, String)>,
-                _durable: bool,
+                _role: String,
+                _args: Vec<(String, String)>,
+                _actor_name: Option<String>,
             ) -> Result<String, String> {
                 Ok("spawned-actor".to_string())
             }
@@ -321,10 +320,9 @@ mod tests {
                 &self,
                 _from: &str,
                 _module_ref: &str,
-                _initial_state: Vec<u8>,
-                _actor_id: Option<String>,
-                _labels: Vec<(String, String)>,
-                _durable: bool,
+                _role: String,
+                _args: Vec<(String, String)>,
+                _actor_name: Option<String>,
             ) -> Result<String, String> {
                 Ok("spawned-actor".to_string())
             }
@@ -583,14 +581,12 @@ mod tests {
                 &self,
                 _from: &str,
                 module_ref: &str,
-                _initial_state: Vec<u8>,
-                actor_id: Option<String>,
-                _labels: Vec<(String, String)>,
-                _durable: bool,
+                _role: String,
+                _args: Vec<(String, String)>,
+                actor_name: Option<String>,
             ) -> Result<String, String> {
-                // Generate actor ID if not provided
                 let spawned_id =
-                    actor_id.unwrap_or_else(|| format!("spawned-{}", ulid::Ulid::new()));
+                    actor_name.unwrap_or_else(|| format!("spawned-{}", ulid::Ulid::new()));
                 Ok(spawned_id)
             }
 
@@ -722,10 +718,9 @@ mod tests {
                 &self,
                 _from: &str,
                 _module_ref: &str,
-                _initial_state: Vec<u8>,
+                _role: String,
+                _args: Vec<(String, String)>,
                 _actor_id: Option<String>,
-                _labels: Vec<(String, String)>,
-                _durable: bool,
             ) -> Result<String, String> {
                 Err("Not implemented".to_string())
             }

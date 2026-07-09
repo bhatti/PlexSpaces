@@ -264,6 +264,7 @@ async fn test_send_to_queue_host_function() {
         None,  // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -326,6 +327,7 @@ async fn test_publish_to_topic_host_function() {
         None,  // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -385,6 +387,7 @@ async fn test_send_to_queue_without_channel_service() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

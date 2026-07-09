@@ -144,6 +144,30 @@ class JwtConfig(betterproto.Message):
     user_id_claim: str = betterproto.string_field(9)
     """JWT claim name for user_id extraction (default: "sub")"""
 
+    algorithm: str = betterproto.string_field(10)
+    """
+    Algorithm: "ES256" (default, auto-selected when private_key_pem is set) or "HS256"
+    """
+
+    private_key_pem: str = betterproto.string_field(11)
+    """
+    EC P-256 private key in PEM format (for signing).
+     Security: Never store in config — set via PLEXSPACES_JWT_PRIVATE_KEY env var
+     or point to a file via PLEXSPACES_JWT_PRIVATE_KEY_FILE.
+    """
+
+    private_key_file: str = betterproto.string_field(12)
+    """
+    Path to EC P-256 private key file. Auto-generates key if file doesn't exist.
+     Set via PLEXSPACES_JWT_PRIVATE_KEY_FILE env var or config.
+    """
+
+    auto_generate_key: bool = betterproto.bool_field(13)
+    """
+    Whether to auto-generate an ES256 key pair on startup when no key is configured.
+     Default: true (dev-friendly). Set to false in production to enforce explicit keys.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class OidcConfig(betterproto.Message):
@@ -403,6 +427,143 @@ class UpdateUserResponse(betterproto.Message):
     user: "User" = betterproto.message_field(1)
 
 
+@dataclass(eq=False, repr=False)
+class Tenant(betterproto.Message):
+    """
+    First-class tenant entity. Created automatically on first OIDC login for a tenant slug.
+    """
+
+    tenant_id: str = betterproto.string_field(1)
+    """ULID primary key"""
+
+    slug: str = betterproto.string_field(2)
+    """
+    URL-safe slug, unique. Derived from OIDC org claim or config default_tenant_id.
+    """
+
+    display_name: str = betterproto.string_field(3)
+    """Human-readable display name"""
+
+    created_at: datetime = betterproto.message_field(4)
+    updated_at: datetime = betterproto.message_field(5)
+
+
+@dataclass(eq=False, repr=False)
+class ApiToken(betterproto.Message):
+    """
+    Long-lived API token for programmatic access (CI/CD, scripts, SDKs).
+     Token format: psx_<32-byte-base64url>. Shown ONCE at creation, never stored in plaintext.
+    """
+
+    token_id: str = betterproto.string_field(1)
+    """ULID primary key"""
+
+    user_id: str = betterproto.string_field(2)
+    """Owner user ID"""
+
+    tenant_id: str = betterproto.string_field(3)
+    """Tenant this token is scoped to"""
+
+    name: str = betterproto.string_field(4)
+    """User-assigned label for this token"""
+
+    prefix: str = betterproto.string_field(5)
+    """First 8 characters of the token (display only, never the secret)"""
+
+    scopes: List[str] = betterproto.string_field(6)
+    """Scopes granted (e.g. "read", "write")"""
+
+    expires_at: datetime = betterproto.message_field(7)
+    """Expiration timestamp (absent = non-expiring)"""
+
+    created_at: datetime = betterproto.message_field(8)
+    last_used_at: datetime = betterproto.message_field(9)
+    revoked: bool = betterproto.bool_field(10)
+    """Whether this token has been revoked"""
+
+    is_admin: bool = betterproto.bool_field(11)
+    """
+    Snapshot of the owner's admin status at token creation time.
+     Stored so validation does not require a users table JOIN on every request.
+    """
+
+
+@dataclass(eq=False, repr=False)
+class ListUsersRequest(betterproto.Message):
+    """
+    Paginated user listing request. Admins can filter across all tenants.
+    """
+
+    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+    tenant_id_filter: str = betterproto.string_field(2)
+    """
+    Admin-only: filter to a specific tenant. Empty = caller's own tenant for non-admins.
+    """
+
+
+@dataclass(eq=False, repr=False)
+class ListUsersResponse(betterproto.Message):
+    users: List["User"] = betterproto.message_field(1)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class ListTenantsRequest(betterproto.Message):
+    """
+    Paginated tenant listing request. Non-admins see only their own tenant.
+    """
+
+    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+
+
+@dataclass(eq=False, repr=False)
+class ListTenantsResponse(betterproto.Message):
+    tenants: List["Tenant"] = betterproto.message_field(1)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
+@dataclass(eq=False, repr=False)
+class CreateApiTokenRequest(betterproto.Message):
+    name: str = betterproto.string_field(1)
+    """User-assigned label for this token"""
+
+    scopes: List[str] = betterproto.string_field(2)
+    """Scopes to grant. Defaults to ["read", "write"] if empty."""
+
+    ttl: timedelta = betterproto.message_field(3)
+    """TTL for the token. Defaults to 100× the session JWT TTL if unset."""
+
+
+@dataclass(eq=False, repr=False)
+class CreateApiTokenResponse(betterproto.Message):
+    token: "ApiToken" = betterproto.message_field(1)
+    """Token metadata (without the secret)"""
+
+    plaintext: str = betterproto.string_field(2)
+    """The plaintext token (psx_<secret>). Shown ONCE — store it now."""
+
+
+@dataclass(eq=False, repr=False)
+class DeleteApiTokenRequest(betterproto.Message):
+    token_id: str = betterproto.string_field(1)
+
+
+@dataclass(eq=False, repr=False)
+class DeleteApiTokenResponse(betterproto.Message):
+    pass
+
+
+@dataclass(eq=False, repr=False)
+class ListApiTokensRequest(betterproto.Message):
+    page: "__common_v1__.PageRequest" = betterproto.message_field(1)
+
+
+@dataclass(eq=False, repr=False)
+class ListApiTokensResponse(betterproto.Message):
+    tokens: List["ApiToken"] = betterproto.message_field(1)
+    page: "__common_v1__.PageResponse" = betterproto.message_field(2)
+
+
 class UserServiceStub(betterproto.ServiceStub):
     async def get_or_create_by_email(
         self,
@@ -438,6 +599,91 @@ class UserServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
+    async def list_users(
+        self,
+        list_users_request: "ListUsersRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "ListUsersResponse":
+        return await self._unary_unary(
+            "/plexspaces.security.v1.UserService/ListUsers",
+            list_users_request,
+            ListUsersResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def list_tenants(
+        self,
+        list_tenants_request: "ListTenantsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "ListTenantsResponse":
+        return await self._unary_unary(
+            "/plexspaces.security.v1.UserService/ListTenants",
+            list_tenants_request,
+            ListTenantsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def create_api_token(
+        self,
+        create_api_token_request: "CreateApiTokenRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "CreateApiTokenResponse":
+        return await self._unary_unary(
+            "/plexspaces.security.v1.UserService/CreateApiToken",
+            create_api_token_request,
+            CreateApiTokenResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def delete_api_token(
+        self,
+        delete_api_token_request: "DeleteApiTokenRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "DeleteApiTokenResponse":
+        return await self._unary_unary(
+            "/plexspaces.security.v1.UserService/DeleteApiToken",
+            delete_api_token_request,
+            DeleteApiTokenResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def list_api_tokens(
+        self,
+        list_api_tokens_request: "ListApiTokensRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "ListApiTokensResponse":
+        return await self._unary_unary(
+            "/plexspaces.security.v1.UserService/ListApiTokens",
+            list_api_tokens_request,
+            ListApiTokensResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
 
 class UserServiceBase(ServiceBase):
 
@@ -449,6 +695,31 @@ class UserServiceBase(ServiceBase):
     async def update_user(
         self, update_user_request: "UpdateUserRequest"
     ) -> "UpdateUserResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def list_users(
+        self, list_users_request: "ListUsersRequest"
+    ) -> "ListUsersResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def list_tenants(
+        self, list_tenants_request: "ListTenantsRequest"
+    ) -> "ListTenantsResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def create_api_token(
+        self, create_api_token_request: "CreateApiTokenRequest"
+    ) -> "CreateApiTokenResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def delete_api_token(
+        self, delete_api_token_request: "DeleteApiTokenRequest"
+    ) -> "DeleteApiTokenResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def list_api_tokens(
+        self, list_api_tokens_request: "ListApiTokensRequest"
+    ) -> "ListApiTokensResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
     async def __rpc_get_or_create_by_email(
@@ -466,6 +737,44 @@ class UserServiceBase(ServiceBase):
         response = await self.update_user(request)
         await stream.send_message(response)
 
+    async def __rpc_list_users(
+        self, stream: "grpclib.server.Stream[ListUsersRequest, ListUsersResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.list_users(request)
+        await stream.send_message(response)
+
+    async def __rpc_list_tenants(
+        self, stream: "grpclib.server.Stream[ListTenantsRequest, ListTenantsResponse]"
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.list_tenants(request)
+        await stream.send_message(response)
+
+    async def __rpc_create_api_token(
+        self,
+        stream: "grpclib.server.Stream[CreateApiTokenRequest, CreateApiTokenResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.create_api_token(request)
+        await stream.send_message(response)
+
+    async def __rpc_delete_api_token(
+        self,
+        stream: "grpclib.server.Stream[DeleteApiTokenRequest, DeleteApiTokenResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.delete_api_token(request)
+        await stream.send_message(response)
+
+    async def __rpc_list_api_tokens(
+        self,
+        stream: "grpclib.server.Stream[ListApiTokensRequest, ListApiTokensResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.list_api_tokens(request)
+        await stream.send_message(response)
+
     def __mapping__(self) -> Dict[str, grpclib.const.Handler]:
         return {
             "/plexspaces.security.v1.UserService/GetOrCreateByEmail": grpclib.const.Handler(
@@ -479,5 +788,35 @@ class UserServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 UpdateUserRequest,
                 UpdateUserResponse,
+            ),
+            "/plexspaces.security.v1.UserService/ListUsers": grpclib.const.Handler(
+                self.__rpc_list_users,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                ListUsersRequest,
+                ListUsersResponse,
+            ),
+            "/plexspaces.security.v1.UserService/ListTenants": grpclib.const.Handler(
+                self.__rpc_list_tenants,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                ListTenantsRequest,
+                ListTenantsResponse,
+            ),
+            "/plexspaces.security.v1.UserService/CreateApiToken": grpclib.const.Handler(
+                self.__rpc_create_api_token,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                CreateApiTokenRequest,
+                CreateApiTokenResponse,
+            ),
+            "/plexspaces.security.v1.UserService/DeleteApiToken": grpclib.const.Handler(
+                self.__rpc_delete_api_token,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                DeleteApiTokenRequest,
+                DeleteApiTokenResponse,
+            ),
+            "/plexspaces.security.v1.UserService/ListApiTokens": grpclib.const.Handler(
+                self.__rpc_list_api_tokens,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                ListApiTokensRequest,
+                ListApiTokensResponse,
             ),
         }

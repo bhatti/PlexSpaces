@@ -1,0 +1,21 @@
+{
+  "name": "minipi-ts",
+  "version": "1.0.0",
+  "description": "TypeScript port of MiniPi — Agent Harness & Eval example (PlexSpaces WASM)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ts && npm run build:bundle",
+    "build:ts": "tsc -p .",
+    "build:bundle": "node build-bundle.mjs"
+  },
+  "dependencies": {
+    "@plexspaces/sdk": "^0.1"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "^0.14.0",
+    "@bytecodealliance/jco": "^1.17.2",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.0.0"
+  }
+}

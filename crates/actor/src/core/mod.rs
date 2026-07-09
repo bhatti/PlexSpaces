@@ -88,7 +88,6 @@ pub use crate::service_locator_trait::{
     ServiceLocator, WasmRuntimeTrait,
 };
 pub use crate::service_trait::{Service, ServiceName};
-pub use crate::spawn_init_parse::legacy_spawn_init_json_to_role_and_args;
 pub use crate::virtual_actor_lifecycle_facet::{
     VirtualActorLifecycleFacet, VirtualActorLifecycleState,
 };

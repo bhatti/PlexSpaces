@@ -18,7 +18,6 @@ max_restart_window_seconds = 60
 name = "rate-limiter"
 tenant_id = "default"
 actor_type = "migrating_erlang_otp_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 

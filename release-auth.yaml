@@ -48,6 +48,10 @@ runtime:
       transport: HTTP
       base_url: "https://api.open-meteo.com"
       publish_to_registry: false
+    - name: ollama
+      transport: HTTP
+      base_url: "http://localhost:11434"
+      publish_to_registry: false
 
   grpc:
     enabled: true

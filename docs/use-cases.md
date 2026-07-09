@@ -86,6 +86,32 @@ Production AI agent systems with stateful, fault-tolerant, and multi-tenant exec
 
 See also: [AI Agents at Scale: 20 Production Patterns with PlexSpaces](../blog/ai-agents-at-scale-with-plexspaces.md)
 
+## Agent Harness and Eval Infrastructure
+
+PlexSpaces provides the full infrastructure layer for production agent harness and eval — without touching model code. The key insight: **harness = agent − model** (loop control, tool calling, state, memory, coordination, durability).
+
+- **OODA Loop Agents**: `@workflow_actor` + standalone `AgentLoop` class (observe/orient/decide/act helpers, token budget enforcement, suspend/resume) — structured loop without any model coupling
+- **Durable Eval Pipelines**: `EvalRunnerActor` (Workflow) checkpoints each scored scenario — crash mid-suite, restart, already-scored scenarios skip; no re-burned tokens
+- **Tool-Call Guardrails**: `SchemaValidationFacet` (priority 95) validates handler method input against JSON Schema (full draft-7 via `jsonschema` crate) before the actor sees them — invalid calls are short-circuited before DurabilityFacet journals them
+- **Execution Trace Capture**: `ExecutionTraceFacet` (priority 85) captures ordered method-call steps with real wall-clock duration, exports `ExecutionTrace` to KV (`trace:{id}` + `trace_index:{actor_id}`) on completion — eval runner queries by actor_id
+- **Parallel Eval Fan-out**: Spawn N AgentActors simultaneously, collect trajectories via TupleSpace blackboard, score in parallel
+- **Regression Detection**: Compare trajectory scores across eval runs with configurable thresholds, step-level replay diff for diagnosis
+- **Human-in-the-Loop**: `ApprovalGateActor` (GenFSM) provides durable wait — agent suspends, gate waits for days, resumes on signal
+- **Benchmark Harness Configs**: BenchmarkActor fans out N `EvalRunnerActors` with different harness configs (token budget, max iterations, tool sets), produces comparison table
+
+**Key Features**:
+- `AgentLoop` standalone class — works with `@workflow_actor`, provides OODA step tracking, token budget, suspend/resume (no class injection)
+- `SchemaValidationFacet` — full JSON Schema draft-7 validation at priority 95 (before durability), method-keyed, fails loudly on bad schema at deploy time
+- `ExecutionTraceFacet` — ordered step capture at priority 85, exports to persistent KV (`trace:{id}`), bounded by max_steps/max_retained_traces
+- Three improvement layers: Memory (cheapest) → Harness (most flexible) → Model (most expensive)
+- Supervision trees — agent crashes → restart just that one, orchestrator keeps running
+- Same runtime for production and eval — no separate eval infrastructure to maintain
+
+**Examples**:
+- [minipi](../examples/python/apps/minipi/README.md) — full harness + eval pipeline (Python)
+
+See also: [Agent Harness & Eval with PlexSpaces](../archived_docs/agent-harness-eval-with-plexspaces.md)
+
 ## Event Processing
 
 Real-time stream processing with exactly-once semantics:

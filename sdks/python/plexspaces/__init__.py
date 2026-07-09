@@ -51,6 +51,7 @@ from .decorators import (
     signal_handler,
     query_handler,
 )
+from .agent import AgentLoop, AgentConfig, AgentTrajectory, AgentStep, AgentStepKind
 from .host import host, pg_first, ServiceHttpClient
 from .workflow import default_retry_config, with_retry
 from .leader_worker import LeaderWorkerClient, list_worker_node_ids
@@ -59,6 +60,11 @@ from .actor_id import ActorID
 __all__ = [
     "ActorID",
     "actor",
+    "AgentConfig",
+    "AgentLoop",
+    "AgentStep",
+    "AgentStepKind",
+    "AgentTrajectory",
     "default_retry_config",
     "event_actor",
     "gen_server_actor",

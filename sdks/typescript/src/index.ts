@@ -32,3 +32,12 @@ export {
   listWorkerNodeIds,
 } from "./leader_worker.js";
 export { ActorID } from "./actor_id.js";
+export {
+  AgentLoop,
+  agentActor,
+  defaultAgentConfig,
+  type AgentConfig,
+  type AgentStep,
+  type AgentTrajectory,
+  type AgentStepKind,
+} from "./agent.js";

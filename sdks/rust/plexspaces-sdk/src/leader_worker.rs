@@ -59,7 +59,7 @@ pub async fn spawn_actor_on_node(
     node_id: &str,
     actor_type: &str,
     actor_name: String,
-    initial_state: Vec<u8>,
+    _initial_state: Vec<u8>,
     config: Option<plexspaces_proto::actor::v1::ActorConfig>,
     labels: std::collections::HashMap<String, String>,
 ) -> Result<String> {
@@ -75,19 +75,17 @@ pub async fn spawn_actor_on_node(
         .map_err(|e| anyhow::anyhow!("get_actor_service_client failed: {}", e))?;
     let mut client = ActorServiceClient::new(channel);
 
-    let (role_opt, args) =
-        plexspaces_actor::legacy_spawn_init_json_to_role_and_args(&initial_state);
     let spec = ActorSpawnSpec {
         identity: Some(ActorIdentity {
             name: actor_name,
             actor_type: actor_type.to_string(),
         }),
-        role: role_opt.unwrap_or_default(),
+        role: String::new(),
         namespace: String::new(),
         tenant_id: String::new(),
         visibility: 0,
         behavior_kind: String::new(),
-        args,
+        args: std::collections::HashMap::new(),
         facets: vec![],
         config,
         labels,

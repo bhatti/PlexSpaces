@@ -19,7 +19,6 @@ max_restart_window_seconds = 60
 name = "session-store"
 tenant_id = "default"
 actor_type = "migrating_wasmcloud_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 

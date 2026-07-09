@@ -139,6 +139,7 @@ async fn test_genserver_handle_request() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -205,6 +206,7 @@ async fn test_genevent_handle_event() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -271,6 +273,7 @@ async fn test_genfsm_handle_transition() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -336,6 +339,7 @@ async fn test_fallback_to_handle_message() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -414,6 +418,7 @@ async fn test_channel_send_to_queue() {
         None,                  // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -474,6 +479,7 @@ async fn test_channel_publish_to_topic() {
         None,                  // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");
@@ -536,6 +542,7 @@ async fn test_channel_service_optional() {
         None,           // shared_timer_pool
         String::new(), // tenant_id
         String::new(), // default_namespace
+        String::new(), // node_grpc_address
     )
     .await
     .expect("Failed to create instance");

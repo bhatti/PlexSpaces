@@ -16,6 +16,9 @@ fi
 
 if [ -d "$REPO_ROOT/sdks/typescript" ]; then
   (cd "$REPO_ROOT/sdks/typescript" && npm run build 2>/dev/null) || true
+  if [ -d "$REPO_ROOT/sdks/typescript/dist" ] && [ -d "node_modules/@plexspaces/sdk" ]; then
+    cp -r "$REPO_ROOT/sdks/typescript/dist/." "node_modules/@plexspaces/sdk/dist/"
+  fi
 fi
 
 ./node_modules/.bin/tsc -p .

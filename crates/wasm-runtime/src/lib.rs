@@ -336,6 +336,10 @@ pub struct WasmConfig {
     /// Default namespace for this WASM application instance.
     /// Fallback when the guest WIT call does not supply a namespace.
     pub default_namespace: String,
+
+    /// Node's own gRPC address (from NodeConfig). Auto-filled into object registry
+    /// registrations when the WASM guest omits grpc_address.
+    pub node_grpc_address: String,
 }
 
 impl Default for WasmConfig {
@@ -359,6 +363,7 @@ impl Default for WasmConfig {
             shared_timer_pool: None,
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 }
@@ -387,6 +392,7 @@ impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
             shared_timer_pool: None,
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 }

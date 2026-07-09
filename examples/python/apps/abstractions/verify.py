@@ -66,7 +66,7 @@ def main() -> None:
     host.send("abstractions-channel", "publish", {"channel": "alerts", "body": "direct"})
     host.process_groups.broadcast("abstractions-group", "notify", {"ok": True})
     timer_id = host.send_after(250, "tick", {"kind": "timer"})
-    spawned_id = host.spawn("abstractions", "abstractions-actor", {"count": 1})
+    spawned_id = host.spawn("abstractions", "abstractions-actor", "", {"count": "1"})
     assert json.loads(host.kv_list("abstractions/")) == ["abstractions/config"]
     assert host.ts.read(["abstractions", "task", None]) == ["abstractions", "task", "t-1"]
     assert json.loads(host.blob_list("abstractions/")) == ["abstractions/blob-1"]

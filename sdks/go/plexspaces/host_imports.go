@@ -162,10 +162,10 @@ func hostSelfID() string {
 // ========================================================================
 
 //go:wasmimport plexspaces:actor/host@0.1.0 spawn
-func rawHostSpawn(moduleRef, actorID, initConfigJSON string, retptr unsafe.Pointer)
+func rawHostSpawn(moduleRef, actorName, role, argsJSON string, retptr unsafe.Pointer)
 
-func hostSpawn(moduleRef, actorID, initConfigJSON string) string {
-	rawHostSpawn(moduleRef, actorID, initConfigJSON, unsafe.Pointer(&retArea))
+func hostSpawn(moduleRef, actorName, role, argsJSON string) string {
+	rawHostSpawn(moduleRef, actorName, role, argsJSON, unsafe.Pointer(&retArea))
 	return readResultString(unsafe.Pointer(&retArea))
 }
 

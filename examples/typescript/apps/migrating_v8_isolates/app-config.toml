@@ -13,7 +13,6 @@ max_restart_window_seconds = 60
 name = "log-processor"
 tenant_id = "default"
 actor_type = "migrating_v8_isolates_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

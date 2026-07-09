@@ -162,11 +162,11 @@ func hostSelfID() string {
 	return stubState.selfID
 }
 
-func hostSpawn(moduleRef, actorID, initConfigJSON string) string {
-	if actorID == "" {
+func hostSpawn(moduleRef, actorName, role, argsJSON string) string {
+	if actorName == "" {
 		return fmt.Sprintf("auto-%s-001", moduleRef)
 	}
-	return actorID
+	return actorName
 }
 
 func hostStop(actorID string) string {

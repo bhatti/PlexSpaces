@@ -608,6 +608,16 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
+        let role = labels
+            .iter()
+            .find(|(k, _)| k == "role")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        let args: Vec<(String, String)> = labels
+            .into_iter()
+            .filter(|(k, _)| k != "role")
+            .collect();
+
         // Drop span before await to ensure Send
         drop(_span);
         match self
@@ -615,10 +625,9 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             .spawn_actor(
                 &self.actor_id,
                 &module_ref,
-                initial_state,
+                role,
+                args,
                 options.actor_id.clone(),
-                labels,
-                options.durable,
             )
             .await
         {
@@ -5113,10 +5122,16 @@ impl plexspaces::actor::registry::Host for RegistryImpl {
         )
         .map_err(|e| make_actor_error("invalid-input", format!("registry register: {}", e)))?;
 
-        let registration = req.registration.ok_or_else(|| {
+        let mut registration = req.registration.ok_or_else(|| {
             make_actor_error("invalid-input", "registry register: missing registration".to_string())
         })?;
         let object_id = registration.object_id.clone();
+
+        // WASM actors don't know the node's own gRPC address; fill it from NodeConfig
+        // so the registry's required-field validation passes.
+        if registration.grpc_address.is_empty() {
+            registration.grpc_address = self.host_functions.node_grpc_address.clone();
+        }
 
         let registry = self.host_functions.object_registry().ok_or_else(|| {
             make_actor_error("internal", "ObjectRegistry not configured".to_string())

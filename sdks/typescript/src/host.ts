@@ -443,14 +443,21 @@ export class Host {
 
   /**
    * Spawn a new actor through the framework-owned actor spawn path exposed by the host.
+   * Returns the canonical actor ID assigned by the framework — use this ID (not actorName)
+   * for all subsequent ask/send/stop calls.
+   *
    * @param moduleRef - Actor type/module reference (must be deployed)
-   * @param actorId - Unique ID for the new actor (empty = auto-generated ULID)
-   * @param initConfig - Optional config passed to the new actor's init()
-   * @returns Spawned actor ID string (may be auto-generated if actorId was empty)
+   * @param actorName - Requested name for the new actor. The framework forms the full canonical
+   *                    ID from this name, moduleRef, namespace and node. Pass empty string to
+   *                    let the framework auto-generate a ULID name.
+   * @param role - Disambiguation key used ONLY when multiple actors in the same supervisor share
+   *               the same actor_type (moduleRef). Pass empty string when moduleRef is unique.
+   * @param args - Key-value init arguments forwarded to the new actor's init()
+   * @returns Canonical actor ID string assigned by the framework
    */
-  spawn(moduleRef: string, actorId: string = '', initConfig?: unknown): string {
-    const configBytes = encodeWitPayloadUtf8(initConfig !== undefined ? JSON.stringify(initConfig) : '{}');
-    const result = safeCall(hostSpawn, moduleRef, actorId, configBytes) as string;
+  spawn(moduleRef: string, actorName: string = '', role: string = '', args: Record<string, string> = {}): string {
+    const argsJson = Object.keys(args).length > 0 ? JSON.stringify(args) : '{}';
+    const result = safeCall(hostSpawn, moduleRef, actorName, role, argsJson) as string;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }

@@ -174,6 +174,7 @@ impl InstancePool {
             None, // shared_timer_pool - pool instances don't track timers
             String::new(), // tenant_id - pool instances are not tied to a specific tenant
             String::new(), // default_namespace - pool instances are not tied to a specific namespace
+            String::new(), // node_grpc_address - pool instances are not tied to a specific node
         )
         .await
     }

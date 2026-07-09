@@ -20,6 +20,19 @@ if ! command -v wasm-tools &>/dev/null; then
   exit 1
 fi
 
+# Support Go 1.26+ with TinyGo (TinyGo checks GOTOOLCHAIN for compatibility)
+export GOTOOLCHAIN=go1.25.5
+# Locate wasm-opt (required by TinyGo); fall back to the copy bundled with jco
+if ! command -v wasm-opt &>/dev/null; then
+  _JCO_WASMOPT="$(npm root -g 2>/dev/null)/@bytecodealliance/jco/node_modules/binaryen/bin/wasm-opt"
+  if [ -f "$_JCO_WASMOPT" ]; then
+    export WASMOPT="$_JCO_WASMOPT"
+  else
+    echo "ERROR: wasm-opt not found. Install binaryen: brew install binaryen"
+    exit 1
+  fi
+fi
+
 ADAPTER=""
 for candidate in \
   "$(npm root -g 2>/dev/null)/@bytecodealliance/jco/lib/wasi_snapshot_preview1.reactor.wasm" \

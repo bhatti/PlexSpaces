@@ -64,6 +64,7 @@ mod tests {
             shared_timer_pool: None,
             tenant_id: String::new(),
             default_namespace: String::new(),
+            node_grpc_address: String::new(),
         }
     }
 

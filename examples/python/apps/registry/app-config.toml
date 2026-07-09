@@ -20,7 +20,6 @@ max_restart_window_seconds = 60
 name = "registry"
 tenant_id = "default"
 actor_type = "registry_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 5
 

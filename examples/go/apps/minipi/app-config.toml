@@ -1,0 +1,204 @@
+# MiniPi — Agent Harness & Eval Example (Go WASM)
+# Demonstrates: durable execution, SchemaValidationFacet, ExecutionTraceFacet, KV coordination
+#
+# Key harness abstractions shown:
+# - SchemaValidationFacet (priority 95): validates method input schemas before actor sees them
+# - ExecutionTraceFacet (priority 85): captures ordered steps, exports to KV on completion
+# - DurabilityFacet (priority 90): journals every step, enables crash recovery
+# - Supervision trees: one_for_one restart keeps eval running if one actor crashes
+#
+# Facet priority chain: virtual_actor(100) → schema_validation(95) → durability(90) →
+#                       execution_trace(85) → metrics(80)
+
+name = "go-minipi"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# ============================================================
+# LLM Gateway — model abstraction with caching
+# ============================================================
+[[supervisor.children]]
+name = "llm_gateway"
+actor_type = "minipi_wasm"
+role = "llm_gateway"
+behavior_kind = "GenServer"
+args = { role = "llm_gateway", provider = "ollama", model = "llama3.2", base_url = "http://localhost:11434", num_ctx = 32768 }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m" } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Tool Registry — validates method input via SchemaValidationFacet
+# ============================================================
+[[supervisor.children]]
+name = "tool_registry"
+actor_type = "minipi_wasm"
+role = "tool_registry"
+behavior_kind = "GenServer"
+args = { role = "tool_registry" }
+
+# method_schemas uses a table section (TOML 1.0 inline tables must be single-line)
+[[supervisor.children.facets]]
+type = "schema_validation"
+priority = 95
+
+[supervisor.children.facets.config]
+validation_mode = "strict"
+
+[supervisor.children.facets.config.method_schemas]
+web_search = '{"type":"object","required":["query"],"properties":{"query":{"type":"string","minLength":1,"maxLength":500},"num_results":{"type":"integer","minimum":1,"maximum":20}}}'
+calculator = '{"type":"object","required":["expression"],"properties":{"expression":{"type":"string","minLength":1}}}'
+kv_read    = '{"type":"object","required":["key"],"properties":{"key":{"type":"string","minLength":1}}}'
+kv_write   = '{"type":"object","required":["key","value"],"properties":{"key":{"type":"string","minLength":1},"value":{}}}'
+
+[[supervisor.children.facets]]
+type = "metrics"
+priority = 80
+
+# ============================================================
+# Eval Runner — durable orchestrator
+# ============================================================
+[[supervisor.children]]
+name = "eval_runner"
+actor_type = "minipi_wasm"
+role = "eval_runner"
+behavior_kind = "Workflow"
+args = { role = "eval_runner" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1, replay_on_activation = true } },
+  { type = "execution_trace", priority = 85, config = { include_payloads = true, max_steps = 1000, max_retained_traces = 10 } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Scorer — trajectory scoring
+# ============================================================
+[[supervisor.children]]
+name = "scorer"
+actor_type = "minipi_wasm"
+role = "scorer"
+behavior_kind = "GenServer"
+args = { role = "scorer" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m" } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Scenario Store — KV-backed scenario catalog
+# ============================================================
+[[supervisor.children]]
+name = "scenario_store"
+actor_type = "minipi_wasm"
+role = "scenario_store"
+behavior_kind = "GenServer"
+args = { role = "scenario_store" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m" } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Trajectory Store — KV + TupleSpace trajectory index
+# ============================================================
+[[supervisor.children]]
+name = "trajectory_store"
+actor_type = "minipi_wasm"
+role = "trajectory_store"
+behavior_kind = "GenServer"
+args = { role = "trajectory_store" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Regression Detector — compare eval runs
+# ============================================================
+[[supervisor.children]]
+name = "regression_detector"
+actor_type = "minipi_wasm"
+role = "regression_detector"
+behavior_kind = "GenServer"
+args = { role = "regression_detector" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Benchmark — parallel eval with different configs
+# ============================================================
+[[supervisor.children]]
+name = "benchmark"
+actor_type = "minipi_wasm"
+role = "benchmark"
+behavior_kind = "Workflow"
+args = { role = "benchmark" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Approval Gate — human-in-the-loop FSM
+# ============================================================
+[[supervisor.children]]
+name = "approval_gate"
+actor_type = "minipi_wasm"
+role = "approval_gate"
+behavior_kind = "GenStateMachine"
+args = { role = "approval_gate" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1, replay_on_activation = true } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Dashboard — read-only aggregator
+# ============================================================
+[[supervisor.children]]
+name = "dashboard"
+actor_type = "minipi_wasm"
+role = "dashboard"
+behavior_kind = "GenServer"
+args = { role = "dashboard" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m" } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Advisor — two-tier LLM: cheap executor + expensive advisor on-demand
+# ============================================================
+[[supervisor.children]]
+name = "advisor"
+actor_type = "minipi_wasm"
+role = "advisor"
+behavior_kind = "GenServer"
+args = { role = "advisor", confidence_threshold = "0.8" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m" } },
+  { type = "metrics", priority = 80 }
+]
+
+# ============================================================
+# Agent Runner — per-eval OODA loop agent (spawned by eval_runner)
+# ============================================================
+[[supervisor.children]]
+name = "agent_runner"
+actor_type = "minipi_wasm"
+role = "agent_runner"
+behavior_kind = "Workflow"
+args = { role = "agent_runner" }
+facets = [
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1, replay_on_activation = true } },
+  { type = "execution_trace", priority = 85, config = { include_payloads = true, max_steps = 200, max_retained_traces = 50 } },
+  { type = "metrics", priority = 80 }
+]

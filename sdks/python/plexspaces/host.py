@@ -342,10 +342,10 @@ class _MockHost:
         """Self ID (mock). Returns mock actor ID."""
         return self._self_id
 
-    def spawn(self, module_ref: str, actor_id: str, init_config_json: str) -> str:
-        """Spawn (mock). Returns spawned actor ID."""
-        spawned_id = actor_id if actor_id else f"mock-{module_ref}-1"
-        print(f"[MOCK] spawn({module_ref}, {actor_id}) -> {spawned_id}")
+    def spawn(self, module_ref: str, actor_name: str, role: str, args_json: str) -> str:
+        """Spawn (mock). Returns spawned actor name (canonical ID in real WASM)."""
+        spawned_id = actor_name if actor_name else f"mock-{module_ref}-1"
+        print(f"[MOCK] spawn({module_ref}, {actor_name}, role={role}) -> {spawned_id}")
         return spawned_id
 
     def stop(self, actor_id: str) -> str:
@@ -1096,38 +1096,57 @@ class Registry:
     ) -> None:
         """Register an object in the registry."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        # Real WIT registry module exposes unprefixed names; _MockHost uses registry_ prefix.
-        fn = getattr(h, "register", None) if _registry_impl is not None else getattr(h, "registry_register", None)
-        if fn is None:
-            raise RuntimeError("registry.register not available")
-        result = fn(ctx_json, object_id, object_type, grpc_address,
-                    object_category, capabilities or [], labels or [])
-        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
-        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
-            raise RuntimeError(result_str)
+        if _registry_impl is not None:
+            # Real WIT path: single JSON-encoded payload argument.
+            req = {
+                "object_id": object_id,
+                "object_type": object_type,
+                "grpc_address": grpc_address,
+                "object_category": object_category or "",
+                "capabilities": capabilities or [],
+                "labels": labels or [],
+            }
+            h.register(_to_payload_bytes(json.dumps(req)))
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_register", None)
+            if fn is None:
+                raise RuntimeError("registry.register not available")
+            result = fn(ctx_json, object_id, object_type, grpc_address,
+                        object_category, capabilities or [], labels or [])
+            result_str = result or ""
+            if isinstance(result_str, str) and result_str.startswith("ERROR:"):
+                raise RuntimeError(result_str)
 
     def unregister(self, ctx: Any, object_type: str, object_id: str) -> None:
         """Unregister an object from the registry."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        fn = getattr(h, "unregister", None) if _registry_impl is not None else getattr(h, "registry_unregister", None)
-        if fn is None:
-            raise RuntimeError("registry.unregister not available")
-        result = fn(ctx_json, object_type, object_id)
-        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
-        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
-            raise RuntimeError(result_str)
+        if _registry_impl is not None:
+            req = {"object_type": object_type, "object_id": object_id}
+            h.unregister(_to_payload_bytes(json.dumps(req)))
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_unregister", None)
+            if fn is None:
+                raise RuntimeError("registry.unregister not available")
+            result = fn(ctx_json, object_type, object_id)
+            result_str = result or ""
+            if isinstance(result_str, str) and result_str.startswith("ERROR:"):
+                raise RuntimeError(result_str)
 
     def lookup(self, ctx: Any, object_type: str, object_id: str) -> Optional[Dict[str, Any]]:
         """Look up an object by ID. Returns the registration dict or None; raises on errors."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        fn = getattr(h, "lookup", None) if _registry_impl is not None else getattr(h, "registry_lookup", None)
-        if fn is None:
-            raise RuntimeError("registry.lookup not available")
-        raw = fn(ctx_json, object_type, object_id)
-        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        if _registry_impl is not None:
+            req = {"object_type": object_type, "object_id": object_id}
+            raw = h.lookup(_to_payload_bytes(json.dumps(req)))
+            result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_lookup", None)
+            if fn is None:
+                raise RuntimeError("registry.lookup not available")
+            result = fn(ctx_json, object_type, object_id) or "null"
         if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
@@ -1139,12 +1158,16 @@ class Registry:
     def lookup_by_alias(self, ctx: Any, alias: str) -> Optional[Dict[str, Any]]:
         """Look up an object by alias. Returns the registration dict or None; raises on errors."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        fn = getattr(h, "lookup_by_alias", None) if _registry_impl is not None else getattr(h, "registry_lookup_by_alias", None)
-        if fn is None:
-            raise RuntimeError("registry.lookup_by_alias not available")
-        raw = fn(ctx_json, alias)
-        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        if _registry_impl is not None:
+            # WIT: lookup-by-alias takes a plain string (not a payload).
+            raw = h.lookup_by_alias(alias)
+            result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "null")
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_lookup_by_alias", None)
+            if fn is None:
+                raise RuntimeError("registry.lookup_by_alias not available")
+            result = fn(ctx_json, alias) or "null"
         if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
@@ -1166,13 +1189,27 @@ class Registry:
     ) -> List[Dict[str, Any]]:
         """Discover objects with optional filtering. Returns list of registration dicts."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        fn = getattr(h, "discover", None) if _registry_impl is not None else getattr(h, "registry_discover", None)
-        if fn is None:
-            raise RuntimeError("registry.discover not available")
-        raw = fn(ctx_json, object_type, object_category, capabilities or [],
-                 labels or [], health_status, offset, limit)
-        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "[]")
+        if _registry_impl is not None:
+            req: Dict[str, Any] = {"offset": offset, "limit": limit}
+            if object_type is not None:
+                req["object_type"] = object_type
+            if object_category is not None:
+                req["object_category"] = object_category
+            if capabilities:
+                req["capabilities"] = capabilities
+            if labels:
+                req["labels"] = labels
+            if health_status is not None:
+                req["health_status"] = health_status
+            raw = h.discover(_to_payload_bytes(json.dumps(req)))
+            result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "[]")
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_discover", None)
+            if fn is None:
+                raise RuntimeError("registry.discover not available")
+            result = fn(ctx_json, object_type, object_category, capabilities or [],
+                        labels or [], health_status, offset, limit) or "[]"
         if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
@@ -1184,14 +1221,17 @@ class Registry:
     def heartbeat(self, ctx: Any, object_type: str, object_id: str) -> None:
         """Update the heartbeat for a registered object."""
         h = _get_registry()
-        ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
-        fn = getattr(h, "heartbeat", None) if _registry_impl is not None else getattr(h, "registry_heartbeat", None)
-        if fn is None:
-            raise RuntimeError("registry.heartbeat not available")
-        result = fn(ctx_json, object_type, object_id)
-        result_str = _from_payload_bytes(result) if isinstance(result, (bytes, bytearray)) else (result or "")
-        if isinstance(result_str, str) and result_str.startswith("ERROR:"):
-            raise RuntimeError(result_str)
+        if _registry_impl is not None:
+            req = {"object_type": object_type, "object_id": object_id}
+            h.heartbeat(_to_payload_bytes(json.dumps(req)))
+        else:
+            ctx_json = json.dumps(ctx) if not isinstance(ctx, str) else ctx
+            fn = getattr(h, "registry_heartbeat", None)
+            if fn is None:
+                raise RuntimeError("registry.heartbeat not available")
+            result = fn(ctx_json, object_type, object_id) or ""
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise RuntimeError(result)
 
 
 class Host:
@@ -1602,22 +1642,27 @@ class Host:
     # Actor Lifecycle
     # ========================================================================
 
-    def spawn(self, module_ref: str, actor_id: str = "", init_config: Any = None) -> str:
+    def spawn(self, module_ref: str, actor_name: str = "", role: str = "", args: Optional[Dict[str, str]] = None) -> str:
         """
-        Spawn a new actor. Delegates to ActorFactory::spawn_actor() via the host.
+        Spawn a new actor. Returns the canonical actor ID assigned by the framework.
+        Use the returned ID (not actor_name) for all subsequent ask/send/stop calls.
 
         Args:
             module_ref: Actor type/module reference (must be a deployed WASM module or registered behavior)
-            actor_id: Unique ID for the new actor (empty = auto-generated ULID)
-            init_config: Optional config passed to the new actor's init()
+            actor_name: Requested name for the new actor. The framework forms the full canonical ID
+                        from this name, module_ref, namespace and node. Pass empty string to
+                        let the framework auto-generate a ULID name.
+            role: Disambiguation key used ONLY when multiple actors in the same supervisor share the
+                  same actor_type (module_ref). Pass empty string when module_ref is unique.
+            args: Key-value init arguments forwarded to the new actor's init()
 
         Returns:
-            Spawned actor ID string (may be auto-generated if actor_id was empty).
+            Canonical actor ID string assigned by the framework.
             Raises RuntimeError on failure.
         """
         h = _get_host()
-        config_json = json.dumps(init_config) if init_config is not None else "{}"
-        result = h.spawn(module_ref, actor_id, _to_payload_bytes(config_json))
+        args_json = json.dumps(args) if args else "{}"
+        result = h.spawn(module_ref, actor_name, role, args_json)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         return result

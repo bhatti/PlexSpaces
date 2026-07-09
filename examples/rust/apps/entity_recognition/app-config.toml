@@ -11,7 +11,6 @@ max_restart_window_seconds = 60
 name = "entity_extractor"
 tenant_id = "default"
 actor_type = "entity_recognition_wasm"
-role = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"

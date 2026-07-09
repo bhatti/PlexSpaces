@@ -1,7 +1,7 @@
 {
   "name": "minipi-ts",
   "version": "1.0.0",
-  "description": "TypeScript port of MiniPi — Agent Harness & Eval example (PlexSpaces WASM)",
+  "description": "TypeScript port of MiniPi \u2014 Agent Harness & Eval example (PlexSpaces WASM)",
   "private": true,
   "type": "module",
   "scripts": {

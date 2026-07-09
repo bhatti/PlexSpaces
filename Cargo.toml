@@ -315,7 +315,7 @@ overflow-checks = true
 [profile.release]
 opt-level = 3
 debug = false
-lto = true
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 

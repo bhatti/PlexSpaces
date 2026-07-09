@@ -168,7 +168,7 @@ redis-backend = ["plexspaces-tuplespace/redis-backend", "plexspaces-keyvalue/red
 sql-backend = ["plexspaces-tuplespace/sql-backend", "plexspaces-keyvalue/sql-backend"]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"

@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plexspaces"
-version = "0.1.6"
+version = "0.1.7"
 description = "PlexSpaces Python SDK - Build actors with minimal boilerplate"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}

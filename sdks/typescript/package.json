@@ -1,6 +1,6 @@
 {
   "name": "@plexspaces/sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "PlexSpaces TypeScript SDK - build actors with minimal boilerplate (inheritance-based)",
   "type": "module",
   "main": "dist/index.js",

@@ -5,13 +5,15 @@
 //
 // Integration tests for the actor-world lock API.
 // Validates protobuf lock-acquire/renew responses and result-based errors.
+// Tenant and namespace are injected by the host from SimpleHostImpl fields;
+// the WIT interface does not expose them as parameters.
 
 #[cfg(feature = "component-model")]
 mod tests {
     use plexspaces_actor::ActorId;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_proto::locks::prv::Lock as ProtoLock;
-    use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;
+    use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host_locks::Host;
     use plexspaces_wasm_runtime::simple_component_host::SimpleHostImpl;
     use plexspaces_wasm_runtime::HostFunctions;
     use prost::Message as _;
@@ -28,14 +30,7 @@ mod tests {
     async fn test_simple_host_lock_acquire_returns_protobuf() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await
             .expect("lock_acquire should succeed");
         let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
@@ -51,14 +46,7 @@ mod tests {
     async fn test_simple_host_lock_release_success() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await
             .expect("acquire should succeed");
         let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
@@ -66,13 +54,7 @@ mod tests {
         let version = parsed.version.clone();
 
         let release_out = host
-            .lock_release(
-                lock_id,
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                version,
-            )
+            .lock_release(lock_id, "holder-1".to_string(), version)
             .await;
         assert!(
             release_out.is_ok(),
@@ -84,14 +66,7 @@ mod tests {
     async fn test_simple_host_lock_renew_returns_new_version() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await
             .expect("acquire should succeed");
         let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
@@ -99,14 +74,7 @@ mod tests {
         let version = parsed.version.clone();
 
         let renew_out = host
-            .lock_renew(
-                lock_id.clone(),
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                version.clone(),
-                60,
-            )
+            .lock_renew(lock_id.clone(), "holder-1".to_string(), version.clone(), 60)
             .await
             .expect("lock_renew should succeed");
         let renewed =
@@ -120,15 +88,8 @@ mod tests {
             "renew should return non-empty version"
         );
 
-        // Release with the new version
         let release_out = host
-            .lock_release(
-                lock_id,
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                renewed.version,
-            )
+            .lock_release(lock_id, "holder-1".to_string(), renewed.version)
             .await;
         assert!(
             release_out.is_ok(),
@@ -140,14 +101,7 @@ mod tests {
     async fn test_simple_host_lock_release_wrong_holder_fails() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await
             .expect("acquire should succeed");
         let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
@@ -155,13 +109,7 @@ mod tests {
         let version = parsed.version.clone();
 
         let release_out = host
-            .lock_release(
-                lock_id,
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-2".to_string(), // wrong holder
-                version,
-            )
+            .lock_release(lock_id, "holder-2".to_string(), version) // wrong holder
             .await;
         assert!(
             release_out.is_err(),
@@ -173,14 +121,7 @@ mod tests {
     async fn test_simple_host_lock_renew_wrong_holder_fails() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await
             .expect("acquire should succeed");
         let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
@@ -188,14 +129,7 @@ mod tests {
         let version = parsed.version.clone();
 
         let renew_out = host
-            .lock_renew(
-                lock_id,
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-2".to_string(), // wrong holder
-                version,
-                60,
-            )
+            .lock_renew(lock_id, "holder-2".to_string(), version, 60) // wrong holder
             .await;
         assert!(renew_out.is_err(), "renew with wrong holder should fail");
     }
@@ -207,14 +141,7 @@ mod tests {
         let mut host = SimpleHostImpl::with_services(actor_id, host_functions, None, None, None);
 
         let out = host
-            .lock_acquire(
-                "tenant1".to_string(),
-                "ns1".to_string(),
-                "holder-1".to_string(),
-                "my-lock".to_string(),
-                30,
-                1000,
-            )
+            .lock_acquire("holder-1".to_string(), "my-lock".to_string(), 30, 1000)
             .await;
         assert!(out.is_err(), "lock_acquire without LockManager should fail");
     }

@@ -350,6 +350,16 @@ See [Examples](examples/README.md) for the complete list.
 
 **Complete Documentation**: All documentation is in the `docs/` directory. Crate-specific documentation is in `crates/*/README.md` with references to main docs.
 
+## Blog Posts
+
+In-depth articles about PlexSpaces design, patterns, and real-world use cases:
+
+- [Building a Durable Actor Framework for Polyglot Serverless Apps](https://shahbhat.medium.com/building-plexspaces-decades-of-distributed-systems-distilled-into-one-framework-a63132040dd8) — The origin story: how decades of distributed systems research shaped PlexSpaces
+- [20+ Production Patterns for Distributed AI Agents Using Actors and TupleSpaces](https://shahbhat.medium.com/20-production-patterns-for-distributed-ai-agents-using-actors-and-tuplespaces-2fceb8a6a0b1) — Practical patterns for building production-grade distributed AI agent systems
+- [Building Mini OpenClaw: Secure AI Agents with Actors, WASM, and Supervision](https://shahbhat.medium.com/building-mini-openclaw-secure-ai-agents-with-actors-wasm-and-supervision-b8d6ea314628) — Secure, sandboxed AI agents using WASM isolation and supervision trees
+- [Building a Self-Improving AI Agent with Durable Actors: MiniHermes](https://shahbhat.medium.com/building-a-self-improving-ai-agent-with-durable-actors-minihermes-614ee292c7eb) — Durable actors enabling self-improving AI agents with persistent state
+- [Building an Agent Harness and Eval Pipeline with Durable Actors](https://shahbhat.medium.com/building-an-agent-harness-and-eval-pipeline-with-durable-actors-d9cd8264370d) — Reliable AI evaluation pipelines using durable execution and actor workflows
+
 ## Comparison with Other Frameworks
 
 PlexSpaces unifies patterns from multiple frameworks:

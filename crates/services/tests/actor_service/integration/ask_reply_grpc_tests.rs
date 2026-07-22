@@ -10,8 +10,7 @@ use tonic::Request;
 
 #[tokio::test]
 async fn test_ask_reply_get_counter_real_grpc() {
-    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
-    let mut harness = TestHarness::new();
+    let mut harness = TestHarness::new_with_auth_disabled();
     let _node = harness
         .spawn_node("node1")
         .await
@@ -19,6 +18,7 @@ async fn test_ask_reply_get_counter_real_grpc() {
 
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(AskReplyRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         actor_name: String::new(),
@@ -52,14 +52,12 @@ async fn test_ask_reply_get_counter_real_grpc() {
         }
     }
 
-    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_send_message_post_counter_real_grpc() {
-    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
-    let mut harness = TestHarness::new();
+    let mut harness = TestHarness::new_with_auth_disabled();
     let _node = harness
         .spawn_node("node1")
         .await
@@ -67,6 +65,7 @@ async fn test_send_message_post_counter_real_grpc() {
 
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(SendMessageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         actor_name: String::new(),
@@ -98,14 +97,12 @@ async fn test_send_message_post_counter_real_grpc() {
         }
     }
 
-    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_ask_reply_post_counter_real_grpc() {
-    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
-    let mut harness = TestHarness::new();
+    let mut harness = TestHarness::new_with_auth_disabled();
     let _node = harness
         .spawn_node("node1")
         .await
@@ -113,6 +110,7 @@ async fn test_ask_reply_post_counter_real_grpc() {
 
     let mut client = harness.get_node("node1").unwrap().client.clone();
     let request = Request::new(AskReplyRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         actor_name: String::new(),
@@ -142,6 +140,5 @@ async fn test_ask_reply_post_counter_real_grpc() {
         }
     }
 
-    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     harness.shutdown().await;
 }

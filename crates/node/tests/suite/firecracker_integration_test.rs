@@ -272,6 +272,7 @@ mod firecracker_integration_tests {
         };
 
         let request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -318,6 +319,7 @@ mod firecracker_integration_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -326,6 +328,7 @@ mod firecracker_integration_tests {
 
         // List VMs
         let list_request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![],
             node_id: String::new(),
             page_size: 10,
@@ -373,6 +376,7 @@ mod firecracker_integration_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -381,6 +385,7 @@ mod firecracker_integration_tests {
 
         // Get VM state
         let state_request = Request::new(GetVmStateRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-state-1".to_string(),
         });
 
@@ -412,6 +417,7 @@ mod firecracker_integration_tests {
 
         // Deploy application (will create VM if needed)
         let deploy_request = Request::new(DeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-deploy-1".to_string(),
             application_id: "test-app-1".to_string(),
             application_bundle: vec![],
@@ -462,6 +468,7 @@ mod firecracker_integration_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -472,6 +479,7 @@ mod firecracker_integration_tests {
 
         // 2. Get VM state
         let state_request = Request::new(GetVmStateRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-lifecycle-1".to_string(),
         });
 
@@ -480,6 +488,7 @@ mod firecracker_integration_tests {
 
         // 3. List VMs (should include our VM)
         let list_request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![],
             node_id: String::new(),
             page_size: 10,
@@ -496,6 +505,7 @@ mod firecracker_integration_tests {
 
         // 4. Stop VM
         let stop_request = Request::new(StopVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-lifecycle-1".to_string(),
             force: false,
         });

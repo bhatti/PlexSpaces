@@ -6,10 +6,12 @@
 pub struct GetRequest {
     /// Key to get
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Get response
@@ -17,10 +19,12 @@ pub struct GetRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetResponse {
     /// Value if key exists
-    #[prost(bytes="vec", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="2")]
     pub value: ::prost::alloc::vec::Vec<u8>,
     /// Whether key exists
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub exists: bool,
 }
 /// Put request
@@ -29,13 +33,15 @@ pub struct GetResponse {
 pub struct PutRequest {
     /// Key to put
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Value to store
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub value: ::prost::alloc::vec::Vec<u8>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Put response
@@ -43,7 +49,9 @@ pub struct PutRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PutResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// Delete request
@@ -52,10 +60,12 @@ pub struct PutResponse {
 pub struct DeleteRequest {
     /// Key to delete
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Delete response
@@ -63,7 +73,9 @@ pub struct DeleteRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteResponse {
     /// Whether key was deleted (false if key didn't exist)
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub deleted: bool,
 }
 /// Exists request
@@ -72,10 +84,12 @@ pub struct DeleteResponse {
 pub struct ExistsRequest {
     /// Key to check
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Exists response
@@ -83,7 +97,9 @@ pub struct ExistsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExistsResponse {
     /// Whether key exists
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub exists: bool,
 }
 /// List request
@@ -92,10 +108,12 @@ pub struct ExistsResponse {
 pub struct ListRequest {
     /// Prefix to list keys with
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub prefix: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// List response
@@ -103,7 +121,9 @@ pub struct ListRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListResponse {
     /// List of keys matching prefix
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// MultiGet request
@@ -111,11 +131,13 @@ pub struct ListResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MultiGetRequest {
     /// Keys to get
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// MultiGet response
@@ -123,7 +145,9 @@ pub struct MultiGetRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MultiGetResponse {
     /// Values (same order as request, None for missing keys)
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub entries: ::prost::alloc::vec::Vec<KeyValueEntry>,
 }
 /// Key-value entry
@@ -145,11 +169,13 @@ pub struct KeyValueEntry {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MultiPutRequest {
     /// Key-value pairs to put
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub pairs: ::prost::alloc::vec::Vec<KeyValuePair>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Key-value pair
@@ -168,7 +194,9 @@ pub struct KeyValuePair {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MultiPutResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// PutWithTtl request
@@ -177,16 +205,18 @@ pub struct MultiPutResponse {
 pub struct PutWithTtlRequest {
     /// Key to put
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Value to store
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub value: ::prost::alloc::vec::Vec<u8>,
     /// Time-to-live
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// PutWithTtl response
@@ -194,7 +224,9 @@ pub struct PutWithTtlRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PutWithTtlResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// RefreshTtl request
@@ -203,13 +235,15 @@ pub struct PutWithTtlResponse {
 pub struct RefreshTtlRequest {
     /// Key to refresh
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// New TTL
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// RefreshTtl response
@@ -217,7 +251,9 @@ pub struct RefreshTtlRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RefreshTtlResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// GetTtl request
@@ -226,10 +262,12 @@ pub struct RefreshTtlResponse {
 pub struct GetTtlRequest {
     /// Key to check
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// GetTtl response
@@ -237,10 +275,12 @@ pub struct GetTtlRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetTtlResponse {
     /// TTL remaining if key exists with TTL
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
     /// Whether key exists
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub exists: bool,
 }
 /// Cas request
@@ -249,18 +289,20 @@ pub struct GetTtlResponse {
 pub struct CasRequest {
     /// Key for CAS operation
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Expected value (None means key must not exist)
     ///
     /// Empty bytes = None
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub expected_value: ::prost::alloc::vec::Vec<u8>,
     /// New value
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub new_value: ::prost::alloc::vec::Vec<u8>,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Cas response
@@ -268,7 +310,9 @@ pub struct CasRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CasResponse {
     /// Whether swap succeeded
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// Increment request
@@ -277,13 +321,15 @@ pub struct CasResponse {
 pub struct IncrementRequest {
     /// Key for counter
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Delta to add
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag="3")]
     pub delta: i64,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Increment response
@@ -291,7 +337,9 @@ pub struct IncrementRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IncrementResponse {
     /// New value after increment
-    #[prost(int64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int64, tag="2")]
     pub value: i64,
 }
 /// Decrement request
@@ -300,13 +348,15 @@ pub struct IncrementResponse {
 pub struct DecrementRequest {
     /// Key for counter
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key: ::prost::alloc::string::String,
     /// Delta to subtract
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag="3")]
     pub delta: i64,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Decrement response
@@ -314,7 +364,9 @@ pub struct DecrementRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DecrementResponse {
     /// New value after decrement
-    #[prost(int64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int64, tag="2")]
     pub value: i64,
 }
 /// ClearPrefix request
@@ -323,10 +375,12 @@ pub struct DecrementResponse {
 pub struct ClearPrefixRequest {
     /// Prefix to clear
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub prefix: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// ClearPrefix response
@@ -334,7 +388,9 @@ pub struct ClearPrefixRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ClearPrefixResponse {
     /// Number of keys deleted
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub deleted_count: u64,
 }
 /// CountPrefix request
@@ -343,10 +399,12 @@ pub struct ClearPrefixResponse {
 pub struct CountPrefixRequest {
     /// Prefix to count
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub prefix: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// CountPrefix response
@@ -354,7 +412,9 @@ pub struct CountPrefixRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CountPrefixResponse {
     /// Number of keys with prefix
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub count: u64,
 }
 /// GetStats request
@@ -364,6 +424,8 @@ pub struct GetStatsRequest {
     /// Namespace for tenant isolation (optional; empty string = default).
     /// Tenant-id comes from auth (JWT/mTLS), not from this request.
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// GetStats response
@@ -371,13 +433,15 @@ pub struct GetStatsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetStatsResponse {
     /// Total number of keys
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub total_keys: u64,
     /// Total size in bytes (approximate)
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub total_size_bytes: u64,
     /// Backend type (e.g., "InMemory", "SQLite", "Redis", "PostgreSQL")
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub backend_type: ::prost::alloc::string::String,
 }
 /// Error codes for key-value store operations.
@@ -424,6 +488,189 @@ impl KeyValueStoreErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

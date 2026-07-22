@@ -6,9 +6,9 @@
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! gRPC TuplePlexSpace Service Implementation
@@ -195,7 +195,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         metrics::histogram!("plexspaces_node_tuplespace_write_duration_seconds")
             .record(elapsed.as_secs_f64());
 
-        Ok(Response::new(WriteResponse { tuple_ids }))
+        Ok(Response::new(WriteResponse { request_id: req.request_id.clone(), tuple_ids }))
     }
 
     /// Read tuples from the TupleSpace (non-destructive)
@@ -250,6 +250,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             .collect();
 
         Ok(Response::new(ReadResponse {
+            request_id: req.request_id.clone(),
             tuples: proto_tuples,
             has_more: false,
         }))
@@ -308,6 +309,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         };
 
         Ok(Response::new(ReadResponse {
+            request_id: req.request_id.clone(),
             tuples: proto_tuples,
             has_more: false,
         }))
@@ -356,6 +358,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             .map_err(Self::tuplespace_error_to_status)?;
 
         Ok(Response::new(CountResponse {
+            request_id: req.request_id.clone(),
             count: count as i64,
         }))
     }
@@ -402,7 +405,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             .await
             .map_err(Self::tuplespace_error_to_status)?;
 
-        Ok(Response::new(ExistsResponse { exists: count > 0 }))
+        Ok(Response::new(ExistsResponse { request_id: req.request_id.clone(), exists: count > 0 }))
     }
 
     // See docs/BARRIER_REFACTORING_PLAN.md for migration guide and examples.
@@ -554,6 +557,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
             op_stats.write_operations + op_stats.read_operations + op_stats.take_operations;
         use plexspaces_proto::tuplespace::v1::{GetStatsResponse, StorageStats};
         Ok(Response::new(GetStatsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             stats: Some(StorageStats {
                 tuple_count,
                 memory_bytes: 0,
@@ -969,6 +973,7 @@ mod tests {
         Request::new(WriteRequest {
             tuples: fields_list.into_iter().map(make_tuple).collect(),
             transaction_id: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         })
     }
 
@@ -985,6 +990,7 @@ mod tests {
             max_results,
             transaction_id: String::new(),
             spatial_filter: None,
+            request_id: ulid::Ulid::new().to_string(),
         })
     }
 
@@ -1097,6 +1103,7 @@ mod tests {
                 template: Some(make_tuple(vec![proto_string("ev"), proto_wildcard()])),
                 transaction_id: String::new(),
                 spatial_filter: None,
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -1109,6 +1116,7 @@ mod tests {
             .exists(Request::new(ExistsRequest {
                 template: Some(exists_tmpl.clone()),
                 transaction_id: String::new(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -1127,6 +1135,7 @@ mod tests {
             .exists(Request::new(ExistsRequest {
                 template: Some(make_tuple(vec![proto_string("cfg"), proto_wildcard()])),
                 transaction_id: String::new(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -1144,6 +1153,7 @@ mod tests {
                 template: Some(make_tuple(vec![proto_wildcard()])),
                 transaction_id: String::new(),
                 spatial_filter: None,
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -1175,6 +1185,7 @@ mod tests {
             .write(Request::new(WriteRequest {
                 tuples: vec![],
                 transaction_id: String::new(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -1190,6 +1201,7 @@ mod tests {
                 max_results: 1,
                 transaction_id: String::new(),
                 spatial_filter: None,
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -1204,6 +1216,7 @@ mod tests {
                         qos: 0,
                         actions: 0,
                         callback_url: String::new(),
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await
@@ -1216,6 +1229,7 @@ mod tests {
                 .unsubscribe(Request::new(
                     plexspaces_proto::tuplespace::v1::UnsubscribeRequest {
                         subscription_id: String::new(),
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await
@@ -1229,6 +1243,7 @@ mod tests {
                     plexspaces_proto::tuplespace::v1::BeginTransactionRequest {
                         isolation_level: 0,
                         timeout: None,
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await
@@ -1241,6 +1256,7 @@ mod tests {
                 .commit_transaction(Request::new(
                     plexspaces_proto::tuplespace::v1::CommitTransactionRequest {
                         transaction_id: String::new(),
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await
@@ -1253,6 +1269,7 @@ mod tests {
                 .abort_transaction(Request::new(
                     plexspaces_proto::tuplespace::v1::AbortTransactionRequest {
                         transaction_id: String::new(),
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await
@@ -1266,6 +1283,7 @@ mod tests {
                     plexspaces_proto::tuplespace::v1::RenewLeaseRequest {
                         tuple_id: String::new(),
                         new_ttl: None,
+                        request_id: ulid::Ulid::new().to_string(),
                     }
                 ))
                 .await

@@ -115,6 +115,10 @@ for line in source.splitlines():
         lines.append(line)
 pathlib.Path(sys.argv[2]).write_text("\n".join(lines) + "\n")
 PY
+trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 
 # Step 1: Deploy
 echo "Step 1: Deploy MiniClaw application"
@@ -129,8 +133,7 @@ for _attempt in 1 2 3; do
     -F "application_id=$APP_ID" \
     -F "name=go-miniclaw" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+    -F "app_file=@$APP_ZIP" 2>&1)
   HTTP_CODE=$(echo "$DEPLOY_RESP" | tail -n1)
   BODY=$(echo "$DEPLOY_RESP" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$BODY" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then

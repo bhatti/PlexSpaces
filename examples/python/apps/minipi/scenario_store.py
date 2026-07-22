@@ -126,7 +126,7 @@ class ScenarioStoreActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:scenario_store", host.self_id())
+            host.kv.put("svc:scenario_store", host.self_id())
         except Exception:
             pass
         try:
@@ -142,7 +142,7 @@ class ScenarioStoreActor:
         """Get a single scenario by ID."""
         if not scenario_id:
             return {"error": "scenario_id is required"}
-        raw = host.kv_get(f"scenario:{scenario_id}")
+        raw = host.kv.get(f"scenario:{scenario_id}")
         if not raw:
             return {"error": f"scenario {scenario_id} not found"}
         try:
@@ -154,11 +154,11 @@ class ScenarioStoreActor:
     def list_scenarios(self, tags: list = None, difficulty: str = "", limit: int = 50) -> dict:
         """List scenarios, optionally filtered by tags or difficulty."""
         try:
-            raw_keys = host.kv_list("scenario:")
+            raw_keys = host.kv.list("scenario:")
             keys = json.loads(raw_keys) if raw_keys and not raw_keys.startswith("ERROR:") else []
             scenarios = []
             for key in keys[:limit * 2]:  # Oversample to account for filtering
-                raw = host.kv_get(key)
+                raw = host.kv.get(key)
                 if not raw:
                     continue
                 try:
@@ -192,7 +192,7 @@ class ScenarioStoreActor:
             scenario["scenario_id"] = scenario_id
 
         try:
-            host.kv_put(f"scenario:{scenario_id}", json.dumps(scenario))
+            host.kv.put(f"scenario:{scenario_id}", json.dumps(scenario))
             self.scenario_count += 1
             host.incr_counter("scenarios_stored_total", 1)
             return {"status": "ok", "scenario_id": scenario_id}
@@ -214,7 +214,7 @@ class ScenarioStoreActor:
         if scenario_ids:
             scenarios = []
             for sid in scenario_ids:
-                raw = host.kv_get(f"scenario:{sid}")
+                raw = host.kv.get(f"scenario:{sid}")
                 if raw:
                     try:
                         scenarios.append(json.loads(raw))
@@ -231,7 +231,7 @@ class ScenarioStoreActor:
             ids = [s["scenario_id"] for s in _BUILTIN_SCENARIOS]
         else:
             # Try to load a stored suite definition
-            raw = host.kv_get(f"suite:{suite_name}")
+            raw = host.kv.get(f"suite:{suite_name}")
             if raw:
                 try:
                     suite_def = json.loads(raw)
@@ -243,7 +243,7 @@ class ScenarioStoreActor:
 
         scenarios = []
         for sid in ids:
-            raw = host.kv_get(f"scenario:{sid}")
+            raw = host.kv.get(f"scenario:{sid}")
             if raw:
                 try:
                     scenarios.append(json.loads(raw))
@@ -258,7 +258,7 @@ class ScenarioStoreActor:
         if not suite_name or not scenario_ids:
             return {"error": "suite_name and scenario_ids are required"}
         try:
-            host.kv_put(f"suite:{suite_name}", json.dumps({"scenario_ids": scenario_ids}))
+            host.kv.put(f"suite:{suite_name}", json.dumps({"scenario_ids": scenario_ids}))
             return {"status": "ok", "suite_name": suite_name, "count": len(scenario_ids)}
         except Exception as e:
             return {"error": str(e)}
@@ -278,10 +278,10 @@ class ScenarioStoreActor:
         seeded = 0
         for sc in _BUILTIN_SCENARIOS:
             key = f"scenario:{sc['scenario_id']}"
-            existing = host.kv_get(key)
+            existing = host.kv.get(key)
             if not existing:
                 try:
-                    host.kv_put(key, json.dumps(sc))
+                    host.kv.put(key, json.dumps(sc))
                     seeded += 1
                 except Exception as e:
                     host.warn(f"Failed to seed scenario {sc['scenario_id']}: {e}")

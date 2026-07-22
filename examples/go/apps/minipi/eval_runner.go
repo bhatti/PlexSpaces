@@ -189,7 +189,7 @@ func (e *EvalRunnerActor) run(p map[string]any) string {
 			trajID := stringVal(traj, "trajectory_id", "")
 			if trajID != "" {
 				trajJSON, _ := json.Marshal(traj)
-				host.KVPut("agent_trajectory:"+trajID, string(trajJSON))
+				host.KV().Put("agent_trajectory:"+trajID, string(trajJSON))
 			}
 			inlineTrajectories = append(inlineTrajectories, traj)
 		}
@@ -319,7 +319,7 @@ func (e *EvalRunnerActor) run(p map[string]any) string {
 	report["cost_estimate_usd"] = costUSD
 
 	reportJSON, _ := json.Marshal(report)
-	host.KVPut("eval_report:"+evalRunID, string(reportJSON))
+	host.KV().Put("eval_report:"+evalRunID, string(reportJSON))
 	// Post TupleSpace entry so DashboardActor can discover this run
 	host.TS().Write([]any{"eval_run", evalRunID, avgScore, passRate})
 
@@ -349,7 +349,7 @@ func (e *EvalRunnerActor) collectTrajectories(agentIDs []string, evalRunID strin
 		if len(r) >= 3 {
 			trajID, _ := r[2].(string)
 			if trajID != "" {
-				if raw := host.KVGet("agent_trajectory:" + trajID); raw != "" {
+				if raw, _ := host.KV().Get("agent_trajectory:" + trajID); raw != "" {
 					var traj map[string]any
 					if err := json.Unmarshal([]byte(raw), &traj); err == nil {
 						collected = append(collected, traj)
@@ -362,11 +362,11 @@ func (e *EvalRunnerActor) collectTrajectories(agentIDs []string, evalRunID strin
 	// Also check KV index for each agent
 	for _, agentID := range agentIDs {
 		indexKey := "agent_trajectory_index:" + agentID
-		if raw := host.KVGet(indexKey); raw != "" {
+		if raw, _ := host.KV().Get(indexKey); raw != "" {
 			var ids []string
 			if err := json.Unmarshal([]byte(raw), &ids); err == nil {
 				for _, trajID := range ids {
-					if trajRaw := host.KVGet("agent_trajectory:" + trajID); trajRaw != "" {
+					if trajRaw, _ := host.KV().Get("agent_trajectory:" + trajID); trajRaw != "" {
 						var traj map[string]any
 						if err2 := json.Unmarshal([]byte(trajRaw), &traj); err2 == nil {
 							// Only include if not already collected

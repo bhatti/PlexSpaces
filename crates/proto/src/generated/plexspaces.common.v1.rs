@@ -101,16 +101,18 @@ pub struct RetryPolicy {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PageRequest {
     /// Offset for pagination (0-based, default: 0)
-    #[prost(int32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
     pub offset: i32,
     /// Limit/Page size (default: 50, max: 1000)
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub limit: i32,
     /// Filter string (optional)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub filter: ::prost::alloc::string::String,
     /// Order by field (optional)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub order_by: ::prost::alloc::string::String,
 }
 /// Standard pagination response
@@ -118,16 +120,18 @@ pub struct PageRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PageResponse {
     /// Total number of items (across all pages)
-    #[prost(int32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
     pub total_size: i32,
     /// Current offset
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub offset: i32,
     /// Current limit/page size
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub limit: i32,
     /// Whether there are more pages (has_next = offset + limit < total_size)
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub has_next: bool,
 }
 // ============================================================================
@@ -603,15 +607,17 @@ pub struct HttpHeader {
 pub struct OutboundHttpRequest {
     /// HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub method: ::prost::alloc::string::String,
     /// Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub path_and_query: ::prost::alloc::string::String,
     /// Extra headers merged with link defaults and auth headers
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag="4")]
     pub headers: ::prost::alloc::vec::Vec<HttpHeader>,
     /// Request body bytes
-    #[prost(bytes="vec", tag="4")]
+    #[prost(bytes="vec", tag="5")]
     pub body: ::prost::alloc::vec::Vec<u8>,
 }
 /// Outbound HTTP response from an external service call.
@@ -619,13 +625,15 @@ pub struct OutboundHttpRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OutboundHttpResponse {
     /// HTTP status code
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub status: u32,
     /// Response headers
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag="3")]
     pub headers: ::prost::alloc::vec::Vec<HttpHeader>,
     /// Response body bytes
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub body: ::prost::alloc::vec::Vec<u8>,
 }
 /// Activation strategy for virtual actors (single definition used by actor_runtime and node.release).

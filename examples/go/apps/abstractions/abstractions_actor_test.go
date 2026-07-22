@@ -68,7 +68,7 @@ func TestChannelPublish(t *testing.T) {
 
 func TestHostContractHelpers(t *testing.T) {
 	plexspaces.ResetStubs()
-	if out := host.KVPut("abstractions/config", "ready"); out != "" {
+	if out := host.KV().Put("abstractions/config", "ready"); out != "" {
 		t.Fatalf("KVPut() = %q", out)
 	}
 	if err := host.PG().Join(defaultGroup); err != nil {
@@ -80,7 +80,7 @@ func TestHostContractHelpers(t *testing.T) {
 	if err := host.PG().Broadcast(defaultGroup, "publish", map[string]any{"channel": "alerts", "body": "broadcast"}); err != nil {
 		t.Fatalf("PG().Broadcast() error = %v", err)
 	}
-	if timerID := host.SendAfter(250, "tick", map[string]any{"kind": "timer"}); timerID == "" {
+	if timerID, _ := host.Actor().SendAfter(250, "tick", map[string]any{"kind": "timer"}); timerID == "" {
 		t.Fatal("SendAfter() returned empty timer ID")
 	}
 }

@@ -25,7 +25,7 @@ class ScorerActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:scorer", host.self_id())
+            host.kv.put("svc:scorer", host.self_id())
         except Exception:
             pass
         try:

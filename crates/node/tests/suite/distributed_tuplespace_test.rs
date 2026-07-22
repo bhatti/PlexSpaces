@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Distributed TupleSpace Integration Tests
@@ -69,6 +69,7 @@ fn proto_tuple(fields: Vec<tuple_field::Value>) -> Tuple {
 
 fn read_req(pattern: Tuple, take: bool) -> ReadRequest {
     ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         timeout: None,
         blocking: false,
@@ -155,6 +156,7 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
         ]);
         let resp = client2
             .write(tonic::Request::new(WriteRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 tuples: vec![write_tuple],
                 transaction_id: String::new(),
             }))
@@ -238,6 +240,7 @@ async fn test_distributed_tuplespace_count_and_exists() {
         ]);
         let resp = client
             .count(tonic::Request::new(CountRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 template: Some(pat),
                 transaction_id: String::new(),
                 spatial_filter: None,
@@ -255,6 +258,7 @@ async fn test_distributed_tuplespace_count_and_exists() {
         ]);
         let resp = client
             .exists(tonic::Request::new(ExistsRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 template: Some(pat),
                 transaction_id: String::new(),
             }))
@@ -271,6 +275,7 @@ async fn test_distributed_tuplespace_count_and_exists() {
         ]);
         let resp = client
             .exists(tonic::Request::new(ExistsRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 template: Some(pat),
                 transaction_id: String::new(),
             }))

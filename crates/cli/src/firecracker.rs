@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Firecracker VM management commands
@@ -285,10 +285,12 @@ async fn deploy_app_to_node(node_addr: &str, vm_id: &str, wasm_path: &PathBuf) -
         metadata: None,
         seed_nodes: vec![],
         required_service_links: vec![],
+        static_mount: String::new(),
     };
 
     // Create deployment request
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: format!("{}-{}", vm_id, app_name),
         name: app_name.clone(),
         version: "1.0.0".to_string(),

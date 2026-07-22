@@ -116,7 +116,7 @@ func (l *LLMGatewayActor) completion(p map[string]any) string {
 
 	// Check deterministic cache
 	cacheKey := l.cacheKeyFor(messages, tools)
-	if cached := host.KVGet(cacheKey); cached != "" {
+	if cached, _ := host.KV().Get(cacheKey); cached != "" {
 		l.CacheHits++
 		l.IncrCounter(host, "llm_cache_hits")
 		var cachedResp map[string]any
@@ -160,7 +160,7 @@ func (l *LLMGatewayActor) completion(p map[string]any) string {
 
 	// Cache successful response
 	if resultJSON, err := json.Marshal(result); err == nil {
-		host.KVPut(cacheKey, string(resultJSON))
+		host.KV().Put(cacheKey, string(resultJSON))
 	}
 
 	l.TotalRequests++

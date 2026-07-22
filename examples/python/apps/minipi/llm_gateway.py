@@ -40,7 +40,7 @@ class LLMGatewayActor:
         self.provider = args.get("provider", "mock")
         self.base_url = args.get("base_url", _OLLAMA_BASE_URL)
         try:
-            host.kv_put("svc:llm_gateway", host.self_id())
+            host.kv.put("svc:llm_gateway", host.self_id())
         except Exception:
             pass
         try:
@@ -215,7 +215,7 @@ class LLMGatewayActor:
 
     def _get_cached(self, key: str):
         try:
-            raw = host.kv_get(key)
+            raw = host.kv.get(key)
             if raw:
                 return json.loads(raw)
         except Exception:
@@ -227,6 +227,6 @@ class LLMGatewayActor:
             host.kv_put_ttl(key, json.dumps(value), _CACHE_TTL_SECONDS)
         except Exception:
             try:
-                host.kv_put(key, json.dumps(value))
+                host.kv.put(key, json.dumps(value))
             except Exception:
                 pass

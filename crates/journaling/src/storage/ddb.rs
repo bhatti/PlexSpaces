@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! DynamoDB-based JournalStorage implementation.
@@ -1618,7 +1618,7 @@ impl JournalStorage for DynamoDBJournalStorage {
         events.sort_by(|a, b| a.sequence.cmp(&b.sequence));
 
         // Build page response
-        let page_response = PageResponse {
+        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan
             offset: page_request.offset,
             limit: page_request.limit,
@@ -1816,6 +1816,42 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "DynamoDB delete_item failed: {}",
                     e
                 )))
+            }
+        }
+    }
+
+    async fn unregister_reminder_if_matches(
+        &self,
+        actor_id: &str,
+        reminder_name: &str,
+        expected_next_fire_ms: u64,
+    ) -> JournalResult<bool> {
+        let table_name = format!("{}-reminders", self.table_prefix);
+        let pk = actor_id.to_string();
+        let sk = format!("REMINDER#{}", reminder_name);
+        let expected_seconds = (expected_next_fire_ms / 1000).to_string();
+
+        match self
+            .client
+            .delete_item()
+            .table_name(&table_name)
+            .key("pk", AttributeValue::S(pk))
+            .key("sk", AttributeValue::S(sk))
+            .condition_expression("next_fire_time = :expected")
+            .expression_attribute_values(":expected", AttributeValue::N(expected_seconds))
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                if e.code() == Some("ConditionalCheckFailedException") {
+                    Ok(false)
+                } else {
+                    Err(crate::JournalError::Storage(format!(
+                        "DynamoDB delete_item (CAS) failed: {}",
+                        e
+                    )))
+                }
             }
         }
     }

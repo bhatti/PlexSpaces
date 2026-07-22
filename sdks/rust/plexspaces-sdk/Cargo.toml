@@ -23,6 +23,7 @@ plexspaces-journaling = { path = "../../../crates/journaling", optional = true }
 plexspaces-workflow = { path = "../../../crates/workflow", optional = true }
 plexspaces-common = { path = "../../../crates/common", optional = true }
 async-trait = { version = "0.1", optional = true }
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = { workspace = true }

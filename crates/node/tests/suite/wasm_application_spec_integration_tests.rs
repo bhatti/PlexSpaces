@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Comprehensive Integration Tests for WASM Application Deployment with ApplicationSpec
@@ -268,7 +268,7 @@ async fn test_empty_node_dashboard_shows_zero_applications() {
     // ARRANGE: Create empty node and start it
     let node = create_test_node("test-node-empty-apps", "127.0.0.1:9011").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -276,6 +276,7 @@ async fn test_empty_node_dashboard_shows_zero_applications() {
 
     // ACT: Get summary from dashboard
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -307,7 +308,7 @@ async fn test_wasm_deployment_creates_applicationspec() {
     // ARRANGE: Create node and start it
     let node = create_test_node("test-node-appspec", "127.0.0.1:9013").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -401,7 +402,7 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
     // ARRANGE: Create empty node, check dashboard, deploy, check again
     let node = create_test_node("test-node-dashboard-flow", "127.0.0.1:9015").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -417,6 +418,7 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
 
     // ACT 1: Check dashboard before deployment
     let before_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -467,6 +469,7 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
 
     // ACT 3: Check dashboard after deployment
     let after_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -492,6 +495,7 @@ async fn test_wasm_deployment_dashboard_reflects_changes() {
 
     // Verify application appears in applications list
     let apps_request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -523,7 +527,7 @@ async fn test_wasm_deployment_applicationspec_fields() {
     // ARRANGE: Deploy WASM and verify ApplicationSpec fields
     let node = create_test_node("test-node-spec-fields", "127.0.0.1:9017").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -597,7 +601,7 @@ async fn test_wasm_deployment_undeployment_flow() {
     // ARRANGE: Deploy, verify, undeploy, verify
     let node = create_test_node("test-node-undeploy", "127.0.0.1:9019").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -684,6 +688,7 @@ async fn test_wasm_deployment_undeployment_flow() {
 
     // Verify dashboard shows 0 applications
     let summary_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -708,7 +713,7 @@ async fn test_wasm_deployment_multiple_applications() {
     // ARRANGE: Deploy multiple applications and verify all are registered
     let node = create_test_node("test-node-multi-apps", "127.0.0.1:9021").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -779,6 +784,7 @@ async fn test_wasm_deployment_multiple_applications() {
 
     // Verify dashboard shows all applications
     let summary_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -795,6 +801,7 @@ async fn test_wasm_deployment_multiple_applications() {
 
     // Verify applications list
     let apps_request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -822,7 +829,7 @@ async fn test_wasm_deployment_component_error_handling() {
     // ARRANGE: Try to deploy a component (should fail gracefully)
     let node = create_test_node("test-node-component-error", "127.0.0.1:9023").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -900,7 +907,7 @@ async fn test_wasm_deployment_applicationspec_auto_generation() {
     // ARRANGE: Deploy without config field - ApplicationSpec should be auto-generated
     let node = create_test_node("test-node-auto-spec", "127.0.0.1:9025").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -968,7 +975,7 @@ async fn test_wasm_deployment_name_vs_application_id() {
     // ARRANGE: Verify that ApplicationManager uses name, not application_id
     let node = create_test_node("test-node-name-id", "127.0.0.1:9027").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -1056,7 +1063,7 @@ async fn test_wasm_deployment_complete_workflow() {
     // ARRANGE: Complete workflow: empty node → deploy → dashboard → undeploy → dashboard
     let node = create_test_node("test-node-complete", "127.0.0.1:9029").await;
     let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move { if let Err(e) = node_clone.start().await {} });
+    let start_handle = tokio::spawn(async move { if let Err(_e) = node_clone.start().await {} });
 
     sleep(Duration::from_millis(2000)).await;
 
@@ -1077,6 +1084,7 @@ async fn test_wasm_deployment_complete_workflow() {
 
     // STEP 1: Check empty node dashboard
     let before_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1122,6 +1130,7 @@ async fn test_wasm_deployment_complete_workflow() {
 
     // STEP 3: Verify dashboard shows application
     let after_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1162,6 +1171,7 @@ async fn test_wasm_deployment_complete_workflow() {
 
     // STEP 6: Verify dashboard shows 0 applications again
     let final_request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),

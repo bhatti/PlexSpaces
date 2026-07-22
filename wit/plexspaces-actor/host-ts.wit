@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// TupleSpace Linda-model coordination for deployable WASM actors.
+
+interface host-ts {
+    use types.{payload, actor-error};
+
+    ts-write: func(tuple-data: payload) -> result<_, actor-error>;
+    ts-read: func(pattern-data: payload) -> result<payload, actor-error>;
+    ts-take: func(pattern-data: payload) -> result<payload, actor-error>;
+    ts-read-all: func(pattern-data: payload) -> result<payload, actor-error>;
+}

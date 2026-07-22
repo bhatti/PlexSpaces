@@ -57,13 +57,20 @@ cd examples/go/apps/migrating_cloudflare_workers
 
 | Feature | How Used |
 |---------|----------|
-| `ActorRouter` | Routes to ChatRoom or RateLimiter by actor ID prefix |
+| `ActorRouter` | Routes to ChatRoom, RateLimiter, or AlarmDemo by actor ID prefix |
 | `BaseActor` | Go actor base with JSON state serialization |
 | `Host.KVPut()/KVGet()` | Durable message history (like DO `state.storage`) |
+| `Host.KVMultiGet()/KVMultiPut()` | Batch history load/store (like DO `storage.get([k1,k2,...])`) |
+| `Host.KVCAS()` | Atomic compare-and-swap for idempotent token reservation |
+| `Host.KVIncrement()` | Atomic distributed counter for request rate tracking |
+| `Host.AlarmSet()` | Schedule durable alarm (like DO `storage.setAlarm()`) |
+| `Host.AlarmGet()` | Query pending alarm timestamp (like DO `storage.getAlarm()`) |
+| `Host.AlarmDelete()` | Cancel pending alarm (like DO `storage.deleteAlarm()`) |
 | `Host.NowMs()` | Timestamps for messages + token bucket refill |
+| `Host.Send()` | Real fire-and-forget fan-out to member actors |
 | `Host.Info()` | Structured logging |
 | `Init()` | Initialize + restore persisted state (`blockConcurrencyWhile`) |
-| `Handle()` | Routes join, leave, send_message, get_history, stats |
+| `Handle()` | Routes join, leave, send_message, get_history, stats, __alarm__ |
 | `GetState()/SetState()` | Checkpoint-based state persistence |
 
 ## Comparison: Cloudflare Workers/DO vs PlexSpaces
@@ -73,13 +80,19 @@ cd examples/go/apps/migrating_cloudflare_workers
 | Actor model | `export class ChatRoom extends DurableObject` | ChatRoom struct + BaseActor |
 | Get instance | `env.CHAT_ROOM.get(id)` | `host.Ask(actorID, ...)` |
 | Durable storage | `this.state.storage.put/get` | `host.KVPut()/KVGet()` + GetState |
+| Batch storage | `storage.get([k1,k2,...])` / `storage.put({...})` | `host.KVMultiGet()` / `host.KVMultiPut()` |
+| Atomic CAS | Transactional storage read-modify-write | `host.KVCAS(key, expected, new)` |
+| Atomic counter | KV atomic increment | `host.KVIncrement(key, delta)` |
 | Request handler | `async fetch(request)` | `Handle(from, msgType, payload)` |
 | Init/migration | `blockConcurrencyWhile()` | `Init()` (runs before any Handle) |
 | Multi-actor | `wrangler.toml [[bindings]]` | `app-config.toml [[children]]` |
 | Routing | Worker fetch + URL path | `ActorRouter` prefix matching |
-| Fan-out | WebSocket broadcast | `host.Send()` to member actors |
+| Fan-out | WebSocket broadcast | `host.Send()` real fire-and-forget to member actors |
 | Rate limiting | Separate DO class per IP | RateLimiter actor per user |
-| Timer/alarm | `this.state.storage.setAlarm()` | `host.SendAfter()` |
+| Set alarm | `this.state.storage.setAlarm(timestamp)` | `host.AlarmSet(timestampMs)` |
+| Get alarm | `this.state.storage.getAlarm()` | `host.AlarmGet()` |
+| Cancel alarm | `this.state.storage.deleteAlarm()` | `host.AlarmDelete()` |
+| Alarm callback | `async alarm() { ... }` | `Handle("__alarm__", ...)` |
 | Deployment | `npx wrangler deploy` | HTTP multipart deploy API |
 | Language | JavaScript/TypeScript | Go, Python, TypeScript, Rust |
 | Distribution | Cloudflare edge network | HTTP/gRPC (multi-cloud) |
@@ -136,7 +149,7 @@ Higher granularity = more compute per coordination overhead = better efficiency.
 
 | File | Description |
 |------|-------------|
-| `guild_chat.go` | ChatRoom + RateLimiter actors (multi-actor) |
+| `guild_chat.go` | ChatRoom + RateLimiter + AlarmDemo actors (multi-actor) |
 | `go.mod` | Go module (references PlexSpaces SDK) |
 | `app-config.toml` | ApplicationSpec (supervisor + 2 DO actors) |
 | `build.sh` | Build WASM module via TinyGo |

@@ -135,33 +135,37 @@ pub struct ObjectRegistration {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterRequest {
     /// Object registration to create/update
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub registration: ::core::option::Option<ObjectRegistration>,
     /// TTL for auto-expiry (optional, default: no expiry)
     /// If specified, object auto-unregisters after TTL expires
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
     /// If true, enforce unique alias placement.
     /// Returns existing grpc_address in response if another active registration holds the same alias.
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub enforce_unique_alias: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterResponse {
     /// Registered object (with generated timestamps)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub registration: ::core::option::Option<ObjectRegistration>,
     /// Whether this was a new registration (true) or update (false)
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub created: bool,
     /// If enforce_unique_alias was true and an active registration with the same alias exists,
     /// this contains the existing registration's grpc_address for forwarding.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub existing_grpc_address: ::prost::alloc::string::String,
     /// If enforce_unique_alias was true and an active registration with the same alias exists,
     /// this contains the existing object_id for diagnostics.
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub existing_object_id: ::prost::alloc::string::String,
 }
 /// Unregister object request
@@ -170,22 +174,26 @@ pub struct RegisterResponse {
 pub struct UnregisterRequest {
     /// Object ID to unregister
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub object_id: ::prost::alloc::string::String,
     /// Object type (for key construction)
-    #[prost(enumeration="ObjectType", tag="2")]
+    #[prost(enumeration="ObjectType", tag="3")]
     pub object_type: i32,
     /// Tenant ID (for multi-tenancy)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace (for logical grouping)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnregisterResponse {
     /// Whether object was found and unregistered
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub unregistered: bool,
 }
 /// Lookup single object request
@@ -194,29 +202,33 @@ pub struct UnregisterResponse {
 pub struct LookupRequest {
     /// Object ID to lookup (mutually exclusive with alias)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub object_id: ::prost::alloc::string::String,
     /// Object type (optional - if not specified, searches all types)
-    #[prost(enumeration="ObjectType", tag="2")]
+    #[prost(enumeration="ObjectType", tag="3")]
     pub object_type: i32,
     /// Tenant ID (for multi-tenancy)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace (for logical grouping)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub namespace: ::prost::alloc::string::String,
     /// Lookup by alias (mutually exclusive with object_id).
     /// Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub alias: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LookupResponse {
     /// Object registration (null if not found)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub registration: ::core::option::Option<ObjectRegistration>,
     /// Whether object was found
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub found: bool,
 }
 /// Discover objects request (with extensive filtering)
@@ -226,76 +238,80 @@ pub struct LookupResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DiscoverRequest {
     /// Filter by object type (optional - if not specified, returns ALL types)
-    #[prost(enumeration="ObjectType", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(enumeration="ObjectType", tag="2")]
     pub object_type: i32,
     /// Filter by object category (exact match)
     /// Examples: "GenServer", "redis", "order-service"
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub object_category: ::prost::alloc::string::String,
     // ==================== LOCATION FILTERING ====================
 
     /// Filter by node ID
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub node_id: ::prost::alloc::string::String,
     /// Filter by tenant ID
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Filter by namespace
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub namespace: ::prost::alloc::string::String,
     // ==================== CAPABILITY FILTERING ====================
 
     /// Filter by capabilities (ALL must be present)
     /// Example: \["persistent", "distributed"\] → only objects with BOTH capabilities
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag="7")]
     pub capabilities: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Filter by labels (ANY can match)
     /// Example: \["prod", "us-west-2"\] → objects with "prod" OR "us-west-2"
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag="8")]
     pub labels: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     // ==================== HEALTH FILTERING ====================
 
     /// Filter by health status
-    #[prost(enumeration="HealthStatus", tag="8")]
+    #[prost(enumeration="HealthStatus", tag="9")]
     pub health_status: i32,
     /// Filter by minimum health age (exclude stale objects)
     /// Example: last_heartbeat < (now - max_age) → excluded
     ///
     /// Max 7 days
-    #[prost(message, optional, tag="9")]
+    #[prost(message, optional, tag="10")]
     pub max_heartbeat_age: ::core::option::Option<::prost_types::Duration>,
     // ==================== PAGINATION ====================
 
     /// Maximum results per page (default: 100, max: 1000)
-    #[prost(int32, tag="10")]
+    #[prost(int32, tag="11")]
     pub page_size: i32,
     /// Pagination token from previous response (opaque)
-    #[prost(string, tag="11")]
+    #[prost(string, tag="12")]
     pub page_token: ::prost::alloc::string::String,
     // ==================== SORTING ====================
 
     /// Sort field (default: "created_at")
     /// Options: "object_id", "created_at", "updated_at", "last_heartbeat"
-    #[prost(string, tag="12")]
+    #[prost(string, tag="13")]
     pub sort_by: ::prost::alloc::string::String,
     /// Sort order (default: ascending)
-    #[prost(bool, tag="13")]
+    #[prost(bool, tag="14")]
     pub descending: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DiscoverResponse {
     /// Matching objects (paginated)
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub registrations: ::prost::alloc::vec::Vec<ObjectRegistration>,
     /// Total count of matching objects (before pagination)
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag="3")]
     pub total_count: i64,
     /// Next page token (empty if no more results)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub next_page_token: ::prost::alloc::string::String,
     /// Whether there are more results
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub has_more: bool,
 }
 /// Heartbeat request
@@ -304,31 +320,35 @@ pub struct DiscoverResponse {
 pub struct HeartbeatRequest {
     /// Object ID sending heartbeat
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub object_id: ::prost::alloc::string::String,
     /// Object type
-    #[prost(enumeration="ObjectType", tag="2")]
+    #[prost(enumeration="ObjectType", tag="3")]
     pub object_type: i32,
     /// Tenant ID
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub namespace: ::prost::alloc::string::String,
     /// Updated health status (optional)
-    #[prost(enumeration="HealthStatus", tag="5")]
+    #[prost(enumeration="HealthStatus", tag="6")]
     pub health_status: i32,
     /// Updated metrics (optional)
-    #[prost(map="string, double", tag="6")]
+    #[prost(map="string, double", tag="7")]
     pub metrics: ::std::collections::HashMap<::prost::alloc::string::String, f64>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HeartbeatResponse {
     /// Whether heartbeat was accepted
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub accepted: bool,
     /// Updated registration
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub registration: ::core::option::Option<ObjectRegistration>,
 }
 /// Batch heartbeat request
@@ -336,20 +356,24 @@ pub struct HeartbeatResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BatchHeartbeatRequest {
     /// Multiple heartbeats
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub heartbeats: ::prost::alloc::vec::Vec<HeartbeatRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BatchHeartbeatResponse {
     /// Results for each heartbeat (same order as request)
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub results: ::prost::alloc::vec::Vec<HeartbeatResponse>,
     /// Number of successful heartbeats
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub success_count: i32,
     /// Number of failed heartbeats
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub failure_count: i32,
 }
 /// List object types request
@@ -358,9 +382,11 @@ pub struct BatchHeartbeatResponse {
 pub struct ListObjectTypesRequest {
     /// Filter by tenant (optional)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Filter by namespace (optional)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Object type summary
@@ -381,10 +407,12 @@ pub struct ObjectTypeSummary {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListObjectTypesResponse {
     /// Summary for each object type
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub summaries: ::prost::alloc::vec::Vec<ObjectTypeSummary>,
     /// Total registered objects across all types
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag="3")]
     pub total_count: i64,
 }
 // ============================================================================
@@ -509,6 +537,189 @@ impl HealthStatus {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

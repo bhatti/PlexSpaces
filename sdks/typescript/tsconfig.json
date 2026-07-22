@@ -9,7 +9,19 @@
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,
-    "declarationMap": false
+    "declarationMap": false,
+    "paths": {
+      "plexspaces:actor/host-logging@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-logging.d.ts"],
+      "plexspaces:actor/host-actor@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-actor.d.ts"],
+      "plexspaces:actor/host-kv@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-kv.d.ts"],
+      "plexspaces:actor/host-ts@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-ts.d.ts"],
+      "plexspaces:actor/host-locks@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-locks.d.ts"],
+      "plexspaces:actor/host-blob@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-blob.d.ts"],
+      "plexspaces:actor/host-pool@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-pool.d.ts"],
+      "plexspaces:actor/host-shard@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-shard.d.ts"],
+      "plexspaces:actor/host-http@0.1.0": ["./src/generated/interfaces/plexspaces-actor-host-http.d.ts"],
+      "plexspaces:actor/registry@0.1.0": ["./src/generated/interfaces/plexspaces-actor-registry.d.ts"]
+    }
   },
   "include": ["src/**/*.ts", "src/generated/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Blob Storage Service API
@@ -243,7 +243,8 @@ message UploadBlobRequest {
   };
 
   // Tenant ID
-  string tenant_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tenant_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -252,7 +253,7 @@ message UploadBlobRequest {
   ];
 
   // Namespace
-  string namespace = 2 [
+  string namespace = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -261,7 +262,7 @@ message UploadBlobRequest {
   ];
 
   // Blob name
-  string name = 3 [
+  string name = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -270,25 +271,25 @@ message UploadBlobRequest {
   ];
 
   // Content type (optional, will be detected if not provided)
-  string content_type = 4 [(buf.validate.field).string = {max_len: 128}];
+  string content_type = 5 [(buf.validate.field).string = {max_len: 128}];
 
   // Blob group (optional)
-  string blob_group = 5 [(buf.validate.field).string = {max_len: 128}];
+  string blob_group = 6 [(buf.validate.field).string = {max_len: 128}];
 
   // Blob kind (optional)
-  string kind = 6 [(buf.validate.field).string = {max_len: 64}];
+  string kind = 7 [(buf.validate.field).string = {max_len: 64}];
 
   // Custom metadata
-  map<string, string> metadata = 7;
+  map<string, string> metadata = 8;
 
   // Custom tags
-  map<string, string> tags = 8;
+  map<string, string> tags = 9;
 
   // Expiration duration (optional)
-  google.protobuf.Duration expires_after = 9;
+  google.protobuf.Duration expires_after = 10;
 
   // Blob data (for gRPC streaming or HTTP body)
-  bytes data = 10;
+  bytes data = 11;
 }
 
 // Upload blob response
@@ -300,7 +301,8 @@ message UploadBlobResponse {
     }
   };
 
-  BlobMetadata metadata = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  BlobMetadata metadata = 2;
 }
 
 // Download blob request
@@ -314,7 +316,8 @@ message DownloadBlobRequest {
   };
 
   // Blob ID
-  string blob_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string blob_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -323,10 +326,10 @@ message DownloadBlobRequest {
   ];
 
   // Tenant ID (for authorization)
-  string tenant_id = 2 [(buf.validate.field).string = {max_len: 64}];
+  string tenant_id = 3 [(buf.validate.field).string = {max_len: 64}];
 
   // Namespace (for authorization)
-  string namespace = 3 [(buf.validate.field).string = {max_len: 32}];
+  string namespace = 4 [(buf.validate.field).string = {max_len: 32}];
 }
 
 // Download blob response (streaming)
@@ -339,10 +342,11 @@ message DownloadBlobResponse {
   };
 
   // Blob metadata (sent first)
-  BlobMetadata metadata = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  BlobMetadata metadata = 2;
 
   // Blob data chunks (streamed)
-  bytes data = 2;
+  bytes data = 3;
 }
 
 // Get blob metadata request
@@ -355,7 +359,8 @@ message GetBlobMetadataRequest {
     }
   };
 
-  string blob_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string blob_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -363,9 +368,9 @@ message GetBlobMetadataRequest {
     }
   ];
 
-  string tenant_id = 2 [(buf.validate.field).string = {max_len: 64}];
+  string tenant_id = 3 [(buf.validate.field).string = {max_len: 64}];
 
-  string namespace = 3 [(buf.validate.field).string = {max_len: 32}];
+  string namespace = 4 [(buf.validate.field).string = {max_len: 32}];
 }
 
 // Get blob metadata response
@@ -377,7 +382,8 @@ message GetBlobMetadataResponse {
     }
   };
 
-  BlobMetadata metadata = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  BlobMetadata metadata = 2;
 }
 
 // List blobs request
@@ -393,7 +399,8 @@ message ListBlobsRequest {
     }
   };
 
-  string tenant_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tenant_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -401,7 +408,7 @@ message ListBlobsRequest {
     }
   ];
 
-  string namespace = 2 [
+  string namespace = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -410,19 +417,19 @@ message ListBlobsRequest {
   ];
 
   // Filter by name (prefix match)
-  string name_prefix = 3 [(buf.validate.field).string = {max_len: 512}];
+  string name_prefix = 4 [(buf.validate.field).string = {max_len: 512}];
 
   // Filter by blob_group
-  string blob_group = 4 [(buf.validate.field).string = {max_len: 128}];
+  string blob_group = 5 [(buf.validate.field).string = {max_len: 128}];
 
   // Filter by kind
-  string kind = 5 [(buf.validate.field).string = {max_len: 64}];
+  string kind = 6 [(buf.validate.field).string = {max_len: 64}];
 
   // Filter by SHA256
-  string sha256 = 6 [(buf.validate.field).string = {max_len: 64}];
+  string sha256 = 7 [(buf.validate.field).string = {max_len: 64}];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 7;
+  plexspaces.common.v1.PageRequest page = 8;
 }
 
 // List blobs response
@@ -434,8 +441,9 @@ message ListBlobsResponse {
     }
   };
 
-  repeated BlobMetadata blobs = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated BlobMetadata blobs = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Delete blob request
@@ -448,7 +456,8 @@ message DeleteBlobRequest {
     }
   };
 
-  string blob_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string blob_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -456,9 +465,9 @@ message DeleteBlobRequest {
     }
   ];
 
-  string tenant_id = 2 [(buf.validate.field).string = {max_len: 64}];
+  string tenant_id = 3 [(buf.validate.field).string = {max_len: 64}];
 
-  string namespace = 3 [(buf.validate.field).string = {max_len: 32}];
+  string namespace = 4 [(buf.validate.field).string = {max_len: 32}];
 }
 
 // Delete blob response
@@ -469,6 +478,7 @@ message DeleteBlobResponse {
       description: "Response after deleting a blob"
     }
   };
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
 }
 
 // Generate presigned URL request
@@ -484,7 +494,8 @@ message GeneratePresignedUrlRequest {
     }
   };
 
-  string blob_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string blob_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -493,7 +504,7 @@ message GeneratePresignedUrlRequest {
   ];
 
   // Operation: "GET" or "PUT"
-  string operation = 2 [
+  string operation = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       in: [
@@ -504,11 +515,11 @@ message GeneratePresignedUrlRequest {
   ];
 
   // Expiration duration (default: 1 hour)
-  google.protobuf.Duration expires_after = 3;
+  google.protobuf.Duration expires_after = 4;
 
-  string tenant_id = 4 [(buf.validate.field).string = {max_len: 64}];
+  string tenant_id = 5 [(buf.validate.field).string = {max_len: 64}];
 
-  string namespace = 5 [(buf.validate.field).string = {max_len: 32}];
+  string namespace = 6 [(buf.validate.field).string = {max_len: 32}];
 }
 
 // Generate presigned URL response
@@ -520,8 +531,9 @@ message GeneratePresignedUrlResponse {
     }
   };
 
-  string url = 1;
-  google.protobuf.Timestamp expires_at = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string url = 2;
+  google.protobuf.Timestamp expires_at = 3;
 }
 
 // Blob Storage Service

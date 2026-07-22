@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Outbound HTTP via service links for deployable WASM actors.
+
+interface host-http {
+    use types.{payload, actor-error};
+
+    http-fetch: func(
+        link-name: string,
+        method: string,
+        path-and-query: string,
+        request: payload
+    ) -> result<payload, actor-error>;
+}

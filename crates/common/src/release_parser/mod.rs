@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # PlexSpaces Release Module
@@ -590,6 +590,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             service_links,
             default_outbound_client_policy: None,
             outbound_policy_templates: std::collections::HashMap::new(),
+            static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
         }),
         system_applications: toml.system_applications.included,
         applications: toml
@@ -630,6 +631,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                     metadata: None, // Not in TOML
                     seed_nodes: vec![],
                     required_service_links,
+                    static_mount: String::new(), // Set from app-config.toml [static] mount at deploy
                 }
             })
             .collect(),
@@ -1223,6 +1225,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![
@@ -1245,6 +1248,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1265,6 +1269,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1373,6 +1378,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![
@@ -1395,6 +1401,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1415,6 +1422,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1435,6 +1443,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1492,6 +1501,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![
@@ -1514,6 +1524,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1534,6 +1545,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1554,6 +1566,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-c".to_string(),
@@ -1574,6 +1587,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1633,6 +1647,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![
@@ -1655,6 +1670,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1675,6 +1691,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1732,6 +1749,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![ApplicationSpec {
@@ -1753,6 +1771,7 @@ mod tests {
                 metadata: None,
                 seed_nodes: vec![],
                 required_service_links: vec![],
+                static_mount: String::new(),
             }],
             env: std::collections::HashMap::new(),
             shutdown: None,
@@ -1814,6 +1833,7 @@ mod tests {
                 service_links: vec![],
                 default_outbound_client_policy: None,
                 outbound_policy_templates: std::collections::HashMap::new(),
+                static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
             }),
             system_applications: vec![],
             applications: vec![
@@ -1836,6 +1856,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1856,6 +1877,7 @@ mod tests {
                     metadata: None,
                     seed_nodes: vec![],
                     required_service_links: vec![],
+                    static_mount: String::new(),
                 },
             ],
             env: std::collections::HashMap::new(),

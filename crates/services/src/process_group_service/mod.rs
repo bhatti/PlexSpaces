@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! ProcessGroupService - Erlang pg/pg2-Inspired Distributed Pub/Sub
@@ -851,7 +851,7 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
             }),
         };
 
-        Ok(Response::new(CreateGroupResponse { group: Some(group) }))
+        Ok(Response::new(CreateGroupResponse { request_id: req.request_id.clone(), group: Some(group) }))
     }
 
     async fn delete_group(
@@ -945,6 +945,7 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
         let total_count = members.len() as i32;
 
         Ok(Response::new(GetMembersResponse {
+            request_id: req.request_id.clone(),
             member_ids: members,
             next_page_token: String::new(),
             total_count,
@@ -973,6 +974,7 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
         let local_count = members.len() as i32;
 
         Ok(Response::new(GetLocalMembersResponse {
+            request_id: req.request_id.clone(),
             member_ids: members,
             local_count,
         }))
@@ -1026,6 +1028,7 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
             .collect();
 
         Ok(Response::new(ListGroupsResponse {
+            request_id: req.request_id.clone(),
             groups,
             next_page_token: String::new(),
             total_count,
@@ -1063,6 +1066,7 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
             .map_err(Self::error_to_status)?;
 
         Ok(Response::new(PublishToGroupResponse {
+            request_id: req.request_id.clone(),
             recipients_count,
             failures_count: 0,
             recipients_per_node: HashMap::new(),

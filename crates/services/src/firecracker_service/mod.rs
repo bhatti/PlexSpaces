@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Firecracker VM Service gRPC implementation
@@ -72,6 +72,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
 
         // Convert proto VmConfig to Firecracker VmConfig
         let vm_config = req
@@ -107,6 +108,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         tracing::info!(vm_id = %vm_id, "VM created successfully");
 
         Ok(Response::new(CreateVmResponse {
+            request_id,
             success: true,
             vm_id,
             socket_path,
@@ -140,6 +142,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         tracing::info!(vm_id = %req.vm_id, state = ?state, "VM booted successfully");
 
         Ok(Response::new(BootVmResponse {
+            request_id: req.request_id.clone(),
             success: true,
             state: map_vm_state_to_proto(state),
             error: None,
@@ -168,6 +171,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         let state = vm_guard.state();
 
         Ok(Response::new(PauseVmResponse {
+            request_id: req.request_id.clone(),
             success: true,
             state: map_vm_state_to_proto(state),
             error: None,
@@ -196,6 +200,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         let state = vm_guard.state();
 
         Ok(Response::new(ResumeVmResponse {
+            request_id: req.request_id.clone(),
             success: true,
             state: map_vm_state_to_proto(state),
             error: None,
@@ -225,6 +230,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         tracing::info!(vm_id = %req.vm_id, "VM stopped successfully");
 
         Ok(Response::new(StopVmResponse {
+            request_id: req.request_id.clone(),
             success: true,
             error: None,
         }))
@@ -255,6 +261,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         };
 
         Ok(Response::new(GetVmStateResponse {
+            request_id: req.request_id.clone(),
             success: true,
             vm: Some(vm_instance),
             error: None,
@@ -293,6 +300,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
 
         let total_count = vm_instances.len() as u32;
         Ok(Response::new(ListVmsResponse {
+            request_id: req.request_id.clone(),
             vms: vm_instances,
             next_page_token: String::new(),
             total_count,
@@ -304,6 +312,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<DeployApplicationRequest>,
     ) -> Result<Response<DeployApplicationResponse>, Status> {
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
 
         tracing::info!(
             vm_id = %req.vm_id,
@@ -375,6 +384,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         // This is a placeholder for the full implementation
 
         Ok(Response::new(DeployApplicationResponse {
+            request_id,
             success: true,
             application_id: req.application_id,
             vm_id: req.vm_id,
@@ -398,6 +408,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         // For now, just return success
 
         Ok(Response::new(UndeployApplicationResponse {
+            request_id: req.request_id.clone(),
             success: true,
             error: None,
         }))

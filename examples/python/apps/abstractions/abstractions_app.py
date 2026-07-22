@@ -114,14 +114,14 @@ class AbstractionsActor:
 
     @handler("kv_put")
     def kv_put(self, key: str, value: str) -> dict:
-        result = host.kv_put(key, value)
+        result = host.kv.put(key, value)
         if result and result.startswith("ERROR"):
             return {"error": f"kv_put: {result}"}
         return {"ok": True, "key": key, "value": value}
 
     @handler("kv_get")
     def kv_get(self, key: str) -> dict:
-        return {"key": key, "value": host.kv_get(key)}
+        return {"key": key, "value": host.kv.get(key)}
 
     @handler("ts_write")
     def ts_write(self, tuple: list) -> dict:  # noqa: A002

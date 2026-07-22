@@ -1,0 +1,23 @@
+{
+  "name": "ts-chat-agent",
+  "version": "1.0.0",
+  "description": "Cloudflare Agents SDK equivalent: conversation state in KV, LLM via httpClient, durable alarm (TypeScript WASM)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ts && npm run build:bundle",
+    "build:ts": "tsc -p .",
+    "build:bundle": "node build-bundle.mjs",
+    "test": "node verify.mjs",
+    "verify": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@plexspaces/sdk": "^0.1"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "^0.14.0",
+    "@bytecodealliance/jco": "^1.16.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.0.0"
+  }
+}

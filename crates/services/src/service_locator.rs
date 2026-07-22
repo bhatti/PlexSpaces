@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! ServiceLocator - Centralized service registration and gRPC client caching
@@ -350,6 +350,17 @@ pub struct ServiceLocatorImpl {
     /// Created during node startup from the shared KeyValueStore
     process_group_registry: Arc<RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>>,
 
+    /// Transport-agnostic actor client (WS-first with gRPC fallback, or gRPC-only before WS is registered)
+    actor_transport_client:
+        Arc<RwLock<Option<Arc<dyn plexspaces_service_traits::ActorTransportClient>>>>,
+
+    /// Transport-agnostic node client (WS-first with gRPC fallback, or gRPC-only before WS is registered)
+    node_transport_client:
+        Arc<RwLock<Option<Arc<dyn plexspaces_service_traits::NodeTransportClient>>>>,
+
+    /// WebSocket session registry (populated by Node::start after WS listener is up)
+    ws_registry: Arc<RwLock<Option<Arc<dyn plexspaces_actor::WsRegistryTrait>>>>,
+
     /// Registered TaskRouter (stored separately for type-safe access)
     /// This allows components to register shard groups for task routing
     task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
@@ -456,6 +467,9 @@ impl ServiceLocatorImpl {
             node_registry: Arc::new(RwLock::new(None)),
             keyvalue_store: Arc::new(RwLock::new(None)),
             process_group_registry: Arc::new(RwLock::new(None)),
+            actor_transport_client: Arc::new(RwLock::new(None)),
+            node_transport_client: Arc::new(RwLock::new(None)),
+            ws_registry: Arc::new(RwLock::new(None)),
             task_router: Arc::new(RwLock::new(None)),
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
@@ -1630,11 +1644,30 @@ impl plexspaces_actor::ServiceLocator for ServiceLocatorImpl {
         registry.clone()
     }
 
+    async fn get_ws_registry(&self) -> Option<std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>> {
+        let registry = self.ws_registry.read().await;
+        registry.clone()
+    }
+
     async fn get_process_group_registry(
         &self,
     ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
         let registry = self.process_group_registry.read().await;
         registry.clone()
+    }
+
+    async fn get_actor_transport_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>> {
+        let client = self.actor_transport_client.read().await;
+        client.clone()
+    }
+
+    async fn get_node_transport_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>> {
+        let client = self.node_transport_client.read().await;
+        client.clone()
     }
 
     async fn get_outbound_http_client(
@@ -1847,6 +1880,27 @@ impl plexspaces_actor::InitializableServiceLocator for ServiceLocatorImpl {
 
     async fn unregister_outbound_http_client(&self) {
         ServiceLocatorImpl::unregister_outbound_http_client(self).await;
+    }
+
+    async fn register_actor_transport_client(
+        &self,
+        client: std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+    ) {
+        let mut g = self.actor_transport_client.write().await;
+        *g = Some(client);
+    }
+
+    async fn register_node_transport_client(
+        &self,
+        client: std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+    ) {
+        let mut g = self.node_transport_client.write().await;
+        *g = Some(client);
+    }
+
+    async fn register_ws_registry(&self, registry: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait>) {
+        let mut g = self.ws_registry.write().await;
+        *g = Some(registry);
     }
 }
 
@@ -2500,6 +2554,7 @@ mod tests {
                 status: 200,
                 headers: vec![],
                 body: format!("call-{call_number}").into_bytes(),
+                request_id: ulid::Ulid::new().to_string(),
             })
         }
     }
@@ -2652,6 +2707,7 @@ mod tests {
                             path_and_query: "/forecast".to_string(),
                             headers: vec![],
                             body: vec![],
+                            request_id: ulid::Ulid::new().to_string(),
                         },
                     )
                     .await

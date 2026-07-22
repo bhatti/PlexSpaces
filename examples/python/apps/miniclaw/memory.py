@@ -42,7 +42,7 @@ class MemoryActor:
         if not key:
             return {"error": "key is required"}
         scoped_key = _scoped_key(scope, agent_id, session_id, key)
-        host.kv_put(scoped_key, str(value))
+        host.kv.put(scoped_key, str(value))
         host.ts.write(["memory", scope, key, str(value)])
         self.memory_count += 1
         fire_audit("memory_stored", f"scope={scope} key={key}")
@@ -53,7 +53,7 @@ class MemoryActor:
         if not key:
             return {"error": "key is required"}
         scoped_key = _scoped_key(scope, agent_id, session_id, key)
-        value = host.kv_get(scoped_key)
+        value = host.kv.get(scoped_key)
         return {"status": "ok", "key": key, "value": value, "found": bool(value)}
 
     @handler("list_memories")
@@ -71,7 +71,7 @@ class MemoryActor:
         if not key:
             return {"error": "key is required"}
         scoped_key = _scoped_key(scope, agent_id, session_id, key)
-        host.kv_delete(scoped_key)
+        host.kv.delete(scoped_key)
         return {"status": "ok", "key": key}
 
     @handler("get_stats")

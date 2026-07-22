@@ -41,23 +41,19 @@ fi
 APP_ID="orleans-batch-predictor"
 APP_NAME="orleans-batch-predictor"
 
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
 if [ -f "$CONFIG_FILE" ]; then
-  DEPLOY_RESPONSE=$(curl -s -X POST \
-    -F "wasm_file=@${WASM_FILE}" \
-    -F "application_id=${APP_ID}" \
-    -F "name=${APP_NAME}" \
-    -F "version=1.0.0" \
-    -F "config=@${CONFIG_FILE}" \
-    "${BASE_URL}/api/v1/applications/deploy" 2>&1)
+  zip -j "$APP_ZIP" "${WASM_FILE}" "${CONFIG_FILE}" >/dev/null
 else
-  # Deploy without config (auto-generated ApplicationSpec)
-  DEPLOY_RESPONSE=$(curl -s -X POST \
-    -F "wasm_file=@${WASM_FILE}" \
-    -F "application_id=${APP_ID}" \
-    -F "name=${APP_NAME}" \
-    -F "version=1.0.0" \
-    "${BASE_URL}/api/v1/applications/deploy" 2>&1)
+  zip -j "$APP_ZIP" "${WASM_FILE}" >/dev/null
 fi
+DEPLOY_RESPONSE=$(curl -s -X POST \
+  -F "application_id=${APP_ID}" \
+  -F "name=${APP_NAME}" \
+  -F "version=1.0.0" \
+  -F "app_file=@${APP_ZIP}" \
+  "${BASE_URL}/api/v1/applications/deploy" 2>&1)
 
 if echo "$DEPLOY_RESPONSE" | grep -qi "error\|failed" || [ -z "$DEPLOY_RESPONSE" ]; then
   echo "  ❌ Deployment failed: $DEPLOY_RESPONSE"

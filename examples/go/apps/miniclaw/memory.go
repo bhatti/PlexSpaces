@@ -80,7 +80,7 @@ func (m *MemoryActor) storeMemory(p map[string]any) string {
 	}
 
 	kvKey := fmt.Sprintf("mem:%s:%s:%s", scope, scopeID, key)
-	host.KVPut(kvKey, value)
+	host.KV().Put(kvKey, value)
 	tsOK := true
 	if result := host.TS().Write([]any{"memory", scope, scopeID, key, value}); strings.HasPrefix(result, "ERROR:") {
 		host.Warn(fmt.Sprintf("MemoryActor: TS write failed for key=%s: %s", key, result))
@@ -143,7 +143,7 @@ func (m *MemoryActor) deleteMemory(p map[string]any) string {
 	if key == "" {
 		return marshal(map[string]any{"error": "key is required"})
 	}
-	host.KVDelete(fmt.Sprintf("mem:%s:%s:%s", scope, scopeID, key))
+	host.KV().Delete(fmt.Sprintf("mem:%s:%s:%s", scope, scopeID, key))
 	if m.MemoryCount > 0 {
 		m.MemoryCount--
 	}
@@ -241,7 +241,7 @@ func (a *AuditEventActor) logEvent(p map[string]any) string {
 		return marshal(map[string]any{"ok": false, "error": "marshal_failed"})
 	}
 
-	host.KVPut(fmt.Sprintf("audit:seq:%d", seq), string(entryJSON))
+	host.KV().Put(fmt.Sprintf("audit:seq:%d", seq), string(entryJSON))
 	if result := host.TS().Write([]any{"audit", eventType, ts, string(entryJSON)}); strings.HasPrefix(result, "ERROR:") {
 		host.Warn(fmt.Sprintf("AuditEventActor: TS write failed for event=%s: %s", eventType, result))
 	}
@@ -260,7 +260,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 	limit := intVal(p, "limit", 50)
 
 	cursorKey := "audit:cursor:" + consumerID
-	cursorRaw := host.KVGet(cursorKey)
+	cursorRaw, _ := host.KV().Get(cursorKey)
 	var cursor int64
 	if cursorRaw != "" {
 		if n, err := strconv.ParseInt(cursorRaw, 10, 64); err == nil {
@@ -271,7 +271,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 	events := make([]any, 0)
 	newCursor := cursor
 	for seq := cursor + 1; seq <= a.Watermark && len(events) < limit; seq++ {
-		raw := host.KVGet(fmt.Sprintf("audit:seq:%d", seq))
+		raw, _ := host.KV().Get(fmt.Sprintf("audit:seq:%d", seq))
 		if raw == "" {
 			continue
 		}
@@ -282,7 +282,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 		}
 	}
 
-	host.KVPut(cursorKey, strconv.FormatInt(newCursor, 10))
+	host.KV().Put(cursorKey, strconv.FormatInt(newCursor, 10))
 	return marshal(map[string]any{
 		"status":      "ok",
 		"consumer_id": consumerID,

@@ -48,7 +48,7 @@ class ContextCompressorActor:
         # Checkpoint original in KV
         checkpoint_key = f"compression_checkpoint:{session_id}:{host.now_ms()}"
         try:
-            host.kv_put(checkpoint_key, messages[:4000])
+            host.kv.put(checkpoint_key, messages[:4000])
         except Exception:
             pass
 

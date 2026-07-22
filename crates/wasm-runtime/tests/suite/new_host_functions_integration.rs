@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Integration tests for new WASM host functions (KeyValue, ProcessGroups, Locks, Registry)
@@ -25,7 +25,7 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_actor::ActorId;
+    use plexspaces_actor::{ActorId, RequestContext, RequestContextExt};
     use plexspaces_keyvalue::SqliteKVStore;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
@@ -154,6 +154,37 @@ mod tests {
             let new_val = current + delta;
             data.insert(key.to_string(), new_val.to_string().into_bytes());
             Ok(new_val)
+        }
+
+        async fn get_ttl(
+            &self,
+            _ctx: &plexspaces_actor::RequestContext,
+            _key: &str,
+        ) -> plexspaces_actor::KeyValueStoreResult<Option<std::time::Duration>> {
+            Ok(None)
+        }
+
+        async fn multi_get(
+            &self,
+            ctx: &plexspaces_actor::RequestContext,
+            keys: &[&str],
+        ) -> plexspaces_actor::KeyValueStoreResult<Vec<Option<Vec<u8>>>> {
+            let mut results = Vec::with_capacity(keys.len());
+            for k in keys {
+                results.push(self.get(ctx, k).await?);
+            }
+            Ok(results)
+        }
+
+        async fn multi_put(
+            &self,
+            ctx: &plexspaces_actor::RequestContext,
+            pairs: &[(&str, Vec<u8>)],
+        ) -> plexspaces_actor::KeyValueStoreResult<()> {
+            for (k, v) in pairs {
+                self.put(ctx, k, v.clone()).await?;
+            }
+            Ok(())
         }
     }
 
@@ -1189,5 +1220,87 @@ mod tests {
             "object should be found when namespace falls back to default_namespace"
         );
         assert_eq!(reg.unwrap().object_id, "fallback-obj");
+    }
+
+    // =========================================================================
+    // Extended KV: TTL, multi-get, multi-put
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_kv_put_with_ttl_and_get_ttl() {
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+        let host_functions = create_test_host_functions_with_services().await;
+
+        let result = host_functions.put_keyvalue_with_ttl(&ctx, "ttl-key", b"hello".to_vec(), 60).await;
+        assert!(result.is_ok(), "put_with_ttl should succeed: {:?}", result);
+
+        let val = host_functions.get_keyvalue(&ctx, "ttl-key").await;
+        assert_eq!(val.unwrap(), Some(b"hello".to_vec()));
+
+        let ttl = host_functions.get_keyvalue_ttl(&ctx, "ttl-key").await;
+        assert!(ttl.is_ok(), "get_ttl should succeed: {:?}", ttl);
+    }
+
+    #[tokio::test]
+    async fn test_kv_multi_get_and_multi_put() {
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+        let host_functions = create_test_host_functions_with_services().await;
+
+        let pairs: Vec<(&str, Vec<u8>)> = vec![
+            ("mg-a", b"alpha".to_vec()),
+            ("mg-b", b"beta".to_vec()),
+        ];
+        let result = host_functions.multi_put_keyvalue(&ctx, &pairs).await;
+        assert!(result.is_ok(), "multi_put should succeed: {:?}", result);
+
+        let keys = ["mg-a", "mg-b", "mg-missing"];
+        let result = host_functions.multi_get_keyvalue(&ctx, &keys).await;
+        assert!(result.is_ok(), "multi_get should succeed: {:?}", result);
+        let values = result.unwrap();
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[0], Some(b"alpha".to_vec()));
+        assert_eq!(values[1], Some(b"beta".to_vec()));
+        assert_eq!(values[2], None, "missing key should return None");
+    }
+
+    // =========================================================================
+    // Durable Alarms
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_alarm_set_get_delete() {
+        let host_functions = create_test_host_functions_with_services().await;
+        let actor_id = "alarm-test-actor//wasm::default@test-node";
+        let timestamp_ms: u64 = 9_999_999_000_000;
+
+        let ts = host_functions.alarm_get(actor_id).await.unwrap();
+        assert_eq!(ts, 0, "no alarm should be set initially");
+
+        let result = host_functions.alarm_set(actor_id, timestamp_ms).await;
+        assert!(result.is_ok(), "alarm_set should succeed: {:?}", result);
+
+        let ts = host_functions.alarm_get(actor_id).await.unwrap();
+        assert_eq!(ts, timestamp_ms, "alarm_get should return the set timestamp");
+
+        let result = host_functions.alarm_delete(actor_id).await;
+        assert!(result.is_ok(), "alarm_delete should succeed: {:?}", result);
+
+        let ts = host_functions.alarm_get(actor_id).await.unwrap();
+        assert_eq!(ts, 0, "alarm should be gone after delete");
+    }
+
+    #[tokio::test]
+    async fn test_alarm_set_overwrites_existing() {
+        let host_functions = create_test_host_functions_with_services().await;
+        let actor_id = "alarm-overwrite-actor//wasm::default@test-node";
+        let ts1: u64 = 1_000_000_000_000;
+        let ts2: u64 = 2_000_000_000_000;
+
+        host_functions.alarm_set(actor_id, ts1).await.unwrap();
+        assert_eq!(host_functions.alarm_get(actor_id).await.unwrap(), ts1);
+
+        host_functions.alarm_set(actor_id, ts2).await.unwrap();
+        assert_eq!(host_functions.alarm_get(actor_id).await.unwrap(), ts2,
+            "second alarm_set should overwrite first");
     }
 }

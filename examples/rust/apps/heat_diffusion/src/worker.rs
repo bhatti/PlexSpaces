@@ -1,5 +1,8 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_ts::{ts_read, ts_write};
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -70,20 +73,20 @@ pub(super) fn handle_worker_compute(payload: &[u8]) -> Vec<u8> {
         }
     };
 
-    let coord_start = host::now_ms();
+    let coord_start = now_ms();
     let north_tuple =
         build_boundary_tuple("north", request.iteration, region.region_id, &region.data);
     let south_tuple =
         build_boundary_tuple("south", request.iteration, region.region_id, &region.data);
-    if let Err(err) = host::ts_write(&north_tuple) {
+    if let Err(err) = ts_write(&north_tuple) {
         return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    if let Err(err) = host::ts_write(&south_tuple) {
+    if let Err(err) = ts_write(&south_tuple) {
         return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
     let north = if region.region_id > 0 {
-        let response = host::ts_read(&boundary_pattern(
+        let response = ts_read(&boundary_pattern(
             "south",
             request.iteration,
             region.region_id - 1,
@@ -96,7 +99,7 @@ pub(super) fn handle_worker_compute(payload: &[u8]) -> Vec<u8> {
         region.fixed_boundary.clone()
     };
     let south = if region.region_id + 1 < region.num_regions {
-        let response = host::ts_read(&boundary_pattern(
+        let response = ts_read(&boundary_pattern(
             "north",
             request.iteration,
             region.region_id + 1,
@@ -112,15 +115,15 @@ pub(super) fn handle_worker_compute(payload: &[u8]) -> Vec<u8> {
     let has_north_neighbor = region.region_id > 0;
     let has_south_neighbor = region.region_id + 1 < region.num_regions;
 
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let (next, max_diff) = compute_region(&region, &north, &south);
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     region.data = next;
     with_state(|state| {
         state.worker = Some(region);
     });
 
-    let coordination_time_ms = host::now_ms()
+    let coordination_time_ms = now_ms()
         .saturating_sub(coord_start)
         .saturating_sub(compute_time_ms);
     let tuple_operations =
@@ -163,9 +166,9 @@ pub(super) fn handle_worker_compute(payload: &[u8]) -> Vec<u8> {
     }
     super::json_bytes(serde_json::json!({
         "status": "ok",
-        "actor_id": host::self_id(),
+        "actor_id": self_id(),
         "role": "worker",
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "max_diff": max_diff,
         "converged": max_diff < request.tolerance,
         "compute_time_ms": compute_time_ms,

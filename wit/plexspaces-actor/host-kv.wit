@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Key-value storage and durable alarms for deployable WASM actors.
+// Equivalent to Cloudflare Durable Objects storage.storage API.
+
+interface host-kv {
+    use types.{payload, actor-error};
+
+    // Get value by key. Returns empty payload if key does not exist.
+    kv-get: func(key: string) -> result<payload, actor-error>;
+    // Put key-value pair. Overwrites existing value.
+    kv-put: func(key: string, value: payload) -> result<_, actor-error>;
+    // Delete key (idempotent).
+    kv-delete: func(key: string) -> result<_, actor-error>;
+    // List all keys with the given prefix.
+    kv-list: func(prefix: string) -> result<list<string>, actor-error>;
+    // Put key with TTL. Key is automatically deleted after ttl-seconds.
+    kv-put-with-ttl: func(key: string, value: payload, ttl-seconds: u64) -> result<_, actor-error>;
+    // Get remaining TTL in seconds, or 0 if no TTL / key not found.
+    kv-get-ttl: func(key: string) -> result<u64, actor-error>;
+    // Compare-and-swap. Pass empty payload for expected to assert key does not exist.
+    // Returns true if swap applied, false if current value did not match.
+    kv-cas: func(key: string, expected: payload, new-value: payload) -> result<bool, actor-error>;
+    // Atomically increment a numeric key by delta. Creates key with delta if absent.
+    kv-increment: func(key: string, delta: s64) -> result<s64, actor-error>;
+    // Batch read. keys-json is a JSON array of key strings.
+    // Returns JSON array of base64-encoded values in same order; null for missing keys.
+    kv-multi-get: func(keys-json: payload) -> result<payload, actor-error>;
+    // Batch write. entries-json is a JSON object mapping keys to base64-encoded values.
+    kv-multi-put: func(entries-json: payload) -> result<_, actor-error>;
+
+    // Durable alarm: single alarm per actor, persisted, survives actor deactivation.
+    // Equivalent to Cloudflare Durable Object setAlarm(timestamp).
+    // When the alarm fires, the actor receives a "__alarm__" message.
+    alarm-set: func(timestamp-ms: u64) -> result<_, actor-error>;
+    // Returns the scheduled alarm timestamp in ms, or 0 if no alarm is set.
+    alarm-get: func() -> result<u64, actor-error>;
+    alarm-delete: func() -> result<_, actor-error>;
+}

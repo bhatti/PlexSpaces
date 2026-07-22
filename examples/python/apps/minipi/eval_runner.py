@@ -37,7 +37,7 @@ class EvalRunnerActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:eval_runner", host.self_id())
+            host.kv.put("svc:eval_runner", host.self_id())
         except Exception:
             pass
         try:
@@ -145,7 +145,7 @@ class EvalRunnerActor:
 
         # Store report for dashboard
         try:
-            host.kv_put(f"eval_report:{self.eval_run_id}", json.dumps(report))
+            host.kv.put(f"eval_report:{self.eval_run_id}", json.dumps(report))
         except Exception:
             pass
 
@@ -189,7 +189,7 @@ class EvalRunnerActor:
                     if t.get("eval_run_id") == eval_run_id:
                         # Load full trajectory from KV
                         traj_key = f"trajectory:{t.get('trajectory_id', '')}"
-                        full_traj_raw = host.kv_get(traj_key)
+                        full_traj_raw = host.kv.get(traj_key)
                         if full_traj_raw:
                             collected.append(json.loads(full_traj_raw))
                         else:

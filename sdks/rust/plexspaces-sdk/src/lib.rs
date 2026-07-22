@@ -862,6 +862,10 @@ pub use plexspaces_facet::Facet;
 
 #[cfg(feature = "native")]
 pub mod elastic_pool_client;
+#[cfg(feature = "native")]
+pub mod ws_thin_client;
+#[cfg(feature = "native")]
+pub use ws_thin_client::{ThinNodePingResult, WsThinClient, WsThinClientOptions};
 #[cfg(feature = "grpc")]
 pub mod leader_worker;
 #[cfg(feature = "grpc")]

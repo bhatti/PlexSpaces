@@ -22,7 +22,11 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{pg_broadcast, pg_join, self_id, send};
+use plexspaces::actor::host_logging::{log, now_ms};
+use plexspaces::actor::host_pool::{pool_checkin, pool_checkout};
+use plexspaces::actor::host_shard::application_metrics_add;
+use plexspaces::actor::host_ts::{ts_read_all, ts_take, ts_write};
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
@@ -92,7 +96,7 @@ fn resolve_application_id() -> String {
     if !id.is_empty() {
         return id;
     }
-    actor_application_id(&host::self_id())
+    actor_application_id(&self_id())
 }
 
 fn merge_application_metrics_for(
@@ -111,7 +115,7 @@ fn merge_application_metrics_for(
         latency_max_ms: metrics.get("latency_max_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
         latency_samples: metrics.get("latency_samples").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
     }.encode_to_vec();
-    host::application_metrics_add(application_id, &metrics_bytes)
+    application_metrics_add(application_id, &metrics_bytes)
         .map(|_| ())
         .map_err(|err| format!("{context}: {err}"))
 }
@@ -218,6 +222,7 @@ fn encode_write_request(tuple_value: &Value) -> Result<Vec<u8>, String> {
         .as_array()
         .ok_or_else(|| "tuple must be a JSON array".to_string())?;
     let request = WriteRequest {
+        request_id: String::new(),
         tuples: vec![json_array_to_proto_tuple(values, false)?],
         transaction_id: String::new(),
     };
@@ -229,6 +234,7 @@ fn encode_read_request(pattern_value: &Value, take: bool, max_results: i32) -> R
         .as_array()
         .ok_or_else(|| "pattern must be a JSON array".to_string())?;
     let request = ReadRequest {
+        request_id: String::new(),
         template: Some(json_array_to_proto_tuple(values, true)?),
         timeout: None,
         blocking: false,
@@ -252,7 +258,7 @@ fn finish_run(
     status: &str,
     state: &mut SweepState,
 ) -> (String, serde_json::Value) {
-    let elapsed = (host::now_ms().saturating_sub(t0)) as f64;
+    let elapsed = (now_ms().saturating_sub(t0)) as f64;
     let elapsed = if elapsed < compute_ms {
         compute_ms
     } else {
@@ -296,7 +302,7 @@ fn finish_run(
 fn run_coordinator(payload: &serde_json::Value) -> String {
     let application_id = resolve_application_id();
     let (body, metrics) = with_state(|state| {
-        let t0 = host::now_ms();
+        let t0 = now_ms();
         if state.created_at_ms == 0 {
             state.created_at_ms = t0;
         }
@@ -306,7 +312,7 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or(&state.sweep_id)
             .to_string();
-        state.updated_at_ms = host::now_ms();
+        state.updated_at_ms = now_ms();
 
         if state.cancel_requested {
             state.status = "cancelled".to_string();
@@ -362,7 +368,7 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
                     );
                 }
             };
-            let w = host::ts_write(&tuple_bytes);
+            let w = ts_write(&tuple_bytes);
             if let Err(err_msg) = w {
                 state.status = "error".to_string();
                 let err = serde_json::json!({
@@ -381,13 +387,13 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
             }
             compute_ms += 2.0;
         }
-        state.updated_at_ms = host::now_ms();
+        state.updated_at_ms = now_ms();
         state.status = "running".to_string();
 
         let mut checkout_handles: Vec<(String, String)> = Vec::new();
         let n_checkout = MAX_CHECKOUT_WORKERS.min(num_params as usize);
         for _ in 0..n_checkout {
-            if let Ok(out) = host::pool_checkout(POOL_NAME, CHECKOUT_TIMEOUT_MS) {
+            if let Ok(out) = pool_checkout(POOL_NAME, CHECKOUT_TIMEOUT_MS) {
                 if out.is_empty() {
                     break;
                 }
@@ -409,9 +415,9 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
                             "num_params": num_params
                         });
                         let payload_bytes = payload_send.to_string().into_bytes();
-                        let s = host::send(&actor_id, "work_available", &payload_bytes);
+                        let s = send(&actor_id, "work_available", &payload_bytes);
                         if let Err(err) = s {
-                            host::log("warn", &format!("send work_available: {}", err));
+                            log("warn", &format!("send work_available: {}", err));
                         }
                     }
                 }
@@ -426,9 +432,9 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
                 "num_params": num_params
             });
             let payload_bytes = payload_broadcast.to_string().into_bytes();
-            let b = host::pg_broadcast(WORKER_GROUP, "work_available", &payload_bytes);
+            let b = pg_broadcast(WORKER_GROUP, "work_available", &payload_bytes);
             if let Err(err) = b {
-                host::log("warn", &format!("pg_broadcast: {}", err));
+                log("warn", &format!("pg_broadcast: {}", err));
             }
         }
 
@@ -444,7 +450,7 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
                 Ok(bytes) => bytes,
                 Err(_) => break,
             };
-            let raw = match host::ts_take(&pattern_bytes) {
+            let raw = match ts_take(&pattern_bytes) {
                 Ok(raw) if !raw.is_empty() => raw,
                 _ => break,
             };
@@ -467,13 +473,13 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
             let result_bytes = match encode_write_request(&result) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    host::log("warn", &format!("coordinator encode result tuple: {}", err));
+                    log("warn", &format!("coordinator encode result tuple: {}", err));
                     break;
                 }
             };
-            let w = host::ts_write(&result_bytes);
+            let w = ts_write(&result_bytes);
             if let Err(err) = w {
-                host::log("warn", &format!("coordinator ts_write result: {}", err));
+                log("warn", &format!("coordinator ts_write result: {}", err));
                 break;
             }
         }
@@ -494,24 +500,24 @@ fn run_coordinator(payload: &serde_json::Value) -> String {
                 Ok(bytes) => bytes,
                 Err(_) => Vec::new(),
             };
-            let raw = host::ts_read_all(&pattern_bytes).unwrap_or_default();
+            let raw = ts_read_all(&pattern_bytes).unwrap_or_default();
             let results = decode_read_response(&raw).unwrap_or_default();
             state.num_completed = results.len() as u32;
             if state.num_completed >= num_params {
                 break;
             }
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         }
 
         for (actor_id, checkout_id) in checkout_handles {
-            let c = host::pool_checkin(POOL_NAME, &actor_id, &checkout_id, true);
+            let c = pool_checkin(POOL_NAME, &actor_id, &checkout_id, true);
             if let Err(err) = c {
-                host::log("warn", &format!("pool_checkin: {}", err));
+                log("warn", &format!("pool_checkin: {}", err));
             }
         }
 
         state.status = "completed".to_string();
-        state.updated_at_ms = host::now_ms();
+        state.updated_at_ms = now_ms();
         finish_run(t0, compute_ms, "completed", state)
     });
 
@@ -527,12 +533,12 @@ fn run_worker(payload: &serde_json::Value) -> String {
     let application_id = resolve_application_id();
     let (body, metrics) = with_state(|state| {
         if !state.worker_joined {
-            let j = host::pg_join(WORKER_GROUP);
+            let j = pg_join(WORKER_GROUP);
             if let Err(err) = j {
-                host::log("warn", &format!("pg_join: {}", err));
+                log("warn", &format!("pg_join: {}", err));
             }
             state.worker_joined = true;
-            host::log("info", &format!("Joined process group {}", WORKER_GROUP));
+            log("info", &format!("Joined process group {}", WORKER_GROUP));
         }
         let sweep_id = payload
             .get("sweep_id")
@@ -553,7 +559,7 @@ fn run_worker(payload: &serde_json::Value) -> String {
             );
         }
 
-        let t0 = host::now_ms();
+        let t0 = now_ms();
         let pattern = serde_json::json!([
             TUPLE_PREFIX,
             sweep_id,
@@ -568,7 +574,7 @@ fn run_worker(payload: &serde_json::Value) -> String {
                 Ok(bytes) => bytes,
                 Err(_) => break,
             };
-            let raw = match host::ts_take(&pattern_bytes) {
+            let raw = match ts_take(&pattern_bytes) {
                 Ok(raw) if !raw.is_empty() => raw,
                 _ => break,
             };
@@ -591,18 +597,18 @@ fn run_worker(payload: &serde_json::Value) -> String {
             let result_bytes = match encode_write_request(&result) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    host::log("warn", &format!("worker encode result tuple: {}", err));
+                    log("warn", &format!("worker encode result tuple: {}", err));
                     break;
                 }
             };
-            let w = host::ts_write(&result_bytes);
+            let w = ts_write(&result_bytes);
             if let Err(err) = w {
-                host::log("warn", &format!("worker ts_write: {}", err));
+                log("warn", &format!("worker ts_write: {}", err));
                 break;
             }
             processed += 1;
         }
-        let elapsed = (host::now_ms().saturating_sub(t0)) as f64;
+        let elapsed = (now_ms().saturating_sub(t0)) as f64;
         state.total_compute_ms += compute_ms;
         state.total_coord_ms += (elapsed - compute_ms).max(0.0);
         let body = serde_json::json!({
@@ -682,7 +688,7 @@ impl SweepActor {
         with_state(|state| {
             let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
             state.application_id = if actor_id.is_empty() {
-                actor_application_id(&host::self_id())
+                actor_application_id(&self_id())
             } else {
                 actor_application_id(actor_id)
             };
@@ -709,7 +715,7 @@ impl SweepActor {
         let application_id = resolve_application_id();
         with_state(|state| {
             state.cancel_requested = true;
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         });
         merge_application_metrics_for(
             &application_id,

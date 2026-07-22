@@ -1,5 +1,5 @@
 // node_modules/@plexspaces/sdk/dist/actor.js
-import { log as hostLog } from "plexspaces:actor/host@0.1.0";
+import { log as hostLog } from "plexspaces:actor/host-logging@0.1.0";
 
 // node_modules/@plexspaces/sdk/dist/decorators.js
 var ACTOR_METADATA = Symbol.for("plexspaces.actor.metadata");
@@ -1513,63 +1513,16 @@ function firstGroupMemberOrThrow(group, members) {
 }
 
 // node_modules/@plexspaces/sdk/dist/host.js
-import {
-  send as hostSend,
-  ask as hostAsk,
-  log as hostLog2,
-  nowMs as hostNowMs,
-  selfId as hostSelfId,
-  spawn as hostSpawn,
-  stop as hostStop,
-  link as hostLink,
-  unlink as hostUnlink,
-  monitor as hostMonitor,
-  demonitor as hostDemonitor,
-  sendAfter as hostSendAfter,
-  kvGet as hostKvGet,
-  kvPut as hostKvPut,
-  kvDelete as hostKvDelete,
-  kvList as hostKvList,
-  tsWrite as hostTsWrite,
-  tsRead as hostTsRead,
-  tsTake as hostTsTake,
-  tsReadAll as hostTsReadAll,
-  lockAcquire as hostLockAcquire,
-  lockRelease as hostLockRelease,
-  lockRenew as hostLockRenew,
-  blobUpload as hostBlobUpload,
-  blobDownload as hostBlobDownload,
-  blobDelete as hostBlobDelete,
-  blobList as hostBlobList,
-  pgJoin as hostPgJoin,
-  pgLeave as hostPgLeave,
-  pgMembers as hostPgMembers,
-  pgBroadcast as hostPgBroadcast,
-  poolCheckout as hostPoolCheckout,
-  poolCheckin as hostPoolCheckin,
-  poolGetMetrics as hostPoolGetMetrics,
-  createShardGroup as hostCreateShardGroup,
-  bulkUpdateShardGroup as hostBulkUpdateShardGroup,
-  mapShardGroup as hostMapShardGroup,
-  scatterGather as hostScatterGather,
-  broadcastShardGroup as hostBroadcastShardGroup,
-  reduceShardGroup as hostReduceShardGroup,
-  allReduceShardGroup as hostAllReduceShardGroup,
-  barrierShardGroup as hostBarrierShardGroup,
-  spawnActors as hostSpawnActors,
-  applicationMetricsAdd as hostApplicationMetricsAdd,
-  applicationGetMetrics as hostApplicationGetMetrics,
-  applicationGetStatus as hostApplicationGetStatus,
-  httpFetch as hostHttpFetch
-} from "plexspaces:actor/host@0.1.0";
-import {
-  register as hostRegistryRegister,
-  unregister as hostRegistryUnregister,
-  lookup as hostRegistryLookup,
-  lookupByAlias as hostRegistryLookupByAlias,
-  discover as hostRegistryDiscover,
-  heartbeat as hostRegistryHeartbeat
-} from "plexspaces:actor/registry@0.1.0";
+import { log as hostLog2, nowMs as hostNowMs } from "plexspaces:actor/host-logging@0.1.0";
+import { send as hostSend, ask as hostAsk, selfId as hostSelfId, spawn as hostSpawn, stop as hostStop, link as hostLink, unlink as hostUnlink, monitor as hostMonitor, demonitor as hostDemonitor, sendAfter as hostSendAfter, pgJoin as hostPgJoin, pgLeave as hostPgLeave, pgMembers as hostPgMembers, pgBroadcast as hostPgBroadcast } from "plexspaces:actor/host-actor@0.1.0";
+import { kvGet as hostKvGet, kvPut as hostKvPut, kvDelete as hostKvDelete, kvList as hostKvList, kvPutWithTtl as hostKvPutWithTtl, kvGetTtl as hostKvGetTtl, kvCas as hostKvCas, kvIncrement as hostKvIncrement, kvMultiGet as hostKvMultiGet, kvMultiPut as hostKvMultiPut, alarmSet as hostAlarmSet, alarmGet as hostAlarmGet, alarmDelete as hostAlarmDelete } from "plexspaces:actor/host-kv@0.1.0";
+import { tsWrite as hostTsWrite, tsRead as hostTsRead, tsTake as hostTsTake, tsReadAll as hostTsReadAll } from "plexspaces:actor/host-ts@0.1.0";
+import { lockAcquire as hostLockAcquire, lockRelease as hostLockRelease, lockRenew as hostLockRenew } from "plexspaces:actor/host-locks@0.1.0";
+import { blobUpload as hostBlobUpload, blobDownload as hostBlobDownload, blobDelete as hostBlobDelete, blobList as hostBlobList } from "plexspaces:actor/host-blob@0.1.0";
+import { poolCheckout as hostPoolCheckout, poolCheckin as hostPoolCheckin, poolGetMetrics as hostPoolGetMetrics } from "plexspaces:actor/host-pool@0.1.0";
+import { createShardGroup as hostCreateShardGroup, bulkUpdateShardGroup as hostBulkUpdateShardGroup, mapShardGroup as hostMapShardGroup, broadcastShardGroup as hostBroadcastShardGroup, reduceShardGroup as hostReduceShardGroup, allReduceShardGroup as hostAllReduceShardGroup, barrierShardGroup as hostBarrierShardGroup, scatterGather as hostScatterGather, spawnActors as hostSpawnActors, applicationMetricsAdd as hostApplicationMetricsAdd, applicationGetMetrics as hostApplicationGetMetrics, applicationGetStatus as hostApplicationGetStatus } from "plexspaces:actor/host-shard@0.1.0";
+import { httpFetch as hostHttpFetch } from "plexspaces:actor/host-http@0.1.0";
+import { register as hostRegistryRegister, unregister as hostRegistryUnregister, lookup as hostRegistryLookup, lookupByAlias as hostRegistryLookupByAlias, discover as hostRegistryDiscover, heartbeat as hostRegistryHeartbeat } from "plexspaces:actor/registry@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
     return fn(...args);
@@ -1603,6 +1556,37 @@ function hostErrorPrefixBytes(raw) {
       return false;
   }
   return true;
+}
+function bytesToBase64(bytes) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let result = "";
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += chars[b0 >> 2] + chars[(b0 & 3) << 4 | b1 >> 4] + (i + 1 < len ? chars[(b1 & 15) << 2 | b2 >> 6] : "=") + (i + 2 < len ? chars[b2 & 63] : "=");
+  }
+  return result;
+}
+function base64ToBytes(b64) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const clean = b64.replace(/=+$/, "");
+  const len = clean.length;
+  const bytes = new Uint8Array(Math.floor(len * 3 / 4));
+  let pos = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c0 = chars.indexOf(clean[i]);
+    const c1 = chars.indexOf(clean[i + 1]);
+    const c2 = i + 2 < len ? chars.indexOf(clean[i + 2]) : 0;
+    const c3 = i + 3 < len ? chars.indexOf(clean[i + 3]) : 0;
+    bytes[pos++] = c0 << 2 | c1 >> 4;
+    if (i + 2 < len)
+      bytes[pos++] = (c1 & 15) << 4 | c2 >> 2;
+    if (i + 3 < len)
+      bytes[pos++] = (c2 & 3) << 6 | c3;
+  }
+  return bytes.subarray(0, pos);
 }
 var TupleSpace = class {
   constructor(host2) {
@@ -1783,11 +1767,213 @@ var Registry = class {
     }
   }
 };
+var KVStore = class {
+  get(key) {
+    if (typeof hostKvGet !== "function")
+      return null;
+    try {
+      const v = decodeWitPayloadUtf8(hostKvGet(key));
+      return v || null;
+    } catch {
+      return null;
+    }
+  }
+  put(key, value) {
+    if (typeof hostKvPut !== "function")
+      return;
+    try {
+      hostKvPut(key, encodeWitPayloadUtf8(value));
+    } catch {
+    }
+  }
+  delete(key) {
+    if (typeof hostKvDelete !== "function")
+      return;
+    try {
+      hostKvDelete(key);
+    } catch {
+    }
+  }
+  list(prefix) {
+    if (typeof hostKvList !== "function")
+      return [];
+    try {
+      return hostKvList(prefix);
+    } catch {
+      return [];
+    }
+  }
+  putWithTtl(key, value, ttlSeconds) {
+    if (typeof hostKvPutWithTtl !== "function")
+      return;
+    hostKvPutWithTtl(key, encodeWitPayloadUtf8(value), BigInt(ttlSeconds));
+  }
+  getTtl(key) {
+    if (typeof hostKvGetTtl !== "function")
+      return 0;
+    try {
+      return Number(hostKvGetTtl(key));
+    } catch {
+      return 0;
+    }
+  }
+  cas(key, expected, newValue) {
+    if (typeof hostKvCas !== "function")
+      return false;
+    const expectedBytes = expected !== null ? encodeWitPayloadUtf8(expected) : new Uint8Array(0);
+    return hostKvCas(key, expectedBytes, encodeWitPayloadUtf8(newValue));
+  }
+  increment(key, delta) {
+    if (typeof hostKvIncrement !== "function")
+      return 0;
+    try {
+      return Number(hostKvIncrement(key, BigInt(delta)));
+    } catch {
+      return 0;
+    }
+  }
+  multiGet(keys) {
+    if (typeof hostKvMultiGet !== "function")
+      return keys.map(() => null);
+    try {
+      const keysJson = encodeWitPayloadUtf8(JSON.stringify(keys));
+      const resultBytes = hostKvMultiGet(keysJson);
+      const resultJson = decodeWitPayloadUtf8(resultBytes);
+      const items = JSON.parse(resultJson);
+      return items.map((v) => {
+        if (v === null)
+          return null;
+        const b = base64ToBytes(v);
+        return new TextDecoder().decode(b);
+      });
+    } catch {
+      return keys.map(() => null);
+    }
+  }
+  multiPut(entries) {
+    if (typeof hostKvMultiPut !== "function")
+      return;
+    const encoded = {};
+    for (const [k, v] of Object.entries(entries)) {
+      encoded[k] = bytesToBase64(new TextEncoder().encode(v));
+    }
+    const entriesJson = encodeWitPayloadUtf8(JSON.stringify(encoded));
+    hostKvMultiPut(entriesJson);
+  }
+  getJson(key) {
+    const raw = this.get(key);
+    if (!raw || raw.startsWith("ERROR:"))
+      return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  putJson(key, value) {
+    const serialized = JSON.stringify(value);
+    this.put(key, serialized);
+  }
+};
+var AlarmClient = class {
+  set(timestampMs) {
+    if (typeof hostAlarmSet !== "function")
+      return;
+    hostAlarmSet(BigInt(timestampMs));
+  }
+  setIn(delayMs) {
+    if (typeof hostNowMs !== "function")
+      return;
+    const now = Number(hostNowMs());
+    this.set(now + delayMs);
+  }
+  get() {
+    if (typeof hostAlarmGet !== "function")
+      return 0;
+    try {
+      return Number(hostAlarmGet());
+    } catch {
+      return 0;
+    }
+  }
+  delete() {
+    if (typeof hostAlarmDelete !== "function")
+      return;
+    hostAlarmDelete();
+  }
+};
+var LockClient = class {
+  acquire(holderId, lockName, leaseDurationSecs, timeoutMs) {
+    const result = hostLockAcquire(holderId, lockName, leaseDurationSecs, timeoutMs);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+  release(lockId, holderId, lockVersion) {
+    const result = hostLockRelease(lockId, holderId, lockVersion);
+    if (typeof result === "string")
+      throw new Error(result);
+  }
+  renew(lockId, holderId, lockVersion, leaseDurationSecs) {
+    const result = hostLockRenew(lockId, holderId, lockVersion, leaseDurationSecs);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+};
+var BlobClient = class {
+  upload(name, data, contentType) {
+    const result = hostBlobUpload(name, data, contentType);
+    if (typeof result !== "string" || result.startsWith("ERROR:"))
+      throw new Error(String(result));
+    return result;
+  }
+  download(blobId) {
+    const result = hostBlobDownload(blobId);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+  delete(blobId) {
+    const result = hostBlobDelete(blobId);
+    if (typeof result === "string")
+      throw new Error(result);
+  }
+  list(prefix) {
+    const result = hostBlobList(prefix);
+    if (Array.isArray(result))
+      return result;
+    return [];
+  }
+};
 var Host = class {
   constructor() {
     this.processGroups = new ProcessGroups();
     this.ts = new TupleSpace(this);
     this.registry = new Registry();
+    this.kv = new KVStore();
+    this.alarm = new AlarmClient();
+    this.locks = new LockClient();
+    this.blob = new BlobClient();
+  }
+  /**
+   * Create an ergonomic HTTP client for a named service link.
+   *
+   * The link must be pre-configured in RuntimeConfig.service_links.
+   * The host handles retries, circuit breaking, and auth injection.
+   *
+   * @param linkName - Service link name (e.g. "payments-api")
+   * @returns A {@link ServiceHttpClient} bound to that link
+   *
+   * @example
+   * ```typescript
+   * const http = host.httpClient("payments-api");
+   * const balance = http.get("/v1/balance?account=123");
+   * const result = http.post("/v1/transfer", { amount: 100 });
+   * ```
+   */
+  httpClient(linkName) {
+    return new ServiceHttpClient(linkName);
   }
   // ========================================================================
   // Messaging
@@ -1938,66 +2124,6 @@ var Host = class {
     const result = safeCall(hostNowMs);
     return typeof result === "bigint" ? Number(result) : typeof result === "number" ? result : 0;
   }
-  // ========================================================================
-  // Key-Value Store
-  // ========================================================================
-  kvGet(key) {
-    if (typeof hostKvGet !== "function")
-      return "";
-    try {
-      return decodeWitPayloadUtf8(hostKvGet(key));
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvPut(key, value) {
-    if (typeof hostKvPut !== "function")
-      return "";
-    try {
-      hostKvPut(key, encodeWitPayloadUtf8(value));
-      return "";
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvDelete(key) {
-    if (typeof hostKvDelete !== "function")
-      return "";
-    try {
-      hostKvDelete(key);
-      return "";
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvList(prefix) {
-    if (typeof hostKvList !== "function")
-      return "[]";
-    try {
-      return JSON.stringify(hostKvList(prefix));
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
-  kvGetJson(key) {
-    const raw = this.kvGet(key);
-    if (!raw || raw.startsWith("ERROR:"))
-      return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  /** Serialize value to JSON and store under key. Throws on write failure. */
-  kvPutJson(key, value) {
-    const serialized = JSON.stringify(value);
-    const result = this.kvPut(key, serialized);
-    if (typeof result === "string" && result.startsWith("ERROR:")) {
-      throw new Error(`kvPutJson(${key}): ${result}`);
-    }
-  }
   /** Increment a single named application metric counter by 1. Errors are swallowed. */
   incrCounter(applicationId, name) {
     this.incrCounters(applicationId, { [name]: 1 });
@@ -2032,33 +2158,6 @@ var Host = class {
   /** @internal */
   tsReadAllPayload(data) {
     return hostPayloadToBytes(safeCall(hostTsReadAll, data));
-  }
-  // ========================================================================
-  // Distributed Locks
-  // ========================================================================
-  lockAcquire(tenantId, namespace, holderId, lockName, leaseDurationSecs = 30, timeoutMs = 0) {
-    return safeCall(hostLockAcquire, tenantId, namespace, holderId, lockName, leaseDurationSecs, BigInt(timeoutMs));
-  }
-  lockRelease(lockId, tenantId, namespace, holderId, lockVersion) {
-    return safeCall(hostLockRelease, lockId, tenantId, namespace, holderId, lockVersion);
-  }
-  lockRenew(lockId, tenantId, namespace, holderId, lockVersion, leaseDurationSecs = 30) {
-    return safeCall(hostLockRenew, lockId, tenantId, namespace, holderId, lockVersion, leaseDurationSecs);
-  }
-  // ========================================================================
-  // Blob Storage
-  // ========================================================================
-  blobUpload(blobId, data, contentType = "application/octet-stream") {
-    return safeCall(hostBlobUpload, blobId, data, contentType);
-  }
-  blobDownload(blobId) {
-    return safeCall(hostBlobDownload, blobId);
-  }
-  blobDelete(blobId) {
-    return safeCall(hostBlobDelete, blobId);
-  }
-  blobList(prefix) {
-    return safeCall(hostBlobList, prefix);
   }
   // ========================================================================
   // Elastic pool (checkout/checkin)
@@ -2241,6 +2340,29 @@ var Host = class {
     }
   }
 };
+var ServiceHttpClient = class {
+  constructor(linkName) {
+    this.linkName = linkName;
+  }
+  /** GET request. Returns response object with status, headers, body. */
+  get(pathAndQuery, headers) {
+    return host.httpFetch(this.linkName, "GET", pathAndQuery, headers);
+  }
+  /** POST JSON request. body is serialized to JSON. */
+  post(pathAndQuery, body, headers) {
+    const bodyStr = body !== void 0 ? JSON.stringify(body) : "";
+    return host.httpFetch(this.linkName, "POST", pathAndQuery, headers, bodyStr);
+  }
+  /** PUT JSON request. */
+  put(pathAndQuery, body, headers) {
+    const bodyStr = body !== void 0 ? JSON.stringify(body) : "";
+    return host.httpFetch(this.linkName, "PUT", pathAndQuery, headers, bodyStr);
+  }
+  /** DELETE request. */
+  delete(pathAndQuery, headers) {
+    return host.httpFetch(this.linkName, "DELETE", pathAndQuery, headers);
+  }
+};
 var host = new Host();
 
 // node_modules/@plexspaces/sdk/dist/router.js
@@ -2287,6 +2409,10 @@ var ActorRouter = class {
     this.active.setState(stateJson);
   }
 };
+
+// node_modules/@plexspaces/sdk/dist/wire/ws-frame-wire.js
+var textEnc = new TextEncoder();
+var textDec = new TextDecoder("utf-8", { fatal: false });
 
 // node_modules/@plexspaces/sdk/dist/agent.js
 function nowMs() {
@@ -2735,11 +2861,11 @@ var AgentActor = class extends WorkflowActor {
   query(name, _params) {
     if (name === "execution_trace") {
       try {
-        const indexRaw = host.kvGet(`trace_index:${this.state.actor_id}`);
+        const indexRaw = host.kv.get(`trace_index:${this.state.actor_id}`);
         if (indexRaw && !indexRaw.startsWith("ERROR:")) {
           const traceIds = JSON.parse(indexRaw);
           if (traceIds.length > 0) {
-            const raw = host.kvGet(`trace:${traceIds[traceIds.length - 1]}`);
+            const raw = host.kv.get(`trace:${traceIds[traceIds.length - 1]}`);
             if (raw && !raw.startsWith("ERROR:")) {
               return JSON.parse(raw);
             }
@@ -2763,7 +2889,7 @@ var AgentActor = class extends WorkflowActor {
     const memoryKey = `agent_memory:${this.state.actor_id}`;
     let priorContext = {};
     try {
-      const raw = host.kvGet(memoryKey);
+      const raw = host.kv.get(memoryKey);
       if (raw && !raw.startsWith("ERROR:")) priorContext = JSON.parse(raw);
     } catch {
     }
@@ -2835,16 +2961,16 @@ Iteration: ${observations.iteration ?? 0}` }
   exportTrajectory(traj) {
     try {
       const key = `agent_trajectory:${traj.trajectoryId ?? ""}`;
-      host.kvPut(key, JSON.stringify(traj));
+      host.kv.put(key, JSON.stringify(traj));
       const indexKey = `agent_trajectory_index:${this.state.actor_id}`;
       let existing = [];
       try {
-        const raw = host.kvGet(indexKey);
+        const raw = host.kv.get(indexKey);
         if (raw && !raw.startsWith("ERROR:")) existing = JSON.parse(raw);
       } catch {
       }
       existing.push(String(traj.trajectoryId ?? ""));
-      host.kvPut(indexKey, JSON.stringify(existing));
+      host.kv.put(indexKey, JSON.stringify(existing));
     } catch (e) {
       host.log("warn", `Failed to export trajectory: ${e}`);
     }
@@ -3011,7 +3137,7 @@ var LLMGatewayActor = class extends PlexSpacesActor {
   }
   getCached(key) {
     try {
-      const raw = host.kvGet(key);
+      const raw = host.kv.get(key);
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw);
     } catch {
     }
@@ -3019,7 +3145,7 @@ var LLMGatewayActor = class extends PlexSpacesActor {
   }
   putCached(key, value) {
     try {
-      host.kvPut(key, JSON.stringify({ ...value, _cached_at: host.nowMs(), _ttl_ms: CACHE_TTL_MS }));
+      host.kv.put(key, JSON.stringify({ ...value, _cached_at: host.nowMs(), _ttl_ms: CACHE_TTL_MS }));
     } catch {
     }
   }
@@ -3036,7 +3162,7 @@ var ToolRegistryActor = class extends PlexSpacesActor {
     }
     for (const [toolName, toolDef] of Object.entries(BUILTIN_TOOLS)) {
       try {
-        host.kvPut(`tool_schema:${toolName}`, JSON.stringify(toolDef.schema));
+        host.kv.put(`tool_schema:${toolName}`, JSON.stringify(toolDef.schema));
       } catch {
       }
     }
@@ -3094,9 +3220,9 @@ var ToolRegistryActor = class extends PlexSpacesActor {
     const name = typeof payload.name === "string" ? payload.name : "";
     if (!name) return { error: "tool name is required" };
     if (payload.schema) {
-      host.kvPut(`tool_schema:${name}`, JSON.stringify(payload.schema));
+      host.kv.put(`tool_schema:${name}`, JSON.stringify(payload.schema));
     }
-    host.kvPut(`tool_desc:${name}`, typeof payload.description === "string" ? payload.description : "");
+    host.kv.put(`tool_desc:${name}`, typeof payload.description === "string" ? payload.description : "");
     return { status: "ok", tool: name };
   }
   onList_tools(_payload) {
@@ -3130,7 +3256,7 @@ var ToolRegistryActor = class extends PlexSpacesActor {
   }
   kvRead(key) {
     try {
-      const value = host.kvGet(`tool_kv:${key}`);
+      const value = host.kv.get(`tool_kv:${key}`);
       return { status: "ok", key, value };
     } catch (e) {
       return { error: String(e) };
@@ -3138,7 +3264,7 @@ var ToolRegistryActor = class extends PlexSpacesActor {
   }
   kvWrite(key, value) {
     try {
-      host.kvPut(`tool_kv:${key}`, value);
+      host.kv.put(`tool_kv:${key}`, value);
       return { status: "ok", key };
     } catch (e) {
       return { error: String(e) };
@@ -3211,7 +3337,7 @@ var EvalRunnerActor = class extends WorkflowActor {
         total_output_tokens: outputTokens
       };
       try {
-        host.kvPut(`trajectory:traj-${evalRunId}-${i}`, JSON.stringify(traj));
+        host.kv.put(`trajectory:traj-${evalRunId}-${i}`, JSON.stringify(traj));
       } catch {
       }
       let score = 0;
@@ -3270,7 +3396,7 @@ var EvalRunnerActor = class extends WorkflowActor {
       regressions: regressionReport
     };
     try {
-      host.kvPut(`eval_report:${evalRunId}`, JSON.stringify(report));
+      host.kv.put(`eval_report:${evalRunId}`, JSON.stringify(report));
     } catch {
     }
     host.log("info", `EvalRunner completed: pass_rate=${passRate.toFixed(3)} avg_score=${avgScore.toFixed(3)} scenarios=${this.state.completed_scenarios} tokens=${totalInputTokens}in/${totalOutputTokens}out`);
@@ -3306,7 +3432,7 @@ var EvalRunnerActor = class extends WorkflowActor {
           const entry = tuple[0];
           const trajId = entry?.trajectory_id ?? entry?.trajectoryId;
           if (!trajId) continue;
-          const raw = host.kvGet(`trajectory:${trajId}`);
+          const raw = host.kv.get(`trajectory:${trajId}`);
           if (raw && !raw.startsWith("ERROR:")) {
             collected.push(JSON.parse(raw));
           } else {
@@ -3322,13 +3448,13 @@ var EvalRunnerActor = class extends WorkflowActor {
       for (const agentId of agentIds) {
         const indexKey = `agent_trajectory_index:${agentId}`;
         try {
-          const raw = host.kvGet(indexKey);
+          const raw = host.kv.get(indexKey);
           if (raw && !raw.startsWith("ERROR:")) {
             const trajIds = JSON.parse(raw);
             for (const trajId of trajIds) {
               const alreadyHave = collected.some((t) => (t.trajectory_id ?? t.trajectoryId) === trajId);
               if (!alreadyHave) {
-                const trajRaw = host.kvGet(`agent_trajectory:${trajId}`);
+                const trajRaw = host.kv.get(`agent_trajectory:${trajId}`);
                 if (trajRaw && !trajRaw.startsWith("ERROR:")) {
                   collected.push(JSON.parse(trajRaw));
                 }
@@ -3377,7 +3503,7 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
   onGet_scenario(payload) {
     const scenarioId = typeof payload.scenario_id === "string" ? payload.scenario_id : "";
     if (!scenarioId) return { error: "scenario_id is required" };
-    const raw = host.kvGet(`scenario:${scenarioId}`);
+    const raw = host.kv.get(`scenario:${scenarioId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `scenario ${scenarioId} not found` };
     try {
       return { status: "ok", scenario: JSON.parse(raw) };
@@ -3390,12 +3516,10 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
     const tags = Array.isArray(payload.tags) ? payload.tags : [];
     const limit = typeof payload.limit === "number" ? payload.limit : 50;
     try {
-      const keysJson = host.kvList("scenario:");
-      if (keysJson.startsWith("ERROR:")) return { error: keysJson };
-      const keys = JSON.parse(keysJson);
+      const keys = host.kv.list("scenario:");
       const scenarios = [];
       for (const key of keys.slice(0, limit * 2)) {
-        const raw = host.kvGet(key);
+        const raw = host.kv.get(key);
         if (!raw || raw.startsWith("ERROR:")) continue;
         let sc;
         try {
@@ -3425,7 +3549,7 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
       scenario.scenario_id = scenarioId;
     }
     try {
-      host.kvPut(`scenario:${scenarioId}`, JSON.stringify(scenario));
+      host.kv.put(`scenario:${scenarioId}`, JSON.stringify(scenario));
       this.state.scenario_count++;
       return { status: "ok", scenario_id: scenarioId };
     } catch (e) {
@@ -3445,7 +3569,7 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
     } else if (suiteName === "full") {
       ids = BUILTIN_SCENARIOS.map((s) => s.scenario_id);
     } else {
-      const raw = host.kvGet(`suite:${suiteName}`);
+      const raw = host.kv.get(`suite:${suiteName}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try {
           ids = JSON.parse(raw).scenario_ids ?? [];
@@ -3457,7 +3581,7 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
     }
     const scenarios = [];
     for (const sid of ids) {
-      const raw = host.kvGet(`scenario:${sid}`);
+      const raw = host.kv.get(`scenario:${sid}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try {
           scenarios.push(JSON.parse(raw));
@@ -3472,7 +3596,7 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
     const scenarioIds = Array.isArray(payload.scenario_ids) ? payload.scenario_ids : [];
     if (!suiteName || !scenarioIds.length) return { error: "suite_name and scenario_ids are required" };
     try {
-      host.kvPut(`suite:${suiteName}`, JSON.stringify({ scenario_ids: scenarioIds }));
+      host.kv.put(`suite:${suiteName}`, JSON.stringify({ scenario_ids: scenarioIds }));
       return { status: "ok", suite_name: suiteName, count: scenarioIds.length };
     } catch (e) {
       return { error: String(e) };
@@ -3485,10 +3609,10 @@ var ScenarioStoreActor = class extends PlexSpacesActor {
     let seeded = 0;
     for (const sc of BUILTIN_SCENARIOS) {
       const key = `scenario:${sc.scenario_id}`;
-      const existing = host.kvGet(key);
+      const existing = host.kv.get(key);
       if (!existing || existing.startsWith("ERROR:")) {
         try {
-          host.kvPut(key, JSON.stringify(sc));
+          host.kv.put(key, JSON.stringify(sc));
           seeded++;
         } catch (e) {
           host.log("warn", `Failed to seed scenario ${sc.scenario_id}: ${e}`);
@@ -3656,7 +3780,7 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
     const outcome = String(trajectory.outcome ?? "unknown");
     const agentActorId = String(trajectory.agent_actor_id ?? trajectory.agentActorId ?? "");
     try {
-      host.kvPut(`trajectory:${trajId}`, JSON.stringify(trajectory));
+      host.kv.put(`trajectory:${trajId}`, JSON.stringify(trajectory));
     } catch (e) {
       this.state.failed_count++;
       host.log("warn", `Failed to store trajectory ${trajId}: ${e}`);
@@ -3674,17 +3798,17 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
       stored_at_ms: host.nowMs()
     };
     try {
-      host.kvPut(`traj_meta:${trajId}`, JSON.stringify(meta));
+      host.kv.put(`traj_meta:${trajId}`, JSON.stringify(meta));
     } catch {
     }
     if (evalRunId) {
       try {
         const indexKey = `traj_index:${evalRunId}`;
-        const existingRaw = host.kvGet(indexKey);
+        const existingRaw = host.kv.get(indexKey);
         const index = existingRaw && !existingRaw.startsWith("ERROR:") ? JSON.parse(existingRaw) : [];
         if (!index.includes(trajId)) {
           index.push(trajId);
-          host.kvPut(indexKey, JSON.stringify(index));
+          host.kv.put(indexKey, JSON.stringify(index));
         }
       } catch {
       }
@@ -3696,7 +3820,7 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
   onGet(payload) {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
-    const raw = host.kvGet(`trajectory:${trajId}`);
+    const raw = host.kv.get(`trajectory:${trajId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `trajectory ${trajId} not found` };
     try {
       return { status: "ok", trajectory: JSON.parse(raw) };
@@ -3716,7 +3840,7 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
     }
     let trajIdsFromKv = [];
     try {
-      const indexRaw = host.kvGet(`traj_index:${evalRunId}`);
+      const indexRaw = host.kv.get(`traj_index:${evalRunId}`);
       if (indexRaw && !indexRaw.startsWith("ERROR:")) trajIdsFromKv = JSON.parse(indexRaw);
     } catch {
     }
@@ -3724,7 +3848,7 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
     const trajectories = [];
     for (const trajId of allIds) {
       const keyPrefix = includeFull ? "trajectory" : "traj_meta";
-      const raw = host.kvGet(`${keyPrefix}:${trajId}`);
+      const raw = host.kv.get(`${keyPrefix}:${trajId}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try {
           trajectories.push(JSON.parse(raw));
@@ -3738,8 +3862,8 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
     try {
-      host.kvDelete(`trajectory:${trajId}`);
-      host.kvDelete(`traj_meta:${trajId}`);
+      host.kv.delete(`trajectory:${trajId}`);
+      host.kv.delete(`traj_meta:${trajId}`);
       return { status: "ok", trajectory_id: trajId };
     } catch (e) {
       return { error: String(e) };
@@ -3749,15 +3873,15 @@ var TrajectoryStoreActor = class extends PlexSpacesActor {
     const evalRunId = typeof payload.eval_run_id === "string" ? payload.eval_run_id : "";
     if (!evalRunId) return { error: "eval_run_id is required" };
     try {
-      const indexRaw = host.kvGet(`traj_index:${evalRunId}`);
+      const indexRaw = host.kv.get(`traj_index:${evalRunId}`);
       const trajIds = indexRaw && !indexRaw.startsWith("ERROR:") ? JSON.parse(indexRaw) : [];
       let deleted = 0;
       for (const trajId of trajIds) {
-        host.kvDelete(`trajectory:${trajId}`);
-        host.kvDelete(`traj_meta:${trajId}`);
+        host.kv.delete(`trajectory:${trajId}`);
+        host.kv.delete(`traj_meta:${trajId}`);
         deleted++;
       }
-      host.kvDelete(`traj_index:${evalRunId}`);
+      host.kv.delete(`traj_index:${evalRunId}`);
       return { status: "ok", eval_run_id: evalRunId, deleted };
     } catch (e) {
       return { error: String(e) };
@@ -3882,7 +4006,7 @@ var RegressionDetectorActor = class extends PlexSpacesActor {
   }
   loadBaseline() {
     try {
-      const raw = host.kvGet("regression_baseline");
+      const raw = host.kv.get("regression_baseline");
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw);
     } catch {
     }
@@ -3895,15 +4019,15 @@ var RegressionDetectorActor = class extends PlexSpacesActor {
       baseline[trajId] = { score: s.score ?? 0, eval_run_id: evalRunId };
     }
     try {
-      host.kvPut("regression_baseline", JSON.stringify(baseline));
-      host.kvPut("regression_baseline_eval_run", evalRunId);
+      host.kv.put("regression_baseline", JSON.stringify(baseline));
+      host.kv.put("regression_baseline_eval_run", evalRunId);
     } catch (e) {
       host.log("warn", `Failed to store baseline: ${e}`);
     }
   }
   loadTrajectory(trajId) {
     try {
-      const raw = host.kvGet(`trajectory:${trajId}`);
+      const raw = host.kv.get(`trajectory:${trajId}`);
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw);
     } catch {
     }
@@ -3954,7 +4078,7 @@ var BenchmarkActor = class extends WorkflowActor {
     this.state.results = [];
     const totalMs = host.nowMs() - startMs;
     for (const runInfo of evalRunIds) {
-      const reportRaw = host.kvGet(`eval_report:${runInfo.eval_run_id}`);
+      const reportRaw = host.kv.get(`eval_report:${runInfo.eval_run_id}`);
       let report;
       if (reportRaw && !reportRaw.startsWith("ERROR:")) {
         try {
@@ -4042,7 +4166,7 @@ var ApprovalGateActor = class extends PlexSpacesActor {
     this.state.pending_request = { action, context, requested_at_ms: host.nowMs() };
     host.log("info", `ApprovalGate: request from agent=${agentId} action=${action}`);
     try {
-      host.kvPut(
+      host.kv.put(
         `approval_request:${this.state.actor_id}`,
         JSON.stringify({ ...this.state.pending_request, agent_id: agentId })
       );
@@ -4140,7 +4264,7 @@ var DashboardActor = class extends PlexSpacesActor {
     if (!evalRunId) return { error: "eval_run_id is required" };
     const reportData = payload.report && typeof payload.report === "object" ? payload.report : payload;
     try {
-      host.kvPut(`eval_report:${evalRunId}`, JSON.stringify(reportData));
+      host.kv.put(`eval_report:${evalRunId}`, JSON.stringify(reportData));
       host.log("info", `DashboardActor: stored eval report eval_run_id=${evalRunId}`);
       return { status: "ok", eval_run_id: evalRunId };
     } catch (e) {
@@ -4150,7 +4274,7 @@ var DashboardActor = class extends PlexSpacesActor {
   onGet_eval_report(payload) {
     const evalRunId = typeof payload.eval_run_id === "string" ? payload.eval_run_id : "";
     if (!evalRunId) return { error: "eval_run_id is required" };
-    const raw = host.kvGet(`eval_report:${evalRunId}`);
+    const raw = host.kv.get(`eval_report:${evalRunId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `eval run ${evalRunId} not found` };
     try {
       return JSON.parse(raw);
@@ -4164,19 +4288,16 @@ var DashboardActor = class extends PlexSpacesActor {
     const seen = /* @__PURE__ */ new Set();
     const candidateIds = ["eval-smoke-001", "eval-smoke-002", "eval-bench-001", "bench-001", "bench-002"];
     try {
-      const keysJson = host.kvList("eval_report:");
-      if (!keysJson.startsWith("ERROR:")) {
-        const keys = JSON.parse(keysJson);
-        for (const k of keys) {
-          const runId = k.replace("eval_report:", "");
-          if (!seen.has(runId)) candidateIds.unshift(runId);
-        }
+      const keys = host.kv.list("eval_report:");
+      for (const k of keys) {
+        const runId = k.replace("eval_report:", "");
+        if (!seen.has(runId)) candidateIds.unshift(runId);
       }
     } catch {
     }
     for (const runId of candidateIds) {
       if (seen.has(runId) || reports.length >= limit) break;
-      const raw = host.kvGet(`eval_report:${runId}`);
+      const raw = host.kv.get(`eval_report:${runId}`);
       if (!raw || raw.startsWith("ERROR:")) continue;
       seen.add(runId);
       try {
@@ -4198,7 +4319,7 @@ var DashboardActor = class extends PlexSpacesActor {
   onGet_trajectory(payload) {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
-    const raw = host.kvGet(`trajectory:${trajId}`);
+    const raw = host.kv.get(`trajectory:${trajId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `trajectory ${trajId} not found` };
     try {
       return JSON.parse(raw);
@@ -4207,8 +4328,8 @@ var DashboardActor = class extends PlexSpacesActor {
     }
   }
   onGet_regressions(_payload) {
-    const baselineRun = host.kvGet("regression_baseline_eval_run") ?? "";
-    const baselineRaw = host.kvGet("regression_baseline") ?? "{}";
+    const baselineRun = host.kv.get("regression_baseline_eval_run") ?? "";
+    const baselineRaw = host.kv.get("regression_baseline") ?? "{}";
     try {
       const baselineData = JSON.parse(baselineRaw);
       return {
@@ -4225,7 +4346,7 @@ var DashboardActor = class extends PlexSpacesActor {
     let totalEvals = 0;
     let scoreSum = 0;
     for (const id of candidateIds) {
-      const raw = host.kvGet(`eval_report:${id}`);
+      const raw = host.kv.get(`eval_report:${id}`);
       if (!raw || raw.startsWith("ERROR:")) continue;
       try {
         const report = JSON.parse(raw);

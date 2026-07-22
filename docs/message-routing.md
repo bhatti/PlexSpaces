@@ -10,10 +10,10 @@ This document describes the message routing design for the PlexSpaces actor syst
 2. **Request-Reply Pattern**: `ask()` provides synchronous request-reply semantics over async messaging
 3. **Simplified Design**: Always create temporary sender ActorRef for `ask()` calls (actor or non-actor) - simplifies code and ensures consistent behavior
 4. **Single Routing Rule**: If receiver is temporary sender → REPLY → route to ReplyWaiter; otherwise → route through the target actor runtime
-5. **Unified Routing Module**: All routing logic centralized in `crates/actor/src/routing.rs` for consistency and reusability
-6. **Dynamic Locality**: Locality determined dynamically by comparing node_id, not by ActorRefInner variants
+5. **ActorRegistry as Routing Authority**: All routing logic centralized in `ActorRegistry::tell()`/`ask()`/`ask_with_sender()` for consistency and reusability
+6. **Dynamic Locality**: Locality determined dynamically by comparing node_id via `ActorId::is_on_node()`, not by ActorRefInner variants
 7. **Tenant ID Propagation**: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext for proper multi-tenancy
-8. **Parallel Operations**: `ask_helper()` returns Futures enabling true parallel map/reduce operations
+8. **Parallel Operations**: `ask_with_sender()` in ActorRegistry enables fanout with a shared temp sender
 9. **Scoped Lookup**: Runtime paths use `(tenant_id, namespace, actor_id)` when scope is available and fail closed on ambiguous flat IDs
 10. **Link and monitor**: `ActorRegistry::{link, unlink, monitor, demonitor}` are **location-transparent**: **local** targets run **`validate_link_monitor_operand_scope`** then **`ActorMonitor`** updates; **remote** targets use **`ActorService`** gRPC only (no local validate; metadata carries `RequestContext`, peer validates locals). Scope for each **local** operand: **`ActorId::namespace`** must match **`RequestContext::namespace`**; when **`auth_enabled`**, the actor must exist in this node’s registry under **`(tenant_id, namespace, actor_id)`** (live `lookup_actor_in_scope` or **`registered_actor_entries`** for indexed passivated actors). **`Node::{link, unlink, monitor, demonitor}`** delegate to the registry. **Spawn visibility** (`ActorVisibility`) is **not** used for link/monitor; messaging visibility stays on **`ActorRef::tell` / `ask`** (and remote send paths that use it).
 
@@ -290,36 +290,38 @@ Node1 → ActorRegistry lookup → Temporary ActorRef::tell(reply) → ReplyWait
 - Reply routing crosses network boundary back to temporary ActorRef
 - Temporary ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 
-## Unified Routing Module
+## ActorRegistry as Routing Authority
 
 ### Overview
 
-All routing logic is centralized in `crates/actor/src/routing.rs` to avoid duplication and ensure consistency between `ActorRef` and `ActorService`.
+All routing logic is centralized in `ActorRegistry` (`crates/actor/src/actor_registry.rs`) to avoid duplication and ensure consistency between `ActorRef` and `ActorService`.
 
 ### Key Functions
 
-- **`extract_node_id(actor_id)`**: Parses actor ID to extract node_id
-- **`is_actor_local(actor_id, service_locator)`**: Dynamically determines if actor is local (uses NodeConfig primarily)
-- **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns Future for parallel operations
-- **`route_local(ctx, service_locator, ...)`**: Routes message to local actor
-- **`route_remote(ctx, service_locator, ...)`**: Routes message to remote actor via gRPC
-- **`route_message(ctx, service_locator, ...)`**: Unified routing that determines locality and routes accordingly
+- **`ActorRegistry::tell(ctx, actor_id, message)`**: Routes a fire-and-forget message; local or remote via ActorService gRPC
+- **`ActorRegistry::ask(ctx, actor_id, message, timeout)`**: Request-reply; creates temp sender + ReplyWaiter; local or remote
+- **`ActorRegistry::ask_with_sender(ctx, actor_id, message, timeout, temp_sender_id, correlation_id)`**: Ask with caller-supplied temp sender for fanout operations
+- **`ActorId::is_on_node(node_id)`**: Determines if actor is local by comparing node_id suffix
 
 ### Design Principles
 
-1. **Generic Functions**: Not tied to specific instances (ActorRef, ActorService)
-2. **RequestContext First**: All functions take `RequestContext` as first parameter for tenant/namespace isolation
-3. **Return Futures**: All async functions return `Pin<Box<dyn Future>>` for parallel operations
-4. **No Cyclic Dependencies**: Routing module doesn't depend on ActorRef or ActorService
+1. **Single Authority**: `ActorRegistry` is the single routing entry point for both `ActorRef` and `ActorService`
+2. **RequestContext First**: All functions take `&RequestContext` for tenant/namespace isolation
+3. **Locality via ActorId**: `is_on_node()` compares node_id suffix; registry lookup handles aliased local actors
+4. **No Cyclic Dependencies**: ActorRegistry doesn't depend on ActorRef
 
-### Parallel Operations
+### Parallel Operations (Fanout)
 
-The `ask_helper()` function returns a Future, enabling true parallel map/reduce operations:
+`ask_with_sender()` enables shard-group fanout with a shared temporary sender:
 
 ```rust
-// Send all asks asynchronously
+// One temp sender shared across all shard asks
+let temp_sender_id = ActorId::temporary_sender(&base_corr, namespace, &node_id)?;
+actor_factory.create_temporary_sender(ctx, temp_sender_id.clone(), base_corr.clone(), expires_at).await?;
+
 let futures: Vec<_> = shard_ids.iter().map(|shard_id| {
-    ask_helper(ctx.clone(), service_locator.clone(), shard_id, message.clone(), ...)
+    let correlation_id = Ulid::new().to_string();
+    registry.ask_with_sender(ctx, shard_id, message.clone(), timeout, temp_sender_id.clone(), correlation_id)
 }).collect();
 
 // Await all replies in parallel

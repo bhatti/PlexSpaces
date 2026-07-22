@@ -70,6 +70,10 @@ actor_op_with_metrics() {
     
     # Coordination phase: HTTP request/response overhead
     local coord_start=$(get_time_ms)
+    trap 'rm -f "${APP_ZIP:-}"' EXIT
+    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+    zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
     RESPONSE=$(curl -s -w "\n%{time_total}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor_id" \
         -H "Content-Type: application/json" \
         ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
@@ -158,15 +162,16 @@ for _attempt in 1 2 3; do
         -F "application_id=$APP_ID" \
         -F "name=$APP_ID" \
         -F "version=1.0.0" \
-        -F "wasm_file=@$WASM_FILE" \
-        -F "config=@$CONFIG_FILE" 2>&1) || true
+        -F "app_file=@$APP_ZIP" 2>&1) || true
   else
+    APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
     DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         ${AUTH_HEADER:+-H "$AUTH_HEADER"} \
         -F "application_id=$APP_ID" \
         -F "name=$APP_ID" \
         -F "version=1.0.0" \
-        -F "wasm_file=@$WASM_FILE" 2>&1)
+        (cd "$(dirname "$WASM_FILE")" && zip -j "$APP_ZIP" "$WASM_FILE" 2>/dev/null) || zip -j "$APP_ZIP" "$WASM_FILE"
+        -F "app_file=@$APP_ZIP" 2>&1)
   fi
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')

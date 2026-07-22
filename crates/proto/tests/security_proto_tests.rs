@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Tests for simplified security.proto (TDD Phase 1.1)
@@ -120,6 +120,7 @@ mod tests {
     #[test]
     fn test_authenticate_service_request() {
         let request = AuthenticateServiceRequest {
+            request_id: ulid::Ulid::new().to_string(),
             service_id: "actor-service".to_string(),
             certificate: b"-----BEGIN CERTIFICATE-----\n...".to_vec(),
             signature: b"signature_bytes".to_vec(),
@@ -144,6 +145,7 @@ mod tests {
         };
 
         let response = AuthenticateServiceResponse {
+            request_id: ulid::Ulid::new().to_string(),
             identity: Some(identity),
             token: "short-lived-token".to_string(),
             expires_at: Some(Timestamp {
@@ -160,6 +162,7 @@ mod tests {
     #[test]
     fn test_authenticate_api_request() {
         let request = AuthenticateApiRequest {
+            request_id: ulid::Ulid::new().to_string(),
             jwt_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
         };
 
@@ -169,6 +172,7 @@ mod tests {
     #[test]
     fn test_authenticate_api_response() {
         let response = AuthenticateApiResponse {
+            request_id: ulid::Ulid::new().to_string(),
             service_id: "external-service".to_string(),
             scopes: vec!["read".to_string(), "write".to_string()],
             expires_at: Some(Timestamp {

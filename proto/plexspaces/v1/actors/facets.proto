@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Facet System API
@@ -209,6 +209,7 @@ syntax = "proto3";
 
 package plexspaces.facets.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -328,77 +329,92 @@ message FacetRegistryEntry {
 }
 
 message RegisterFacetRequest {
-  FacetDefinition definition = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  FacetDefinition definition = 2;
 }
 
 message RegisterFacetResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-message UnregisterFacetRequest {
-  string facet_type = 1;
-}
-
-message AttachFacetRequest {
-  string actor_id = 1;
-  string facet_type = 2;
-  int32 priority = 3;
-  google.protobuf.Struct config = 4;
-}
-
-message AttachFacetResponse {
-  bool success = 1;
-  string attachment_id = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
   string error_message = 3;
 }
 
-message DetachFacetRequest {
-  string actor_id = 1;
+message UnregisterFacetRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   string facet_type = 2;
 }
 
+message AttachFacetRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  string facet_type = 3;
+  int32 priority = 4;
+  google.protobuf.Struct config = 5;
+}
+
+message AttachFacetResponse {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string attachment_id = 3;
+  string error_message = 4;
+}
+
+message DetachFacetRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  string facet_type = 3;
+}
+
 message ListActorFacetsRequest {
-  string actor_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
 }
 
 message ListActorFacetsResponse {
-  repeated FacetAttachment facets = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated FacetAttachment facets = 2;
 }
 
 message ListAvailableFacetsRequest {
   // Optional filter
-  string filter = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string filter = 2;
 }
 
 message ListAvailableFacetsResponse {
-  repeated FacetRegistryEntry facets = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated FacetRegistryEntry facets = 2;
 }
 
 message GetFacetDefinitionRequest {
-  string facet_type = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string facet_type = 2;
 }
 
 message GetFacetDefinitionResponse {
-  FacetDefinition definition = 1;
-  bool found = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  FacetDefinition definition = 2;
+  bool found = 3;
 }
 
 message UpdateFacetConfigRequest {
-  string attachment_id = 1;
-  google.protobuf.Struct config = 2;
-}
-
-message EnsureFacetRequest {
-  string actor_id = 1;
-  string facet_type = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string attachment_id = 2;
   google.protobuf.Struct config = 3;
 }
 
+message EnsureFacetRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  string facet_type = 3;
+  google.protobuf.Struct config = 4;
+}
+
 message EnsureFacetResponse {
-  bool was_attached = 1;
-  string attachment_id = 2;
-  string error_message = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool was_attached = 2;
+  string attachment_id = 3;
+  string error_message = 4;
 }
 
 // Built-in facet types (for reference)

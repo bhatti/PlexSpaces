@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// This file is part of PlexSpaces.
+//
+// PlexSpaces is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// PlexSpaces is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
+
+// PlexSpaces WebSocket Transport Protocol
+//
+// ## Purpose
+// Binary frame protocol for WebSocket connections. Every WS binary message is
+// a prost-serialized WsFrame. A single /ws endpoint handles both actor operations
+// and node-level cluster operations, enabling thin clients that can only make
+// outbound connections (behind VPN/firewall, no inbound gRPC).
+//
+// ## Design: No Duplicate Types
+// WsFrame reuses existing gRPC Request/Response types directly:
+//   Actor tell/ask    -> SendMessageRequest / AskReplyRequest + their responses
+//   Node ping (SWIM)  -> PingRequest / PingResponse
+//   Heartbeat         -> SendHeartbeatRequest / SendHeartbeatResponse
+//   Metrics           -> GetMetricsRequest / NodeMetrics
+//   Registration      -> NodeRegistration (carries node_id, address, capabilities, node_role)
+//   Node role         -> NodeRole enum from node.proto (FULL for gRPC, THIN for WS-only)
+//
+// Only WsNodeRegisterAck and WsError are new — no gRPC equivalents exist.
+//
+// ## Protocol Flow
+// 1. Client: GET /ws?token=<jwt>  (or Authorization: Bearer <jwt> on upgrade)
+// 2. Client sends first frame: WsFrame{ request_id, node_register: NodeRegistration{ node_role: THIN } }
+// 3. Server responds:          WsFrame{ request_id, node_register_ack: WsNodeRegisterAck }
+// 4. Client sends tell frames: WsFrame{ request_id, tell: SendMessageRequest }
+// 5. Client sends ask frames:  WsFrame{ request_id, ask: AskReplyRequest }
+// 6. Server responds async:    WsFrame{ request_id, ask_response: AskReplyResponse }
+//    (same request_id as the ask — enables out-of-order correlation)
+// 7. Heartbeat:                WsFrame{ request_id, heartbeat: SendHeartbeatRequest }
+//
+// ## Wire Format
+// All frames: binary protobuf (prost encode/decode). No JSON fallback.
+
+syntax = "proto3";
+
+package plexspaces.transport.ws.v1;
+
+import "buf/validate/validate.proto";
+import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/node/node.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/transport/websocket;plexspaces_ws_v1";
+option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.transport.ws.v1";
+
+// WsFrame is the top-level envelope for every WebSocket binary message.
+// One WsFrame per binary frame. Set request_id on ask frames; server echoes
+// the same value in the matching ask_response for out-of-order correlation.
+message WsFrame {
+  // Client-generated correlation ID (ULID recommended, max 40 chars).
+  // Required for ask operations; optional for tell/heartbeat/ping.
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+
+  oneof payload {
+    // ── Actor operations: existing gRPC types, zero duplication ──────────────
+    // Fire-and-forget to an actor or actor-type.
+    plexspaces.actor.v1.SendMessageRequest tell = 10;
+    // Server ack for a tell frame.
+    plexspaces.actor.v1.SendMessageResponse tell_response = 11;
+    // Request-reply; response arrives as ask_response with matching request_id.
+    plexspaces.actor.v1.AskReplyRequest ask = 12;
+    // Async response correlated by WsFrame.request_id.
+    plexspaces.actor.v1.AskReplyResponse ask_response = 13;
+
+    // ── Node operations: existing gRPC types ─────────────────────────────────
+    // WS handshake: MUST be first frame after upgrade.
+    // Set node_role = NODE_ROLE_THIN for thin clients, NODE_ROLE_FULL if also serving gRPC.
+    plexspaces.node.v1.NodeRegistration node_register = 20;
+    // Server handshake ack.
+    WsNodeRegisterAck node_register_ack = 21;
+    // SWIM-compatible ping (same type as gRPC SWIM protocol).
+    plexspaces.node.v1.PingRequest node_ping = 22;
+    // SWIM-compatible ping response.
+    plexspaces.node.v1.PingResponse node_ping_response = 23;
+    // Liveness heartbeat (same type as gRPC SendHeartbeat RPC).
+    plexspaces.node.v1.SendHeartbeatRequest heartbeat = 24;
+    // Heartbeat ack (same type as gRPC SendHeartbeat response).
+    plexspaces.node.v1.SendHeartbeatResponse heartbeat_ack = 25;
+    // Request node metrics (same type as gRPC GetMetrics RPC).
+    plexspaces.node.v1.GetMetricsRequest metrics_request = 26;
+    // Node metrics response (NodeMetrics: messages_routed, active_actors, etc.).
+    plexspaces.node.v1.NodeMetrics metrics_response = 27;
+
+    // ── Control ───────────────────────────────────────────────────────────────
+    // Server-sent error (numeric code mirrors tonic::Code values).
+    WsError error = 30;
+  }
+}
+
+// Server acknowledgement for the WS handshake (node_register frame).
+// No direct gRPC equivalent: RegisterNodesResponse is list-oriented;
+// this is a per-connection ack that also returns the assigned node_id.
+message WsNodeRegisterAck {
+  bool success = 1;
+  // Canonical node_id for this WS session (may differ if collision resolved).
+  string assigned_node_id = 2 [(buf.validate.field).string.max_len = 128];
+  string error_message = 3 [(buf.validate.field).string.max_len = 2048];
+}
+
+// Server-sent error frame for unprocessable requests.
+// Uses numeric code (mirrors tonic::Code) rather than common.ErrorDetail's
+// string code (which requires ALL_CAPS pattern).
+// request_id echoes the id from the frame that caused the error so that
+// clients can correlate errors to in-flight asks/tells on a multiplexed connection.
+message WsError {
+  // Echoes the request_id of the frame that triggered this error.
+  // Empty for non-request errors (e.g. handshake timeout, decode failure).
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  // Numeric error code: 0=Ok, 2=Unknown, 5=NotFound, 13=Internal, 16=Unauthenticated
+  uint32 code = 2;
+  string message = 3 [(buf.validate.field).string.max_len = 2048];
+}

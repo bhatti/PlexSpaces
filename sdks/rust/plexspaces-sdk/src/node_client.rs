@@ -234,7 +234,7 @@ impl NodeClient {
         match SystemServiceClient::connect(addr.to_string()).await {
             Ok(mut client) => {
                 // Call core SystemService.liveness_probe() API
-                let request = Request::new(LivenessProbeRequest {});
+                let request = Request::new(LivenessProbeRequest { request_id: ulid::Ulid::new().to_string() });
                 match tokio_timeout(timeout_duration, client.liveness_probe(request)).await {
                     Ok(Ok(resp)) => {
                         let inner: LivenessProbeResponse = resp.into_inner();
@@ -308,7 +308,7 @@ impl NodeClient {
 
             // Call core SystemService.readiness_probe() API
             if let Some(ref mut client) = self.system_client {
-                let request = Request::new(ReadinessProbeRequest {});
+                let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
                 match client.readiness_probe(request).await {
                     Ok(resp) => {
                         let inner: ReadinessProbeResponse = resp.into_inner();
@@ -350,6 +350,7 @@ impl NodeClient {
     /// Ping the node to verify connectivity
     pub async fn ping(&mut self, source_node_id: String, sequence_number: u64) -> Result<()> {
         let req = PingRequest {
+            request_id: ulid::Ulid::new().to_string(),
             source_node_id,
             sequence_number,
             updates: Vec::new(),
@@ -399,6 +400,7 @@ impl NodeClient {
     ) -> Result<ConnectNodesResponse> {
         if addresses.is_empty() {
             return Ok(ConnectNodesResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 connected: HashMap::new(),
                 failed: HashMap::new(),
                 total_time: None,
@@ -478,6 +480,7 @@ impl NodeClient {
 
         for attempt in 0..=health_config.max_retries {
             let req = ConnectNodesRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 node_addresses: alive_nodes.clone(),
                 cluster: cluster.clone().unwrap_or_default(),
                 timeout: Some(Duration {
@@ -513,6 +516,7 @@ impl NodeClient {
                     all_failed.insert(addr, error_msg.clone());
                 }
                 return Ok(ConnectNodesResponse {
+                    request_id: ulid::Ulid::new().to_string(),
                     connected: HashMap::new(),
                     failed: all_failed,
                     total_time: None,
@@ -527,6 +531,7 @@ impl NodeClient {
         let final_failed = resp.failed;
 
         Ok(ConnectNodesResponse {
+            request_id: ulid::Ulid::new().to_string(),
             connected: final_connected,
             failed: final_failed,
             total_time: resp.total_time,
@@ -539,6 +544,7 @@ impl NodeClient {
         cluster: Option<String>,
     ) -> Result<plexspaces_proto::node::v1::ListConnectedNodesResponse> {
         let req = ListConnectedNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             cluster: cluster.unwrap_or_default(),
             page_size: 100,
             page_token: String::new(),
@@ -561,6 +567,7 @@ impl NodeClient {
         node_id: &str,
     ) -> Result<plexspaces_proto::node::v1::NodeMetrics> {
         let req = GetMetricsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: node_id.to_string(),
             include_extended: false,
         };

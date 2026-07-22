@@ -149,6 +149,7 @@ async fn node_service_list_connected_nodes_empty(
     let mut client = NodeServiceClient::connect(endpoint).await?;
 
     let req = Request::new(ListConnectedNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         cluster: String::new(),
         page_size: 100,
         page_token: String::new(),
@@ -168,6 +169,7 @@ async fn node_service_connect_nodes_registers_seed_addresses(
     let mut client = NodeServiceClient::connect(endpoint).await?;
 
     let req = Request::new(ConnectNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_addresses: vec!["192.0.2.1:7999".to_string()],
         cluster: String::new(),
         timeout: Some(prost_types::Duration {
@@ -182,6 +184,7 @@ async fn node_service_connect_nodes_registers_seed_addresses(
 
     let list = client
         .list_connected_nodes(Request::new(ListConnectedNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             cluster: String::new(),
             page_size: 100,
             page_token: String::new(),
@@ -203,6 +206,7 @@ async fn node_service_connect_nodes_registers_seed_addresses_in_cluster_view(
 
     client
         .connect_nodes(Request::new(ConnectNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_addresses: vec!["192.0.2.2:7999".to_string()],
             cluster: "heat".to_string(),
             timeout: Some(prost_types::Duration {
@@ -214,6 +218,7 @@ async fn node_service_connect_nodes_registers_seed_addresses_in_cluster_view(
 
     let list = client
         .list_connected_nodes(Request::new(ListConnectedNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             cluster: "heat".to_string(),
             page_size: 100,
             page_token: String::new(),
@@ -240,6 +245,7 @@ async fn node_service_seed_registration_upserts_to_concrete_node_and_supports_id
 
     client
         .connect_nodes(system_request(ConnectNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_addresses: vec!["localhost:8093".to_string()],
             cluster: "heat".to_string(),
             timeout: Some(prost_types::Duration {
@@ -281,6 +287,7 @@ async fn node_service_seed_registration_upserts_to_concrete_node_and_supports_id
 
     let list = client
         .list_connected_nodes(system_request(ListConnectedNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             cluster: "heat".to_string(),
             page_size: 100,
             page_token: String::new(),
@@ -302,6 +309,7 @@ async fn node_service_disconnect_nodes_unknown_idempotent(
     let mut client = NodeServiceClient::connect(endpoint).await?;
 
     let req = Request::new(DisconnectNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_ids: vec!["nonexistent-node".to_string()],
         notify_remote: false,
     });

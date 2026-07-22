@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Dashboard Service Implementation
@@ -452,6 +452,7 @@ impl DashboardServiceImpl {
         let has_next = end < total_size;
 
         let page_response = PageResponse {
+            request_id: ulid::Ulid::new().to_string(),
             total_size: total_size as i32,
             offset: start as i32,
             limit: limit as i32,
@@ -675,6 +676,7 @@ impl DashboardServiceImpl {
         }
         applications.sort_by(|left, right| left.application_id.cmp(&right.application_id));
         let page_response = PageResponse {
+            request_id: ulid::Ulid::new().to_string(),
             total_size: total_size as i32,
             offset: page_offset.min(total_size) as i32,
             limit: if page_limit == usize::MAX {
@@ -713,6 +715,7 @@ impl DashboardServiceImpl {
         let response = client
             .get_application_status(Self::tonic_request_with_dashboard_metadata(
                 plexspaces_proto::application::v1::GetApplicationStatusRequest {
+                    request_id: ulid::Ulid::new().to_string(),
                     application_id: application_name.to_string(),
                 },
                 tenant_id,
@@ -970,6 +973,7 @@ impl DashboardServiceImpl {
         let mut client = NodeServiceClient::new(channel);
         client
             .get_metrics(Request::new(GetMetricsRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 node_id: node_id.to_string(),
                 include_extended: false,
             }))
@@ -1045,6 +1049,7 @@ impl DashboardService for DashboardServiceImpl {
         let summary_applications = self
             .application_rows_from_registry(
                 &GetApplicationsRequest {
+                    request_id: ulid::Ulid::new().to_string(),
                     node_id: req.node_id.clone(),
                     tenant_id: tenant_id.clone().unwrap_or_default(),
                     namespace: String::new(),
@@ -1121,6 +1126,7 @@ impl DashboardService for DashboardServiceImpl {
         }
 
         Ok(Response::new(GetSummaryResponse {
+            request_id: req.request_id.clone(),
             total_clusters,
             total_nodes,
             total_tenants,
@@ -1162,6 +1168,7 @@ impl DashboardService for DashboardServiceImpl {
         let (paginated_nodes, page_response) = Self::apply_pagination(all_nodes, page_request);
 
         Ok(Response::new(GetNodesResponse {
+            request_id: req.request_id.clone(),
             nodes: paginated_nodes,
             page: Some(page_response),
         }))
@@ -1224,6 +1231,7 @@ impl DashboardService for DashboardServiceImpl {
         let total_applications = self
             .application_rows_from_registry(
                 &GetApplicationsRequest {
+                    request_id: ulid::Ulid::new().to_string(),
                     node_id: req.node_id.clone(),
                     tenant_id: tenant_id.clone().unwrap_or_default(),
                     namespace: String::new(),
@@ -1308,6 +1316,7 @@ impl DashboardService for DashboardServiceImpl {
         let dependency_health = self.get_dependency_health_internal(true).await;
 
         Ok(Response::new(GetNodeDashboardResponse {
+            request_id: req.request_id.clone(),
             node: Some(node),
             node_metrics,
             system_metrics,
@@ -1344,6 +1353,7 @@ impl DashboardService for DashboardServiceImpl {
             .await?;
 
         Ok(Response::new(GetApplicationsResponse {
+            request_id: req.request_id.clone(),
             applications: paginated_apps,
             page: Some(page_response),
         }))
@@ -1514,6 +1524,7 @@ impl DashboardService for DashboardServiceImpl {
         let end = (start + limit).min(total_size);
         let has_next = end < total_size;
         let page_response = PageResponse {
+            request_id: ulid::Ulid::new().to_string(),
             total_size: total_size as i32,
             offset: start as i32,
             limit: limit as i32,
@@ -1558,6 +1569,7 @@ impl DashboardService for DashboardServiceImpl {
         let paginated_actors = actors;
 
         Ok(Response::new(GetActorsResponse {
+            request_id: req.request_id.clone(),
             actors: paginated_actors,
             page: Some(page_response),
         }))
@@ -1575,6 +1587,7 @@ impl DashboardService for DashboardServiceImpl {
             .await;
 
         Ok(Response::new(GetDependencyHealthResponse {
+            request_id: req.request_id.clone(),
             health_check: Some(health_check),
             node_id: req.node_id,
         }))
@@ -1616,6 +1629,7 @@ impl DashboardService for DashboardServiceImpl {
                 String::new()
             };
             return Ok(Response::new(GetDashboardMetricsResponse {
+                request_id: req.request_id.clone(),
                 metrics,
                 definitions,
                 prometheus_text,
@@ -1643,6 +1657,7 @@ impl DashboardService for DashboardServiceImpl {
                 String::new()
             };
             return Ok(Response::new(GetDashboardMetricsResponse {
+                request_id: req.request_id.clone(),
                 metrics,
                 definitions,
                 prometheus_text,
@@ -1711,6 +1726,7 @@ impl DashboardService for DashboardServiceImpl {
         let (workflows, page_response) = Self::apply_pagination(workflows, req.page);
 
         Ok(Response::new(GetWorkflowsResponse {
+            request_id: req.request_id.clone(),
             workflows,
             page: Some(page_response),
         }))
@@ -2082,6 +2098,7 @@ impl DashboardServiceImpl {
                 }).collect();
 
             let page_response = plexspaces_proto::common::v1::PageResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 total_size: -1, // unknown without count query
                 offset: offset as i32,
                 limit: limit as i32,
@@ -2089,6 +2106,7 @@ impl DashboardServiceImpl {
             };
 
             Ok(Response::new(GetObjectsResponse {
+                request_id: req.request_id.clone(),
                 objects,
                 page: Some(page_response),
             }))
@@ -2134,8 +2152,10 @@ impl DashboardServiceImpl {
             let total = inner.total_count;
             let (offset, limit) = Self::page_window(req.page.as_ref());
             Ok(Response::new(GetObjectsResponse {
+                request_id: req.request_id.clone(),
                 objects: inner.registrations,
                 page: Some(plexspaces_proto::common::v1::PageResponse {
+                    request_id: ulid::Ulid::new().to_string(),
                     total_size: total as i32,
                     offset: offset as i32,
                     limit: limit as i32,
@@ -2188,8 +2208,10 @@ impl DashboardServiceImpl {
             }
 
             Ok(Response::new(GetKeyValuesResponse {
+                request_id: req.request_id.clone(),
                 entries,
                 page: Some(plexspaces_proto::common::v1::PageResponse {
+                    request_id: ulid::Ulid::new().to_string(),
                     total_size: total_size as i32,
                     offset: offset as i32,
                     limit: limit as i32,
@@ -2207,6 +2229,7 @@ impl DashboardServiceImpl {
             let mut client =
                 plexspaces_proto::keyvalue::v1::key_value_service_client::KeyValueServiceClient::new(channel);
             let list_req = plexspaces_proto::keyvalue::v1::ListRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 prefix: req.prefix,
                 namespace: req.namespace,
             };
@@ -2227,8 +2250,10 @@ impl DashboardServiceImpl {
                 size_bytes: 0,
             }).collect();
             Ok(Response::new(GetKeyValuesResponse {
+                request_id: req.request_id.clone(),
                 entries,
                 page: Some(plexspaces_proto::common::v1::PageResponse {
+                    request_id: ulid::Ulid::new().to_string(),
                     total_size: total_size as i32,
                     offset: offset as i32,
                     limit: limit as i32,
@@ -2278,6 +2303,7 @@ impl DashboardServiceImpl {
             };
 
             Ok(Response::new(GetTupleSpacesResponse {
+                request_id: req.request_id.clone(),
                 spaces: vec![summary],
             }))
         } else {
@@ -2302,6 +2328,7 @@ impl DashboardServiceImpl {
                 .map(|r| r.into_inner().count)
                 .unwrap_or(0);
             Ok(Response::new(GetTupleSpacesResponse {
+                request_id: req.request_id.clone(),
                 spaces: vec![TupleSpaceSummary {
                     namespace: req.namespace,
                     pattern: req.pattern,
@@ -2337,6 +2364,7 @@ impl DashboardServiceImpl {
                 .map_err(|e| Status::internal(format!("Blob list failed: {e}")))?;
 
             let page_response = plexspaces_proto::common::v1::PageResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 total_size: -1,
                 offset: offset as i32,
                 limit: limit as i32,
@@ -2344,6 +2372,7 @@ impl DashboardServiceImpl {
             };
 
             Ok(Response::new(GetBlobsResponse {
+                request_id: req.request_id.clone(),
                 blobs,
                 page: Some(page_response),
             }))
@@ -2378,6 +2407,7 @@ impl DashboardServiceImpl {
             let inner = resp.into_inner();
             let page = inner.page;
             Ok(Response::new(GetBlobsResponse {
+                request_id: req.request_id.clone(),
                 blobs: inner.blobs,
                 page,
             }))
@@ -2410,6 +2440,7 @@ impl DashboardServiceImpl {
                 .await
             {
                 Ok(Some(url)) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    request_id: req.request_id.clone(),
                     url,
                     error: String::new(),
                     expires_at: Some(prost_types::Timestamp {
@@ -2418,6 +2449,7 @@ impl DashboardServiceImpl {
                     }),
                 })),
                 Ok(None) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    request_id: req.request_id.clone(),
                     url: String::new(),
                     error: "Presigned URLs not supported by this blob backend".to_string(),
                     expires_at: None,
@@ -2430,6 +2462,7 @@ impl DashboardServiceImpl {
                         format!("Download failed: {e}")
                     };
                     Ok(Response::new(GetBlobPresignedUrlResponse {
+                        request_id: req.request_id.clone(),
                         url: String::new(),
                         error: user_msg,
                         expires_at: None,
@@ -2459,12 +2492,14 @@ impl DashboardServiceImpl {
                 Ok(resp) => {
                     let inner = resp.into_inner();
                     Ok(Response::new(GetBlobPresignedUrlResponse {
+                        request_id: req.request_id.clone(),
                         url: inner.url,
                         expires_at: inner.expires_at,
                         error: String::new(),
                     }))
                 }
                 Err(e) => Ok(Response::new(GetBlobPresignedUrlResponse {
+                    request_id: req.request_id.clone(),
                     url: String::new(),
                     error: format!("Remote presigned URL failed: {e}"),
                     expires_at: None,
@@ -2496,7 +2531,7 @@ impl DashboardServiceImpl {
                     .map(|rc| rc.service_links)
                     .unwrap_or_default()
             };
-            Ok(Response::new(GetServiceLinksResponse { service_links }))
+            Ok(Response::new(GetServiceLinksResponse { request_id: req.request_id.clone(), service_links }))
         } else {
             // Remote node — forward via ServiceLink gRPC client
             let channel = self
@@ -2518,6 +2553,7 @@ impl DashboardServiceImpl {
                 .await
                 .map_err(|e| Status::internal(format!("Remote service links failed: {e}")))?;
             Ok(Response::new(GetServiceLinksResponse {
+                request_id: req.request_id.clone(),
                 service_links: resp.into_inner().links,
             }))
         }
@@ -2534,6 +2570,7 @@ impl DashboardServiceImpl {
         if self.is_local_node(&req.node_id, &local_id) {
             // Re-use GetDashboardMetrics internally
             let dash_req = GetDashboardMetricsRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 namespace: req.namespace,
                 name_pattern: req.name_pattern,
                 label_filter: req.label_filter,
@@ -2545,6 +2582,7 @@ impl DashboardServiceImpl {
             let resp = self.get_dashboard_metrics(inner_request).await?;
             let inner = resp.into_inner();
             Ok(Response::new(GetMetricsTableResponse {
+                request_id: req.request_id.clone(),
                 metrics: inner.metrics,
                 definitions: inner.definitions,
             }))
@@ -2559,6 +2597,7 @@ impl DashboardServiceImpl {
             let mut client =
                 plexspaces_proto::metrics::v1::metrics_service_client::MetricsServiceClient::new(channel);
             let get_req = plexspaces_proto::metrics::v1::GetMetricsRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 name_pattern: req.name_pattern,
                 label_filter: req.label_filter,
             };
@@ -2570,6 +2609,7 @@ impl DashboardServiceImpl {
                 .map_err(|e| Status::internal(format!("Remote metrics failed: {e}")))?;
             let inner = resp.into_inner();
             Ok(Response::new(GetMetricsTableResponse {
+                request_id: req.request_id.clone(),
                 metrics: inner.metrics,
                 definitions: vec![],
             }))
@@ -2749,6 +2789,7 @@ mod tests {
             limit: 10,
             filter: String::new(),
             order_by: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let (paginated, page_response) =
@@ -2771,6 +2812,7 @@ mod tests {
             limit: 10,
             filter: String::new(),
             order_by: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let (paginated, page_response) =

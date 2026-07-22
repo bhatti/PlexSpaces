@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! WASM Applications Auto-Deploy Loader
@@ -269,12 +269,21 @@ pub fn parse_app_config_toml(
         None
     };
 
+    // [static] mount = "apps/chat"
+    let static_mount = parsed
+        .get("static")
+        .and_then(|v| v.get("mount"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     Ok(ApplicationSpec {
         name: app_name.to_string(),
         version,
         tenant_id,
         seed_nodes,
         supervisor,
+        static_mount,
         ..Default::default()
     })
 }
@@ -644,6 +653,7 @@ async fn deploy_wasm_app(
 
     // Create deploy request
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app.name.clone(),
         name: app.name.clone(),
         version: app.version.clone(),

@@ -761,6 +761,8 @@ pub mod node_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** List connected nodes (paginated)
+*/
         pub async fn list_connected_nodes(
             &mut self,
             request: impl tonic::IntoRequest<super::ListConnectedNodesRequest>,
@@ -1116,6 +1118,8 @@ pub mod node_service_server {
             tonic::Response<super::UnregisterNodeResponse>,
             tonic::Status,
         >;
+        /** List connected nodes (paginated)
+*/
         async fn list_connected_nodes(
             &self,
             request: tonic::Request<super::ListConnectedNodesRequest>,

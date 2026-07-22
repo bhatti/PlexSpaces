@@ -24,6 +24,19 @@ export function kvGet() { return ""; }
 export function kvPut() { return ""; }
 export function kvDelete() { return ""; }
 export function kvList() { return "[]"; }
+export function kvCas() { return true; }
+export function kvIncrement(key, delta) { return delta; }
+export function kvMultiGet(keysJson) {
+  // keysJson is a Uint8Array of JSON-encoded key array; return null for all
+  try {
+    const keys = JSON.parse(new TextDecoder().decode(keysJson));
+    return new TextEncoder().encode(JSON.stringify(keys.map(() => null)));
+  } catch { return new TextEncoder().encode("[]"); }
+}
+export function kvMultiPut() { return; }
+export function alarmSet() { return; }
+export function alarmGet() { return BigInt(0); }
+export function alarmDelete() { return; }
 export function tsWrite() { return ""; }
 export function tsRead() { return ""; }
 export function tsTake() { return ""; }

@@ -8,38 +8,44 @@
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HandleRequestRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub message: ::core::option::Option<::prost_types::Any>,
-    #[prost(string, tag="3")]
-    pub correlation_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
+    pub correlation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
     pub sender_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="5")]
+    #[prost(map="string, string", tag="6")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HandleRequestResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub message: ::core::option::Option<::prost_types::Any>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub correlation_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="3")]
+    #[prost(map="string, string", tag="4")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HandleEventRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub message: ::core::option::Option<::prost_types::Any>,
-    #[prost(string, tag="3")]
-    pub event_type: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
+    pub event_type: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
     pub sender_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="5")]
+    #[prost(map="string, string", tag="6")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 // ============================================================================
@@ -50,28 +56,34 @@ pub struct HandleEventRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NotifyHandlersRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub event: ::core::option::Option<::prost_types::Any>,
-    #[prost(map="string, string", tag="3")]
+    #[prost(map="string, string", tag="4")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AddHandlerRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub handler_id: ::prost::alloc::string::String,
+    pub actor_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub handler_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub handler_type: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RemoveHandlerRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub handler_id: ::prost::alloc::string::String,
 }
 // @@protoc_insertion_point(module)

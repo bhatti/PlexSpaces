@@ -12,7 +12,18 @@ wit_bindgen::generate!({
 });
 
 pub use exports::plexspaces::actor::actor::Guest;
-pub use plexspaces::actor::host;
+
+use plexspaces::actor::host_kv::{
+    alarm_delete as raw_alarm_delete, alarm_get as raw_alarm_get, alarm_set as raw_alarm_set,
+    kv_cas as raw_kv_cas,
+    kv_get, kv_increment as raw_kv_increment,
+    kv_multi_get as raw_kv_multi_get, kv_multi_put as raw_kv_multi_put,
+    kv_put, kv_put_with_ttl as raw_kv_put_with_ttl,
+};
+pub use plexspaces::actor::host_kv::{kv_delete, kv_list};
+use plexspaces::actor::host_actor::pg_members;
+use plexspaces::actor::host_logging::{log, now_ms};
+use plexspaces::actor::host_shard::application_metrics_add;
 
 /// Decode a protobuf message from actor-world bytes.
 pub fn decode_proto<M>(payload: &[u8]) -> Result<M, String>
@@ -103,10 +114,10 @@ impl EventLog {
         limit: usize,
     ) -> Result<(Vec<T>, i64), String> {
         let cursor_key = format!("{}cursor:{}", prefix, consumer_id);
-        let cursor: i64 = host::kv_get(&cursor_key)
+        let cursor: i64 = kv_get(&cursor_key)
             .ok()
             .and_then(|b| String::from_utf8(b).ok())
-            .and_then(|s| s.parse().ok())
+            .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
 
         let mut events = Vec::new();
@@ -126,7 +137,7 @@ impl EventLog {
 
         if new_cursor != cursor {
             let cursor_bytes = new_cursor.to_string().into_bytes();
-            let _ = host::kv_put(&cursor_key, &cursor_bytes);
+            let _ = kv_put(&cursor_key, &cursor_bytes);
         }
         Ok((events, new_cursor))
     }
@@ -140,7 +151,7 @@ impl EventLog {
 /// let router_id = pg_first("svc:llm_router")?;
 /// ```
 pub fn pg_first(group: &str) -> Result<String, String> {
-    let members = host::pg_members(group)?;
+    let members = pg_members(group)?;
     members
         .into_iter()
         .next()
@@ -156,7 +167,7 @@ pub fn pg_first(group: &str) -> Result<String, String> {
 /// let task: Option<Task> = kv_get_json("queue:pending:1")?;
 /// ```
 pub fn kv_get_json<T: serde::de::DeserializeOwned>(key: &str) -> Result<Option<T>, String> {
-    let raw = host::kv_get(key)?;
+    let raw = kv_get(key)?;
     if raw.is_empty() {
         return Ok(None);
     }
@@ -175,7 +186,75 @@ pub fn kv_get_json<T: serde::de::DeserializeOwned>(key: &str) -> Result<Option<T
 pub fn kv_put_json<T: serde::Serialize>(key: &str, value: &T) -> Result<(), String> {
     let bytes =
         serde_json::to_vec(value).map_err(|e| format!("kv_put_json({key:?}): serialize: {e}"))?;
-    host::kv_put(key, &bytes)
+    kv_put(key, &bytes)
+}
+
+/// Store a value with automatic expiry after `ttl_seconds`.
+pub fn kv_put_with_ttl(key: &str, value: &[u8], ttl_seconds: u64) -> Result<(), String> {
+    raw_kv_put_with_ttl(key, &value.to_vec(), ttl_seconds)
+}
+
+/// Atomically increment a numeric counter by `delta`. Returns the new value.
+pub fn kv_increment(key: &str, delta: i64) -> Result<i64, String> {
+    raw_kv_increment(key, delta)
+}
+
+/// Compare-and-swap: set key to `new_value` only if current value equals `expected`.
+/// Pass `None` for `expected` to assert the key does not exist.
+/// Returns `true` if the swap was applied.
+pub fn kv_cas(key: &str, expected: Option<&[u8]>, new_value: &[u8]) -> Result<bool, String> {
+    let exp = match expected {
+        Some(b) => b.to_vec(),
+        None => Vec::new(),
+    };
+    raw_kv_cas(key, &exp, &new_value.to_vec())
+}
+
+/// Fetch multiple keys in one call.
+/// Returns values in the same order as `keys`; `None` for missing keys.
+pub fn kv_multi_get(keys: &[&str]) -> Result<Vec<Option<Vec<u8>>>, String> {
+    let keys_json = serde_json::to_vec(keys)
+        .map_err(|e| format!("kv_multi_get: serialize keys: {e}"))?;
+    let result_bytes = raw_kv_multi_get(&keys_json)?;
+    let result: Vec<Option<String>> = serde_json::from_slice(&result_bytes)
+        .map_err(|e| format!("kv_multi_get: parse response: {e}"))?;
+    result.into_iter()
+        .map(|v| v.map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+            .map_err(|e| format!("kv_multi_get: base64 decode: {e}")))
+            .transpose())
+        .collect()
+}
+
+/// Store multiple key-value pairs in one call.
+pub fn kv_multi_put(entries: &[(&str, &[u8])]) -> Result<(), String> {
+    let encoded: std::collections::HashMap<&str, String> = entries.iter()
+        .map(|(k, v)| (*k, base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v)))
+        .collect();
+    let entries_json = serde_json::to_vec(&encoded)
+        .map_err(|e| format!("kv_multi_put: serialize: {e}"))?;
+    raw_kv_multi_put(&entries_json)
+}
+
+/// Schedule a durable alarm at an absolute timestamp (milliseconds since epoch).
+/// The alarm survives actor deactivation. When it fires, the actor receives a "__alarm__" message.
+/// Equivalent to Cloudflare Durable Object setAlarm(timestamp).
+pub fn alarm_set(timestamp_ms: u64) -> Result<(), String> {
+    raw_alarm_set(timestamp_ms)
+}
+
+/// Schedule an alarm relative to now (convenience wrapper around alarm_set).
+pub fn alarm_set_in(delay_ms: u64) -> Result<(), String> {
+    raw_alarm_set(now_ms() + delay_ms)
+}
+
+/// Returns the scheduled alarm timestamp in ms, or 0 if no alarm is set.
+pub fn alarm_get() -> Result<u64, String> {
+    raw_alarm_get()
+}
+
+/// Cancel the pending durable alarm.
+pub fn alarm_delete() -> Result<(), String> {
+    raw_alarm_delete()
 }
 
 /// Increment a single named application metric counter by 1.
@@ -209,8 +288,8 @@ pub fn incr_counters(application_id: &str, counters: &[(&str, u64)]) {
         ..Default::default()
     };
     let bytes = metrics.encode_to_vec();
-    if let Err(e) = host::application_metrics_add(application_id, &bytes) {
-        host::log(
+    if let Err(e) = application_metrics_add(application_id, &bytes) {
+        log(
             "warn",
             &format!("incr_counters: metrics update failed: {e}"),
         );

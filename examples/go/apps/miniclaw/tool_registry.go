@@ -90,11 +90,11 @@ func (t *ToolRegistryActor) Init(configJSON string) string {
 			host.Warn(fmt.Sprintf("ToolRegistryActor: failed to marshal built-in tool %s: %v", name, err))
 			continue
 		}
-		host.KVPut("tool:"+name, string(toolJSON))
+		host.KV().Put("tool:"+name, string(toolJSON))
 		names = append(names, name)
 	}
 	namesJSON, _ := json.Marshal(names)
-	host.KVPut("tool_names", string(namesJSON))
+	host.KV().Put("tool_names", string(namesJSON))
 	t.ToolCount = len(builtins)
 
 	host.Info(fmt.Sprintf("ToolRegistryActor Init actor_id=%s tools=%d", config.ActorID, t.ToolCount))
@@ -131,9 +131,9 @@ func (t *ToolRegistryActor) registerTool(p map[string]any) string {
 	if err != nil {
 		return marshal(map[string]any{"error": "failed to serialize tool definition"})
 	}
-	host.KVPut("tool:"+name, string(toolJSON))
+	host.KV().Put("tool:"+name, string(toolJSON))
 
-	namesRaw := host.KVGet("tool_names")
+	namesRaw, _ := host.KV().Get("tool_names")
 	var names []string
 	_ = json.Unmarshal([]byte(namesRaw), &names)
 	found := false
@@ -146,7 +146,7 @@ func (t *ToolRegistryActor) registerTool(p map[string]any) string {
 	if !found {
 		names = append(names, name)
 		namesJSON, _ := json.Marshal(names)
-		host.KVPut("tool_names", string(namesJSON))
+		host.KV().Put("tool_names", string(namesJSON))
 		t.ToolCount++
 	}
 
@@ -155,13 +155,13 @@ func (t *ToolRegistryActor) registerTool(p map[string]any) string {
 }
 
 func (t *ToolRegistryActor) listTools() string {
-	namesRaw := host.KVGet("tool_names")
+	namesRaw, _ := host.KV().Get("tool_names")
 	var names []string
 	_ = json.Unmarshal([]byte(namesRaw), &names)
 
 	tools := make([]any, 0, len(names))
 	for _, name := range names {
-		toolRaw := host.KVGet("tool:" + name)
+		toolRaw, _ := host.KV().Get("tool:" + name)
 		if toolRaw == "" {
 			continue
 		}

@@ -58,14 +58,14 @@ func (l *LLMGatewayActor) Init(configJSON string) string {
 		l.DefaultModel = m
 	}
 	// Persist active provider so other actors can discover it
-	host.KVPut("llm_gateway:active_provider", l.ActiveProvider)
-	host.KVPut("llm_gateway:default_model", l.DefaultModel)
+	host.KV().Put("llm_gateway:active_provider", l.ActiveProvider)
+	host.KV().Put("llm_gateway:default_model", l.DefaultModel)
 
 	if err := host.PG().Join("svc:llm_gateway"); err != nil {
 		host.Warn(fmt.Sprintf("LLMGatewayActor: failed to join svc:llm_gateway: %v", err))
 	}
 	// Schedule periodic health check
-	_ = host.SendAfter(30000, "health_tick", map[string]any{"op": "health_tick"})
+	_, _ = host.Actor().SendAfter(30000, "health_tick", map[string]any{"op": "health_tick"})
 	host.Info(fmt.Sprintf("LLMGatewayActor Init actor_id=%s provider=%s model=%s", config.ActorID, l.ActiveProvider, l.DefaultModel))
 	return ""
 }
@@ -113,12 +113,12 @@ func (l *LLMGatewayActor) registerProvider(p map[string]any) string {
 	}
 	meta := map[string]any{"name": name, "base_url": baseURL, "model": model}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("provider:"+name, string(metaJSON))
+	host.KV().Put("provider:"+name, string(metaJSON))
 	if apiKey != "" {
-		host.KVPut("provider_key:"+name, apiKey)
+		host.KV().Put("provider_key:"+name, apiKey)
 	}
 	// Track provider names in a comma-separated index
-	existing := host.KVGet("provider_names")
+	existing, _ := host.KV().Get("provider_names")
 	names := []string{}
 	if existing != "" {
 		names = strings.Split(existing, ",")
@@ -132,7 +132,7 @@ func (l *LLMGatewayActor) registerProvider(p map[string]any) string {
 	}
 	if !found {
 		names = append(names, name)
-		host.KVPut("provider_names", strings.Join(names, ","))
+		host.KV().Put("provider_names", strings.Join(names, ","))
 	}
 	host.Info(fmt.Sprintf("LLMGatewayActor: registered provider=%s", name))
 	fireAudit("provider_registered", fmt.Sprintf("provider=%s", name))
@@ -149,8 +149,8 @@ func (l *LLMGatewayActor) switchProvider(p map[string]any) string {
 	if m := stringVal(p, "model", ""); m != "" {
 		l.DefaultModel = m
 	}
-	host.KVPut("llm_gateway:active_provider", l.ActiveProvider)
-	host.KVPut("llm_gateway:default_model", l.DefaultModel)
+	host.KV().Put("llm_gateway:active_provider", l.ActiveProvider)
+	host.KV().Put("llm_gateway:default_model", l.DefaultModel)
 	l.CircuitOpen = false
 	l.ConsecutiveFailures = 0
 	host.Info(fmt.Sprintf("LLMGatewayActor: switched provider %s → %s model=%s", old, l.ActiveProvider, l.DefaultModel))
@@ -171,7 +171,7 @@ func (l *LLMGatewayActor) completion(p map[string]any) string {
 	// Check cache
 	lastUserMsg := extractLastUserMessage(messages)
 	cacheKey := "llm_cache:" + llmCacheKeyFor(lastUserMsg)
-	if cached := host.KVGet(cacheKey); cached != "" {
+	if cached, _ := host.KV().Get(cacheKey); cached != "" {
 		l.CacheHits++
 		var cachedResp map[string]any
 		if err := json.Unmarshal([]byte(cached), &cachedResp); err == nil {
@@ -197,7 +197,7 @@ func (l *LLMGatewayActor) completion(p map[string]any) string {
 
 	// Cache successful response
 	if respJSON, err := json.Marshal(resp); err == nil {
-		host.KVPut(cacheKey, string(respJSON))
+		host.KV().Put(cacheKey, string(respJSON))
 	}
 
 	l.RequestCount++
@@ -536,7 +536,7 @@ func (l *LLMGatewayActor) healthTick() string {
 			host.Info("LLMGatewayActor: circuit closed via timer recovery")
 		}
 	}
-	_ = host.SendAfter(30000, "health_tick", map[string]any{"op": "health_tick"})
+	_, _ = host.Actor().SendAfter(30000, "health_tick", map[string]any{"op": "health_tick"})
 	return marshal(map[string]any{"status": "ok", "circuit_open": l.CircuitOpen})
 }
 

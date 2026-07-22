@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Test stub implementation of ServiceLocator for actor crate
@@ -179,6 +179,22 @@ impl ServiceLocator for TestServiceLocatorStub {
     }
 
     async fn get_node_registry(&self) -> Option<Arc<dyn crate::core::NodeRegistryTrait>> {
+        None
+    }
+
+    async fn get_actor_transport_client(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_service_traits::ActorTransportClient>> {
+        None
+    }
+
+    async fn get_node_transport_client(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_service_traits::NodeTransportClient>> {
+        None
+    }
+
+    async fn get_ws_registry(&self) -> Option<Arc<dyn crate::WsRegistryTrait>> {
         None
     }
 }

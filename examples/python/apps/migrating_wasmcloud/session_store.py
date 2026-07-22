@@ -21,7 +21,7 @@ Real-world use case: Distributed session management (Redis Session Store, AWS El
 - state(): Persistent state (stats, config)
 - @handler(): Routes session operations (create, get, refresh, delete, stats)
 - `KeyValue` helper class: Convenient KV operations with auto JSON encoding/decoding
-- host.kv_get() / host.kv_put() / host.kv_delete() / host.kv_list(): KV capability (raw functions)
+- host.kv.get() / host.kv.put() / host.kv.delete() / host.kv.list(): KV capability (raw functions)
 - host.ask(): Inter-actor communication (simulates HTTP capability)
 - host.now_ms(): Timestamp for TTL checks
 - host.send_after(): Timer capability (periodic cleanup)
@@ -62,7 +62,7 @@ class KeyValue:
         Returns:
             Value string or default if not found
         """
-        value = host.kv_get(key)
+        value = host.kv.get(key)
         return value if value else default
     
     def get_json(self, key: str, default: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -76,7 +76,7 @@ class KeyValue:
         Returns:
             Deserialized JSON dict or default
         """
-        value = host.kv_get(key)
+        value = host.kv.get(key)
         if not value:
             return default
         try:
@@ -95,7 +95,7 @@ class KeyValue:
         Returns:
             True on success, False on failure
         """
-        result = host.kv_put(key, value)
+        result = host.kv.put(key, value)
         return not result.startswith("ERROR:")
     
     def put_json(self, key: str, value: Dict[str, Any]) -> bool:
@@ -125,7 +125,7 @@ class KeyValue:
         Returns:
             True on success, False on failure
         """
-        result = host.kv_delete(key)
+        result = host.kv.delete(key)
         return not result.startswith("ERROR:")
     
     def list(self, prefix: str) -> List[str]:
@@ -138,7 +138,7 @@ class KeyValue:
         Returns:
             List of matching keys
         """
-        keys_json = host.kv_list(prefix)
+        keys_json = host.kv.list(prefix)
         if not keys_json or keys_json.startswith("ERROR:"):
             return []
         try:

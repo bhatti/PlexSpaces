@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Workflow storage layer
@@ -656,19 +656,23 @@ impl WorkflowStorage {
         let namespace = ctx.namespace();
         let definition_bytes: Vec<u8> = match &self.pool {
             SqlPool::Sqlite(pool) => {
-                let row = sqlx::query(
-                    r#"
-            SELECT definition_proto FROM workflow_definitions
-            WHERE id = ? AND version = ? AND tenant_id = ? AND namespace = ?
-            "#,
-                )
-                .bind(id)
-                .bind(version)
-                .bind(tenant_id)
-                .bind(namespace)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| {
+                let mut sql = String::from(
+                    "SELECT definition_proto FROM workflow_definitions WHERE id = ? AND version = ?",
+                );
+                if !tenant_id.is_empty() {
+                    sql.push_str(" AND tenant_id = ?");
+                }
+                if !namespace.is_empty() {
+                    sql.push_str(" AND namespace = ?");
+                }
+                let mut q = sqlx::query(&sql).bind(id).bind(version);
+                if !tenant_id.is_empty() {
+                    q = q.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    q = q.bind(namespace);
+                }
+                let row = q.fetch_one(pool).await.map_err(|e| {
                     WorkflowError::NotFound(format!(
                         "Definition {}:{} not found: {}",
                         id, version, e
@@ -677,19 +681,25 @@ impl WorkflowStorage {
                 row.get(0)
             }
             SqlPool::Postgres(pool) => {
-                let row = sqlx::query(
-                    r#"
-                    SELECT definition_proto FROM workflow_definitions
-                    WHERE id = $1 AND version = $2 AND tenant_id = $3 AND namespace = $4
-                    "#,
-                )
-                .bind(id)
-                .bind(version)
-                .bind(tenant_id)
-                .bind(namespace)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| {
+                let mut sql = String::from(
+                    "SELECT definition_proto FROM workflow_definitions WHERE id = $1 AND version = $2",
+                );
+                let mut param_idx = 3u8;
+                if !tenant_id.is_empty() {
+                    sql.push_str(&format!(" AND tenant_id = ${param_idx}"));
+                    param_idx += 1;
+                }
+                if !namespace.is_empty() {
+                    sql.push_str(&format!(" AND namespace = ${param_idx}"));
+                }
+                let mut q = sqlx::query(&sql).bind(id).bind(version);
+                if !tenant_id.is_empty() {
+                    q = q.bind(tenant_id);
+                }
+                if !namespace.is_empty() {
+                    q = q.bind(namespace);
+                }
+                let row = q.fetch_one(pool).await.map_err(|e| {
                     WorkflowError::NotFound(format!(
                         "Definition {}:{} not found: {}",
                         id, version, e

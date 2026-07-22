@@ -4,6 +4,8 @@ pub mod timer_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /** Timer/Reminder service
+*/
     #[derive(Debug, Clone)]
     pub struct TimerServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -84,6 +86,8 @@ pub mod timer_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Register a non-durable timer
+*/
         pub async fn register_timer(
             &mut self,
             request: impl tonic::IntoRequest<super::RegisterTimerRequest>,
@@ -111,6 +115,8 @@ pub mod timer_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Unregister a timer
+*/
         pub async fn unregister_timer(
             &mut self,
             request: impl tonic::IntoRequest<super::UnregisterTimerRequest>,
@@ -141,6 +147,8 @@ pub mod timer_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Register a durable reminder
+*/
         pub async fn register_reminder(
             &mut self,
             request: impl tonic::IntoRequest<super::RegisterReminderRequest>,
@@ -171,6 +179,8 @@ pub mod timer_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Unregister a reminder
+*/
         pub async fn unregister_reminder(
             &mut self,
             request: impl tonic::IntoRequest<super::UnregisterReminderRequest>,
@@ -201,6 +211,8 @@ pub mod timer_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** List all timers for an actor
+*/
         pub async fn list_timers(
             &mut self,
             request: impl tonic::IntoRequest<super::ListTimersRequest>,
@@ -228,6 +240,8 @@ pub mod timer_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** List all reminders for an actor
+*/
         pub async fn list_reminders(
             &mut self,
             request: impl tonic::IntoRequest<super::ListRemindersRequest>,
@@ -264,6 +278,8 @@ pub mod timer_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with TimerServiceServer.
     #[async_trait]
     pub trait TimerService: Send + Sync + 'static {
+        /** Register a non-durable timer
+*/
         async fn register_timer(
             &self,
             request: tonic::Request<super::RegisterTimerRequest>,
@@ -271,6 +287,8 @@ pub mod timer_service_server {
             tonic::Response<super::RegisterTimerResponse>,
             tonic::Status,
         >;
+        /** Unregister a timer
+*/
         async fn unregister_timer(
             &self,
             request: tonic::Request<super::UnregisterTimerRequest>,
@@ -278,6 +296,8 @@ pub mod timer_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
+        /** Register a durable reminder
+*/
         async fn register_reminder(
             &self,
             request: tonic::Request<super::RegisterReminderRequest>,
@@ -285,6 +305,8 @@ pub mod timer_service_server {
             tonic::Response<super::RegisterReminderResponse>,
             tonic::Status,
         >;
+        /** Unregister a reminder
+*/
         async fn unregister_reminder(
             &self,
             request: tonic::Request<super::UnregisterReminderRequest>,
@@ -292,6 +314,8 @@ pub mod timer_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
+        /** List all timers for an actor
+*/
         async fn list_timers(
             &self,
             request: tonic::Request<super::ListTimersRequest>,
@@ -299,6 +323,8 @@ pub mod timer_service_server {
             tonic::Response<super::ListTimersResponse>,
             tonic::Status,
         >;
+        /** List all reminders for an actor
+*/
         async fn list_reminders(
             &self,
             request: tonic::Request<super::ListRemindersRequest>,
@@ -307,6 +333,8 @@ pub mod timer_service_server {
             tonic::Status,
         >;
     }
+    /** Timer/Reminder service
+*/
     #[derive(Debug)]
     pub struct TimerServiceServer<T: TimerService> {
         inner: _Inner<T>,

@@ -1,5 +1,7 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -92,7 +94,7 @@ pub(super) fn handle_worker_compute_gradient(payload: &[u8]) -> Vec<u8> {
         None => return super::json_bytes(serde_json::json!({ "error": "worker not initialized" })),
     };
 
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let mut gradient_checksum = 0_u64;
     let mut gradient_scale = 0_u64;
     let per_iteration_samples = shard.samples_for_shard / shard.iterations.max(1);
@@ -114,7 +116,7 @@ pub(super) fn handle_worker_compute_gradient(payload: &[u8]) -> Vec<u8> {
         }
     }
 
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms =
         ((request.iteration as u64 + 1) * 2) + ((shard.shard_id as u64 % 5) + 1);
     let latency_ms = compute_time_ms + coordination_time_ms;
@@ -159,9 +161,9 @@ pub(super) fn handle_worker_compute_gradient(payload: &[u8]) -> Vec<u8> {
 
     super::json_bytes(serde_json::json!({
         "status": "ok",
-        "actor_id": host::self_id(),
+        "actor_id": self_id(),
         "role": "worker",
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "samples_processed": batch_samples,
         "gradient_operations": gradient_operations,
         "gradient_checksum": gradient_checksum,

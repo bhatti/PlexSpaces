@@ -8,8 +8,13 @@
 use plexspaces_proto::ActorServiceClient;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use tonic::transport::Channel;
+
+/// Global atomic counter to assign unique base ports across concurrent tests.
+/// Starts at 19001 and increments by 10 per harness (room for 10 nodes per test).
+static NEXT_BASE_PORT: AtomicU16 = AtomicU16::new(19001);
 
 /// Locate node_runner binary (next to test binary in target/debug or target/debug/deps).
 fn find_node_runner_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -44,6 +49,7 @@ fn find_node_runner_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
 pub struct TestHarness {
     nodes: Vec<NodeProcess>,
     base_port: u16,
+    disable_auth: bool,
 }
 
 /// A single node process with its gRPC client
@@ -55,11 +61,23 @@ pub struct NodeProcess {
 }
 
 impl TestHarness {
-    /// Create a new test harness
+    /// Create a new test harness with a unique base port to avoid conflicts between concurrent tests.
     pub fn new() -> Self {
+        let base_port = NEXT_BASE_PORT.fetch_add(10, Ordering::Relaxed);
         TestHarness {
             nodes: vec![],
-            base_port: 19001, // Use high ports to avoid conflicts
+            base_port,
+            disable_auth: false,
+        }
+    }
+
+    /// Create a test harness with authentication disabled for testing.
+    pub fn new_with_auth_disabled() -> Self {
+        let base_port = NEXT_BASE_PORT.fetch_add(10, Ordering::Relaxed);
+        TestHarness {
+            nodes: vec![],
+            base_port,
+            disable_auth: true,
         }
     }
 
@@ -84,9 +102,12 @@ impl TestHarness {
         println!("Using node_runner at: {}", binary_path.display());
 
         // Spawn node_runner binary
-        let process = Command::new(&binary_path)
-            .arg(node_id)
-            .arg(port.to_string())
+        let mut cmd = Command::new(&binary_path);
+        cmd.arg(node_id).arg(port.to_string());
+        if self.disable_auth {
+            cmd.env("PLEXSPACES_DISABLE_AUTH", "1");
+        }
+        let process = cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn node_runner: {}", e))?;
 

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces gRPC Middleware API
@@ -52,6 +52,7 @@ syntax = "proto3";
 
 package plexspaces.grpc.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -487,29 +488,29 @@ enum LogDestination {
 // - Includes TLS certificate information for mTLS authentication
 message InterceptorRequest {
   // gRPC method full path (e.g., "/plexspaces.actor.v1.ActorService/SpawnActor")
-  string method = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string method = 2;
 
   // Request headers/metadata
-  map<string, string> headers = 2;
+  map<string, string> headers = 3;
 
   // Remote client address
-  string remote_addr = 3;
+  string remote_addr = 4;
 
   // Request timestamp
-  google.protobuf.Timestamp timestamp = 4;
+  google.protobuf.Timestamp timestamp = 5;
 
-  // Request ID for correlation
-  string request_id = 5;
+  // Request ID for correlation (moved to request_id = 1)
 
   // TLS peer certificate (PEM format) for mTLS authentication
   // Extracted from TLS connection during handshake
   // Empty if connection is not using TLS or mTLS is not enabled
-  string peer_certificate = 6;
+  string peer_certificate = 7;
 
   // Service identity extracted from peer certificate (CN or SAN)
   // Set by TLS layer after certificate validation
   // Used by mTLS interceptor for service-to-service authentication
-  string peer_service_id = 7;
+  string peer_service_id = 8;
 }
 
 // Interceptor response context
@@ -522,22 +523,22 @@ message InterceptorRequest {
 // - Interceptors can add response headers
 message InterceptorResponse {
   // Response status code
-  int32 status_code = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int32 status_code = 2;
 
   // Response headers/metadata
-  map<string, string> headers = 2;
+  map<string, string> headers = 3;
 
   // Response timestamp
-  google.protobuf.Timestamp timestamp = 3;
+  google.protobuf.Timestamp timestamp = 4;
 
   // Request duration (calculated by interceptor chain)
-  google.protobuf.Duration duration = 4;
+  google.protobuf.Duration duration = 5;
 
-  // Request ID for correlation with InterceptorRequest
-  string request_id = 5;
+  // Request ID for correlation with InterceptorRequest (moved to request_id = 1)
 
   // gRPC method full path (echoed from the originating InterceptorRequest)
-  string method = 6;
+  string method = 7;
 }
 
 // Interceptor decision

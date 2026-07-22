@@ -426,32 +426,40 @@ pub struct CheckpointConfig {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub entry: ::core::option::Option<JournalEntry>,
 }
 /// / Append single journal entry response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendResponse {
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub sequence: u64,
 }
 /// / Append batch of journal entries request (atomic operation)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendBatchRequest {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub entries: ::prost::alloc::vec::Vec<JournalEntry>,
 }
 /// / Append batch of journal entries response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendBatchResponse {
-    #[prost(uint64, tag="1")]
-    pub first_sequence: u64,
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
     #[prost(uint64, tag="2")]
+    pub first_sequence: u64,
+    #[prost(uint64, tag="3")]
     pub last_sequence: u64,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub count: u32,
 }
 /// / Replay journal entries from sequence request
@@ -459,8 +467,10 @@ pub struct AppendBatchResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReplayFromRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub from_sequence: u64,
 }
 /// / Get latest checkpoint for actor request
@@ -468,20 +478,26 @@ pub struct ReplayFromRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetLatestCheckpointRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
 }
 /// / Save checkpoint request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SaveCheckpointRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub checkpoint: ::core::option::Option<Checkpoint>,
 }
 /// / Save checkpoint response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SaveCheckpointResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// / Truncate journal to sequence request (cleanup after checkpoint)
@@ -489,23 +505,29 @@ pub struct SaveCheckpointResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TruncateToRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub sequence: u64,
 }
 /// / Truncate journal to sequence response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TruncateToResponse {
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub deleted_count: u64,
 }
 /// / Get journal statistics request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetStatsRequest {
-    /// Optional: stats for specific actor
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    /// Optional: stats for specific actor
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
 }
 // ==================== Event Sourcing Request/Response Messages ====================
@@ -514,14 +536,18 @@ pub struct GetStatsRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendEventRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub event: ::core::option::Option<ActorEvent>,
 }
 /// / Append event response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AppendEventResponse {
-    #[prost(uint64, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
     pub sequence: u64,
 }
 /// / Replay events from sequence request (paginated)
@@ -529,19 +555,23 @@ pub struct AppendEventResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReplayEventsFromRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub from_sequence: u64,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub page_request: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 /// / Replay events from sequence response (paginated)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReplayEventsFromResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub events: ::prost::alloc::vec::Vec<ActorEvent>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page_response: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// / Get actor history request (paginated)
@@ -549,8 +579,10 @@ pub struct ReplayEventsFromResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActorHistoryRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page_request: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 /// / Journal statistics

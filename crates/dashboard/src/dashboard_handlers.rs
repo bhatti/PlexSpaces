@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Dashboard HTTP Handlers
@@ -462,6 +462,7 @@ async fn api_summary(
     // Create gRPC request
     let request = dashboard_request(
         GetSummaryRequest {
+            request_id: ulid::Ulid::new().to_string(),
             tenant_id,
             node_id,
             cluster_id,
@@ -560,6 +561,7 @@ async fn api_nodes(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -568,6 +570,7 @@ async fn api_nodes(
 
     let request = dashboard_request(
         GetNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             tenant_id,
             cluster_id,
             page: page_request,
@@ -665,6 +668,7 @@ async fn api_node_dashboard(
 
     let request = dashboard_request(
         GetNodeDashboardRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id,
             since: None,
         },
@@ -771,6 +775,7 @@ async fn api_local_recorder_summary(
 
     let req = dashboard_request(
         GetDashboardMetricsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             namespace: String::new(),
             name_pattern: "*".to_string(),
             label_filter: HashMap::new(),
@@ -822,6 +827,7 @@ async fn api_applications(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -830,6 +836,7 @@ async fn api_applications(
 
     let request = dashboard_request(
         GetApplicationsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: _params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: _params.get("namespace").cloned().unwrap_or_default(),
@@ -1100,6 +1107,7 @@ async fn api_actors(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -1108,6 +1116,7 @@ async fn api_actors(
 
     let request = dashboard_request(
         GetActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: _params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: _params.get("namespace").cloned().unwrap_or_default(),
@@ -1185,6 +1194,7 @@ async fn api_dependencies(
 
     let request = dashboard_request(
         GetDependencyHealthRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: _params.get("node_id").cloned().unwrap_or_default(),
             include_non_critical,
         },
@@ -1254,6 +1264,7 @@ async fn api_application_detail(
     // Get application info
     let request = dashboard_request(
         GetApplicationsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: String::new(),
             tenant_id: String::new(),
             namespace: String::new(),
@@ -1285,6 +1296,7 @@ async fn api_application_detail(
     // Get actors for this application
     let actors_request = dashboard_request(
         GetActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: String::new(),
             tenant_id: app.tenant_id.clone(),
             namespace: app.name.clone(),
@@ -1411,6 +1423,7 @@ async fn api_actor_detail(
     // Get actor info
     let request = dashboard_request(
         GetActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: String::new(),
             tenant_id: String::new(),
             namespace: String::new(),
@@ -1594,6 +1607,7 @@ async fn api_objects(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -1602,6 +1616,7 @@ async fn api_objects(
 
     let request = dashboard_request(
         GetObjectsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: params.get("namespace").cloned().unwrap_or_default(),
@@ -1698,6 +1713,7 @@ async fn api_keyvalues(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -1706,6 +1722,7 @@ async fn api_keyvalues(
 
     let request = dashboard_request(
         GetKeyValuesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: params.get("namespace").cloned().unwrap_or_default(),
@@ -1768,6 +1785,7 @@ async fn api_tuplespaces(
 
     let request = dashboard_request(
         GetTupleSpacesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: params.get("namespace").cloned().unwrap_or_default(),
@@ -1852,6 +1870,7 @@ async fn api_blobs(
         .unwrap_or(50);
 
     let page_request = Some(PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset,
         limit,
         filter: String::new(),
@@ -1860,6 +1879,7 @@ async fn api_blobs(
 
     let request = dashboard_request(
         GetBlobsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
             namespace: params.get("namespace").cloned().unwrap_or_default(),
@@ -1934,6 +1954,7 @@ async fn api_blob_presigned_url(
 
     let request = dashboard_request(
         GetBlobPresignedUrlRequest {
+            request_id: ulid::Ulid::new().to_string(),
             blob_id,
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
@@ -2011,6 +2032,7 @@ async fn api_service_links(
 
     let request = dashboard_request(
         GetServiceLinksRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             tenant_id: params.get("tenant_id").cloned().unwrap_or_default(),
         },
@@ -2064,6 +2086,7 @@ async fn api_metrics_table(
 
     let request = dashboard_request(
         GetMetricsTableRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: params.get("node_id").cloned().unwrap_or_default(),
             namespace: params.get("namespace").cloned().unwrap_or_default(),
             name_pattern: params

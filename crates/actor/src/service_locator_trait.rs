@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! ServiceLocator and InitializableServiceLocator traits
@@ -160,6 +160,19 @@ pub trait ServiceLocator: plexspaces_service_traits::ServiceLocatorBase {
     /// Get NodeRegistry
     async fn get_node_registry(&self) -> Option<std::sync::Arc<dyn NodeRegistryTrait>>;
 
+    /// Get the WebSocket session registry (populated by Node::start()).
+    async fn get_ws_registry(&self) -> Option<std::sync::Arc<dyn WsRegistryTrait>>;
+
+    /// Get transport-agnostic actor client (WS-first with gRPC fallback when WsRegistry is registered).
+    async fn get_actor_transport_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>>;
+
+    /// Get transport-agnostic node client (WS-first with gRPC fallback when WsRegistry is registered).
+    async fn get_node_transport_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>>;
+
     /// Get resilient outbound HTTP client for runtime service links.
     async fn get_outbound_http_client(
         &self,
@@ -286,6 +299,21 @@ pub trait InitializableServiceLocator: ServiceLocator {
         &self,
         registry: std::sync::Arc<dyn std::any::Any + Send + Sync>,
     );
+
+    /// Register ActorTransportClient at node startup (replaces gRPC-only routing).
+    async fn register_actor_transport_client(
+        &self,
+        client: std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+    );
+
+    /// Register NodeTransportClient at node startup.
+    async fn register_node_transport_client(
+        &self,
+        client: std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+    );
+
+    /// Register WebSocket session registry at node startup.
+    async fn register_ws_registry(&self, registry: std::sync::Arc<dyn WsRegistryTrait>);
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)
@@ -385,4 +413,25 @@ pub trait NodeRegistryTrait: Send + Sync {
     fn is_gossip_running(&self) -> bool;
     /// Returns (total_entries, active_entries, oldest_entry_age) for the node cache.
     async fn cache_stats(&self) -> (usize, usize, std::time::Duration);
+}
+
+/// Interface for the WebSocket session registry.
+///
+/// Abstracts over `WsRegistry` (defined in `crates/node`) so that `ServiceLocator`
+/// and consumers in other crates can access WS session state without depending on
+/// the node crate (which would create a circular dependency).
+///
+/// # Design
+/// Same pattern as `NodeRegistryTrait`: thin trait in `crates/actor`, concrete impl
+/// in `crates/node`, registered via `InitializableServiceLocator::register_ws_registry`.
+#[async_trait]
+pub trait WsRegistryTrait: Send + Sync {
+    /// Return the node IDs of all active thin-node sessions.
+    async fn list_thin_nodes(&self) -> Vec<String>;
+    /// Return the node IDs of all active sessions regardless of role.
+    async fn list_all_nodes(&self) -> Vec<String>;
+    /// Return true if a session for `node_id` is currently open.
+    async fn is_connected(&self, node_id: &str) -> bool;
+    /// Return the number of active sessions.
+    async fn session_count(&self) -> usize;
 }

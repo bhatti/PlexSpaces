@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public
 // General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Metrics Service: unified Prometheus export via `metrics` + `metrics-exporter-prometheus`.
@@ -731,7 +731,10 @@ impl MetricsService for MetricsServiceImpl {
         _request: Request<ExportPrometheusRequest>,
     ) -> Result<Response<ExportPrometheusResponse>, Status> {
         let content = self.prometheus_handle.render();
-        Ok(Response::new(ExportPrometheusResponse { content }))
+        Ok(Response::new(ExportPrometheusResponse {
+            request_id: ulid::Ulid::new().to_string(),
+            content,
+        }))
     }
 
     async fn get_metrics(
@@ -741,19 +744,27 @@ impl MetricsService for MetricsServiceImpl {
         let req = request.into_inner();
         let text = self.prometheus_handle.render();
         let metrics = parse_prometheus_text(&text, &req.name_pattern, &req.label_filter);
-        Ok(Response::new(GetMetricsResponse { metrics }))
+        Ok(Response::new(GetMetricsResponse {
+            request_id: req.request_id.clone(),
+            metrics,
+        }))
     }
 
     async fn list_metric_definitions(
         &self,
         request: Request<ListMetricDefinitionsRequest>,
     ) -> Result<Response<ListMetricDefinitionsResponse>, Status> {
-        let pat = request.into_inner().name_pattern;
+        let inner = request.into_inner();
+        let request_id = inner.request_id.clone();
+        let pat = inner.name_pattern;
         let definitions: Vec<MetricDefinition> = unified_metric_definitions()
             .into_iter()
             .filter(|d| metric_name_matches(&pat, &d.name))
             .collect();
-        Ok(Response::new(ListMetricDefinitionsResponse { definitions }))
+        Ok(Response::new(ListMetricDefinitionsResponse {
+            request_id,
+            definitions,
+        }))
     }
 
     async fn record_metric(
@@ -870,7 +881,7 @@ mod tests {
         let service = test_service();
         metrics::counter!("plexspaces_messages_routed_total", "namespace" => "test-ns")
             .increment(1);
-        let request = Request::new(ExportPrometheusRequest {});
+        let request = Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.export_prometheus(request).await.unwrap();
         let body = &response.get_ref().content;
         assert!(
@@ -891,10 +902,11 @@ mod tests {
                 timestamp: None,
                 value: Some(MetricValue::CounterValue(3.0)),
             }),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.record_metric(request).await.unwrap();
         let exp = service
-            .export_prometheus(Request::new(ExportPrometheusRequest {}))
+            .export_prometheus(Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() }))
             .await
             .unwrap();
         assert!(exp
@@ -915,10 +927,11 @@ mod tests {
                 nanos: 1_000_000,
             }),
             error_type: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.record_message_routing(request).await.unwrap();
         let exp = service
-            .export_prometheus(Request::new(ExportPrometheusRequest {}))
+            .export_prometheus(Request::new(ExportPrometheusRequest { request_id: ulid::Ulid::new().to_string() }))
             .await
             .unwrap();
         assert!(exp
@@ -933,6 +946,7 @@ mod tests {
         let service = test_service();
         let request = Request::new(ListMetricDefinitionsRequest {
             name_pattern: "plexspaces_messages_*".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
         let response = service.list_metric_definitions(request).await.unwrap();
         let names: Vec<_> = response
@@ -952,6 +966,7 @@ mod tests {
         let request = Request::new(GetMetricsRequest {
             name_pattern: "plexspaces_messages_routed*".to_string(),
             label_filter: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
         let response = service.get_metrics(request).await.unwrap();
         assert!(response

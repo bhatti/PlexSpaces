@@ -576,7 +576,7 @@ func (a *presenceActor) handleSetPresence(payload map[string]any) string {
 	a.LastSeenMs = nowMs
 	a.ExpiryDeadlineMs = nowMs + int64(ttlMs)
 
-	_ = host.SendAfter(uint64(ttlMs), "expire_presence", map[string]any{
+	_, _ = host.Actor().SendAfter(uint64(ttlMs), "expire_presence", map[string]any{
 		"deadline_ms": a.ExpiryDeadlineMs,
 	})
 
@@ -788,7 +788,7 @@ func (a *guildActor) handleCreateChannel(payload map[string]any) string {
 	}
 	a.Channels = sliceUnique(a.Channels, channelID)
 	kvVal, _ := json.Marshal(a.Channels)
-	_ = host.KVPut("guild:"+a.GuildID+":channels", string(kvVal))
+	_ = host.KV().Put("guild:"+a.GuildID+":channels", string(kvVal))
 	return marshal(map[string]any{
 		"guild_id":   a.GuildID,
 		"channel_id": channelID,
@@ -884,7 +884,7 @@ func (a *channelActor) handleJoinMember(payload map[string]any) string {
 		members = append(members, k)
 	}
 	membersJSON, _ := json.Marshal(members)
-	_ = host.KVPut("channel:"+a.GuildID+":"+a.ChannelID+":members", string(membersJSON))
+	_ = host.KV().Put("channel:"+a.GuildID+":"+a.ChannelID+":members", string(membersJSON))
 	return marshal(map[string]any{
 		"guild_id":     a.GuildID,
 		"channel_id":   a.ChannelID,
@@ -900,7 +900,7 @@ func (a *channelActor) handleMarkTyping(payload map[string]any) string {
 	}
 	deadlineMs := int64(host.NowMs()) + int64(ttlMs)
 	a.TypingDeadlines[userID] = deadlineMs
-	_ = host.SendAfter(uint64(ttlMs), "clear_typing", map[string]any{
+	_, _ = host.Actor().SendAfter(uint64(ttlMs), "clear_typing", map[string]any{
 		"user_id":     userID,
 		"deadline_ms": deadlineMs,
 	})

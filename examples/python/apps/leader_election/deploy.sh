@@ -22,6 +22,10 @@ if [ ! -f "$WASM_FILE" ]; then
     "$SCRIPT_DIR/build.sh" || { echo -e "${RED}Build failed${NC}"; exit 1; }
 fi
 
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
     echo -e "${RED}Cannot connect to node at localhost:$HTTP_PORT${NC}"
@@ -35,8 +39,7 @@ RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/depl
     -F "application_id=$APP_ID" \
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
 if echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
     echo -e "${GREEN}Deployed $APP_ID (actor1, actor2)${NC}"
     echo "Run: ./compete.sh actor1 $HTTP_PORT  and  ./compete.sh actor2 $HTTP_PORT"

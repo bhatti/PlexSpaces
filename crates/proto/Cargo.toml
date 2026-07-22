@@ -28,6 +28,9 @@ async-trait = { workspace = true, optional = true }
 default = ["grpc"]
 grpc = ["dep:async-trait", "dep:tokio", "dep:tonic"]
 
+[dev-dependencies]
+ulid = { workspace = true }
+
 [build-dependencies]
 tonic-build = { version = "0.12", features = ["prost"] }
 prost-build = { workspace = true }

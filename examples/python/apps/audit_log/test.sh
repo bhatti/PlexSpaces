@@ -60,6 +60,7 @@ fi
 
 echo "Step 1: Check node status"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
     echo -e "${RED}❌ Cannot connect to node at localhost:$HTTP_PORT${NC}"
@@ -82,7 +83,8 @@ for _attempt in 1 2 3; do
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "behavior_kind=GenEvent" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
+    (cd "$(dirname "$WASM_FILE")" && zip -j "$APP_ZIP" "$WASM_FILE" 2>/dev/null) || zip -j "$APP_ZIP" "$WASM_FILE"
+    -F "app_file=@$APP_ZIP" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then

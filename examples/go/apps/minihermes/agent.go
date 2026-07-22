@@ -110,7 +110,7 @@ func (a *AgentActor) Handle(fromActor, msgType, payloadJSON string) string {
 		sessionID := stringVal(p, "session_id", "")
 		a.Messages = []map[string]any{}
 		if sessionID != "" {
-			host.KVDelete("session_history:" + sessionID)
+			host.KV().Delete("session_history:" + sessionID)
 		}
 		return marshal(map[string]any{"status": "ok"})
 	case "get_stats":
@@ -135,7 +135,7 @@ func (a *AgentActor) chat(p map[string]any) string {
 	}
 
 	// Restore session history from KV if available
-	if hist := host.KVGet("session_history:" + sessionID); hist != "" && len(a.Messages) == 0 {
+	if hist, _ := host.KV().Get("session_history:" + sessionID); hist != "" && len(a.Messages) == 0 {
 		var msgs []map[string]any
 		if err := json.Unmarshal([]byte(hist), &msgs); err == nil {
 			a.Messages = msgs
@@ -293,7 +293,7 @@ func (a *AgentActor) chat(p map[string]any) string {
 
 	// Persist session history
 	if msgsJSON, err := json.Marshal(a.Messages); err == nil {
-		host.KVPut("session_history:"+sessionID, string(msgsJSON))
+		host.KV().Put("session_history:"+sessionID, string(msgsJSON))
 	}
 
 	// Track multi-step patterns for skill learning
@@ -339,7 +339,7 @@ func (a *AgentActor) processCron(p map[string]any) string {
 	a.Messages = savedMessages
 
 	// Persist cron result
-	host.KVPut("cron_result:"+jobID+":"+runID, cronResp)
+	host.KV().Put("cron_result:"+jobID+":"+runID, cronResp)
 	fireAudit("cron_executed", fmt.Sprintf("job_id=%s run_id=%s", jobID, runID))
 	host.Info(fmt.Sprintf("AgentActor: cron job executed job_id=%s run_id=%s", jobID, runID))
 

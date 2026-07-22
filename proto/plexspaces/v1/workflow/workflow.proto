@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Workflow API (Simplified Design)
@@ -608,80 +608,92 @@ service WorkflowService {
 // Definition management
 
 message CreateDefinitionRequest {
-  WorkflowDefinition definition = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowDefinition definition = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message CreateDefinitionResponse {
-  WorkflowDefinition definition = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowDefinition definition = 2;
 }
 
 message GetDefinitionRequest {
-  string id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
+  string version = 3 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
 }
 
 message GetDefinitionResponse {
-  WorkflowDefinition definition = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowDefinition definition = 2;
 }
 
 message ListDefinitionsRequest {
-  plexspaces.common.v1.PageRequest page = 1;
-  map<string, string> label_filter = 2;
-  string name_prefix = 3 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page = 2;
+  map<string, string> label_filter = 3;
+  string name_prefix = 4 [(buf.validate.field).string.max_len = 255];
 }
 
 message ListDefinitionsResponse {
-  repeated WorkflowDefinition definitions = 1 [(buf.validate.field).repeated.max_items = 10000];
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated WorkflowDefinition definitions = 2 [(buf.validate.field).repeated.max_items = 10000];
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 message UpdateDefinitionRequest {
-  WorkflowDefinition definition = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowDefinition definition = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message UpdateDefinitionResponse {
-  WorkflowDefinition definition = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowDefinition definition = 2;
 }
 
 message DeleteDefinitionRequest {
-  string id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = delete all versions
+  string version = 3 [(buf.validate.field).string.max_len = 64]; // Empty = delete all versions
 }
 
 // Execution management
 
 message StartExecutionRequest {
-  string definition_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string definition_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string definition_version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
-  google.protobuf.Struct input = 3;
-  string execution_id = 4 [(buf.validate.field).string.max_len = 255]; // Optional - auto-generate if empty
-  map<string, string> labels = 5;
+  string definition_version = 3 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
+  google.protobuf.Struct input = 4;
+  string execution_id = 5 [(buf.validate.field).string.max_len = 255]; // Optional - auto-generate if empty
+  map<string, string> labels = 6;
 }
 
 message StartExecutionResponse {
-  string execution_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [(buf.validate.field).string.max_len = 255];
 }
 
 message GetExecutionRequest {
-  string execution_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -691,61 +703,67 @@ message GetExecutionRequest {
 }
 
 message GetExecutionResponse {
-  WorkflowExecution execution = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WorkflowExecution execution = 2;
 }
 
 message ListExecutionsRequest {
-  plexspaces.common.v1.PageRequest page = 1;
-  string definition_id = 2 [(buf.validate.field).string.max_len = 255];
-  ExecutionStatus status = 3;
-  map<string, string> label_filter = 4;
-  google.protobuf.Timestamp started_after = 5;
-  google.protobuf.Timestamp started_before = 6;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page = 2;
+  string definition_id = 3 [(buf.validate.field).string.max_len = 255];
+  ExecutionStatus status = 4;
+  map<string, string> label_filter = 5;
+  google.protobuf.Timestamp started_after = 6;
+  google.protobuf.Timestamp started_before = 7;
 }
 
 message ListExecutionsResponse {
-  repeated WorkflowExecution executions = 1 [(buf.validate.field).repeated.max_items = 10000];
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated WorkflowExecution executions = 2 [(buf.validate.field).repeated.max_items = 10000];
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 message CancelExecutionRequest {
-  string execution_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string reason = 2 [(buf.validate.field).string.max_len = 1024];
+  string reason = 3 [(buf.validate.field).string.max_len = 1024];
 }
 
 message SignalExecutionRequest {
-  string execution_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string signal_name = 2 [
+  string signal_name = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  google.protobuf.Value data = 3;
+  google.protobuf.Value data = 4;
 }
 
 message QueryExecutionRequest {
-  string execution_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string query_name = 2 [
+  string query_name = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -755,21 +773,24 @@ message QueryExecutionRequest {
 }
 
 message QueryExecutionResponse {
-  google.protobuf.Value result = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  google.protobuf.Value result = 2;
 }
 
 message GetStepExecutionsRequest {
-  string execution_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string execution_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  plexspaces.common.v1.PageRequest page = 2;
+  plexspaces.common.v1.PageRequest page = 3;
 }
 
 message GetStepExecutionsResponse {
-  repeated StepExecution step_executions = 1 [(buf.validate.field).repeated.max_items = 10000];
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated StepExecution step_executions = 2 [(buf.validate.field).repeated.max_items = 10000];
+  plexspaces.common.v1.PageResponse page = 3;
 }

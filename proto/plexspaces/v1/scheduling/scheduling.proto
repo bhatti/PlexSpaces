@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Resource-Aware Scheduling API
@@ -90,38 +90,35 @@ message SchedulingDecision {
 // Scheduling request stored in state store
 message SchedulingRequest {
   // Request ID (unique)
-  string request_id = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-  }];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
 
   // Request details (imported from actor_runtime.proto)
-  plexspaces.actor.v1.ActorResourceRequirements requirements = 2;
+  plexspaces.actor.v1.ActorResourceRequirements requirements = 3;
 
   // Status
-  SchedulingStatus status = 5;
+  SchedulingStatus status = 6;
 
   // Result (if scheduled)
-  string selected_node_id = 6;
-  string actor_id = 7; // Created actor ID
+  string selected_node_id = 7;
+  string actor_id = 8; // Created actor ID
 
   // Error (if failed)
-  string error_message = 8;
+  string error_message = 9;
 
   // Timestamps
-  google.protobuf.Timestamp created_at = 9;
-  google.protobuf.Timestamp scheduled_at = 10;
-  google.protobuf.Timestamp completed_at = 11;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp scheduled_at = 11;
+  google.protobuf.Timestamp completed_at = 12;
 
   // Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)
   // NOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).
   // Stored here for tracking, isolation, and state store operations.
-  string tenant_id = 12;
+  string tenant_id = 13;
 
   // Namespace for storage isolation (set from gRPC metadata when request is created)
   // NOTE: This is NOT an API input field - namespace comes from request metadata.
   // Stored here for tracking, isolation, and state store operations.
-  string namespace = 13;
+  string namespace = 14;
 }
 
 // Scheduling status enum
@@ -164,56 +161,52 @@ service SchedulingService {
 // Request to schedule an actor
 message ScheduleActorRequest {
   // Actor resource requirements (imported from actor_runtime.proto)
-  plexspaces.actor.v1.ActorResourceRequirements requirements = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.actor.v1.ActorResourceRequirements requirements = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Optional: Client-provided request ID (for idempotency)
-  // If not provided, server generates one
-  string request_id = 4;
+  // If not provided, server generates one (now unified as request_id = 1)
 }
 
 // Response for schedule actor request
 message ScheduleActorResponse {
   // Request ID for tracking
-  string request_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
 
   // Immediate status (PENDING, SCHEDULED, or FAILED)
-  SchedulingStatus status = 2;
+  SchedulingStatus status = 3;
 
   // If SCHEDULED: selected node ID
-  string node_id = 3;
+  string node_id = 4;
 
   // If SCHEDULED: node gRPC address
-  string node_address = 4;
+  string node_address = 5;
 
   // If FAILED: error message
-  string error_message = 5;
+  string error_message = 6;
 
   // Timestamp
-  google.protobuf.Timestamp timestamp = 6;
+  google.protobuf.Timestamp timestamp = 7;
 }
 
 // Request to get scheduling status
 message GetSchedulingStatusRequest {
   // Request ID
-  string request_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
 }
 
 // Response for get scheduling status
 message GetSchedulingStatusResponse {
   // Scheduling request
-  SchedulingRequest request = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  SchedulingRequest request = 2;
 }
 
 // Request to get node capacity
 message GetNodeCapacityRequest {
   // Node ID
-  string node_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -225,25 +218,28 @@ message GetNodeCapacityRequest {
 // Response for get node capacity
 message GetNodeCapacityResponse {
   // Node capacity (imported from node.proto)
-  plexspaces.node.v1.NodeCapacity capacity = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.node.v1.NodeCapacity capacity = 2;
 }
 
 // Request to list all node capacities
 message ListNodeCapacitiesRequest {
   // Optional: Filter by labels
-  map<string, string> label_filters = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  map<string, string> label_filters = 2;
 
   // Optional: Pagination
-  plexspaces.common.v1.PageRequest page = 2;
+  plexspaces.common.v1.PageRequest page = 3;
 }
 
 // Response for list node capacities
 message ListNodeCapacitiesResponse {
   // Node capacities
-  repeated NodeCapacityEntry capacities = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated NodeCapacityEntry capacities = 2;
 
   // Pagination
-  plexspaces.common.v1.PageResponse page = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Node capacity entry (node ID + capacity)

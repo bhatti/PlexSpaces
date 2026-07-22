@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Guest interface implemented by deployable WASM actors (polyglot actor-world).
+// The runtime calls init/handle/get-state/set-state on each WASM actor instance.
+
+interface actor {
+    use types.{payload, actor-error};
+
+    // Initialize with protobuf-encoded config bytes.
+    init: func(config: payload) -> result<_, actor-error>;
+
+    // Handle a message and return protobuf-encoded response bytes.
+    handle: func(from-actor: string, msg-type: string, payload: payload) -> result<payload, actor-error>;
+
+    // Snapshot actor state as protobuf-encoded bytes.
+    get-state: func() -> result<payload, actor-error>;
+
+    // Restore actor state from protobuf-encoded bytes.
+    set-state: func(state: payload) -> result<_, actor-error>;
+}

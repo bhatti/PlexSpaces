@@ -1,0 +1,27 @@
+# Alarms API Application Configuration (TypeScript)
+#
+# Deploys a RequestQueue actor with durable alarm-based batch processing.
+# Equivalent to Cloudflare wrangler.toml with a Durable Object binding.
+#
+# | wrangler.toml                             | app-config.toml                        |
+# |-------------------------------------------|----------------------------------------|
+# | [[durable_objects.bindings]]              | [[supervisor.children]]                |
+# | name = "REQUEST_QUEUE"                    | name = "RequestQueueActor"             |
+# | class_name = "RequestQueue"               | actor_type = "RequestQueueActor"       |
+
+name = "ts-alarms-api"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "RequestQueueActor"
+actor_type = "RequestQueueActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+facets = ["virtual_actor", "reminder"]
+tenant_id = "default"

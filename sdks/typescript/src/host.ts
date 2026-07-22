@@ -4,7 +4,7 @@
 // PlexSpaces Host Functions (TypeScript SDK)
 //
 // Provides TypeScript wrappers for WIT host imports.
-// Uses virtual imports from 'plexspaces:actor/host@0.1.0'.
+// Uses virtual imports split across 9+ per-interface modules (host-logging, host-actor, host-kv, host-ts, host-locks, host-blob, host-pool, host-shard, host-http, registry).
 
 // Protobuf wire for WIT `payload` fields (matches Go WASM hostWire* / tuplespace_proto_wire).
 import {
@@ -37,60 +37,62 @@ import {
 import { firstGroupMember, firstGroupMemberOrThrow } from './process_groups.js';
 
 // Virtual imports provided by jco componentize at runtime.
-// These map 1:1 to the WIT host interface functions.
-// @ts-ignore
+// These map 1:1 to the WIT host interface functions (split by namespace).
+// Types resolved via paths in tsconfig.json; resolved at runtime by jco componentize.
+import { log as hostLog, nowMs as hostNowMs } from 'plexspaces:actor/host-logging@0.1.0';
+
 import {
-  send as hostSend,
-  ask as hostAsk,
-  log as hostLog,
-  nowMs as hostNowMs,
-  selfId as hostSelfId,
-  spawn as hostSpawn,
-  stop as hostStop,
-  link as hostLink,
-  unlink as hostUnlink,
-  monitor as hostMonitor,
-  demonitor as hostDemonitor,
+  send as hostSend, ask as hostAsk, selfId as hostSelfId,
+  spawn as hostSpawn, stop as hostStop,
+  link as hostLink, unlink as hostUnlink,
+  monitor as hostMonitor, demonitor as hostDemonitor,
   sendAfter as hostSendAfter,
-  kvGet as hostKvGet,
-  kvPut as hostKvPut,
-  kvDelete as hostKvDelete,
-  kvList as hostKvList,
-  tsWrite as hostTsWrite,
-  tsRead as hostTsRead,
-  tsTake as hostTsTake,
-  tsReadAll as hostTsReadAll,
-  lockAcquire as hostLockAcquire,
-  lockRelease as hostLockRelease,
-  lockRenew as hostLockRenew,
-  blobUpload as hostBlobUpload,
-  blobDownload as hostBlobDownload,
-  blobDelete as hostBlobDelete,
-  blobList as hostBlobList,
-  pgJoin as hostPgJoin,
-  pgLeave as hostPgLeave,
-  pgMembers as hostPgMembers,
-  pgBroadcast as hostPgBroadcast,
-  poolCheckout as hostPoolCheckout,
-  poolCheckin as hostPoolCheckin,
-  poolGetMetrics as hostPoolGetMetrics,
+  pgJoin as hostPgJoin, pgLeave as hostPgLeave,
+  pgMembers as hostPgMembers, pgBroadcast as hostPgBroadcast,
+} from 'plexspaces:actor/host-actor@0.1.0';
+
+import {
+  kvGet as hostKvGet, kvPut as hostKvPut, kvDelete as hostKvDelete, kvList as hostKvList,
+  kvPutWithTtl as hostKvPutWithTtl, kvGetTtl as hostKvGetTtl,
+  kvCas as hostKvCas, kvIncrement as hostKvIncrement,
+  kvMultiGet as hostKvMultiGet, kvMultiPut as hostKvMultiPut,
+  alarmSet as hostAlarmSet, alarmGet as hostAlarmGet, alarmDelete as hostAlarmDelete,
+} from 'plexspaces:actor/host-kv@0.1.0';
+
+import {
+  tsWrite as hostTsWrite, tsRead as hostTsRead, tsTake as hostTsTake, tsReadAll as hostTsReadAll,
+} from 'plexspaces:actor/host-ts@0.1.0';
+
+import {
+  lockAcquire as hostLockAcquire, lockRelease as hostLockRelease, lockRenew as hostLockRenew,
+} from 'plexspaces:actor/host-locks@0.1.0';
+
+import {
+  blobUpload as hostBlobUpload, blobDownload as hostBlobDownload,
+  blobDelete as hostBlobDelete, blobList as hostBlobList,
+} from 'plexspaces:actor/host-blob@0.1.0';
+
+import {
+  poolCheckout as hostPoolCheckout, poolCheckin as hostPoolCheckin, poolGetMetrics as hostPoolGetMetrics,
+} from 'plexspaces:actor/host-pool@0.1.0';
+
+import {
   createShardGroup as hostCreateShardGroup,
   bulkUpdateShardGroup as hostBulkUpdateShardGroup,
   mapShardGroup as hostMapShardGroup,
-  scatterGather as hostScatterGather,
   broadcastShardGroup as hostBroadcastShardGroup,
   reduceShardGroup as hostReduceShardGroup,
   allReduceShardGroup as hostAllReduceShardGroup,
   barrierShardGroup as hostBarrierShardGroup,
+  scatterGather as hostScatterGather,
   spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
   applicationGetMetrics as hostApplicationGetMetrics,
   applicationGetStatus as hostApplicationGetStatus,
-  httpFetch as hostHttpFetch,
-  // @ts-expect-error Virtual import
-} from 'plexspaces:actor/host@0.1.0';
+} from 'plexspaces:actor/host-shard@0.1.0';
 
-// @ts-ignore
+import { httpFetch as hostHttpFetch } from 'plexspaces:actor/host-http@0.1.0';
+
 import {
   register as hostRegistryRegister,
   unregister as hostRegistryUnregister,
@@ -98,7 +100,6 @@ import {
   lookupByAlias as hostRegistryLookupByAlias,
   discover as hostRegistryDiscover,
   heartbeat as hostRegistryHeartbeat,
-  // @ts-expect-error Virtual import
 } from 'plexspaces:actor/registry@0.1.0';
 
 /**
@@ -138,6 +139,34 @@ function hostErrorPrefixBytes(raw: Uint8Array): boolean {
     if (raw[i] !== prefix.charCodeAt(i)) return false;
   }
   return true;
+}
+
+/** Encode bytes to base64 string without using btoa (works in Node.js and WASM). */
+function bytesToBase64(bytes: Uint8Array): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i]; const b1 = i + 1 < len ? bytes[i + 1] : 0; const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += chars[b0 >> 2] + chars[((b0 & 3) << 4) | (b1 >> 4)] + (i + 1 < len ? chars[((b1 & 15) << 2) | (b2 >> 6)] : '=') + (i + 2 < len ? chars[b2 & 63] : '=');
+  }
+  return result;
+}
+
+/** Decode base64 string to bytes without using atob (works in Node.js and WASM). */
+function base64ToBytes(b64: string): Uint8Array {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = b64.replace(/=+$/, '');
+  const len = clean.length;
+  const bytes = new Uint8Array(Math.floor(len * 3 / 4));
+  let pos = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c0 = chars.indexOf(clean[i]); const c1 = chars.indexOf(clean[i + 1]); const c2 = i + 2 < len ? chars.indexOf(clean[i + 2]) : 0; const c3 = i + 3 < len ? chars.indexOf(clean[i + 3]) : 0;
+    bytes[pos++] = (c0 << 2) | (c1 >> 4);
+    if (i + 2 < len) bytes[pos++] = ((c1 & 15) << 4) | (c2 >> 2);
+    if (i + 3 < len) bytes[pos++] = ((c2 & 3) << 6) | c3;
+  }
+  return bytes.subarray(0, pos);
 }
 
 /**
@@ -390,12 +419,221 @@ export class Registry {
 
 export { RegistryObjectType };
 
+/**
+ * KVStore provides namespaced KV operations.
+ * Equivalent to Cloudflare DO's this.state.storage API.
+ * Access via host.kv.get(), host.kv.put() etc.
+ */
+export class KVStore {
+  get(key: string): string | null {
+    if (typeof hostKvGet !== 'function') return null;
+    try { const v = decodeWitPayloadUtf8(hostKvGet(key)); return v || null; } catch { return null; }
+  }
+  put(key: string, value: string): void {
+    if (typeof hostKvPut !== 'function') return;
+    try { hostKvPut(key, encodeWitPayloadUtf8(value)); } catch { /* ignore */ }
+  }
+  delete(key: string): void {
+    if (typeof hostKvDelete !== 'function') return;
+    try { hostKvDelete(key); } catch { /* ignore */ }
+  }
+  list(prefix: string): string[] {
+    if (typeof hostKvList !== 'function') return [];
+    try { return hostKvList(prefix) as string[]; } catch { return []; }
+  }
+  putWithTtl(key: string, value: string, ttlSeconds: number): void {
+    if (typeof hostKvPutWithTtl !== 'function') return;
+    hostKvPutWithTtl(key, encodeWitPayloadUtf8(value), BigInt(ttlSeconds));
+  }
+  getTtl(key: string): number {
+    if (typeof hostKvGetTtl !== 'function') return 0;
+    try { return Number(hostKvGetTtl(key)); } catch { return 0; }
+  }
+  cas(key: string, expected: string | null, newValue: string): boolean {
+    if (typeof hostKvCas !== 'function') return false;
+    const expectedBytes = expected !== null ? encodeWitPayloadUtf8(expected) : new Uint8Array(0);
+    return hostKvCas(key, expectedBytes, encodeWitPayloadUtf8(newValue));
+  }
+  increment(key: string, delta: number): number {
+    if (typeof hostKvIncrement !== 'function') return 0;
+    try { return Number(hostKvIncrement(key, BigInt(delta))); } catch { return 0; }
+  }
+  multiGet(keys: string[]): (string | null)[] {
+    if (typeof hostKvMultiGet !== 'function') return keys.map(() => null);
+    try {
+      const keysJson = encodeWitPayloadUtf8(JSON.stringify(keys));
+      const resultBytes: Uint8Array = hostKvMultiGet(keysJson);
+      const resultJson: string = decodeWitPayloadUtf8(resultBytes);
+      const items: (string | null)[] = JSON.parse(resultJson);
+      return items.map(v => { if (v === null) return null; const b = base64ToBytes(v); return new TextDecoder().decode(b); });
+    } catch { return keys.map(() => null); }
+  }
+  multiPut(entries: Record<string, string>): void {
+    if (typeof hostKvMultiPut !== 'function') return;
+    const encoded: Record<string, string> = {};
+    for (const [k, v] of Object.entries(entries)) {
+      encoded[k] = bytesToBase64(new TextEncoder().encode(v));
+    }
+    const entriesJson = encodeWitPayloadUtf8(JSON.stringify(encoded));
+    hostKvMultiPut(entriesJson);
+  }
+  getJson<T = unknown>(key: string): T | null {
+    const raw = this.get(key);
+    if (!raw || raw.startsWith('ERROR:')) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  putJson(key: string, value: unknown): void {
+    const serialized = JSON.stringify(value);
+    this.put(key, serialized);
+  }
+}
+
+/**
+ * AlarmClient provides durable alarm scheduling.
+ * Equivalent to Cloudflare DO's setAlarm/getAlarm/deleteAlarm.
+ * Access via host.alarm.set(), host.alarm.get(), host.alarm.delete() etc.
+ */
+export class AlarmClient {
+  set(timestampMs: number): void {
+    if (typeof hostAlarmSet !== 'function') return;
+    hostAlarmSet(BigInt(timestampMs));
+  }
+  setIn(delayMs: number): void {
+    if (typeof hostNowMs !== 'function') return;
+    const now = Number(hostNowMs());
+    this.set(now + delayMs);
+  }
+  get(): number {
+    if (typeof hostAlarmGet !== 'function') return 0;
+    try { return Number(hostAlarmGet()); } catch { return 0; }
+  }
+  delete(): void {
+    if (typeof hostAlarmDelete !== 'function') return;
+    hostAlarmDelete();
+  }
+}
+
+/**
+ * LockClient provides distributed lock operations.
+ * Access via host.locks.acquire(), host.locks.release() etc.
+ */
+export class LockClient {
+  acquire(holderId: string, lockName: string, leaseDurationSecs: number, timeoutMs: bigint): Uint8Array {
+    const result = hostLockAcquire(holderId, lockName, leaseDurationSecs, timeoutMs);
+    if (typeof result === 'string') throw new Error(result);
+    return result;
+  }
+  release(lockId: string, holderId: string, lockVersion: string): void {
+    const result = hostLockRelease(lockId, holderId, lockVersion);
+    if (typeof result === 'string') throw new Error(result);
+  }
+  renew(lockId: string, holderId: string, lockVersion: string, leaseDurationSecs: number): Uint8Array {
+    const result = hostLockRenew(lockId, holderId, lockVersion, leaseDurationSecs);
+    if (typeof result === 'string') throw new Error(result);
+    return result;
+  }
+}
+
+/**
+ * BlobClient provides blob storage operations.
+ * Access via host.blob.upload(), host.blob.download() etc.
+ */
+export class BlobClient {
+  upload(name: string, data: Uint8Array, contentType: string): string {
+    const result = hostBlobUpload(name, data, contentType);
+    if (typeof result !== 'string' || result.startsWith('ERROR:')) throw new Error(String(result));
+    return result;
+  }
+  download(blobId: string): Uint8Array {
+    const result = hostBlobDownload(blobId);
+    if (typeof result === 'string') throw new Error(result);
+    return result;
+  }
+  delete(blobId: string): void {
+    const result = hostBlobDelete(blobId);
+    if (typeof result === 'string') throw new Error(result);
+  }
+  list(prefix: string): string[] {
+    const result = hostBlobList(prefix);
+    if (Array.isArray(result)) return result as string[];
+    return [];
+  }
+}
+
+/**
+ * ActorRef is a lightweight handle to a named virtual actor.
+ * Equivalent to Cloudflare DO's env.BINDING.get(id).
+ * Use getActorRef() to obtain one.
+ *
+ * @example
+ * ```typescript
+ * const room = getActorRef("ChatRoomActor", roomId, "default");
+ * const result = room.ask("send_message", payload, BigInt(5000));
+ * ```
+ */
+export class ActorRef {
+    readonly actorId: string;
+
+    constructor(actorType: string, name: string, namespace: string) {
+        this.actorId = `${name}//${actorType}::${namespace}@*`;
+    }
+
+    id(): string { return this.actorId; }
+
+    tell(msgType: string, payload: Uint8Array): void {
+        hostSend(this.actorId, msgType, payload);
+    }
+
+    ask(msgType: string, payload: Uint8Array, timeoutMs: bigint): Uint8Array {
+        const result = hostAsk(this.actorId, msgType, payload, timeoutMs);
+        if (typeof result === 'string') throw new Error(result);
+        return result;
+    }
+}
+
+/**
+ * getActorRef constructs an ActorRef for a named virtual actor.
+ * The actor is created automatically on first contact (virtual actor pattern).
+ * Equivalent to Cloudflare: `const room = env.CHAT_ROOM.get(roomId)`
+ */
+export function getActorRef(actorType: string, name: string, namespace: string): ActorRef {
+    return new ActorRef(actorType, name, namespace);
+}
+
 export class Host {
   readonly processGroups = new ProcessGroups();
   /** Tuple space: list-in, list-out. Use null in patterns for wildcards. */
   readonly ts = new TupleSpace(this);
   /** Object registry: register, discover, and look up actors and services. */
   readonly registry = new Registry();
+  /** Namespaced KV store: host.kv.get(), host.kv.put() etc. */
+  readonly kv: KVStore = new KVStore();
+  /** Durable alarm client: host.alarm.set(), host.alarm.get() etc. */
+  readonly alarm: AlarmClient = new AlarmClient();
+  /** Distributed lock client: host.locks.acquire(), host.locks.release() etc. */
+  readonly locks: LockClient = new LockClient();
+  /** Blob storage client: host.blob.upload(), host.blob.download() etc. */
+  readonly blob: BlobClient = new BlobClient();
+
+  /**
+   * Create an ergonomic HTTP client for a named service link.
+   *
+   * The link must be pre-configured in RuntimeConfig.service_links.
+   * The host handles retries, circuit breaking, and auth injection.
+   *
+   * @param linkName - Service link name (e.g. "payments-api")
+   * @returns A {@link ServiceHttpClient} bound to that link
+   *
+   * @example
+   * ```typescript
+   * const http = host.httpClient("payments-api");
+   * const balance = http.get("/v1/balance?account=123");
+   * const result = http.post("/v1/transfer", { amount: 100 });
+   * ```
+   */
+  httpClient(linkName: string): ServiceHttpClient {
+    return new ServiceHttpClient(linkName);
+  }
 
   // ========================================================================
   // Messaging
@@ -559,43 +797,6 @@ export class Host {
     return typeof result === 'bigint' ? Number(result) : (typeof result === 'number' ? result : 0);
   }
 
-  // ========================================================================
-  // Key-Value Store
-  // ========================================================================
-
-  kvGet(key: string): string {
-    if (typeof hostKvGet !== 'function') return '';
-    try { return decodeWitPayloadUtf8(hostKvGet(key)); } catch (e) { return `ERROR:${e}`; }
-  }
-  kvPut(key: string, value: string): string {
-    if (typeof hostKvPut !== 'function') return '';
-    try { hostKvPut(key, encodeWitPayloadUtf8(value)); return ''; } catch (e) { return `ERROR:${e}`; }
-  }
-  kvDelete(key: string): string {
-    if (typeof hostKvDelete !== 'function') return '';
-    try { hostKvDelete(key); return ''; } catch (e) { return `ERROR:${e}`; }
-  }
-  kvList(prefix: string): string {
-    if (typeof hostKvList !== 'function') return '[]';
-    try { return JSON.stringify(hostKvList(prefix)); } catch (e) { return `ERROR:${e}`; }
-  }
-
-  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
-  kvGetJson<T = unknown>(key: string): T | null {
-    const raw = this.kvGet(key);
-    if (!raw || raw.startsWith('ERROR:')) return null;
-    try { return JSON.parse(raw) as T; } catch { return null; }
-  }
-
-  /** Serialize value to JSON and store under key. Throws on write failure. */
-  kvPutJson(key: string, value: unknown): void {
-    const serialized = JSON.stringify(value);
-    const result = this.kvPut(key, serialized);
-    if (typeof result === 'string' && result.startsWith('ERROR:')) {
-      throw new Error(`kvPutJson(${key}): ${result}`);
-    }
-  }
-
   /** Increment a single named application metric counter by 1. Errors are swallowed. */
   incrCounter(applicationId: string, name: string): void {
     this.incrCounters(applicationId, { [name]: 1 });
@@ -637,31 +838,6 @@ export class Host {
   tsReadAllPayload(data: Uint8Array): Uint8Array {
     return hostPayloadToBytes(safeCall(hostTsReadAll, data));
   }
-
-  // ========================================================================
-  // Distributed Locks
-  // ========================================================================
-
-  lockAcquire(tenantId: string, namespace: string, holderId: string, lockName: string, leaseDurationSecs: number = 30, timeoutMs: number = 0): string {
-    return safeCall(hostLockAcquire, tenantId, namespace, holderId, lockName, leaseDurationSecs, BigInt(timeoutMs)) as string;
-  }
-  lockRelease(lockId: string, tenantId: string, namespace: string, holderId: string, lockVersion: string): string {
-    return safeCall(hostLockRelease, lockId, tenantId, namespace, holderId, lockVersion) as string;
-  }
-  lockRenew(lockId: string, tenantId: string, namespace: string, holderId: string, lockVersion: string, leaseDurationSecs: number = 30): string {
-    return safeCall(hostLockRenew, lockId, tenantId, namespace, holderId, lockVersion, leaseDurationSecs) as string;
-  }
-
-  // ========================================================================
-  // Blob Storage
-  // ========================================================================
-
-  blobUpload(blobId: string, data: string, contentType: string = 'application/octet-stream'): string {
-    return safeCall(hostBlobUpload, blobId, data, contentType) as string;
-  }
-  blobDownload(blobId: string): string { return safeCall(hostBlobDownload, blobId) as string; }
-  blobDelete(blobId: string): string { return safeCall(hostBlobDelete, blobId) as string; }
-  blobList(prefix: string): string { return safeCall(hostBlobList, prefix) as string; }
 
   // ========================================================================
   // Elastic pool (checkout/checkin)
@@ -882,7 +1058,7 @@ export class EventLog {
     this.watermark++;
     const key = `${prefix}seq:${this.watermark}`;
     try {
-      h.kvPutJson(key, entry);
+      h.kv.putJson(key, entry);
     } catch (e) {
       this.watermark--;
       throw new Error(`EventLog.append: ${e}`);
@@ -896,13 +1072,13 @@ export class EventLog {
    */
   poll(h: Host, prefix: string, consumerId: string, limit = 100): [unknown[], number] {
     const cursorKey = `${prefix}cursor:${consumerId}`;
-    const rawCursor = h.kvGet(cursorKey);
+    const rawCursor = h.kv.get(cursorKey);
     const cursor = rawCursor ? parseInt(rawCursor, 10) || 0 : 0;
 
     const events: unknown[] = [];
     let newCursor = cursor;
     for (let seq = cursor + 1; seq <= this.watermark && events.length < limit; seq++) {
-      const entry = h.kvGetJson(`${prefix}seq:${seq}`);
+      const entry = h.kv.getJson(`${prefix}seq:${seq}`);
       if (entry !== null) {
         events.push(entry);
         newCursor = seq;
@@ -910,7 +1086,7 @@ export class EventLog {
     }
 
     if (newCursor !== cursor) {
-      h.kvPut(cursorKey, String(newCursor));
+      h.kv.put(cursorKey, String(newCursor));
     }
     return [events, newCursor];
   }
@@ -922,9 +1098,13 @@ export class EventLog {
  * The link must be pre-configured in RuntimeConfig.service_links.
  * The host handles retries, circuit breaking, and auth injection.
  *
+ * Prefer creating instances via {@link Host.httpClient} rather than calling
+ * the constructor directly:
+ *
  * @example
  * ```typescript
- * const http = new ServiceHttpClient("payments-api");
+ * // Preferred: use the factory method
+ * const http = host.httpClient("payments-api");
  * const balance = http.get("/v1/balance?account=123");
  * const result = http.post("/v1/transfer", { amount: 100 });
  * ```
@@ -976,6 +1156,7 @@ export const host = new Host();
 export function pgFirst(group: string): string | null {
   return host.processGroups.first(group);
 }
+
 
 /** Return the first member of a process group, throwing if empty. */
 export function pgFirstOrThrow(group: string): string {

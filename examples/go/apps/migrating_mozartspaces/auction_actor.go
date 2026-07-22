@@ -22,8 +22,6 @@ var host = plexspaces.NewHost()
 const (
 	bidPrefix     = "bid"
 	auctionPrefix = "auction"
-	tenantID      = "default"
-	namespace     = "auction"
 	lockLeaseSec  = 30
 	lockTimeoutMs = 5000
 	gatherPollMax = 500
@@ -154,20 +152,20 @@ func (a *AuctionActor) Run(payloadJSON string) string {
 	// Commit: acquire lock, write sold tuple, broadcast, release
 	lockName := "auction:" + auctionID + ":commit"
 	holderID := host.SelfID()
-	lockResult := host.LockAcquire(tenantID, namespace, holderID, lockName, lockLeaseSec, lockTimeoutMs)
+	lockResultBytes, lockErr := host.Locks().Acquire(holderID, lockName, uint32(lockLeaseSec), uint64(lockTimeoutMs))
 
-	if lockResult != "" && !isHostError(lockResult) {
+	if lockErr == nil && len(lockResultBytes) > 0 {
 		var lockInfo struct {
 			LockKey string `json:"lock_key"`
 			Version string `json:"version"`
 		}
-		_ = json.Unmarshal([]byte(lockResult), &lockInfo)
+		_ = json.Unmarshal(lockResultBytes, &lockInfo)
 		host.TS().Write([]any{auctionPrefix, auctionID, "sold", a.WinnerID, a.WinningAmount})
 		_ = host.PG().Broadcast(pgName, "sold", map[string]any{
 			"winner_id": a.WinnerID,
 			"amount":    a.WinningAmount,
 		})
-		host.LockRelease(lockInfo.LockKey, tenantID, namespace, holderID, lockInfo.Version)
+		_ = host.Locks().Release(lockInfo.LockKey, holderID, lockInfo.Version)
 		a.Status = "sold"
 	}
 	a.UpdatedAtMs = host.NowMs()

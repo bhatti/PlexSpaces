@@ -630,7 +630,7 @@ class GuildActor extends PlexSpacesActor<GuildState> {
     const channelsSet = new Set([...this.state.channels, channelId]);
     this.state.channels = [...channelsSet].sort();
 
-    host.kvPut(
+    host.kv.put(
       `guild:${this.state.guild_id}:channels`,
       JSON.stringify(this.state.channels),
     );
@@ -692,7 +692,7 @@ class ChannelActor extends PlexSpacesActor<ChannelState> {
     memberIndex[userId] = { session_id: sessionId };
     this.state.member_index = memberIndex;
 
-    host.kvPut(
+    host.kv.put(
       `channel:${this.state.guild_id}:${this.state.channel_id}:members`,
       JSON.stringify(Object.keys(this.state.member_index).sort()),
     );

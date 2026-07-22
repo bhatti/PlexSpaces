@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Process Groups API (Actor Groups - Pub/Sub Pattern)
@@ -368,7 +368,8 @@ message GroupMembership {
 
 message CreateGroupRequest {
   // Group name (required)
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -382,7 +383,7 @@ message CreateGroupRequest {
   ];
 
   // Namespace (optional hierarchical isolation within tenant)
-  string namespace = 3 [
+  string namespace = 4 [
     (buf.validate.field).string.max_len = 255,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
       description: "Namespace within tenant"
@@ -391,17 +392,19 @@ message CreateGroupRequest {
   ];
 
   // Metadata (labels, annotations)
-  plexspaces.common.v1.Metadata metadata = 4;
+  plexspaces.common.v1.Metadata metadata = 5;
 }
 
 message CreateGroupResponse {
   // Created group
-  ProcessGroup group = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ProcessGroup group = 2;
 }
 
 message DeleteGroupRequest {
   // Group name to delete
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -412,7 +415,8 @@ message DeleteGroupRequest {
 
 message JoinGroupRequest {
   // Group to join
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -421,7 +425,7 @@ message JoinGroupRequest {
   ];
 
   // Actor ID to add to group
-  string actor_id = 3 [
+  string actor_id = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -430,7 +434,7 @@ message JoinGroupRequest {
   ];
 
   // Node hosting this actor (optional - can be looked up via ActorRegistry)
-  string node_id = 4 [(buf.validate.field).string.max_len = 255];
+  string node_id = 5 [(buf.validate.field).string.max_len = 255];
 
   // Topics to subscribe to within the group (optional - empty = all topics)
   //
@@ -448,7 +452,7 @@ message JoinGroupRequest {
   // - ["config.database"] → only database config updates
   // - ["events.user.login", "events.user.logout"] → only user login/logout events
   // - [] → all messages (default)
-  repeated string topics = 5 [(buf.validate.field).repeated.items.string = {
+  repeated string topics = 6 [(buf.validate.field).repeated.items.string = {
     min_len: 1
     max_len: 255
   }];
@@ -456,7 +460,8 @@ message JoinGroupRequest {
 
 message LeaveGroupRequest {
   // Group to leave
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -465,7 +470,7 @@ message LeaveGroupRequest {
   ];
 
   // Actor ID to remove from group
-  string actor_id = 3 [
+  string actor_id = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -476,7 +481,8 @@ message LeaveGroupRequest {
 
 message GetMembersRequest {
   // Group name
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -485,25 +491,27 @@ message GetMembersRequest {
   ];
 
   // Pagination (optional)
-  int32 page_size = 3 [(buf.validate.field).int32 = {
+  int32 page_size = 4 [(buf.validate.field).int32 = {
     gte: 0
     lte: 10000
   }];
-  string page_token = 4 [(buf.validate.field).string.max_len = 1024];
+  string page_token = 5 [(buf.validate.field).string.max_len = 1024];
 }
 
 message GetMembersResponse {
   // All members (cluster-wide)
-  repeated string member_ids = 1 [(buf.validate.field).repeated.items.string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string member_ids = 2 [(buf.validate.field).repeated.items.string.max_len = 255];
 
   // Pagination
-  string next_page_token = 2 [(buf.validate.field).string.max_len = 1024];
-  int32 total_count = 3 [(buf.validate.field).int32.gte = 0];
+  string next_page_token = 3 [(buf.validate.field).string.max_len = 1024];
+  int32 total_count = 4 [(buf.validate.field).int32.gte = 0];
 }
 
 message GetLocalMembersRequest {
   // Group name
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -514,39 +522,43 @@ message GetLocalMembersRequest {
 
 message GetLocalMembersResponse {
   // Local members only (this node)
-  repeated string member_ids = 1 [(buf.validate.field).repeated.items.string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string member_ids = 2 [(buf.validate.field).repeated.items.string.max_len = 255];
 
   // Total count (local only)
-  int32 local_count = 2 [(buf.validate.field).int32.gte = 0];
+  int32 local_count = 3 [(buf.validate.field).int32.gte = 0];
 }
 
 message ListGroupsRequest {
   // Filter by namespace (optional)
-  string namespace = 2 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by group name pattern (optional, e.g., "config-*")
-  string name_pattern = 3 [(buf.validate.field).string.max_len = 255];
+  string name_pattern = 4 [(buf.validate.field).string.max_len = 255];
 
   // Pagination
-  int32 page_size = 4 [(buf.validate.field).int32 = {
+  int32 page_size = 5 [(buf.validate.field).int32 = {
     gte: 0
     lte: 10000
   }];
-  string page_token = 5 [(buf.validate.field).string.max_len = 1024];
+  string page_token = 6 [(buf.validate.field).string.max_len = 1024];
 }
 
 message ListGroupsResponse {
   // Groups matching filter
-  repeated ProcessGroup groups = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ProcessGroup groups = 2;
 
   // Pagination
-  string next_page_token = 2 [(buf.validate.field).string.max_len = 1024];
-  int32 total_count = 3 [(buf.validate.field).int32.gte = 0];
+  string next_page_token = 3 [(buf.validate.field).string.max_len = 1024];
+  int32 total_count = 4 [(buf.validate.field).int32.gte = 0];
 }
 
 message PublishToGroupRequest {
   // Group to publish to
-  string group_name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -570,7 +582,7 @@ message PublishToGroupRequest {
   // - group_name="config-updates", topic="database" → only database config subscribers
   // - group_name="events", topic="user.login" → only user login event subscribers
   // - group_name="events", topic="" → all event subscribers
-  string topic = 4 [
+  string topic = 5 [
     (buf.validate.field).string.max_len = 255,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
       description: "Topic within group (optional - empty = all members)"
@@ -587,7 +599,7 @@ message PublishToGroupRequest {
   // - payload: Message content
   // - priority: Message priority (system=75, high=50, normal=25, low=0)
   // - ttl: How long to retry failed deliveries
-  plexspaces.common.v1.Message message = 3 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.Message message = 4 [(google.api.field_behavior) = REQUIRED];
 }
 
 message PublishToGroupResponse {
@@ -596,13 +608,14 @@ message PublishToGroupResponse {
   // NOTE: This is best-effort count (async delivery)
   // - Local members: Counted immediately
   // - Remote members: May still be in-flight
-  uint32 recipients_count = 1 [(buf.validate.field).uint32.gte = 0];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 recipients_count = 2 [(buf.validate.field).uint32.gte = 0];
 
   // How many members were unreachable
-  uint32 failures_count = 2 [(buf.validate.field).uint32.gte = 0];
+  uint32 failures_count = 3 [(buf.validate.field).uint32.gte = 0];
 
   // Breakdown by node (for debugging)
-  map<string, uint32> recipients_per_node = 3;
+  map<string, uint32> recipients_per_node = 4;
 }
 
 // ============================================================================

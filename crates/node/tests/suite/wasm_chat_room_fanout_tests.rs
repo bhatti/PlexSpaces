@@ -120,6 +120,7 @@ async fn actor_ask(
     payload: serde_json::Value,
 ) -> serde_json::Value {
     let request = AskReplyRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: namespace.to_string(),
         actor_type: actor_type_and_name.to_string(),
         actor_name: String::new(),
@@ -184,6 +185,7 @@ async fn deploy_chat_room_app(
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),

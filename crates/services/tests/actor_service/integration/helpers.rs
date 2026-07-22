@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status};
 /// Create a tell request with payload and target actor id/type.
 pub fn create_send_message_request(payload: &str, receiver: &str) -> SendMessageRequest {
     SendMessageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: String::new(),
         actor_type: receiver.to_string(),
         actor_name: String::new(),

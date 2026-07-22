@@ -163,7 +163,7 @@ func (b *BenchmarkActor) run(p map[string]any) string {
 		} else {
 			// Cache the response directly in case KV write raced
 			respJSON, _ := json.Marshal(evalResp)
-			host.KVPut("eval_report:"+evalRunID, string(respJSON))
+			host.KV().Put("eval_report:"+evalRunID, string(respJSON))
 		}
 		evalRuns = append(evalRuns, evalRunInfo{
 			EvalRunID: evalRunID,
@@ -177,7 +177,7 @@ func (b *BenchmarkActor) run(p map[string]any) string {
 	b.Results = make([]map[string]any, 0, len(evalRuns))
 	for _, run := range evalRuns {
 		var report map[string]any
-		raw := host.KVGet("eval_report:" + run.EvalRunID)
+		raw, _ := host.KV().Get("eval_report:" + run.EvalRunID)
 		if raw != "" {
 			_ = json.Unmarshal([]byte(raw), &report)
 		}

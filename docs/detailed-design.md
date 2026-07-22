@@ -155,35 +155,38 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 - Timeout handling
 - Automatic routing via gRPC for remote actors
 
-#### Unified Routing Module
+#### ActorRegistry as Routing Authority
 
-All message routing logic is centralized in `crates/actor/src/routing.rs` to ensure consistency and enable parallel operations.
+All message routing logic is centralized in `ActorRegistry` (`crates/actor/src/actor_registry.rs`) to ensure consistency and enable parallel operations.
 
 **Key Functions**:
 
 - **`ActorId::new(name, actor_type, namespace, node_id)`**: Constructs validated actor IDs
 - **`ActorId::from_canonical(actor_id)`**: Restores a structured ID at string boundaries
-- **`is_actor_local(actor_id, service_locator)`**: Determines locality from the structured `ActorId`
-- **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns `Pin<Box<dyn Future>>` for parallel operations
-- **`route_local(ctx, service_locator, ...)`**: Routes message to local actor (returns Future)
-- **`route_remote(ctx, service_locator, ...)`**: Routes message to remote actor via gRPC (returns Future)
-- **`route_message(ctx, service_locator, ...)`**: Unified routing that determines locality and routes accordingly (returns Future)
+- **`ActorId::is_on_node(node_id)`**: Determines locality by comparing node_id suffix
+- **`ActorRegistry::tell(ctx, actor_id, message)`**: Routes fire-and-forget; local or remote via ActorService gRPC
+- **`ActorRegistry::ask(ctx, actor_id, message, timeout)`**: Request-reply with temp sender + ReplyWaiter
+- **`ActorRegistry::ask_with_sender(ctx, actor_id, message, timeout, temp_sender_id, correlation_id)`**: Ask with caller-supplied temp sender for fanout
 
 **Design Principles**:
 
-1. **Generic Functions**: Not tied to specific instances (ActorRef, ActorService)
-2. **RequestContext First**: All functions take `RequestContext` as first parameter for tenant/namespace isolation
-3. **Return Futures**: All async functions return `Pin<Box<dyn Future>>` for parallel operations (map/reduce)
-4. **No Cyclic Dependencies**: Routing module stays dependency-light and works with framework traits plus `RequestContext`
+1. **Single Authority**: All routing goes through `ActorRegistry`
+2. **RequestContext First**: All functions take `&RequestContext` for tenant/namespace isolation
+3. **Locality via ActorId**: `is_on_node()` compares node_id; registry lookup handles aliased local actors
+4. **No Cyclic Dependencies**: ActorRegistry doesn't depend on ActorRef
 
 **Parallel Operations**:
 
-The `ask_helper()` function returns a Future, enabling true parallel map/reduce operations:
+`ask_with_sender()` enables shard-group fanout with a shared temporary sender:
 
 ```rust
-// Send all asks asynchronously
+let temp_sender_id = ActorId::temporary_sender(&base_corr, namespace, &node_id)?;
+actor_factory.create_temporary_sender(ctx, temp_sender_id.clone(), base_corr, expires_at).await?;
+
+// Send all asks asynchronously with shared temp sender
 let futures: Vec<_> = shard_ids.iter().map(|shard_id| {
-    ask_helper(ctx.clone(), service_locator.clone(), shard_id, message.clone(), ...)
+    let correlation_id = Ulid::new().to_string();
+    registry.ask_with_sender(ctx, shard_id, message.clone(), timeout, temp_sender_id.clone(), correlation_id)
 }).collect();
 
 // Await all replies in parallel
@@ -260,7 +263,7 @@ See [crates/behavior/README.md](../crates/behavior/README.md) for full behavior 
 
 ### GenServer
 
-Request/reply (OTP-style). Trait: `plexspaces_behavior::GenServer`. Implements `handle_request(ctx, msg)`; `route_message()` routes Call → handle_request (reply expected), Cast → handle_request (optional reply).
+Request/reply (OTP-style). Trait: `plexspaces_behavior::GenServer`. Implements `handle_request(ctx, msg)`; dispatches Call → handle_request (reply expected), Cast → handle_request (optional reply).
 
 **Location**: `crates/behavior/src/mod.rs` (lines 97-342)
 
@@ -273,7 +276,7 @@ When a GenServer handler returns `Err(BehaviorError)`, the framework sends an im
 
 The error reply carries a JSON payload `{"error": "<message>", "success": false}`. On the receiving side:
 - **Local calls** (`ask`): The `ReplyWaiter` resolves with the error reply message (callers check `message_type == "error_reply"`)
-- **Remote calls** (gRPC): The `AskReplyResponse` returns `success: false` with `error_message` populated; `route_remote` reconstructs the reply with `message_type: "error_reply"`
+- **Remote calls** (gRPC): The `AskReplyResponse` returns `success: false` with `error_message` populated; the ActorService reconstructs the reply with `message_type: "error_reply"`
 - **Scatter-gather**: Error replies from individual shards are classified as shard failures, contributing to partial-failure tolerance
 
 The `send_reply` method has an idempotency guard (AtomicBool) ensuring exactly one reply per message cycle — the error reply path and normal reply path cannot both fire.
@@ -3320,22 +3323,28 @@ TypeScript, Go, and Rust WASM actors. Its ABI is proto-bytes-first:
 - failures use `result<_, actor-error>` rather than stringly `"ERROR:..."` conventions,
 - SDKs own protobuf encode/decode while host code delegates to `HostFunctions` and core services.
 
-| Category | Functions |
-|----------|-----------|
-| **Messaging** | `send`, `ask` (request-reply with timeout) |
-| **Actor Identity** | `self-id` |
-| **Actor Lifecycle** | `spawn`, `stop` |
-| **Linking & Monitoring** | `link`, `unlink`, `monitor`, `demonitor` |
-| **Timers** | `send-after` (returns timer-id for tracking) |
-| **Logging & Time** | `log`, `now-ms` |
-| **Key-Value Store** | `kv-get`, `kv-put`, `kv-delete`, `kv-list` |
-| **TupleSpace** | `ts-write`, `ts-read`, `ts-take`, `ts-read-all` |
-| **Distributed Locks** | `lock-acquire`, `lock-release`, `lock-renew` |
-| **Blob Storage** | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
-| **Process Groups** | `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
-| **Elastic pool** | `pool-checkout`, `pool-checkin`, `pool-get-metrics` |
-| **Object Registry** | `register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, `heartbeat` (interface: `plexspaces:actor/registry@0.1.0`) |
-| **Shard groups & App metrics** | `create-shard-group`, `bulk-update-shard-group`, `map-shard-group`, `broadcast-shard-group`, `reduce-shard-group`, `all-reduce-shard-group`, `barrier-shard-group`, `scatter-gather`, `spawn-actors`, `application-metrics-add`, `application-get-status`, `http-fetch` |
+The flat `interface host` has been reorganized into 9 namespaced WIT interfaces. Each maps directly
+to a namespace accessor in the SDKs (Python: `host.kv.*`, Go: `host.KV().*`, TypeScript: `host.kv.*`).
+
+| WIT Interface | Functions |
+|---|---|
+| `host-logging` | `log`, `now-ms` |
+| `host-actor` | `send`, `ask`, `self-id`, `spawn`, `stop`, `link`, `unlink`, `monitor`, `demonitor`, `send-after`, `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
+| `host-kv` | `kv-get`, `kv-put`, `kv-delete`, `kv-list`, `kv-put-with-ttl`, `kv-get-ttl`, `kv-cas`, `kv-increment`, `kv-multi-get`, `kv-multi-put`, `alarm-set`¹, `alarm-get`¹, `alarm-delete`¹ |
+| `host-ts` | `ts-write`, `ts-read`, `ts-take`, `ts-read-all` |
+| `host-locks` | `lock-acquire`, `lock-release`, `lock-renew` |
+| `host-blob` | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
+| `host-pool` | `pool-checkout`, `pool-checkin`, `pool-get-metrics` |
+| `host-shard` | `create-shard-group`, `bulk-update-shard-group`, `map-shard-group`, `broadcast-shard-group`, `reduce-shard-group`, `all-reduce-shard-group`, `barrier-shard-group`, `scatter-gather`, `spawn-actors`, `application-metrics-add`, `application-get-metrics`, `application-get-status` |
+| `host-http` | `http-fetch` |
+
+¹ Alarm functions are co-located in `host-kv` at the WIT level for implementation simplicity; SDK code uses the `host.alarm` / `host.Alarm()` namespace accessor for a clean API surface.
+
+The Object Registry uses a separate interface: `plexspaces:actor/registry@0.1.0` (`register`, `unregister`, `lookup`, `lookup-by-alias`, `discover`, `heartbeat`).
+
+**Deprecated flat interface**: The original single `interface host` with ~60 methods remains compiled
+in for backward compatibility but is deprecated. New code should use the namespaced interfaces and
+the corresponding SDK namespace accessors.
 
 ### State Preservation
 
@@ -3350,6 +3359,8 @@ WASM components are re-instantiated after each `handle()` call (wasmtime Compone
 
 - **No `parent-id`**: The framework uses Erlang-style supervisor trees for hierarchy, not explicit parent/child tracking exposed to individual WASM actors.
 - **No `cancel-timer`**: Timer/reminder management is handled by the framework's `TimerFacet`/`ReminderFacet` (actor facets). Actors can be stopped to cancel pending timers.
+- **Durable alarms vs. `send-after`**: `alarm-set(timestamp_ms)` is a single durable per-actor alarm backed by `ReminderFacet` (survives deactivation). `send-after` is a non-durable in-process timer. When the alarm fires the runtime delivers a `"__alarm__"` message to the actor's `handle()` function. `alarm-delete` cancels it; `alarm-set` called again replaces the pending alarm atomically.
+- **`kv-multi-get` / `kv-multi-put` WIT encoding**: TinyGo cannot pass WIT `list<string>` as host-import inputs, so both functions use `payload` (list<u8>) at the WIT boundary. The caller JSON-encodes the key list / entry map; the host parses JSON and delegates to the `KeyValueStore` trait. Binary values are base64-encoded within the JSON to preserve arbitrary bytes.
 - **`send-after` with tracked JoinHandles**: Timer tasks are stored in `SimpleHostImpl::pending_timers` for proper cleanup when the actor stops.
 
 ### SDKs
@@ -3728,9 +3739,110 @@ Schema definitions are in `db/migrations/`; service-specific behavior and table 
 
 See [db/README.md](../db/README.md) for how migrations are run at startup.
 
+## WebSocket Transport
+
+WebSocket is a first-class transport alongside gRPC and REST. It targets thin clients — browsers, edge devices, IoT nodes — that make outbound TCP connections but have no inbound port for gRPC.
+
+### Transport Client Traits
+
+`ActorTransportClient` and `NodeTransportClient` in `crates/service-traits` abstract over gRPC and WS routing. High-level services (`ActorServiceImpl`, `NodeRegistry`) call these traits and never know which transport is used.
+
+```rust
+// crates/service-traits/src/transport_client.rs
+#[async_trait]
+pub trait ActorTransportClient: Send + Sync {
+    async fn send_message(&self, node_id: &str, req: ...) -> Result<...>;
+    async fn ask_reply(&self, node_id: &str, req: ...) -> Result<...>;
+}
+```
+
+`WsActorTransportClient` checks `WsRegistry::get_sender(node_id)` first; if connected, wraps the request in a `WsFrame` and sends it via the session's `mpsc::Sender`. If not connected, delegates to `GrpcActorTransportClient`.
+
+### WsRegistry
+
+`WsRegistry` (`crates/node/src/ws_registry.rs`) tracks live WebSocket sessions in an `RwLock<HashMap<String, WsSession>>`. Each `WsSession` holds:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `node_id` | `String` | Canonical ID (ULID if client sent empty) |
+| `sender` | `mpsc::Sender<WsFrame>` | Channel to the writer task for this connection |
+| `role` | `NodeRole` | Always `NodeRoleThin` for WS connections |
+| `tenant_id` | `String` | Extracted from JWT at upgrade time |
+| `connected_at` | `Instant` | Session start time |
+| `last_heartbeat` | `Instant` | Updated on each heartbeat frame |
+
+Access via `ServiceLocator::get_ws_registry()` which returns `Arc<dyn WsRegistryTrait>`.
+
+### WS Route Handler
+
+`crates/node/src/http_routes/ws_routes.rs`:
+
+1. **Upgrade** — JWT validated at HTTP upgrade (`ws_upgrade_handler`); tenant extracted and stored in `WsRouteState`.
+2. **Split** — Socket split into `(write, read)`. A writer task drains an `mpsc::Receiver<WsFrame>` into the socket (capacity 256).
+3. **Handshake** — `await_registration()` waits up to 10s for the first binary frame to be `NodeRegister`. Returns `(node_id, role, registration, ack_request_id)` — **without sending the ack**.
+4. **Register-before-ack** — `handle_ws_connection` calls `ws_registry.register(session)` and optionally `node_registry.register_node()` **before** sending `NodeRegisterAck`. This ensures state is consistent when the client acts on the ack.
+5. **Message loop** — `dispatch_frame()` routes each subsequent frame to `handle_tell`, `handle_ask`, or the heartbeat handler.
+
+### Pending Ask Correlation
+
+`PendingAsks` (`crates/node/src/ws_transport_client.rs`) holds an `RwLock<HashMap<String, (node_id, oneshot::Sender<AskReplyResponse>)>>`:
+
+- Entry inserted **before** the `WsFrame` is sent (prevents a race where the response arrives before the sender is registered).
+- The WS receive loop calls `pending_asks.resolve(request_id, response)` when an `AskReplyResponse` frame arrives.
+- On timeout, `pending_asks.remove(request_id)` cleans up.
+- On disconnect, `pending_asks.cancel_for_node(node_id, error)` cancels only the asks for the disconnecting session.
+
+### Thin Node and SWIM
+
+When a thin node registers:
+- `NodeRegistry::register_node()` is called with `NodeRoleThin`
+- SWIM metadata `node_type = "thin"` is mirrored into `SwimMember.metadata`
+- `select_indirect_targets()` in `swim.rs` filters out members with `node_type = "thin"` (they have no inbound gRPC to relay pings through)
+
+### Node Resource Hints
+
+`PingResponse` carries a `NodeResourceHints` embedded message (field 9) populated in real-time by the server:
+
+```protobuf
+message NodeResourceHints {
+  float  cpu_percent         = 1;  // 0–100; 0 = unavailable
+  uint64 memory_available_mb = 2;  // MiB available
+  uint32 available_cores     = 3;  // hardware_concurrency
+}
+```
+
+`NodeServiceImpl::ping()` populates this via `sysinfo` (CPU + memory) and `std::thread::available_parallelism`. Thin nodes that want to advertise their own capabilities at connect time set `NodeRegistration.resource_hints` (field 11). The schema is shared between both messages so resource fields stay in sync.
+
+### TypeScript WsThinClient
+
+`sdks/typescript/src/ws_thin_client.ts` provides a zero-dependency browser/Node.js thin-node client. All `WsFrame` encoding is hand-rolled in `sdks/typescript/src/wire/ws-frame-wire.ts` using `proto-wire-common.ts` primitives — no protobufjs, no grpc-web.
+
+Key implementation details:
+- **ULID generator**: inline, `crypto.getRandomValues`, Crockford base32 — 10-byte random bit-packed into 16 × 5-bit groups (80 bits → 26 chars)
+- **Auto-heartbeat**: 25-second interval keeps session alive
+- **Ask correlation**: `pendingAsks: Map<request_id, {resolve, reject}>` populated before frame is sent
+- **Nested sub-message decode**: `parsePingResponse` decodes `NodeResourceHints` as length-delimited field 9, then reads fields 1/2/3 from the nested bytes
+
+### Integration Tests
+
+`crates/node/tests/suite/ws_integration_tests.rs` covers:
+- Auth-disabled upgrade
+- Registration handshake with `request_id` echo assertion
+- Server-assigned ULID when client sends empty `node_id`
+- `WsRegistry` accessible via `ServiceLocator` immediately after ack
+- `list_thin_nodes()`, `is_connected()`, `session_count()`
+- Disconnect detection via poll loop (no fixed sleep)
+- Heartbeat → HeartbeatAck with `request_id` echoed
+- Multiple concurrent sessions
+- Duplicate node_id rejection (WsError code 9)
+- Ask round-trip over WS (non-existent actor → AskResponse success=false, not raw WsError)
+
+See [WebSocket Transport](websocket.md) for the full protocol reference.
+
 ## See Also
 
 - [Architecture](architecture.md): High-level overview
+- [WebSocket Transport](websocket.md): Protocol reference, client examples
 - [Getting Started](getting-started.md): Quick start guide
 - [Use Cases](use-cases.md): Real-world applications
 - [API Reference](https://docs.rs/plexspaces/): Full API documentation

@@ -84,6 +84,9 @@ pub struct ApplicationSpec {
     /// External service links this application expects at deploy time.
     #[prost(message, repeated, tag="15")]
     pub required_service_links: ::prost::alloc::vec::Vec<ApplicationServiceLinkRequirement>,
+    /// URL mount path for static files bundled in the app zip.
+    #[prost(string, tag="16")]
+    pub static_mount: ::prost::alloc::string::String,
 }
 /// Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -180,25 +183,27 @@ pub struct ApplicationRuntimeState {
 pub struct DeployApplicationRequest {
     /// Application identifier (unique per node)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub application_id: ::prost::alloc::string::String,
     /// Application name
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub name: ::prost::alloc::string::String,
     /// Application version
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub version: ::prost::alloc::string::String,
     /// WASM module (if WASM application)
     /// If provided, application code is loaded from WASM.
     /// If not provided, application must be pre-registered (native Rust).
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub wasm_module: ::core::option::Option<super::super::wasm::v1::WasmModule>,
     /// Application configuration
     /// Defines supervision tree, dependencies, environment variables, etc.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag="6")]
     pub config: ::core::option::Option<ApplicationSpec>,
     /// Initial state (optional, for stateful applications)
     /// Passed to application's start() method.
-    #[prost(bytes="vec", tag="6")]
+    #[prost(bytes="vec", tag="7")]
     pub initial_state: ::prost::alloc::vec::Vec<u8>,
 }
 /// Deploy application response
@@ -206,16 +211,18 @@ pub struct DeployApplicationRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployApplicationResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Application ID (may differ from request if auto-generated)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub application_id: ::prost::alloc::string::String,
     /// Application status after deployment
-    #[prost(enumeration="ApplicationStatus", tag="3")]
+    #[prost(enumeration="ApplicationStatus", tag="4")]
     pub status: i32,
     /// Error details (if success=false)
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag="5")]
     pub error: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Undeploy application request
@@ -224,9 +231,11 @@ pub struct DeployApplicationResponse {
 pub struct UndeployApplicationRequest {
     /// Application ID to undeploy
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub application_id: ::prost::alloc::string::String,
     /// Graceful shutdown timeout (optional, uses app config default if not provided)
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 /// Undeploy application response
@@ -234,10 +243,12 @@ pub struct UndeployApplicationRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UndeployApplicationResponse {
     /// Success flag
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Error details (if success=false)
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag="3")]
     pub error: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// List applications request
@@ -245,7 +256,9 @@ pub struct UndeployApplicationResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApplicationsRequest {
     /// Filter by status (optional, empty = all applications)
-    #[prost(enumeration="ApplicationStatus", optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(enumeration="ApplicationStatus", optional, tag="2")]
     pub status_filter: ::core::option::Option<i32>,
 }
 /// List applications response
@@ -253,7 +266,9 @@ pub struct ListApplicationsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApplicationsResponse {
     /// List of deployed applications
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub applications: ::prost::alloc::vec::Vec<ApplicationInfo>,
 }
 /// Application information
@@ -333,6 +348,8 @@ pub struct ApplicationMetrics {
 pub struct GetApplicationStatusRequest {
     /// Application ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub application_id: ::prost::alloc::string::String,
 }
 /// Get application status response
@@ -340,19 +357,21 @@ pub struct GetApplicationStatusRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetApplicationStatusResponse {
     /// Application information
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub application: ::core::option::Option<ApplicationInfo>,
     /// Detailed application state
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub state: ::core::option::Option<ApplicationRuntimeState>,
     /// Error if application not found
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag="4")]
     pub error: ::core::option::Option<::prost::alloc::string::String>,
     /// Node ID that served this status response.
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub node_id: ::prost::alloc::string::String,
     /// Node address that served this status response.
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub node_address: ::prost::alloc::string::String,
 }
 /// Application type
@@ -675,6 +694,189 @@ impl ApplicationErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

@@ -18,10 +18,7 @@
  * Type definitions are generated in src/generated/ but are not imported here
  * to keep the SDK simple. The virtual import works at runtime without types.
  */
-// @ts-ignore - Virtual import provided by jco componentize at runtime
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error - Virtual import - types are optional (generated in src/generated/)
-import { log as hostLog } from 'plexspaces:actor/host@0.1.0';
+import { log as hostLog } from 'plexspaces:actor/host-logging@0.1.0';
 import { getActorDefinition } from './decorators.js';
 import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from './wit-payload.js';
 /**

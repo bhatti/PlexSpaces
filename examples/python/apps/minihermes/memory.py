@@ -36,7 +36,7 @@ class MemoryActor:
         if not key:
             return {"error": "key is required"}
         full_key = f"mem:{tier}:{scope}:{scope_id}:{key}"
-        host.kv_put(full_key, value)
+        host.kv.put(full_key, value)
         try:
             host.ts.write(["memory", tier, scope, scope_id, key, value[:50]])
         except Exception:
@@ -76,7 +76,7 @@ class MemoryActor:
                       scope_id: str = "default") -> dict:
         if not key:
             return {"error": "key is required"}
-        host.kv_delete(f"mem:{tier}:{scope}:{scope_id}:{key}")
+        host.kv.delete(f"mem:{tier}:{scope}:{scope_id}:{key}")
         return {"status": "ok", "tier": tier, "key": key}
 
     @handler("get_stats")
@@ -107,7 +107,7 @@ class AuditEventActor:
         seq = self.watermark
         entry = {"seq": seq, "event_type": event_type, "detail": detail,
                  "timestamp": timestamp or host.now_ms()}
-        host.kv_put(f"audit:seq:{seq}", json.dumps(entry))
+        host.kv.put(f"audit:seq:{seq}", json.dumps(entry))
         try:
             host.ts.write(["audit_event", event_type, seq, detail[:80]])
         except Exception:
@@ -116,12 +116,12 @@ class AuditEventActor:
     @handler("poll_events")
     def poll_events(self, consumer_id: str = "default", limit: int = 20) -> dict:
         cursor_key = f"audit:cursor:{consumer_id}"
-        cursor_raw = host.kv_get(cursor_key)
+        cursor_raw = host.kv.get(cursor_key)
         cursor = int(cursor_raw) if cursor_raw else 0
 
         events = []
         for seq in range(cursor + 1, self.watermark + 1):
-            raw = host.kv_get(f"audit:seq:{seq}")
+            raw = host.kv.get(f"audit:seq:{seq}")
             if raw:
                 try:
                     events.append(json.loads(raw))
@@ -132,7 +132,7 @@ class AuditEventActor:
 
         if events:
             new_cursor = events[-1]["seq"]
-            host.kv_put(cursor_key, str(new_cursor))
+            host.kv.put(cursor_key, str(new_cursor))
 
         return {"status": "ok", "events": events, "count": len(events),
                 "cursor": events[-1]["seq"] if events else cursor,

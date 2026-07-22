@@ -26,7 +26,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/bhatti/PlexSpaces/sdks/go/plexspaces"
 )
@@ -92,9 +91,9 @@ func (a *weatherActor) handleGetWeather(payloadJSON string) string {
 	cacheKey := "weather:" + city
 
 	// Try cache first
-	cached := h.KVGet(cacheKey)
-	if strings.HasPrefix(cached, "ERROR:") {
-		h.Log("warn", fmt.Sprintf("Cache read failed for %s: %s", city, cached))
+	cached, cacheErr := h.KV().Get(cacheKey)
+	if cacheErr != nil {
+		h.Log("warn", fmt.Sprintf("Cache read failed for %s: %s", city, cacheErr.Error()))
 	} else if cached != "" {
 		var data map[string]any
 		if json.Unmarshal([]byte(cached), &data) == nil {
@@ -140,8 +139,8 @@ func (a *weatherActor) handleGetWeather(payloadJSON string) string {
 		"fetched_at_ms": float64(h.NowMs()),
 	}
 	if cacheJSON, err := json.Marshal(cachedData); err == nil {
-		if cacheWrite := h.KVPut(cacheKey, string(cacheJSON)); strings.HasPrefix(cacheWrite, "ERROR:") {
-			h.Log("warn", fmt.Sprintf("Cache write failed for %s: %s", city, cacheWrite))
+		if writeErr := h.KV().Put(cacheKey, string(cacheJSON)); writeErr != nil {
+			h.Log("warn", fmt.Sprintf("Cache write failed for %s: %s", city, writeErr.Error()))
 		}
 	}
 

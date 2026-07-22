@@ -85,6 +85,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **Distributed Coordination**: Actor groups, process groups, and distributed locks
 - **Observability**: Built-in metrics (unified Prometheus pipeline; see [Metrics](docs/metrics.md)), tracing, and health checks
 - **gRPC-First**: All APIs defined in Protocol Buffers for type safety and multi-language support
+- **WebSocket Transport**: Thin-client support for browsers and edge devices via `/ws` endpoint with binary Protobuf frames (see [WebSocket Transport](docs/websocket.md))
 - **Capability Providers**: HTTP, KeyValue, BlobStorage facets for I/O operations
 - **Security Facets**: Authentication, authorization, and encryption support
 - **Event-Driven**: EventEmitter facet for reactive programming patterns

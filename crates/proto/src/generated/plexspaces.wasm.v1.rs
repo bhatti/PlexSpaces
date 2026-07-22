@@ -8,10 +8,12 @@
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HttpFetchRequest {
     /// Request headers to merge with service-link defaults and auth headers.
-    #[prost(map="string, string", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Raw request body bytes.
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub body: ::prost::alloc::vec::Vec<u8>,
 }
 /// Outbound HTTP response returned by actor-world host.http-fetch.
@@ -19,13 +21,15 @@ pub struct HttpFetchRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HttpFetchResponse {
     /// HTTP status code.
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub status: u32,
     /// Response headers.
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Raw response body bytes.
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub body: ::prost::alloc::vec::Vec<u8>,
 }
 /// WebAssembly module definition
@@ -328,13 +332,15 @@ pub struct WasmConfig {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployWasmModuleRequest {
     /// WASM module to deploy
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub module: ::core::option::Option<WasmModule>,
     /// How to distribute module to nodes
-    #[prost(enumeration="deploy_wasm_module_request::PreWarmStrategy", tag="2")]
+    #[prost(enumeration="deploy_wasm_module_request::PreWarmStrategy", tag="3")]
     pub pre_warm: i32,
     /// Node tags for PUSH_TAGGED strategy (e.g., \["us-east-1", "production"\])
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag="4")]
     pub target_node_tags: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Nested message and enum types in `DeployWasmModuleRequest`.
@@ -343,14 +349,15 @@ pub mod deploy_wasm_module_request {
     #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum PreWarmStrategy {
+        PreWarmStrategyUnspecified = 0,
         /// No pre-warming - nodes fetch on-demand (lazy)
-        None = 0,
+        None = 1,
         /// Announce to all nodes - they decide whether to pre-fetch
-        Announce = 1,
+        Announce = 2,
         /// Push to all nodes immediately (eager)
-        PushAll = 2,
+        PushAll = 3,
         /// Push to subset of nodes (e.g., based on tags)
-        PushTagged = 3,
+        PushTagged = 4,
     }
     impl PreWarmStrategy {
         /// String value of the enum field names used in the ProtoBuf definition.
@@ -359,6 +366,7 @@ pub mod deploy_wasm_module_request {
         /// (if the ProtoBuf definition does not change) and safe for programmatic use.
         pub fn as_str_name(&self) -> &'static str {
             match self {
+                PreWarmStrategy::PreWarmStrategyUnspecified => "PRE_WARM_STRATEGY_UNSPECIFIED",
                 PreWarmStrategy::None => "NONE",
                 PreWarmStrategy::Announce => "ANNOUNCE",
                 PreWarmStrategy::PushAll => "PUSH_ALL",
@@ -368,6 +376,7 @@ pub mod deploy_wasm_module_request {
         /// Creates an enum from field names used in the ProtoBuf definition.
         pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
             match value {
+                "PRE_WARM_STRATEGY_UNSPECIFIED" => Some(Self::PreWarmStrategyUnspecified),
                 "NONE" => Some(Self::None),
                 "ANNOUNCE" => Some(Self::Announce),
                 "PUSH_ALL" => Some(Self::PushAll),
@@ -382,19 +391,21 @@ pub mod deploy_wasm_module_request {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployWasmModuleResponse {
     /// Was deployment successful?
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Module hash (for cache lookup)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub module_hash: ::prost::alloc::string::String,
     /// Number of nodes that received the module (for pre-warming)
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub nodes_pre_warmed: u32,
     /// Error details if deployment failed (replaces error_message)
     ///
     /// If deployment succeeded, this field is not set (code = OK).
     /// If deployment failed, code indicates failure reason.
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub error: ::core::option::Option<WasmError>,
 }
 /// Instantiate WASM actor request
@@ -421,11 +432,13 @@ pub struct InstantiateActorRequest {
     /// - Name: "counter-actor@1.2.3" (fetches from registry)
     /// - Hash: "a1b2c3d4..." (direct cache lookup)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub module_ref: ::prost::alloc::string::String,
     /// Actor ID to assign to this instance
     ///
     /// Format: ULID for sortability (see CLAUDE.md Core Principle 0)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
     /// Initial state bytes (opaque to runtime)
     ///
@@ -434,17 +447,17 @@ pub struct InstantiateActorRequest {
     /// - Empty (new actor with default state)
     /// - Snapshot (restoring actor from checkpoint)
     /// - Migration state (actor moving to new node)
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub initial_state: ::prost::alloc::vec::Vec<u8>,
     /// Configuration overrides (optional)
     ///
     /// If not provided, uses module's default config or system defaults.
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub config: ::core::option::Option<WasmConfig>,
     /// Node ID to instantiate on (optional)
     ///
     /// If not provided, scheduler chooses node based on load balancing.
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub target_node_id: ::prost::alloc::string::String,
 }
 /// Instantiate WASM actor response
@@ -452,22 +465,24 @@ pub struct InstantiateActorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InstantiateActorResponse {
     /// Was instantiation successful?
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Actor ID of instantiated actor
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
     /// Node ID where actor is running
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub node_id: ::prost::alloc::string::String,
     /// Instance creation time
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     /// Error details if instantiation failed (replaces error_message)
     ///
     /// If instantiation succeeded, this field is not set (code = OK).
     /// If instantiation failed, code indicates failure reason.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag="6")]
     pub error: ::core::option::Option<WasmError>,
 }
 /// Migrate WASM actor request
@@ -490,17 +505,19 @@ pub struct InstantiateActorResponse {
 pub struct MigrateActorRequest {
     /// Actor ID to migrate
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
     /// Source node ID (current location)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub source_node_id: ::prost::alloc::string::String,
     /// Destination node ID (target location)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub target_node_id: ::prost::alloc::string::String,
     /// Include journal entries (for durable actors)
     ///
     /// If true, migrate journal for replay on destination.
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub include_journal: bool,
 }
 /// Migrate WASM actor response
@@ -508,16 +525,18 @@ pub struct MigrateActorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MigrateActorResponse {
     /// Was migration successful?
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Migration duration (should be < 10ms for state-only)
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub migration_time: ::core::option::Option<::prost_types::Duration>,
     /// Size of state transferred (bytes)
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag="4")]
     pub state_size_bytes: u64,
     /// Error details if migration failed
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub error: ::core::option::Option<WasmError>,
 }
 /// WASM error details
@@ -698,6 +717,189 @@ impl WasmErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

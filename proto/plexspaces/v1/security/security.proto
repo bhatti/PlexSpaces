@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Security API
@@ -38,6 +38,7 @@ syntax = "proto3";
 
 package plexspaces.security.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
@@ -327,9 +328,10 @@ message AuthenticateServiceRequest {
     }
   };
 
-  string service_id = 1 [(google.api.field_behavior) = REQUIRED];
-  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED]; // Client certificate
-  bytes signature = 3 [(google.api.field_behavior) = REQUIRED]; // Signature of challenge
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string service_id = 2 [(google.api.field_behavior) = REQUIRED];
+  bytes certificate = 3 [(google.api.field_behavior) = REQUIRED]; // Client certificate
+  bytes signature = 4 [(google.api.field_behavior) = REQUIRED]; // Signature of challenge
 }
 
 message AuthenticateServiceResponse {
@@ -340,9 +342,10 @@ message AuthenticateServiceResponse {
     }
   };
 
-  ServiceIdentity identity = 1;
-  string token = 2; // Short-lived token for subsequent requests
-  google.protobuf.Timestamp expires_at = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ServiceIdentity identity = 2;
+  string token = 3; // Short-lived token for subsequent requests
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 // API authentication (JWT)
@@ -355,7 +358,8 @@ message AuthenticateApiRequest {
     }
   };
 
-  string jwt_token = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string jwt_token = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message AuthenticateApiResponse {
@@ -366,9 +370,10 @@ message AuthenticateApiResponse {
     }
   };
 
-  string service_id = 1; // Service ID from JWT claims
-  repeated string scopes = 2; // Scopes from JWT claims
-  google.protobuf.Timestamp expires_at = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string service_id = 2; // Service ID from JWT claims
+  repeated string scopes = 3; // Scopes from JWT claims
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 // API key management
@@ -381,10 +386,11 @@ message CreateApiKeyRequest {
     }
   };
 
-  string name = 1 [(google.api.field_behavior) = REQUIRED];
-  string description = 2;
-  repeated string scopes = 3;
-  google.protobuf.Duration expires_in = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  string description = 3;
+  repeated string scopes = 4;
+  google.protobuf.Duration expires_in = 5;
 }
 
 message CreateApiKeyResponse {
@@ -395,8 +401,9 @@ message CreateApiKeyResponse {
     }
   };
 
-  ApiKey api_key = 1;
-  string key = 2; // Only returned on creation
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ApiKey api_key = 2;
+  string key = 3; // Only returned on creation
 }
 
 message RevokeApiKeyRequest {
@@ -408,7 +415,8 @@ message RevokeApiKeyRequest {
     }
   };
 
-  string key_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message RevokeApiKeyResponse {
@@ -418,6 +426,7 @@ message RevokeApiKeyResponse {
       description: "Response confirming API key revocation"
     }
   };
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
 }
 
 message ListApiKeysRequest {
@@ -428,7 +437,8 @@ message ListApiKeysRequest {
     }
   };
 
-  plexspaces.common.v1.PageRequest page_request = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page_request = 2;
 }
 
 message ListApiKeysResponse {
@@ -439,8 +449,9 @@ message ListApiKeysResponse {
     }
   };
 
-  repeated ApiKey api_keys = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ApiKey api_keys = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 // Audit logs
@@ -452,12 +463,13 @@ message GetAuditLogsRequest {
     }
   };
 
-  google.protobuf.Timestamp start_time = 1;
-  google.protobuf.Timestamp end_time = 2;
-  string service_id = 3; // Changed from user_id to service_id
-  string action = 4;
-  string resource = 5;
-  plexspaces.common.v1.PageRequest page_request = 6;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  string service_id = 4; // Changed from user_id to service_id
+  string action = 5;
+  string resource = 6;
+  plexspaces.common.v1.PageRequest page_request = 7;
 }
 
 message GetAuditLogsResponse {
@@ -468,8 +480,9 @@ message GetAuditLogsResponse {
     }
   };
 
-  repeated AuditLogEntry entries = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated AuditLogEntry entries = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 // Note: SecurityService gRPC service removed - message types retained for configuration use

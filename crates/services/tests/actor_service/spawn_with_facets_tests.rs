@@ -251,6 +251,7 @@ async fn test_spawn_actor_with_virtual_actor_facet() {
     };
 
     let request = SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         spec: Some(ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: "virtual-actor-1".to_string(),
@@ -352,6 +353,7 @@ async fn test_spawn_actor_with_multiple_facets() {
     };
 
     let request = SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         spec: Some(ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: "multi-facet-actor".to_string(),
@@ -414,6 +416,7 @@ async fn test_spawn_actor_without_facets() {
     let actor_service = ActorServiceImpl::new(service_locator, "test-node".to_string());
 
     let request = SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         spec: Some(ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: "no-facet-actor".to_string(),

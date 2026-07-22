@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Application deployment commands (like AWS Lambda)
@@ -35,6 +35,7 @@ use plexspaces_proto::wasm::v1::WasmModule;
 use reqwest::multipart;
 use std::fs;
 use tonic::transport::Channel;
+use ulid::Ulid;
 
 /// Deploy an application (like AWS Lambda deploy)
 ///
@@ -149,6 +150,7 @@ pub async fn deploy(
             metadata: None,
             seed_nodes: vec![],
             required_service_links: vec![],
+            static_mount: String::new(),
         })
     } else if wasm_module.is_none() {
         // Config required if not WASM
@@ -171,6 +173,7 @@ pub async fn deploy(
             metadata: None,
             seed_nodes: vec![],
             required_service_links: vec![],
+            static_mount: String::new(),
         })
     };
 
@@ -199,6 +202,7 @@ pub async fn deploy(
     };
 
     let request = DeployApplicationRequest {
+        request_id: Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: name.to_string(),
         version: version.to_string(),
@@ -379,6 +383,7 @@ pub async fn undeploy(node_addr: &str, app_id: &str) -> Result<()> {
     println!("🛑 Undeploying application: {}", app_id);
 
     let request = UndeployApplicationRequest {
+        request_id: Ulid::new().to_string(),
         application_id: app_id.to_string(),
         timeout: None, // Use default timeout
     };
@@ -426,6 +431,7 @@ pub async fn list(node_addr: &str, json_output: bool) -> Result<()> {
         .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE);
 
     let request = ListApplicationsRequest {
+        request_id: Ulid::new().to_string(),
         status_filter: None,
     };
 
@@ -511,6 +517,7 @@ mod list_json_tests {
     #[test]
     fn list_applications_json_empty_applications() {
         let r = ListApplicationsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             applications: vec![],
         };
         let s = list_applications_response_to_json_string(&r).unwrap();
@@ -533,6 +540,7 @@ mod list_json_tests {
             latency_samples: HashMap::new(),
         };
         let r = ListApplicationsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             applications: vec![ApplicationInfo {
                 application_id: "app-1".into(),
                 name: "my-app".into(),
@@ -555,6 +563,7 @@ mod list_json_tests {
     #[test]
     fn list_applications_json_serializes_deployed_at() {
         let r = ListApplicationsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             applications: vec![ApplicationInfo {
                 application_id: "a".into(),
                 name: "n".into(),

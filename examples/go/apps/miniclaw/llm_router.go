@@ -54,7 +54,7 @@ func (l *LLMRouterActor) Init(configJSON string) string {
 	if err := host.PG().Join("svc:llm_router"); err != nil {
 		host.Warn(fmt.Sprintf("LLMRouterActor: failed to join svc:llm_router: %v", err))
 	}
-	_ = host.SendAfter(30000, "timer_tick", map[string]any{"op": "timer_tick"})
+	_, _ = host.Actor().SendAfter(30000, "timer_tick", map[string]any{"op": "timer_tick"})
 	host.Info(fmt.Sprintf("LLMRouterActor Init actor_id=%s model=%s", config.ActorID, l.Model))
 	return ""
 }
@@ -96,7 +96,7 @@ func (l *LLMRouterActor) registerCredential(p map[string]any) string {
 	if token == "" || apiKey == "" {
 		return marshal(map[string]any{"error": "phantom_token and api_key required"})
 	}
-	host.KVPut("cred:"+token, apiKey)
+	host.KV().Put("cred:"+token, apiKey)
 	host.Info(fmt.Sprintf("LLMRouterActor: registered credential for token=%s", token))
 	return marshal(map[string]any{"status": "ok", "phantom_token": token})
 }
@@ -107,7 +107,8 @@ func (l *LLMRouterActor) resolveCredential(phantomToken string) string {
 	if phantomToken == "" {
 		return ""
 	}
-	return host.KVGet("cred:" + phantomToken)
+	v, _ := host.KV().Get("cred:" + phantomToken)
+	return v
 }
 
 func (l *LLMRouterActor) chatCompletion(p map[string]any) string {
@@ -157,7 +158,7 @@ func (l *LLMRouterActor) chatCompletion(p map[string]any) string {
 	}
 
 	cacheKey := "llm_cache:" + cacheKeyFor(lastUserMsg)
-	cached := host.KVGet(cacheKey)
+	cached, _ := host.KV().Get(cacheKey)
 	if cached != "" {
 		l.CacheHits++
 		var cachedResp map[string]any
@@ -257,7 +258,7 @@ func (l *LLMRouterActor) chatCompletion(p map[string]any) string {
 	if err != nil {
 		host.Warn(fmt.Sprintf("LLMRouterActor: failed to marshal response for cache: %v", err))
 	} else {
-		host.KVPut(cacheKey, string(respJSON))
+		host.KV().Put(cacheKey, string(respJSON))
 	}
 
 	l.RequestCount++
@@ -279,7 +280,7 @@ func (l *LLMRouterActor) timerTick() string {
 			host.Info("LLMRouterActor: circuit closed via timer recovery")
 		}
 	}
-	_ = host.SendAfter(30000, "timer_tick", map[string]any{"op": "timer_tick"})
+	_, _ = host.Actor().SendAfter(30000, "timer_tick", map[string]any{"op": "timer_tick"})
 	return marshal(map[string]any{"status": "ok", "circuit_open": l.CircuitOpen})
 }
 

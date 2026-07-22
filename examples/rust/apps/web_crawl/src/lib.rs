@@ -38,7 +38,11 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{ask, pg_join, pg_members};
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_pool::{pool_checkin, pool_checkout, pool_get_metrics};
+use plexspaces::actor::host_shard::{create_shard_group, scatter_gather};
+use plexspaces::actor::host_ts::{ts_read, ts_take, ts_write};
 
 const FETCHER_POOL: &str = "fetcher_pool";
 const CRAWL_WORKERS_GROUP: &str = "crawl_workers";
@@ -179,7 +183,7 @@ fn ts_write_4(f0: &str, f1: &str, f2: &str, f3: &str) {
         ])],
         transaction_id: String::new(),
     };
-    let _ = host::ts_write(&req.encode_to_vec());
+    let _ = ts_write(&req.encode_to_vec());
 }
 
 fn ts_take_pending() -> Option<(String, String)> {
@@ -197,7 +201,7 @@ fn ts_take_pending() -> Option<(String, String)> {
         transaction_id: String::new(),
         spatial_filter: None,
     };
-    let raw = host::ts_take(&req.encode_to_vec()).ok()?;
+    let raw = ts_take(&req.encode_to_vec()).ok()?;
     if raw.is_empty() {
         return None;
     }
@@ -228,7 +232,7 @@ fn ts_read_any(url: &str) -> bool {
         transaction_id: String::new(),
         spatial_filter: None,
     };
-    if let Ok(raw) = host::ts_read(&req.encode_to_vec()) {
+    if let Ok(raw) = ts_read(&req.encode_to_vec()) {
         if let Ok(resp) = ReadResponse::decode(raw.as_slice()) {
             return !resp.tuples.is_empty();
         }
@@ -270,7 +274,7 @@ fn handle_init(payload: &[u8]) -> Vec<u8> {
         if s.role == "fetcher" {
             #[cfg(not(test))]
             {
-                if host::pg_join(CRAWL_WORKERS_GROUP).is_ok() {
+                if pg_join(CRAWL_WORKERS_GROUP).is_ok() {
                     s.worker_joined = true;
                 }
             }
@@ -294,7 +298,7 @@ fn handle_fetch(payload: &[u8]) -> Vec<u8> {
         if !s.worker_joined {
             #[cfg(not(test))]
             {
-                if host::pg_join(CRAWL_WORKERS_GROUP).is_ok() {
+                if pg_join(CRAWL_WORKERS_GROUP).is_ok() {
                     s.worker_joined = true;
                 }
             }
@@ -338,7 +342,7 @@ fn handle_fetch_batch(payload: &[u8]) -> Vec<u8> {
     let shard_index = with_state(|s| {
         if !s.worker_joined {
             #[cfg(not(test))]
-            { let _ = host::pg_join(CRAWL_WORKERS_GROUP).map(|_| s.worker_joined = true); }
+            { let _ = pg_join(CRAWL_WORKERS_GROUP).map(|_| s.worker_joined = true); }
         }
         s.pool_slot
     });
@@ -408,7 +412,7 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
     let mut baseline_pps = 0.0f64;
 
     for &num_workers in &worker_counts {
-        let group_id = format!("bench-fetchers-{num_workers}-{}", host::now_ms() % 100_000);
+        let group_id = format!("bench-fetchers-{num_workers}-{}", now_ms() % 100_000);
 
         for u in urls.iter().take(4) {
             ts_write_4("url_queue", u, "pending", "0");
@@ -419,7 +423,7 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
         let mut total_words = 0i64;
         let mut worker_fetches = vec![0i64; num_workers];
 
-        let t0 = host::now_ms();
+        let t0 = now_ms();
 
         // ── ScatterGather parallel dispatch ──
         let sg_req = CreateShardGroupRequest {
@@ -439,9 +443,9 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
             metadata: std::collections::HashMap::new(),
         }.encode_to_vec();
 
-        let t_coord0 = host::now_ms();
-        let create_resp = host::create_shard_group(&sg_req);
-        coord_ms += host::now_ms().saturating_sub(t_coord0);
+        let t_coord0 = now_ms();
+        let create_resp = create_shard_group(&sg_req);
+        coord_ms += now_ms().saturating_sub(t_coord0);
 
         let sg_ok = create_resp.as_ref().map(|b| {
             CreateShardGroupResponse::decode(b.as_slice())
@@ -456,7 +460,7 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
             let scatter_req = ScatterGatherRequest {
                 group_id: group_id.clone(),
                 query: Some(ProtoMessage {
-                    id: format!("req-{}", host::now_ms()),
+                    id: format!("req-{}", now_ms()),
                     message_type: "fetch_batch".to_string(),
                     payload: query_json.to_string().into_bytes(),
                     ..Default::default()
@@ -467,11 +471,11 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
                 ..Default::default()
             }.encode_to_vec();
 
-            let t_fetch = host::now_ms();
-            let sg_resp = host::scatter_gather(&scatter_req);
-            fetch_ms += host::now_ms().saturating_sub(t_fetch);
+            let t_fetch = now_ms();
+            let sg_resp = scatter_gather(&scatter_req);
+            fetch_ms += now_ms().saturating_sub(t_fetch);
 
-            let t_coord_post = host::now_ms();
+            let t_coord_post = now_ms();
             if let Ok(resp_bytes) = sg_resp {
                 if let Ok(response) = ScatterGatherResponse::decode(resp_bytes.as_slice()) {
                     for (si, shard) in response.shard_responses.iter().enumerate() {
@@ -491,17 +495,17 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
                 for f in worker_fetches.iter_mut() { *f = (pages_per_round / num_workers) as i64; }
             }
             for u in urls.iter().take(4) { ts_write_4("url_queue", u, "visited", "1"); }
-            coord_ms += host::now_ms().saturating_sub(t_coord_post);
+            coord_ms += now_ms().saturating_sub(t_coord_post);
         } else {
             // Fallback: sequential dispatch
             let worker_ids: Vec<String> = (0..num_workers).map(|i| format!("{app_id}/fetcher-{i}@")).collect();
             for (idx, url) in urls.iter().enumerate() {
                 let wid = &worker_ids[idx % num_workers];
                 let req = json!({ "url": url }).to_string().into_bytes();
-                let t_f = host::now_ms();
-                let resp = host::ask(wid, "fetch", &req, 10_000);
-                fetch_ms += host::now_ms().saturating_sub(t_f);
-                let t_c = host::now_ms();
+                let t_f = now_ms();
+                let resp = ask(wid, "fetch", &req, 10_000);
+                fetch_ms += now_ms().saturating_sub(t_f);
+                let t_c = now_ms();
                 worker_fetches[idx % num_workers] += 1;
                 let tw: u64 = if let Ok(rb) = resp {
                     if let Ok(rv) = serde_json::from_slice::<Value>(&rb) {
@@ -511,11 +515,11 @@ fn handle_benchmark(payload: &[u8]) -> Vec<u8> {
                 } else { simulate_word_counts(url).values().sum() };
                 total_words += tw as i64;
                 if idx % 10 == 0 { ts_write_4("url_queue", url, "visited", "1"); }
-                coord_ms += host::now_ms().saturating_sub(t_c);
+                coord_ms += now_ms().saturating_sub(t_c);
             }
         }
 
-        let elapsed = host::now_ms().saturating_sub(t0);
+        let elapsed = now_ms().saturating_sub(t0);
         let pps = if elapsed > 0 { pages_per_round as f64 * 1000.0 / elapsed as f64 } else { 0.0 };
         let elapsed1 = elapsed.max(1);
         let pf = 1.0 - coord_ms as f64 / elapsed1 as f64;
@@ -567,7 +571,7 @@ fn handle_analyze(payload: &[u8]) -> Vec<u8> {
         if !s.analyzer_joined {
             #[cfg(not(test))]
             {
-                if host::pg_join(ANALYZER_GROUP).is_ok() {
+                if pg_join(ANALYZER_GROUP).is_ok() {
                     s.analyzer_joined = true;
                 }
             }
@@ -627,7 +631,7 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
     let mut all_results: Vec<Value> = Vec::new();
     let mut coord_time_ms = 0u64;
     let mut fetch_time_ms = 0u64;
-    let t0_crawl = host::now_ms();
+    let t0_crawl = now_ms();
 
     // ── Phase 2: BFS drain from local frontier ──
     while !frontier.is_empty() && pages_crawled < max_pages {
@@ -640,11 +644,11 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
         }
 
         // ── ElasticPool checkout — separates rate limiting from queue depth ──
-        let t_coord = host::now_ms();
-        let checkout_raw_result = host::pool_checkout(FETCHER_POOL, CHECKOUT_TIMEOUT_MS);
-        coord_time_ms += host::now_ms().saturating_sub(t_coord);
+        let t_coord = now_ms();
+        let checkout_raw_result = pool_checkout(FETCHER_POOL, CHECKOUT_TIMEOUT_MS);
+        coord_time_ms += now_ms().saturating_sub(t_coord);
 
-        let t_fetch = host::now_ms();
+        let t_fetch = now_ms();
         let result_bytes = if let Ok(checkout_raw) = checkout_raw_result {
             if !checkout_raw.is_empty() {
                 if let Ok(handle) = serde_json::from_slice::<Value>(&checkout_raw) {
@@ -652,10 +656,10 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
                     let checkout_id = handle.get("checkout_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     if !actor_id.is_empty() {
                         let fetch_req = json!({ "url": url, "depth": depth }).to_string().into_bytes();
-                        let result = host::ask(&actor_id, "fetch", &fetch_req, 10_000);
-                        let t_checkin = host::now_ms();
-                        let _ = host::pool_checkin(FETCHER_POOL, &actor_id, &checkout_id, true);
-                        coord_time_ms += host::now_ms().saturating_sub(t_checkin);
+                        let result = ask(&actor_id, "fetch", &fetch_req, 10_000);
+                        let t_checkin = now_ms();
+                        let _ = pool_checkin(FETCHER_POOL, &actor_id, &checkout_id, true);
+                        coord_time_ms += now_ms().saturating_sub(t_checkin);
                         match result {
                             Ok(b) => b,
                             Err(_) => fallback_result(&url),
@@ -672,11 +676,11 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
         } else {
             fallback_result(&url)
         };
-        fetch_time_ms += host::now_ms().saturating_sub(t_fetch);
+        fetch_time_ms += now_ms().saturating_sub(t_fetch);
 
         if let Ok(result) = serde_json::from_slice::<Value>(&result_bytes) {
             // Enqueue newly discovered links — mark-before-enqueue dedup via local HashSet
-            let t_coord2 = host::now_ms();
+            let t_coord2 = now_ms();
             if let Some(links) = result.get("links").and_then(|l| l.as_array()) {
                 for link in links {
                     if let Some(link_str) = link.as_str() {
@@ -690,13 +694,13 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
                     }
                 }
             }
-            coord_time_ms += host::now_ms().saturating_sub(t_coord2);
+            coord_time_ms += now_ms().saturating_sub(t_coord2);
             all_results.push(result);
             pages_crawled += 1;
         }
     }
 
-    let elapsed_ms = host::now_ms().saturating_sub(t0_crawl);
+    let elapsed_ms = now_ms().saturating_sub(t0_crawl);
     let pages_per_sec = if elapsed_ms > 0 {
         (pages_crawled as f64) * 1000.0 / (elapsed_ms as f64)
     } else {
@@ -709,7 +713,7 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
     };
 
     // ── Pool utilization metrics ──
-    let pool_metrics = if let Ok(raw) = host::pool_get_metrics(FETCHER_POOL) {
+    let pool_metrics = if let Ok(raw) = pool_get_metrics(FETCHER_POOL) {
         serde_json::from_slice(&raw).unwrap_or_else(|_| json!({ "total_checkouts": pages_crawled, "pool_size": 4 }))
     } else {
         json!({ "total_checkouts": pages_crawled, "pool_size": 4 })
@@ -730,9 +734,9 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
         }
         let analyzer_id = format!("{app_id}/analyzer-{shard_idx}@");
         let analyze_req = json!({ "results": chunk }).to_string().into_bytes();
-        if host::ask(&analyzer_id, "analyze", &analyze_req, 10_000).is_ok() {
+        if ask(&analyzer_id, "analyze", &analyze_req, 10_000).is_ok() {
             let top_req = json!({ "n": 20 }).to_string().into_bytes();
-            if let Ok(top_bytes) = host::ask(&analyzer_id, "top_words", &top_req, 10_000) {
+            if let Ok(top_bytes) = ask(&analyzer_id, "top_words", &top_req, 10_000) {
                 if let Ok(top) = serde_json::from_slice::<Value>(&top_bytes) {
                     if let Some(words) = top.get("top_words").and_then(|w| w.as_array()) {
                         for entry in words {
@@ -761,7 +765,7 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
 
     // ── Phase 4: ProcessGroup status gather — discover actual worker activity ──
     let mut worker_stats: Vec<Value> = Vec::new();
-    let members = host::pg_members(CRAWL_WORKERS_GROUP).unwrap_or_default();
+    let members = pg_members(CRAWL_WORKERS_GROUP).unwrap_or_default();
     let members_to_query = if members.is_empty() {
         (0..4).map(|i| format!("{app_id}/fetcher-{i}@")).collect::<Vec<_>>()
     } else {
@@ -769,7 +773,7 @@ fn handle_crawl(payload: &[u8]) -> Vec<u8> {
     };
     for member_id in &members_to_query {
         let req = json!({}).to_string().into_bytes();
-        if let Ok(stats_bytes) = host::ask(member_id, "status_request", &req, 5_000) {
+        if let Ok(stats_bytes) = ask(member_id, "status_request", &req, 5_000) {
             if let Ok(mut stats) = serde_json::from_slice::<Value>(&stats_bytes) {
                 let short_id = member_id.split('/').last()
                     .unwrap_or(member_id)

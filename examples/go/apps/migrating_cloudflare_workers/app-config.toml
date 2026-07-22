@@ -42,3 +42,16 @@ shutdown_timeout_seconds = 5
 max_tokens = "5"
 refill_rate_ms = "1000"
 tenant_id = "default"
+
+# AlarmDemo actor (Durable Object: durable alarm lifecycle)
+# Demonstrates setAlarm/getAlarm/deleteAlarm + batched request processing.
+[[supervisor.children]]
+name = "AlarmDemo"
+actor_type = "AlarmDemo"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+facets = ["virtual_actor", "reminder"]
+tenant_id = "default"
+
+[supervisor.children.args]
+tenant_id = "default"

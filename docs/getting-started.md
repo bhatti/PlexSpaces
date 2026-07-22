@@ -366,8 +366,9 @@ Facets add dynamic capabilities to actors:
 4. **Explore Examples**: Check out the [examples directory](../examples/README.md) for more patterns
 5. **Read Architecture**: Understand the [system design](architecture.md)
 6. **FaaS Invocation**: Learn how to invoke actors via HTTP: `GET /api/v1/actors/{namespace}/{actor_type}` and `/ask` use `AskReply`; `POST`/`PUT /api/v1/actors/{namespace}/{actor_type}` use `SendMessage`; `POST`/`PUT /ask` use `AskReply` with a request body. See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
-7. **Deploy to Production**: Follow the [installation guide](installation.md)
-8. **Learn Use Cases**: See [real-world applications](use-cases.md)
+7. **WebSocket Clients**: Connect thin clients (browsers, edge devices) via WebSocket — see [WebSocket Transport](websocket.md)
+8. **Deploy to Production**: Follow the [installation guide](installation.md)
+9. **Learn Use Cases**: See [real-world applications](use-cases.md)
 
 ## Common Patterns
 

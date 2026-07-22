@@ -50,7 +50,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_persist() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -72,7 +72,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_persist_batch() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -98,7 +98,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_get_sequence() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -140,7 +140,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_checkpoint() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -174,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_get_checkpoint_sequence() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -211,7 +211,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_is_replaying() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -230,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_cache_side_effect() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -256,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_read_journal() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -305,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_impl_compact() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions_with_journal().await;
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -339,7 +339,7 @@ mod tests {
     async fn test_durability_impl_without_storage() {
         // ARRANGE: Create host functions without journal storage
         let host_functions = Arc::new(HostFunctions::new());
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Try to persist (should fail)

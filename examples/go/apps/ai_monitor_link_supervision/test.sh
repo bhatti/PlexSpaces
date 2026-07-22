@@ -127,6 +127,10 @@ for node in "${NODE_LIST[@]}"; do
 done
 
 TEMP_CONFIG="$(mktemp -t ai-monitor-link-app-config)"
+  trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
+  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+  zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 render_config "$TEMP_CONFIG"
 
 echo "Step 1: Undeploy from all nodes, then deploy to entry node"
@@ -140,8 +144,7 @@ for _attempt in 1 2 3; do
       -F "application_id=$APP_ID" \
       -F "name=$APP_NAME" \
       -F "version=1.0.0" \
-      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$TEMP_CONFIG" 2>&1)
+      -F "app_file=@$APP_ZIP" 2>&1)
   http_code=$(echo "$response" | tail -n1)
   body=$(echo "$response" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then

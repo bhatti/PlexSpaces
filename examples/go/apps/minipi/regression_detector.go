@@ -261,7 +261,7 @@ func (r *RegressionDetectorActor) replayDiff(p map[string]any) string {
 }
 
 func (r *RegressionDetectorActor) loadBaseline() map[string]map[string]any {
-	raw := host.KVGet("regression_baseline")
+	raw, _ := host.KV().Get("regression_baseline")
 	if raw == "" {
 		return map[string]map[string]any{}
 	}
@@ -284,18 +284,18 @@ func (r *RegressionDetectorActor) storeBaseline(evalRunID string, scores []map[s
 		}
 	}
 	baselineJSON, _ := json.Marshal(baseline)
-	host.KVPut("regression_baseline", string(baselineJSON))
-	host.KVPut("regression_baseline_eval_run", evalRunID)
+	host.KV().Put("regression_baseline", string(baselineJSON))
+	host.KV().Put("regression_baseline_eval_run", evalRunID)
 }
 
 func (r *RegressionDetectorActor) loadTrajectory(trajID string) map[string]any {
 	if trajID == "" {
 		return map[string]any{}
 	}
-	raw := host.KVGet("trajectory:" + trajID)
+	raw, _ := host.KV().Get("trajectory:" + trajID)
 	if raw == "" {
 		// Try agent_trajectory key
-		raw = host.KVGet("agent_trajectory:" + trajID)
+		raw, _ = host.KV().Get("agent_trajectory:" + trajID)
 	}
 	if raw == "" {
 		return map[string]any{}

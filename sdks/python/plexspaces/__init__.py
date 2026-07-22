@@ -52,7 +52,7 @@ from .decorators import (
     query_handler,
 )
 from .agent import AgentLoop, AgentConfig, AgentTrajectory, AgentStep, AgentStepKind
-from .host import host, pg_first, ServiceHttpClient
+from .host import host, pg_first, ServiceHttpClient, ActorRef, get_actor_ref
 from .workflow import default_retry_config, with_retry
 from .leader_worker import LeaderWorkerClient, list_worker_node_ids
 from .actor_id import ActorID
@@ -79,6 +79,8 @@ __all__ = [
     "host",
     "pg_first",
     "ServiceHttpClient",
+    "ActorRef",
+    "get_actor_ref",
     "with_retry",
     "LeaderWorkerClient",
     "list_worker_node_ids",

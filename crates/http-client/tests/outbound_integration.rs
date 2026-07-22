@@ -57,6 +57,7 @@ async fn outbound_http_get_success() {
         .execute(
             "test-api",
             OutboundHttpRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 method: "GET".to_string(),
                 path_and_query: "/ping".to_string(),
                 headers: vec![],
@@ -117,6 +118,7 @@ async fn outbound_http_retries_on_503_then_succeeds() {
         .execute(
             "flaky",
             OutboundHttpRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 method: "GET".to_string(),
                 path_and_query: "/flaky".to_string(),
                 headers: vec![],
@@ -170,6 +172,7 @@ async fn circuit_opens_after_failures() {
 
     let client = ResilientOutboundHttpClient::from_runtime_config(&rt).expect("build client");
     let req = OutboundHttpRequest {
+        request_id: ulid::Ulid::new().to_string(),
         method: "GET".to_string(),
         path_and_query: "/boom".to_string(),
         headers: vec![],
@@ -223,6 +226,7 @@ async fn outbound_http_client_supports_concurrent_calls() {
                 .execute(
                     "weather-api",
                     OutboundHttpRequest {
+                        request_id: ulid::Ulid::new().to_string(),
                         method: "GET".to_string(),
                         path_and_query: "/forecast".to_string(),
                         headers: vec![],

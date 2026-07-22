@@ -464,7 +464,10 @@ mod wasm_app {
     });
 
     use exports::plexspaces::actor::actor::Guest;
-    use plexspaces::actor::host;
+    use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_http::http_fetch;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::{application_get_metrics, application_metrics_add};
 
     struct WasmHost;
 
@@ -488,12 +491,12 @@ mod wasm_app {
     }
 
     fn current_node_id() -> String {
-        actor_node_id(&host::self_id())
+        actor_node_id(&self_id())
     }
 
     fn merge_application_metrics(metrics: Value, context: &str) -> Result<(), String> {
         let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
-        host::application_metrics_add(&current_application_id(), &metrics_bytes)
+        application_metrics_add(&current_application_id(), &metrics_bytes)
             .map(|_| ())
             .map_err(|err| format!("{context}: {err}"))
     }
@@ -541,7 +544,7 @@ mod wasm_app {
     }
 
     fn handle_get_metrics() -> Result<Vec<u8>, String> {
-        let response = host::application_get_metrics(&current_application_id(), &current_node_id())?;
+        let response = application_get_metrics(&current_application_id(), &current_node_id())?;
         let metrics = plexspaces_proto::application::v1::ApplicationMetrics::decode(response.as_slice())
             .map_err(|err| format!("invalid ApplicationMetrics protobuf: {err}"))?;
         Ok(application_metrics_to_json(&metrics).to_string().into_bytes())
@@ -549,21 +552,22 @@ mod wasm_app {
 
     impl WeatherHost for WasmHost {
         fn now_ms(&self) -> u64 {
-            host::now_ms()
+            now_ms()
         }
 
         fn http_fetch(&mut self, path_and_query: &str) -> Result<Vec<u8>, String> {
             let request = HttpFetchRequest {
+                request_id: String::new(),
                 headers: Default::default(),
                 body: Vec::new(),
             };
-            host::http_fetch(LINK_NAME, "GET", path_and_query, &encode_message(&request))
+            http_fetch(LINK_NAME, "GET", path_and_query, &encode_message(&request))
         }
     }
 
     impl Guest for WeatherBridge {
         fn init(config: Vec<u8>) -> Result<(), String> {
-            let config = decode_weather_config(&config, &host::self_id());
+            let config = decode_weather_config(&config, &self_id());
             let actor = WeatherActor::from_config(config);
             let mut guard = state_cell().lock().expect("weather state lock poisoned");
             *guard = actor.state;

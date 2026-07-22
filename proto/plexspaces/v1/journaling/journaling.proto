@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Journaling API
@@ -493,92 +493,108 @@ enum CompressionType {
 
 /// Append single journal entry request
 message AppendRequest {
-  JournalEntry entry = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  JournalEntry entry = 2;
 }
 
 /// Append single journal entry response
 message AppendResponse {
-  uint64 sequence = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 sequence = 2;
 }
 
 /// Append batch of journal entries request (atomic operation)
 message AppendBatchRequest {
-  repeated JournalEntry entries = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated JournalEntry entries = 2;
 }
 
 /// Append batch of journal entries response
 message AppendBatchResponse {
-  uint64 first_sequence = 1;
-  uint64 last_sequence = 2;
-  uint32 count = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 first_sequence = 2;
+  uint64 last_sequence = 3;
+  uint32 count = 4;
 }
 
 /// Replay journal entries from sequence request
 message ReplayFromRequest {
-  string actor_id = 1;
-  uint64 from_sequence = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  uint64 from_sequence = 3;
 }
 
 /// Get latest checkpoint for actor request
 message GetLatestCheckpointRequest {
-  string actor_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
 }
 
 /// Save checkpoint request
 message SaveCheckpointRequest {
-  Checkpoint checkpoint = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Checkpoint checkpoint = 2;
 }
 
 /// Save checkpoint response
 message SaveCheckpointResponse {
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 /// Truncate journal to sequence request (cleanup after checkpoint)
 message TruncateToRequest {
-  string actor_id = 1;
-  uint64 sequence = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  uint64 sequence = 3;
 }
 
 /// Truncate journal to sequence response
 message TruncateToResponse {
-  uint64 deleted_count = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 deleted_count = 2;
 }
 
 /// Get journal statistics request
 message GetStatsRequest {
-  string actor_id = 1; // Optional: stats for specific actor
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2; // Optional: stats for specific actor
 }
 
 // ==================== Event Sourcing Request/Response Messages ====================
 
 /// Append event request
 message AppendEventRequest {
-  ActorEvent event = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ActorEvent event = 2;
 }
 
 /// Append event response
 message AppendEventResponse {
-  uint64 sequence = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 sequence = 2;
 }
 
 /// Replay events from sequence request (paginated)
 message ReplayEventsFromRequest {
-  string actor_id = 1;
-  uint64 from_sequence = 2;
-  plexspaces.common.v1.PageRequest page_request = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  uint64 from_sequence = 3;
+  plexspaces.common.v1.PageRequest page_request = 4;
 }
 
 /// Replay events from sequence response (paginated)
 message ReplayEventsFromResponse {
-  repeated ActorEvent events = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ActorEvent events = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 /// Get actor history request (paginated)
 message GetActorHistoryRequest {
-  string actor_id = 1;
-  plexspaces.common.v1.PageRequest page_request = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  plexspaces.common.v1.PageRequest page_request = 3;
 }
 
 /// Journal statistics

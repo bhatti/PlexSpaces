@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Workflow Service gRPC implementation
@@ -103,6 +103,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(CreateDefinitionResponse {
+            request_id: req.request_id.clone(),
             definition: Some(def),
         }))
     }
@@ -131,6 +132,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(GetDefinitionResponse {
+            request_id: req.request_id.clone(),
             definition: Some(def),
         }))
     }
@@ -155,6 +157,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(ListDefinitionsResponse {
+            request_id: req.request_id.clone(),
             definitions,
             page: None,
         }))
@@ -176,6 +179,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(UpdateDefinitionResponse {
+            request_id: req.request_id.clone(),
             definition: Some(def),
         }))
     }
@@ -233,7 +237,7 @@ impl WorkflowService for WorkflowServiceImpl {
                 .await
                 .map_err(Self::workflow_error_to_status)?;
 
-        Ok(Response::new(StartExecutionResponse { execution_id }))
+        Ok(Response::new(StartExecutionResponse { request_id: req.request_id.clone(), execution_id }))
     }
 
     async fn get_execution(
@@ -254,6 +258,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(GetExecutionResponse {
+            request_id: req.request_id.clone(),
             execution: Some(exec),
         }))
     }
@@ -300,6 +305,7 @@ impl WorkflowService for WorkflowServiceImpl {
 
         // TODO: Implement pagination and timestamp filters
         Ok(Response::new(ListExecutionsResponse {
+            request_id: req.request_id.clone(),
             executions,
             page: None,
         }))
@@ -445,6 +451,7 @@ impl WorkflowService for WorkflowServiceImpl {
         };
 
         Ok(Response::new(QueryExecutionResponse {
+            request_id: req.request_id.clone(),
             result: Some(result),
         }))
     }
@@ -467,6 +474,7 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(GetStepExecutionsResponse {
+            request_id: req.request_id.clone(),
             step_executions,
             page: None, // TODO: Implement pagination
         }))
@@ -505,6 +513,7 @@ mod tests {
 
         let req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def.clone()),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.create_definition(req).await;
@@ -530,6 +539,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -537,6 +547,7 @@ mod tests {
         let get_req = Request::new(GetDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.get_definition(get_req).await;
@@ -555,6 +566,7 @@ mod tests {
         let get_req = Request::new(GetDefinitionRequest {
             id: "nonexistent".to_string(),
             version: "1.0".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.get_definition(get_req).await;
@@ -575,6 +587,7 @@ mod tests {
 
             let create_req = Request::new(CreateDefinitionRequest {
                 definition: Some(proto_def),
+                request_id: ulid::Ulid::new().to_string(),
             });
             service.create_definition(create_req).await.unwrap();
         }
@@ -584,6 +597,7 @@ mod tests {
             page: None,
             label_filter: std::collections::HashMap::new(),
             name_prefix: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.list_definitions(list_req).await;
@@ -605,6 +619,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def.clone()),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -612,6 +627,7 @@ mod tests {
         proto_def.name = "Updated Workflow".to_string();
         let update_req = Request::new(UpdateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.update_definition(update_req).await;
@@ -633,6 +649,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -640,6 +657,7 @@ mod tests {
         let delete_req = Request::new(DeleteDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.delete_definition(delete_req).await;
@@ -649,6 +667,7 @@ mod tests {
         let get_req = Request::new(GetDefinitionRequest {
             id: "test-workflow".to_string(),
             version: "1.0".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.get_definition(get_req).await;
@@ -668,6 +687,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -678,6 +698,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.start_execution(start_req).await;
@@ -699,6 +720,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -708,13 +730,14 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let start_response = service.start_execution(start_req).await.unwrap();
         let execution_id = start_response.into_inner().execution_id;
 
         // Get execution
-        let get_req = Request::new(GetExecutionRequest { execution_id });
+        let get_req = Request::new(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
 
         let result = service.get_execution(get_req).await;
         assert!(result.is_ok());
@@ -735,6 +758,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -745,6 +769,7 @@ mod tests {
                 input: None,
                 execution_id: String::new(),
                 labels: std::collections::HashMap::new(),
+                request_id: ulid::Ulid::new().to_string(),
             });
             service.start_execution(start_req).await.unwrap();
         }
@@ -757,6 +782,7 @@ mod tests {
             label_filter: std::collections::HashMap::new(),
             started_after: None,
             started_before: None,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.list_executions(list_req).await;
@@ -778,6 +804,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -787,6 +814,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let start_response = service.start_execution(start_req).await.unwrap();
@@ -796,13 +824,14 @@ mod tests {
         let cancel_req = Request::new(CancelExecutionRequest {
             execution_id: execution_id.clone(),
             reason: "Test cancellation".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.cancel_execution(cancel_req).await;
         assert!(result.is_ok());
 
         // Verify status is cancelled
-        let get_req = Request::new(GetExecutionRequest { execution_id });
+        let get_req = Request::new(GetExecutionRequest { execution_id, request_id: ulid::Ulid::new().to_string() });
         let exec = service.get_execution(get_req).await.unwrap().into_inner();
         // ExecutionStatusCancelled = 5
         assert_eq!(
@@ -823,6 +852,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -832,6 +862,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let start_response = service.start_execution(start_req).await.unwrap();
@@ -846,6 +877,7 @@ mod tests {
                     "test-data".to_string(),
                 )),
             }),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.signal_execution(signal_req).await;
@@ -864,6 +896,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -873,6 +906,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let start_response = service.start_execution(start_req).await.unwrap();
@@ -882,6 +916,7 @@ mod tests {
         let query_req = Request::new(QueryExecutionRequest {
             execution_id: execution_id.clone(),
             query_name: "status".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.query_execution(query_req).await;
@@ -894,6 +929,7 @@ mod tests {
         let query_req = Request::new(QueryExecutionRequest {
             execution_id,
             query_name: "current_step".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.query_execution(query_req).await;
@@ -912,6 +948,7 @@ mod tests {
 
         let create_req = Request::new(CreateDefinitionRequest {
             definition: Some(proto_def),
+            request_id: ulid::Ulid::new().to_string(),
         });
         service.create_definition(create_req).await.unwrap();
 
@@ -921,6 +958,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let start_response = service.start_execution(start_req).await.unwrap();
@@ -930,6 +968,7 @@ mod tests {
         let get_steps_req = Request::new(GetStepExecutionsRequest {
             execution_id,
             page: None,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.get_step_executions(get_steps_req).await;
@@ -952,6 +991,7 @@ mod tests {
             input: None,
             execution_id: String::new(),
             labels: std::collections::HashMap::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.start_execution(start_req).await;
@@ -961,6 +1001,7 @@ mod tests {
         // Test empty execution_id
         let get_req = Request::new(GetExecutionRequest {
             execution_id: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.get_execution(get_req).await;

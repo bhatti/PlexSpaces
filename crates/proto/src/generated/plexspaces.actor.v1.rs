@@ -983,116 +983,138 @@ pub struct NodePlacement {
 pub struct CreateShardGroupRequest {
     /// Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
     /// Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub config: ::core::option::Option<DataParallelConfig>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_type: ::prost::alloc::string::String,
     /// Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub shard_config: ::core::option::Option<ActorConfig>,
-    #[prost(bytes="vec", tag="4")]
+    #[prost(bytes="vec", tag="5")]
     pub initial_state: ::prost::alloc::vec::Vec<u8>,
-    #[prost(map="string, string", tag="5")]
+    #[prost(map="string, string", tag="6")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateShardGroupResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub group: ::core::option::Option<ShardGroup>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteShardGroupRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub force: bool,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub shutdown_timeout: ::core::option::Option<::prost_types::Duration>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetShardGroupRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetShardGroupResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub group: ::core::option::Option<ShardGroup>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListShardGroupsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_type: ::prost::alloc::string::String,
-    #[prost(enumeration="ShardGroupState", tag="2")]
+    #[prost(enumeration="ShardGroupState", tag="3")]
     pub state: i32,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListShardGroupsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub groups: ::prost::alloc::vec::Vec<ShardGroup>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendToShardRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub partition_key: ::prost::alloc::vec::Vec<u8>,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub message: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub wait_for_response: bool,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag="6")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendToShardResponse {
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub shard_id: u32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub shard_actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub response: ::core::option::Option<super::super::common::v1::Message>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScatterGatherRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub query: ::core::option::Option<super::super::common::v1::Message>,
     #[prost(message, optional, tag="3")]
+    pub query: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="4")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
-    #[prost(enumeration="ShardGroupAggregationStrategy", tag="4")]
+    #[prost(enumeration="ShardGroupAggregationStrategy", tag="5")]
     pub aggregation: i32,
-    #[prost(uint32, tag="5")]
+    #[prost(uint32, tag="6")]
     pub min_responses: u32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ShardQueryResponse {
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub shard_id: u32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub shard_actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
-    pub response: ::core::option::Option<super::super::common::v1::Message>,
     #[prost(message, optional, tag="4")]
+    pub response: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="5")]
     pub latency: ::core::option::Option<::prost_types::Duration>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag="6")]
     pub success: bool,
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub error: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1110,11 +1132,13 @@ pub struct ScatterGatherStats {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScatterGatherResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub result: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag="3")]
     pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub stats: ::core::option::Option<ScatterGatherStats>,
 }
 /// Bulk update: send update messages to multiple shards (DPA UpdateFunction)
@@ -1124,38 +1148,42 @@ pub struct ScatterGatherResponse {
 pub struct BulkUpdateShardGroupRequest {
     /// Group to update
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
     /// Update messages: partition_key -> message
     /// Messages will be routed to appropriate shards based on partition_key
-    #[prost(map="string, message", tag="2")]
+    #[prost(map="string, message", tag="3")]
     pub updates: ::std::collections::HashMap<::prost::alloc::string::String, super::super::common::v1::Message>,
     /// Consistency level for updates
-    #[prost(enumeration="ConsistencyLevel", tag="3")]
+    #[prost(enumeration="ConsistencyLevel", tag="4")]
     pub consistency_level: i32,
     /// Timeout for updates
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     /// Wait for responses (true = wait for all, false = fire-and-forget)
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag="6")]
     pub wait_for_responses: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BulkUpdateShardGroupResponse {
     /// Number of updates sent
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub updates_sent: u32,
     /// Number of successful updates
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag="3")]
     pub updates_succeeded: u32,
     /// Number of failed updates
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub updates_failed: u32,
     /// Per-shard statistics
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag="5")]
     pub shard_stats: ::prost::alloc::vec::Vec<ShardUpdateStats>,
     /// Errors (if any)
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag="6")]
     pub errors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1179,25 +1207,29 @@ pub struct ShardUpdateStats {
 pub struct MapShardGroupRequest {
     /// Group to map over
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
     /// Map function message (sent to each shard)
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub map_function: ::core::option::Option<super::super::common::v1::Message>,
     /// Timeout for map operation
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     /// Minimum number of shards that must respond (0 = all required)
-    #[prost(uint32, tag="4")]
+    #[prost(uint32, tag="5")]
     pub min_responses: u32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MapShardGroupResponse {
     /// Mapped results from each shard
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub shard_results: ::prost::alloc::vec::Vec<ShardQueryResponse>,
     /// Statistics
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub stats: ::core::option::Option<ScatterGatherStats>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1210,83 +1242,11 @@ pub struct CollectiveTargetField {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BroadcastShardGroupRequest {
     #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub message: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, optional, tag="3")]
-    pub timeout: ::core::option::Option<::prost_types::Duration>,
-    #[prost(uint32, tag="4")]
-    pub min_acks: u32,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BroadcastShardGroupResponse {
-    #[prost(message, repeated, tag="1")]
-    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
-    #[prost(message, optional, tag="2")]
-    pub stats: ::core::option::Option<ScatterGatherStats>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReduceShardGroupRequest {
-    #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, optional, tag="3")]
-    pub timeout: ::core::option::Option<::prost_types::Duration>,
-    #[prost(uint32, tag="4")]
-    pub min_responses: u32,
-    #[prost(enumeration="CollectiveReduction", tag="5")]
-    pub reduction: i32,
-    #[prost(message, optional, tag="6")]
-    pub target: ::core::option::Option<CollectiveTargetField>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReduceShardGroupResponse {
-    #[prost(message, optional, tag="1")]
-    pub result: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, repeated, tag="2")]
-    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
-    #[prost(message, optional, tag="3")]
-    pub stats: ::core::option::Option<ScatterGatherStats>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AllReduceShardGroupRequest {
-    #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
-    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, optional, tag="3")]
-    pub timeout: ::core::option::Option<::prost_types::Duration>,
-    #[prost(uint32, tag="4")]
-    pub min_responses: u32,
-    #[prost(enumeration="CollectiveReduction", tag="5")]
-    pub reduction: i32,
-    #[prost(message, optional, tag="6")]
-    pub target: ::core::option::Option<CollectiveTargetField>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AllReduceShardGroupResponse {
-    #[prost(message, optional, tag="1")]
-    pub result: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(message, repeated, tag="2")]
-    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
-    #[prost(message, optional, tag="3")]
-    pub stats: ::core::option::Option<ScatterGatherStats>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BarrierShardGroupRequest {
-    #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub barrier_id: ::prost::alloc::string::String,
-    #[prost(uint64, tag="3")]
-    pub round: u64,
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
     #[prost(message, optional, tag="4")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     #[prost(uint32, tag="5")]
@@ -1294,10 +1254,98 @@ pub struct BarrierShardGroupRequest {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BarrierShardGroupResponse {
-    #[prost(message, repeated, tag="1")]
+pub struct BroadcastShardGroupResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="3")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReduceShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="4")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="5")]
+    pub min_responses: u32,
+    #[prost(enumeration="CollectiveReduction", tag="6")]
+    pub reduction: i32,
+    #[prost(message, optional, tag="7")]
+    pub target: ::core::option::Option<CollectiveTargetField>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReduceShardGroupResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
     #[prost(message, optional, tag="2")]
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, repeated, tag="3")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="4")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AllReduceShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="4")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="5")]
+    pub min_responses: u32,
+    #[prost(enumeration="CollectiveReduction", tag="6")]
+    pub reduction: i32,
+    #[prost(message, optional, tag="7")]
+    pub target: ::core::option::Option<CollectiveTargetField>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AllReduceShardGroupResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, repeated, tag="3")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="4")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BarrierShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub barrier_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="4")]
+    pub round: u64,
+    #[prost(message, optional, tag="5")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="6")]
+    pub min_acks: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BarrierShardGroupResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="3")]
     pub stats: ::core::option::Option<ScatterGatherStats>,
 }
 /// Scale shard group (add/remove shards with rebalancing)
@@ -1306,25 +1354,29 @@ pub struct BarrierShardGroupResponse {
 pub struct ScaleShardGroupRequest {
     /// Group to scale
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_id: ::prost::alloc::string::String,
     /// New shard count
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag="3")]
     pub new_shard_count: u32,
     /// Rebalancing policy
-    #[prost(enumeration="RebalancePolicy", tag="3")]
+    #[prost(enumeration="RebalancePolicy", tag="4")]
     pub rebalance_policy: i32,
     /// Configuration for new shards (if scaling up)
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub new_shard_config: ::core::option::Option<ActorConfig>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScaleShardGroupResponse {
     /// Updated shard group
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub group: ::core::option::Option<ShardGroup>,
     /// Rebalancing status
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub rebalance_status: ::core::option::Option<RebalanceStatus>,
 }
 /// Actor performance metrics
@@ -1352,15 +1404,17 @@ pub struct ActorMetrics {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SpawnActorRequest {
     /// Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub spec: ::core::option::Option<ActorSpawnSpec>,
     /// Optional namespace override for this RPC only.
     /// If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// Number of identical replicas to spawn (default: 1 when 0).
     /// When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub instances_count: u32,
 }
 /// Response from SpawnActor
@@ -1383,16 +1437,20 @@ pub struct SpawnActorResponse {
     /// Example: "general-1@node2", "worker-abc@prod-7"
     /// Use this for messaging: actor_ref.tell(msg), actor_ref.ask(msg)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_ref: ::prost::alloc::string::String,
     /// Full actor details (state, config, metrics)
     /// Useful for inspection and monitoring
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub actor: ::core::option::Option<Actor>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SpawnActorsRequest {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub requests: ::prost::alloc::vec::Vec<SpawnActorRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1408,7 +1466,9 @@ pub struct SpawnActorResult {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SpawnActorsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub results: ::prost::alloc::vec::Vec<SpawnActorResult>,
 }
 /// Request to get an actor
@@ -1416,40 +1476,48 @@ pub struct SpawnActorsResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActorRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (tenant_id from JWT)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActorResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub actor: ::core::option::Option<Actor>,
 }
 /// Request to list actors
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListActorsRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub page_request: ::core::option::Option<super::super::common::v1::PageRequest>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_type: ::prost::alloc::string::String,
-    #[prost(enumeration="ActorState", tag="3")]
+    #[prost(enumeration="ActorState", tag="4")]
     pub state: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub node_id: ::prost::alloc::string::String,
     /// Namespace for tenant isolation (tenant_id from JWT)
     /// Only actors in this namespace will be returned
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub namespace: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListActorsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub actors: ::prost::alloc::vec::Vec<Actor>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page_response: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// Request to send a message via tell semantics
@@ -1458,72 +1526,78 @@ pub struct ListActorsResponse {
 pub struct SendMessageRequest {
     /// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub namespace: ::prost::alloc::string::String,
     /// Actor type or actor id to target.
     /// If this value contains '@', it is treated as a direct actor id first.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_type: ::prost::alloc::string::String,
     /// Optional HTTP method metadata for gateway-originated requests.
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub http_method: ::prost::alloc::string::String,
     /// Request payload bytes.
-    #[prost(bytes="vec", tag="4")]
+    #[prost(bytes="vec", tag="5")]
     pub payload: ::prost::alloc::vec::Vec<u8>,
     /// Request headers or message metadata.
-    #[prost(map="string, string", tag="5")]
+    #[prost(map="string, string", tag="6")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Query parameters from HTTP requests.
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="7")]
     pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Full request path for gateway-originated requests.
-    #[prost(string, tag="7")]
+    #[prost(string, tag="8")]
     pub path: ::prost::alloc::string::String,
     /// Remaining path segment after actor_type.
-    #[prost(string, tag="8")]
+    #[prost(string, tag="9")]
     pub subpath: ::prost::alloc::string::String,
     /// Optional sender actor id for remoting and tracing.
-    #[prost(string, tag="9")]
+    #[prost(string, tag="10")]
     pub sender_id: ::prost::alloc::string::String,
     /// Optional application or transport message type.
-    #[prost(string, tag="10")]
+    #[prost(string, tag="11")]
     pub message_type: ::prost::alloc::string::String,
     /// Optional correlation id preserved for remoting.
-    #[prost(string, tag="11")]
+    #[prost(string, tag="12")]
     pub correlation_id: ::prost::alloc::string::String,
     /// Optional reply_to preserved for remoting.
-    #[prost(string, tag="12")]
+    #[prost(string, tag="13")]
     pub reply_to: ::prost::alloc::string::String,
     /// Optional client-provided message id.
-    #[prost(string, tag="13")]
+    #[prost(string, tag="14")]
     pub message_id: ::prost::alloc::string::String,
     /// Optional actor instance name. When set together with actor_type and namespace,
     /// the handler constructs the canonical actor ID directly:
     ///    actor_name//actor_type::namespace@node_id
     /// This avoids ambiguous lookups and makes addressing explicit.
     /// If empty, falls back to registry lookup by actor_type within the namespace.
-    #[prost(string, tag="20")]
+    #[prost(string, tag="21")]
     pub actor_name: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendMessageResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(string, tag="2")]
-    pub message_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub message_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
     pub error_message: ::prost::alloc::string::String,
 }
 /// Request for streaming messages (high-throughput)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StreamMessageRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub message: ::core::option::Option<super::super::common::v1::Message>,
     /// Sequence number for ordering (client-generated)
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub sequence: u64,
 }
 /// Response for streaming messages
@@ -1531,15 +1605,17 @@ pub struct StreamMessageRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StreamMessageResponse {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub message_id: ::prost::alloc::string::String,
     /// Acknowledgement of sequence number
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub sequence: u64,
     /// Status: "delivered", "failed", "queued"
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub status: ::prost::alloc::string::String,
     /// Optional error message
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub error: ::prost::alloc::string::String,
 }
 /// Request to delete actor
@@ -1547,11 +1623,13 @@ pub struct StreamMessageResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteActorRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub force: bool,
     /// Namespace for tenant isolation (tenant_id from JWT)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 // NOTE: Facet management (AttachFacet, DetachFacet, etc.) is handled by
@@ -1819,10 +1897,12 @@ pub struct ActorMigrating {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitorActorRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub supervisor_id: ::prost::alloc::string::String,
+    pub actor_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub supervisor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub supervisor_callback: ::prost::alloc::string::String,
 }
 /// Response to MonitorActor request
@@ -1840,6 +1920,8 @@ pub struct MonitorActorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitorActorResponse {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub monitor_ref: ::prost::alloc::string::String,
 }
 /// Request to remove a monitor (Erlang demonitor/1 equivalent)
@@ -1852,10 +1934,12 @@ pub struct MonitorActorResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DemonitorActorRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub supervisor_id: ::prost::alloc::string::String,
+    pub actor_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub supervisor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub monitor_ref: ::prost::alloc::string::String,
 }
 /// Notification that a monitored actor has terminated
@@ -1907,7 +1991,9 @@ pub struct ActorDownNotification {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActorStatesRequest {
     /// List of canonical actor IDs to check
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub actor_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Response for batch actor state check — uses existing ActorState enum
@@ -1916,7 +2002,9 @@ pub struct GetActorStatesRequest {
 pub struct GetActorStatesResponse {
     /// Map of canonical actor_id -> ActorState (uses existing ActorState enum)
     /// ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
-    #[prost(map="string, enumeration(ActorState)", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(map="string, enumeration(ActorState)", tag="2")]
     pub states: ::std::collections::HashMap<::prost::alloc::string::String, i32>,
 }
 /// / Actor link for two-way death propagation
@@ -1987,15 +2075,19 @@ pub struct ActorLink {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LinkActorRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub linked_actor_id: ::prost::alloc::string::String,
 }
 /// / Response to LinkActor request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LinkActorResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// / Unlink two actors (Erlang unlink/1 equivalent)
@@ -2010,15 +2102,19 @@ pub struct LinkActorResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnlinkActorRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub linked_actor_id: ::prost::alloc::string::String,
 }
 /// / Response to UnlinkActor request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnlinkActorResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 // ============================================================================
@@ -2038,6 +2134,8 @@ pub struct UnlinkActorResponse {
 pub struct CheckActorExistsRequest {
     /// Actor ID to check
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
 }
 /// Response to check actor exists request
@@ -2045,13 +2143,15 @@ pub struct CheckActorExistsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckActorExistsResponse {
     /// Actor exists (virtual or active)
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub exists: bool,
     /// Actor is currently active (in memory)
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub is_active: bool,
     /// Actor has VirtualActorFacet (is virtual)
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub is_virtual: bool,
 }
 /// Request to ask an actor via HTTP-like interface (FaaS-style)
@@ -2070,63 +2170,65 @@ pub struct AskReplyRequest {
     /// Can be empty - defaults to empty string if not provided
     /// Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub namespace: ::prost::alloc::string::String,
     /// Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
     /// Used to lookup actors via ActorRegistry discover_actors_by_type
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub actor_type: ::prost::alloc::string::String,
     /// HTTP method metadata (GET, POST, or PUT)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub http_method: ::prost::alloc::string::String,
     /// Request payload
     /// For GET: JSON string of query parameters
     /// For POST/PUT: Request body bytes
-    #[prost(bytes="vec", tag="4")]
+    #[prost(bytes="vec", tag="5")]
     pub payload: ::prost::alloc::vec::Vec<u8>,
     /// HTTP headers
     /// Converted from HTTP request headers
-    #[prost(map="string, string", tag="5")]
+    #[prost(map="string, string", tag="6")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Query parameters (for GET requests)
     /// Converted to JSON and stored in payload
-    #[prost(map="string, string", tag="6")]
+    #[prost(map="string, string", tag="7")]
     pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Full HTTP path for the request (optional)
     /// Example: "/api/v1/actors/default/counter/custom/path"
     /// Allows actors to perform custom routing based on the complete URL
-    #[prost(string, tag="7")]
+    #[prost(string, tag="8")]
     pub path: ::prost::alloc::string::String,
     /// Subpath after the actor_type segment (optional)
     /// Example: for "/api/v1/actors/default/counter/metrics/latest"
     ///           subpath = "metrics/latest"
     /// This will be used in future for advanced per-actor routing capabilities.
-    #[prost(string, tag="8")]
+    #[prost(string, tag="9")]
     pub subpath: ::prost::alloc::string::String,
     /// Optional sender actor id for remoting and tracing.
-    #[prost(string, tag="9")]
+    #[prost(string, tag="10")]
     pub sender_id: ::prost::alloc::string::String,
     /// Optional transport message type.
-    #[prost(string, tag="10")]
+    #[prost(string, tag="11")]
     pub message_type: ::prost::alloc::string::String,
     /// Optional correlation id preserved for remoting.
-    #[prost(string, tag="11")]
+    #[prost(string, tag="12")]
     pub correlation_id: ::prost::alloc::string::String,
     /// Optional reply_to preserved for remoting.
-    #[prost(string, tag="12")]
+    #[prost(string, tag="13")]
     pub reply_to: ::prost::alloc::string::String,
     /// Optional client-provided message id.
-    #[prost(string, tag="13")]
+    #[prost(string, tag="14")]
     pub message_id: ::prost::alloc::string::String,
     /// Optional timeout for request-reply (ask) operations.
     /// Defaults to 5 seconds if not specified. Use for long-running operations like training.
     /// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-    #[prost(message, optional, tag="14")]
+    #[prost(message, optional, tag="15")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     /// Optional actor instance name. When set together with actor_type and namespace,
     /// the handler constructs the canonical actor ID directly:
     ///    actor_name//actor_type::namespace@node_id
     /// If empty, falls back to registry lookup by actor_type within the namespace.
-    #[prost(string, tag="20")]
+    #[prost(string, tag="21")]
     pub actor_name: ::prost::alloc::string::String,
 }
 /// Response from asking an actor
@@ -2137,20 +2239,22 @@ pub struct AskReplyRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AskReplyResponse {
     /// Success status
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
     /// Response payload (for GET/ask requests)
     /// Contains the reply message from actor
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub payload: ::prost::alloc::vec::Vec<u8>,
     /// Response headers (optional metadata)
-    #[prost(map="string, string", tag="3")]
+    #[prost(map="string, string", tag="4")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Actor ID that was invoked (format: "actor_id@node_id")
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub actor_id: ::prost::alloc::string::String,
     /// Error message (if success is false)
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub error_message: ::prost::alloc::string::String,
 }
 /// Lifecycle event filter for subscribers
@@ -3300,6 +3404,189 @@ impl ActorHealthStatus {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

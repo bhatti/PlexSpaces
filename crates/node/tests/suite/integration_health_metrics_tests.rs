@@ -218,7 +218,9 @@ async fn test_metrics_service_export_prometheus() {
     let handle = install_metrics_recorder();
     let metrics_service = MetricsServiceImpl::new(handle);
     metrics::counter!("plexspaces_node_health_requests_total").increment(1);
-    let request = tonic::Request::new(plexspaces_proto::metrics::v1::ExportPrometheusRequest {});
+    let request = tonic::Request::new(plexspaces_proto::metrics::v1::ExportPrometheusRequest {
+    request_id: ulid::Ulid::new().to_string(),
+    });
 
     let response = metrics_service.export_prometheus(request).await.unwrap();
     let content = response.get_ref().content.clone();
@@ -240,6 +242,7 @@ async fn test_metrics_service_list_definitions() {
     let metrics_service = MetricsServiceImpl::new(install_metrics_recorder());
     let request = tonic::Request::new(
         plexspaces_proto::metrics::v1::ListMetricDefinitionsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             name_pattern: String::new(),
         },
     );
@@ -267,6 +270,7 @@ async fn test_metrics_service_get_metrics() {
 
     let metrics_service = MetricsServiceImpl::new(install_metrics_recorder());
     let request = tonic::Request::new(plexspaces_proto::metrics::v1::GetMetricsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         name_pattern: String::new(),
         label_filter: std::collections::HashMap::new(),
     });
@@ -390,6 +394,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     let result = plexspaces_proto::actor::v1::actor_service_server::ActorService::spawn_actor(
         actor_service.as_ref(),
         tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                     name: String::new(),
@@ -437,6 +442,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     let result = plexspaces_proto::actor::v1::actor_service_server::ActorService::spawn_actor(
         actor_service.as_ref(),
         tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                     name: String::new(),

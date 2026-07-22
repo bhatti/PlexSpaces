@@ -58,7 +58,6 @@ from .proto_wire import (
 
 # Global reference to actual host module (set by runtime)
 _host_impl = None
-_host_init_attempted = False
 
 # Whether the host is a real WIT host (payload = list<u8> = bytes) or mock (string)
 _host_is_wit = False
@@ -66,13 +65,73 @@ _host_is_wit = False
 # Eager import at module load time - componentize-py does NOT support
 # dynamic imports during handler execution (causes WASM trap)
 try:
-    from wit_world.imports import host as _wit_host_eager
-    _host_impl = _wit_host_eager
-    _host_is_wit = True
-    _host_init_attempted = True
+    from wit_world.imports import host_logging as _wit_host_logging
+    _host_logging_is_wit = True
 except ImportError:
-    # Not in WASM environment, will use mock
-    _host_init_attempted = True
+    _wit_host_logging = None
+    _host_logging_is_wit = False
+
+try:
+    from wit_world.imports import host_actor as _wit_host_actor
+    _host_actor_is_wit = True
+except ImportError:
+    _wit_host_actor = None
+    _host_actor_is_wit = False
+
+try:
+    from wit_world.imports import host_kv as _wit_host_kv
+    _host_kv_is_wit = True
+except ImportError:
+    _wit_host_kv = None
+    _host_kv_is_wit = False
+
+try:
+    from wit_world.imports import host_ts as _wit_host_ts
+    _host_ts_is_wit = True
+except ImportError:
+    _wit_host_ts = None
+    _host_ts_is_wit = False
+
+try:
+    from wit_world.imports import host_locks as _wit_host_locks
+    _host_locks_is_wit = True
+except ImportError:
+    _wit_host_locks = None
+    _host_locks_is_wit = False
+
+try:
+    from wit_world.imports import host_blob as _wit_host_blob
+    _host_blob_is_wit = True
+except ImportError:
+    _wit_host_blob = None
+    _host_blob_is_wit = False
+
+try:
+    from wit_world.imports import host_pool as _wit_host_pool
+    _host_pool_is_wit = True
+except ImportError:
+    _wit_host_pool = None
+    _host_pool_is_wit = False
+
+try:
+    from wit_world.imports import host_shard as _wit_host_shard
+    _host_shard_is_wit = True
+except ImportError:
+    _wit_host_shard = None
+    _host_shard_is_wit = False
+
+try:
+    from wit_world.imports import host_http as _wit_host_http
+    _host_http_is_wit = True
+except ImportError:
+    _wit_host_http = None
+    _host_http_is_wit = False
+
+_host_is_wit = (
+    _host_logging_is_wit or _host_actor_is_wit or _host_kv_is_wit
+    or _host_ts_is_wit or _host_locks_is_wit or _host_blob_is_wit
+    or _host_pool_is_wit or _host_shard_is_wit or _host_http_is_wit
+)
 
 _channels_impl = None
 try:
@@ -121,41 +180,91 @@ def _decode_lock_payload(data) -> str:
     return str(data) if data else ""
 
 
-def _get_host():
-    """Get the host implementation (real or mock)."""
-    global _host_impl, _host_init_attempted
-    if _host_impl is not None:
-        return _host_impl
-
-    # Eager import already attempted - return mock if not in WASM
-    if _host_init_attempted:
+def _get_mock_host():
+    """Get (and cache) the shared MockHost instance."""
+    global _host_impl
+    if _host_impl is None:
         _host_impl = _MockHost()
-        return _host_impl
+    return _host_impl
 
-    # Fallback (should not reach here in WASM)
-    try:
-        from wit_world.imports import host as wit_host
-        _host_impl = wit_host
-        return _host_impl
-    except ImportError:
-        _host_impl = _MockHost()
-        return _host_impl
+
+def _get_host_logging():
+    """Get the host_logging WIT module, or mock."""
+    if _wit_host_logging is not None:
+        return _wit_host_logging
+    return _get_mock_host()
+
+
+def _get_host_actor():
+    """Get the host_actor WIT module, or mock."""
+    if _wit_host_actor is not None:
+        return _wit_host_actor
+    return _get_mock_host()
+
+
+def _get_host_kv():
+    """Get the host_kv WIT module, or mock."""
+    if _wit_host_kv is not None:
+        return _wit_host_kv
+    return _get_mock_host()
+
+
+def _get_host_ts():
+    """Get the host_ts WIT module, or mock."""
+    if _wit_host_ts is not None:
+        return _wit_host_ts
+    return _get_mock_host()
+
+
+def _get_host_locks():
+    """Get the host_locks WIT module, or mock."""
+    if _wit_host_locks is not None:
+        return _wit_host_locks
+    return _get_mock_host()
+
+
+def _get_host_blob():
+    """Get the host_blob WIT module, or mock."""
+    if _wit_host_blob is not None:
+        return _wit_host_blob
+    return _get_mock_host()
+
+
+def _get_host_pool():
+    """Get the host_pool WIT module, or mock."""
+    if _wit_host_pool is not None:
+        return _wit_host_pool
+    return _get_mock_host()
+
+
+def _get_host_shard():
+    """Get the host_shard WIT module, or mock."""
+    if _wit_host_shard is not None:
+        return _wit_host_shard
+    return _get_mock_host()
+
+
+def _get_host_http():
+    """Get the host_http WIT module, or mock."""
+    if _wit_host_http is not None:
+        return _wit_host_http
+    return _get_mock_host()
 
 
 def _get_channels():
-    """Get the channels WIT import (real or mock fallback to _get_host())."""
+    """Get the channels WIT import (real or mock fallback to _get_host_actor())."""
     global _channels_impl
     if _channels_impl is not None:
         return _channels_impl
-    return _get_host()
+    return _get_host_actor()
 
 
 def _get_registry():
-    """Get the registry WIT import (real or mock fallback to _get_host())."""
+    """Get the registry WIT import (real or mock fallback to _get_host_actor())."""
     global _registry_impl
     if _registry_impl is not None:
         return _registry_impl
-    return _get_host()
+    return _get_host_actor()
 
 
 class _MockHost:
@@ -195,7 +304,6 @@ class _MockHost:
                 "payload_json": payload_json,
             }
         )
-        print(f"[MOCK] send({to}, {msg_type}, {payload_json})")
         return ""
 
     def log(self, level: str, message: str) -> None:
@@ -268,21 +376,62 @@ class _MockHost:
 
     def kv_list(self, prefix: str) -> str:
         """Key-value list (mock). Returns JSON array of keys."""
-        import json
         keys = [k for k in self._kv.keys() if k.startswith(prefix)]
         return json.dumps(keys)
 
+    def kv_put_with_ttl(self, key: str, value: str, ttl_seconds: int) -> str:
+        self._kv[key] = value
+        return ""
+
+    def kv_get_ttl(self, key: str) -> int:
+        return 0
+
+    def kv_cas(self, key: str, expected: str, new_value: str) -> bool:
+        if expected == "":
+            if key in self._kv:
+                return False
+        else:
+            if self._kv.get(key) != expected:
+                return False
+        self._kv[key] = new_value
+        return True
+
+    def kv_increment(self, key: str, delta: int) -> int:
+        current = 0
+        try:
+            current = int(self._kv.get(key, "0"))
+        except (ValueError, TypeError):
+            pass
+        new_val = current + delta
+        self._kv[key] = str(new_val)
+        return new_val
+
+    def kv_multi_get(self, keys: list) -> list:
+        return [self._kv.get(k) for k in keys]
+
+    def kv_multi_put(self, entries: dict) -> str:
+        self._kv.update(entries)
+        return ""
+
+    def alarm_set(self, timestamp_ms: int) -> str:
+        self._alarm: int = timestamp_ms
+        return ""
+
+    def alarm_get(self) -> int:
+        return getattr(self, "_alarm", 0)
+
+    def alarm_delete(self) -> str:
+        self._alarm = 0
+        return ""
+
     def lock_acquire(
         self,
-        tenant_id: str,
-        namespace: str,
         holder_id: str,
         lock_name: str,
         lease_duration_secs: int = 30,
         timeout_ms: int = 0,
     ) -> str:
         """Lock acquire (mock). Returns JSON with lock_key, version, holder_id, etc."""
-        import json
         return json.dumps({
             "lock_key": lock_name,
             "version": "mock-version-1",
@@ -295,8 +444,6 @@ class _MockHost:
     def lock_release(
         self,
         lock_id: str,
-        tenant_id: str,
-        namespace: str,
         holder_id: str,
         lock_version: str,
     ) -> str:
@@ -306,8 +453,6 @@ class _MockHost:
     def lock_renew(
         self,
         lock_id: str,
-        tenant_id: str,
-        namespace: str,
         holder_id: str,
         lock_version: str,
         lease_duration_secs: int = 30,
@@ -335,7 +480,6 @@ class _MockHost:
 
     def ask(self, to: str, msg_type: str, payload_json: str, timeout_ms: int) -> str:
         """Ask (mock). Returns empty JSON."""
-        print(f"[MOCK] ask({to}, {msg_type}, timeout={timeout_ms})")
         return "{}"
 
     def self_id(self) -> str:
@@ -345,12 +489,10 @@ class _MockHost:
     def spawn(self, module_ref: str, actor_name: str, role: str, args_json: str) -> str:
         """Spawn (mock). Returns spawned actor name (canonical ID in real WASM)."""
         spawned_id = actor_name if actor_name else f"mock-{module_ref}-1"
-        print(f"[MOCK] spawn({module_ref}, {actor_name}, role={role}) -> {spawned_id}")
         return spawned_id
 
     def stop(self, actor_id: str) -> str:
         """Stop (mock). Returns empty on success."""
-        print(f"[MOCK] stop({actor_id})")
         return ""
 
     def link(self, actor_id: str) -> str:
@@ -776,21 +918,21 @@ class ProcessGroups:
 
     def join(self, group: str) -> None:
         """Join a process group (uses self actor ID)."""
-        h = _get_host()
+        h = _get_host_actor()
         result = h.pg_join(group)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def leave(self, group: str) -> None:
         """Leave a process group."""
-        h = _get_host()
+        h = _get_host_actor()
         result = h.pg_leave(group)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def members(self, group: str) -> List[str]:
         """Get all members of a group. Returns list of actor IDs."""
-        h = _get_host()
+        h = _get_host_actor()
         raw = h.pg_members(group)
         result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "[]")
         if isinstance(result, str) and result.startswith("ERROR:"):
@@ -802,7 +944,7 @@ class ProcessGroups:
 
     def broadcast(self, group: str, msg_type: str, payload: Any = None) -> None:
         """Broadcast a message to all members of a group."""
-        h = _get_host()
+        h = _get_host_actor()
         payload_json = json.dumps(payload) if payload is not None else "{}"
         result = h.pg_broadcast(group, msg_type, _to_payload_bytes(payload_json))
         if result and isinstance(result, str) and result.startswith("ERROR:"):
@@ -847,7 +989,8 @@ class EventLog:
         self.watermark += 1
         key = f"{prefix}seq:{self.watermark}"
         try:
-            h.kv_put_json(key, entry)
+            serialized = json.dumps(entry)
+            _get_host_kv().kv_put(key, _to_payload_bytes(serialized))
         except Exception as e:
             self.watermark -= 1
             raise RuntimeError(f"EventLog.append: {e}") from e
@@ -862,21 +1005,26 @@ class EventLog:
         The new cursor is persisted in KV so the next call resumes from where this left off.
         """
         cursor_key = f"{prefix}cursor:{consumer_id}"
-        raw_cursor = h.kv_get(cursor_key)
+        raw_cursor = _from_payload_bytes(_get_host_kv().kv_get(cursor_key))
         cursor = int(raw_cursor) if raw_cursor and raw_cursor.isdigit() else 0
 
         events: list = []
         new_cursor = cursor
         seq = cursor + 1
         while seq <= self.watermark and len(events) < limit:
-            entry = h.kv_get_json(f"{prefix}seq:{seq}")
-            if entry is not None:
-                events.append(entry)
-                new_cursor = seq
+            raw = _from_payload_bytes(_get_host_kv().kv_get(f"{prefix}seq:{seq}"))
+            if raw:
+                try:
+                    entry = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    entry = None
+                if entry is not None:
+                    events.append(entry)
+                    new_cursor = seq
             seq += 1
 
         if new_cursor != cursor:
-            h.kv_put(cursor_key, str(new_cursor))
+            _get_host_kv().kv_put(cursor_key, _to_payload_bytes(str(new_cursor)))
         return events, new_cursor
 
 
@@ -1234,6 +1382,258 @@ class Registry:
                 raise RuntimeError(result)
 
 
+class KVStore:
+    """Key-value store accessor. Equivalent to Cloudflare DO storage API."""
+
+    def get(self, key: str) -> str:
+        """Get value by key. Returns empty string if not found."""
+        return _from_payload_bytes(_get_host_kv().kv_get(key))
+
+    def put(self, key: str, value: str) -> None:
+        """Store a string value under key."""
+        _get_host_kv().kv_put(key, _to_payload_bytes(value))
+
+    def delete(self, key: str) -> None:
+        """Delete a key."""
+        _get_host_kv().kv_delete(key)
+
+    def list(self, prefix: str = "") -> list:
+        """List keys with optional prefix. Returns list of key strings."""
+        raw = _get_host_kv().kv_list(prefix)
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, (bytes, bytearray)):
+            raw = _from_payload_bytes(raw)
+        try:
+            result = json.loads(raw)
+            return result if isinstance(result, list) else []
+        except (json.JSONDecodeError, ValueError):
+            return []
+
+    def put_with_ttl(self, key: str, value: str, ttl_seconds: int) -> None:
+        """Store a value with automatic expiry after ttl_seconds."""
+        h = _get_host_kv()
+        fn = getattr(h, "kv_put_with_ttl", None) or getattr(h, "kv-put-with-ttl", None)
+        if fn:
+            fn(key, _to_payload_bytes(value), ttl_seconds)
+
+    def get_ttl(self, key: str) -> int:
+        """Returns remaining TTL in seconds, or 0 if no TTL / key not found."""
+        h = _get_host_kv()
+        fn = getattr(h, "kv_get_ttl", None) or getattr(h, "kv-get-ttl", None)
+        if not fn:
+            return 0
+        result = fn(key)
+        if result is None:
+            return 0
+        try:
+            return int(result)
+        except (TypeError, ValueError):
+            return 0
+
+    def cas(self, key: str, expected: Optional[str], new_value: str) -> bool:
+        """Compare-and-swap. Returns True if the swap was applied."""
+        h = _get_host_kv()
+        fn = getattr(h, "kv_cas", None) or getattr(h, "kv-cas", None)
+        if fn is None:
+            return False
+        exp_bytes = _to_payload_bytes(expected) if expected is not None else b""
+        return bool(fn(key, exp_bytes, _to_payload_bytes(new_value)))
+
+    def increment(self, key: str, delta: int = 1) -> int:
+        """Atomically increment a numeric counter by delta. Returns new value."""
+        h = _get_host_kv()
+        fn = getattr(h, "kv_increment", None) or getattr(h, "kv-increment", None)
+        if not fn:
+            return 0
+        result = fn(key, delta)
+        if result is None:
+            return 0
+        try:
+            return int(result)
+        except (TypeError, ValueError):
+            return 0
+
+    def multi_get(self, keys: list) -> list:
+        """Fetch multiple keys in one call. Returns list of values (None for missing)."""
+        import base64
+        h = _get_host_kv()
+        fn = getattr(h, "kv_multi_get", None) or getattr(h, "kv-multi-get", None)
+        if not fn:
+            return [None] * len(keys)
+        if _host_kv_is_wit:
+            raw = fn(json.dumps(keys).encode("utf-8"))
+            decoded = _from_payload_bytes(raw)
+            try:
+                items = json.loads(decoded)
+                return [base64.b64decode(v).decode("utf-8") if v is not None else None for v in items]
+            except Exception:
+                return [None] * len(keys)
+        else:
+            result = fn(keys)
+            if isinstance(result, list):
+                return [_from_payload_bytes(v) if isinstance(v, (bytes, bytearray)) else v for v in result]
+            return [None] * len(keys)
+
+    def multi_put(self, entries: dict) -> None:
+        """Store multiple key-value pairs in one call."""
+        import base64
+        h = _get_host_kv()
+        fn = getattr(h, "kv_multi_put", None) or getattr(h, "kv-multi-put", None)
+        if not fn:
+            return
+        if _host_kv_is_wit:
+            encoded = {k: base64.b64encode(v.encode("utf-8")).decode("ascii") for k, v in entries.items()}
+            fn(json.dumps(encoded).encode("utf-8"))
+        else:
+            fn(entries)
+
+    def get_json(self, key: str) -> Optional[Any]:
+        """Retrieve a JSON value by key. Returns deserialized object or None if not found."""
+        raw = self.get(key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def put_json(self, key: str, value: Any) -> None:
+        """Serialize value to JSON and store under key."""
+        try:
+            serialized = json.dumps(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"kv.put_json({key!r}): serialization failed: {e}") from e
+        result = _get_host_kv().kv_put(key, _to_payload_bytes(serialized))
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(f"kv.put_json({key!r}): {result}")
+
+
+class AlarmClient:
+    """Durable alarm accessor. Equivalent to Cloudflare DO setAlarm/deleteAlarm."""
+
+    def set(self, timestamp_ms: int) -> None:
+        """Schedule a durable alarm at an absolute timestamp (ms since epoch)."""
+        h = _get_host_kv()
+        fn = getattr(h, "alarm_set", None) or getattr(h, "alarm-set", None)
+        if fn:
+            fn(timestamp_ms)
+
+    def set_in(self, delay_ms: int) -> None:
+        """Schedule an alarm relative to now (delay in milliseconds)."""
+        try:
+            now = _get_host_logging().now_ms()
+        except Exception:
+            import time
+            now = int(time.time() * 1000)
+        self.set(now + delay_ms)
+
+    def get(self) -> int:
+        """Returns the scheduled alarm timestamp in ms, or 0 if no alarm is set."""
+        h = _get_host_kv()
+        fn = getattr(h, "alarm_get", None) or getattr(h, "alarm-get", None)
+        if not fn:
+            return 0
+        result = fn()
+        if result is None:
+            return 0
+        try:
+            return int(result)
+        except (TypeError, ValueError):
+            return 0
+
+    def delete(self) -> None:
+        """Cancel the pending durable alarm."""
+        h = _get_host_kv()
+        fn = getattr(h, "alarm_delete", None) or getattr(h, "alarm-delete", None)
+        if fn:
+            fn()
+
+
+class LockClient:
+    """Distributed lock accessor."""
+
+    def acquire(self, holder_id: str, lock_name: str, lease_duration_secs: int = 30, timeout_ms: int = 0) -> bytes:
+        """Acquire a lock. Returns raw response bytes."""
+        result = _get_host_locks().lock_acquire(holder_id, lock_name, lease_duration_secs, timeout_ms)
+        return bytes(result) if result else b""
+
+    def release(self, lock_id: str, holder_id: str, lock_version: str) -> None:
+        """Release a held lock."""
+        _get_host_locks().lock_release(lock_id, holder_id, lock_version)
+
+    def renew(self, lock_id: str, holder_id: str, lock_version: str, lease_duration_secs: int = 30) -> bytes:
+        """Renew a held lock lease. Returns raw response bytes."""
+        result = _get_host_locks().lock_renew(lock_id, holder_id, lock_version, lease_duration_secs)
+        return bytes(result) if result else b""
+
+
+class BlobClient:
+    """Blob storage accessor."""
+
+    def upload(self, name: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        """Upload blob data. Returns blob ID or empty on success."""
+        return _get_host_blob().blob_upload(name, list(data), content_type)
+
+    def download(self, blob_id: str) -> bytes:
+        """Download blob data. Returns bytes or empty bytes if not found."""
+        result = _get_host_blob().blob_download(blob_id)
+        return bytes(result) if result else b""
+
+    def delete(self, blob_id: str) -> None:
+        """Delete a blob."""
+        _get_host_blob().blob_delete(blob_id)
+
+    def list(self, prefix: str = "") -> list:
+        """List blob IDs with optional prefix."""
+        return _get_host_blob().blob_list(prefix) or []
+
+
+class ActorRef:
+    """Lightweight handle to a named virtual actor.
+
+    Equivalent to Cloudflare DO's env.BINDING.get(id).
+    Use get_actor_ref() to obtain one.
+
+    Example::
+
+        room = get_actor_ref("ChatRoomActor", room_id, "default")
+        result = room.ask("send_message", payload, timeout_ms=5000)
+    """
+
+    def __init__(self, actor_type: str, name: str, namespace: str) -> None:
+        self.actor_id = f"{name}//{actor_type}::{namespace}@*"
+
+    def id(self) -> str:
+        return self.actor_id
+
+    def tell(self, msg_type: str, payload: bytes) -> None:
+        _get_host_actor().send(self.actor_id, msg_type, list(payload))
+
+    def ask(self, msg_type: str, payload: bytes, timeout_ms: int = 5000) -> bytes:
+        result = _get_host_actor().ask(self.actor_id, msg_type, list(payload), timeout_ms)
+        return bytes(result) if result else b""
+
+
+def get_actor_ref(actor_type: str, name: str, namespace: str) -> "ActorRef":
+    """Construct an ActorRef for a named virtual actor.
+
+    The actor is created automatically on first contact (virtual actor pattern).
+    Equivalent to Cloudflare: ``env.CHAT_ROOM.get(room_id)``
+
+    Args:
+        actor_type: Actor class name (e.g. "ChatRoomActor")
+        name: Unique instance name (e.g. "room-123")
+        namespace: Namespace/tenant (e.g. "default")
+
+    Returns:
+        ActorRef handle for sending messages
+    """
+    return ActorRef(actor_type, name, namespace)
+
+
 class Host:
     """
     PlexSpaces host function interface.
@@ -1246,20 +1646,24 @@ class Host:
         self.ts = _TupleSpaceHelper(self)
         self.channel = Channel()
         self.registry = Registry()
+        self.kv = KVStore()
+        self.alarm = AlarmClient()
+        self.locks = LockClient()
+        self.blob = BlobClient()
 
     def send(self, to: str, msg_type: str, payload: Optional[Union[str, Dict[str, Any], List[Any]]] = None) -> str:
         """
         Send a message to another actor (fire-and-forget).
-        
+
         Args:
             to: Target actor ID
             msg_type: Message type
             payload: Message payload (will be JSON-serialized if not a string)
-        
+
         Returns:
             Response string (empty on success, error message on failure)
         """
-        h = _get_host()
+        h = _get_host_actor()
         payload_json = ""
         if payload is not None:
             if isinstance(payload, str):
@@ -1267,34 +1671,34 @@ class Host:
             else:
                 payload_json = json.dumps(payload)
         return h.send(to, msg_type, _to_payload_bytes(payload_json))
-    
+
     def log(self, level: str, message: str) -> None:
         """
         Log a message.
-        
+
         Args:
             level: Log level ("debug", "info", "warn", "error")
             message: Log message
         """
-        h = _get_host()
+        h = _get_host_logging()
         h.log(level, message)
-    
+
     def debug(self, message: str) -> None:
         """Log a debug message."""
         self.log("debug", message)
-    
+
     def info(self, message: str) -> None:
         """Log an info message."""
         self.log("info", message)
-    
+
     def warn(self, message: str) -> None:
         """Log a warning message."""
         self.log("warn", message)
-    
+
     def error(self, message: str) -> None:
         """Log an error message."""
         self.log("error", message)
-    
+
     def now_ms(self) -> int:
         """
         Get current timestamp in milliseconds.
@@ -1302,55 +1706,8 @@ class Host:
         Returns:
             Unix timestamp in milliseconds
         """
-        h = _get_host()
+        h = _get_host_logging()
         return h.now_ms()
-
-    def kv_get(self, key: str) -> str:
-        """
-        Key-value get (string-only, WASM-safe).
-        
-        Args:
-            key: Key to retrieve
-        
-        Returns:
-            Value string or empty string if not found
-        """
-        h = _get_host()
-        return _from_payload_bytes(h.kv_get(key))
-
-    def kv_put(self, key: str, value: str) -> str:
-        """
-        Key-value put (string-only).
-
-        Args:
-            key: Key to store
-            value: Value string
-
-        Returns:
-            Empty string on success, "ERROR:message" on failure
-        """
-        h = _get_host()
-        return h.kv_put(key, _to_payload_bytes(value))
-
-    def kv_get_json(self, key: str) -> Optional[Any]:
-        """Retrieve a JSON value by key. Returns deserialized object or None if not found."""
-        raw = self.kv_get(key)
-        if not raw:
-            return None
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-    def kv_put_json(self, key: str, value: Any) -> None:
-        """Serialize value to JSON and store under key. Raises on serialization or write failure."""
-        try:
-            serialized = json.dumps(value)
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"kv_put_json({key!r}): serialization failed: {e}") from e
-        result = self.kv_put(key, serialized)
-        if result and isinstance(result, str) and result.startswith("ERROR:"):
-            raise RuntimeError(f"kv_put_json({key!r}): {result}")
 
     def incr_counter(self, application_id: str, name: str) -> None:
         """Increment a single named application metric counter by 1."""
@@ -1365,236 +1722,6 @@ class Host:
             })
         except Exception as e:
             self.warn(f"incr_counters: metrics update failed: {e}")
-
-    def ts_write(self, tuple_json: str) -> str:
-        """
-        TupleSpace write. tuple_json: JSON array of values, e.g. ["AUDIT","action",...].
-        Returns empty on success, ERROR:... on failure.
-        """
-        h = _get_host()
-        if _host_is_wit:
-            # WIT host expects proto-encoded WriteRequest bytes
-            values = json.loads(tuple_json) if isinstance(tuple_json, str) else tuple_json
-            wire = encode_write_request(values)
-            h.ts_write(wire)
-            return ""
-        if hasattr(h, "ts_write"):
-            return h.ts_write(tuple_json)
-        return getattr(h, "ts-write", lambda _: "")(tuple_json)
-
-    def ts_read(self, pattern_json: str) -> str:
-        """
-        TupleSpace read (non-destructive). pattern_json: JSON array with wildcards (null or "*").
-        Returns matched tuple as JSON array, or empty if not found.
-        """
-        h = _get_host()
-        if _host_is_wit:
-            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
-            wire = encode_read_request(values, take=False)
-            raw = h.ts_read(wire)
-            result = decode_read_response_first(bytes(raw) if raw else b"")
-            return json.dumps(result) if result is not None else ""
-        if hasattr(h, "ts_read"):
-            return h.ts_read(pattern_json)
-        return getattr(h, "ts-read", lambda _: "")(pattern_json)
-
-    def ts_take(self, pattern_json: str) -> str:
-        """
-        TupleSpace take (destructive read). pattern_json: JSON array with wildcards.
-        Returns matched tuple as JSON array and removes it, or empty if not found.
-        """
-        h = _get_host()
-        if _host_is_wit:
-            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
-            wire = encode_read_request(values, take=True)
-            raw = h.ts_take(wire)
-            result = decode_read_response_first(bytes(raw) if raw else b"")
-            return json.dumps(result) if result is not None else ""
-        if hasattr(h, "ts_take"):
-            return h.ts_take(pattern_json)
-        return getattr(h, "ts-take", lambda _: "")(pattern_json)
-
-    def ts_read_all(self, pattern_json: str) -> str:
-        """
-        TupleSpace read-all matching tuples (non-destructive).
-        Returns JSON array of matched tuples, e.g. [["task","w1",1],["task","w2",2]].
-        """
-        h = _get_host()
-        if _host_is_wit:
-            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
-            wire = encode_read_request(values, take=False, max_results=10000)
-            raw = h.ts_read_all(wire)
-            result = decode_read_response_all(bytes(raw) if raw else b"")
-            return json.dumps(result)
-        if hasattr(h, "ts_read_all"):
-            return _from_payload_bytes(h.ts_read_all(_to_payload_bytes(pattern_json)))
-        return getattr(h, "ts-read-all", lambda _: "[]")(pattern_json)
-
-    def kv_delete(self, key: str) -> str:
-        """
-        Key-value delete.
-        
-        Args:
-            key: Key to delete
-        
-        Returns:
-            Empty string on success, "ERROR:message" on failure
-        """
-        h = _get_host()
-        return h.kv_delete(key)
-
-    def kv_list(self, prefix: str) -> str:
-        """
-        Key-value list keys with prefix.
-        
-        Args:
-            prefix: Key prefix to match
-        
-        Returns:
-            JSON array of keys (e.g., ["key1","key2"]) or "ERROR:message" on failure
-        """
-        h = _get_host()
-        if hasattr(h, "kv_list"):
-            raw = h.kv_list(prefix)
-            if raw is None:
-                return "[]"
-            if isinstance(raw, list):
-                return json.dumps(raw)
-            if isinstance(raw, (bytes, bytearray)):
-                return _from_payload_bytes(raw)
-            if isinstance(raw, str):
-                return raw
-            return str(raw)
-        return getattr(h, "kv-list", lambda _: "[]")(prefix)
-
-    def lock_acquire(
-        self,
-        tenant_id: str,
-        namespace: str,
-        holder_id: str,
-        lock_name: str,
-        lease_duration_secs: int = 30,
-        timeout_ms: int = 0,
-    ) -> str:
-        """
-        Acquire a distributed lock.
-        Required: tenant_id, namespace, holder_id, lock_name.
-        Returns JSON on success: {"lock_key","version","holder_id","locked","lease_duration_secs","expires_at_ms"},
-        or "ERROR:..." on failure.
-        """
-        h = _get_host()
-        if hasattr(h, "lock_acquire"):
-            return _decode_lock_payload(h.lock_acquire(
-                tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms
-            ))
-        return getattr(h, "lock-acquire", lambda *_: "ERROR: not implemented")(
-            tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms
-        )
-
-    def lock_release(
-        self,
-        lock_id: str,
-        tenant_id: str,
-        namespace: str,
-        holder_id: str,
-        lock_version: str,
-    ) -> str:
-        """
-        Release a distributed lock.
-        Required: lock_id, tenant_id, namespace, holder_id, lock_version (from acquire or last renew).
-        Returns empty on success, ERROR:... on failure.
-        """
-        h = _get_host()
-        if hasattr(h, "lock_release"):
-            return h.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)
-        return getattr(h, "lock-release", lambda *_: "")(
-            lock_id, tenant_id, namespace, holder_id, lock_version
-        )
-
-    def lock_renew(
-        self,
-        lock_id: str,
-        tenant_id: str,
-        namespace: str,
-        holder_id: str,
-        lock_version: str,
-        lease_duration_secs: int = 30,
-    ) -> str:
-        """
-        Renew lease on a held lock (heartbeat).
-        Required: lock_id, tenant_id, namespace, holder_id, lock_version.
-        Returns new lock version on success, or ERROR:... on failure.
-        """
-        h = _get_host()
-        if hasattr(h, "lock_renew"):
-            return _decode_lock_payload(h.lock_renew(
-                lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs
-            ))
-        return getattr(h, "lock-renew", lambda *_: "ERROR: not implemented")(
-            lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs
-        )
-
-    def blob_upload(self, blob_id: str, data: str, content_type: str = "application/octet-stream") -> str:
-        """
-        Upload blob data (base64-encoded).
-        
-        Args:
-            blob_id: Unique blob identifier
-            data: Base64-encoded content
-            content_type: MIME type (e.g., "image/png", "application/json")
-        
-        Returns:
-            Empty string on success, "ERROR:message" on failure
-        """
-        h = _get_host()
-        if hasattr(h, "blob_upload"):
-            return h.blob_upload(blob_id, _to_payload_bytes(data), content_type)
-        return getattr(h, "blob-upload", lambda *_: "")(blob_id, data, content_type)
-
-    def blob_download(self, blob_id: str) -> str:
-        """
-        Download blob data.
-        
-        Args:
-            blob_id: Unique blob identifier
-        
-        Returns:
-            Base64-encoded content on success, empty string if not found, "ERROR:message" on failure
-        """
-        h = _get_host()
-        if hasattr(h, "blob_download"):
-            return _from_payload_bytes(h.blob_download(blob_id))
-        return getattr(h, "blob-download", lambda _: "")(blob_id)
-
-    def blob_delete(self, blob_id: str) -> str:
-        """
-        Delete blob.
-        
-        Args:
-            blob_id: Unique blob identifier
-        
-        Returns:
-            Empty string on success, "ERROR:message" on failure
-        """
-        h = _get_host()
-        if hasattr(h, "blob_delete"):
-            return h.blob_delete(blob_id)
-        return getattr(h, "blob-delete", lambda _: "")(blob_id)
-
-    def blob_list(self, prefix: str) -> str:
-        """
-        List blobs with prefix.
-        
-        Args:
-            prefix: Blob ID prefix to match
-        
-        Returns:
-            JSON array of blob IDs (e.g., ["blob1","blob2"]) or "ERROR:message" on failure
-        """
-        h = _get_host()
-        if hasattr(h, "blob_list"):
-            return h.blob_list(prefix)
-        return getattr(h, "blob-list", lambda _: "[]")(prefix)
 
     # ========================================================================
     # Messaging: ask (request-reply)
@@ -1613,7 +1740,7 @@ class Host:
         Returns:
             Parsed JSON response, or raw string if not valid JSON
         """
-        h = _get_host()
+        h = _get_host_actor()
         payload_json = ""
         if payload is not None:
             payload_json = json.dumps(payload) if not isinstance(payload, str) else payload
@@ -1635,7 +1762,7 @@ class Host:
 
     def self_id(self) -> str:
         """Get own actor ID."""
-        h = _get_host()
+        h = _get_host_actor()
         return h.self_id()
 
     # ========================================================================
@@ -1660,7 +1787,7 @@ class Host:
             Canonical actor ID string assigned by the framework.
             Raises RuntimeError on failure.
         """
-        h = _get_host()
+        h = _get_host_actor()
         args_json = json.dumps(args) if args else "{}"
         result = h.spawn(module_ref, actor_name, role, args_json)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
@@ -1677,7 +1804,7 @@ class Host:
         Raises:
             RuntimeError: on failure
         """
-        h = _get_host()
+        h = _get_host_actor()
         result = h.stop(actor_id)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
@@ -1688,14 +1815,14 @@ class Host:
 
     def link(self, actor_id: str) -> None:
         """Bidirectional link: if either actor crashes, the other is notified."""
-        h = _get_host()
+        h = _get_host_actor()
         result = h.link(actor_id)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def unlink(self, actor_id: str) -> None:
         """Remove a bidirectional link."""
-        h = _get_host()
+        h = _get_host_actor()
         result = h.unlink(actor_id)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
@@ -1704,7 +1831,7 @@ class Host:
         """
         Monitor an actor (unidirectional). Returns monitor reference string.
         """
-        h = _get_host()
+        h = _get_host_actor()
         result = h.monitor(actor_id)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
@@ -1712,14 +1839,10 @@ class Host:
 
     def demonitor(self, monitor_ref: str) -> None:
         """Cancel a monitor."""
-        h = _get_host()
+        h = _get_host_actor()
         result = h.demonitor(monitor_ref)
         if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
-
-    # ========================================================================
-    # Timers (Delayed Messaging)
-    # ========================================================================
 
     # ========================================================================
     # Elastic pool (checkout/checkin)
@@ -1737,7 +1860,7 @@ class Host:
             Dict with actor_id, pool_name, checkout_id on success.
             None on failure (pool not configured, timeout, or pool empty).
         """
-        h = _get_host()
+        h = _get_host_pool()
         fn = getattr(h, "pool_checkout", None) or getattr(h, "pool-checkout", None)
         if fn is None:
             return None
@@ -1769,7 +1892,7 @@ class Host:
         Raises:
             RuntimeError: on failure.
         """
-        h = _get_host()
+        h = _get_host_pool()
         fn = getattr(h, "pool_checkin", None) or getattr(h, "pool-checkin", None)
         if fn is None:
             raise RuntimeError("pool checkin not available")
@@ -1788,7 +1911,7 @@ class Host:
             Dict with total_actors, available_actors, busy_actors, current_load, etc.
             None if not available or on error.
         """
-        h = _get_host()
+        h = _get_host_pool()
         fn = getattr(h, "pool_get_metrics", None) or getattr(h, "pool-get-metrics", None)
         if fn is None:
             return None
@@ -1809,11 +1932,11 @@ class Host:
         request: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Call a shard-group host function with proto encoding/decoding."""
-        h = _get_host()
+        h = _get_host_shard()
         fn = getattr(h, name, None) or getattr(h, name.replace("_", "-"), None)
         if fn is None:
             raise RuntimeError(f"{name} not available")
-        if _host_is_wit:
+        if _host_shard_is_wit:
             wire = encode_fn(request)
             raw = fn(wire)
             result_bytes = bytes(raw) if raw else b""
@@ -1837,11 +1960,11 @@ class Host:
 
     def bulk_update_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Bulk update a shard group."""
-        h = _get_host()
+        h = _get_host_shard()
         fn = getattr(h, "bulk_update_shard_group", None) or getattr(h, "bulk-update-shard-group", None)
         if fn is None:
             raise RuntimeError("bulk_update_shard_group not available")
-        if _host_is_wit:
+        if _host_shard_is_wit:
             raise RuntimeError("bulk_update_shard_group: proto wire not implemented for Python WASM")
         raw = fn(json.dumps(request))
         result = _from_payload_bytes(raw)
@@ -1905,11 +2028,11 @@ class Host:
 
     def spawn_actors(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Spawn multiple actors using the framework actor service."""
-        h = _get_host()
+        h = _get_host_actor()
         fn = getattr(h, "spawn_actors", None) or getattr(h, "spawn-actors", None)
         if fn is None:
             raise RuntimeError("spawn_actors not available")
-        if _host_is_wit:
+        if _host_actor_is_wit:
             raise RuntimeError("spawn_actors: proto wire not implemented for Python WASM")
         raw = fn(json.dumps(request))
         result = _from_payload_bytes(raw)
@@ -1921,13 +2044,13 @@ class Host:
         self, application_id: str, metrics: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Merge a node-local application metrics delta."""
-        h = _get_host()
+        h = _get_host_actor()
         fn = getattr(h, "application_metrics_add", None) or getattr(
             h, "application-metrics-add", None
         )
         if fn is None:
             raise RuntimeError("application_metrics_add not available")
-        if _host_is_wit:
+        if _host_actor_is_wit:
             wire = encode_application_metrics(metrics)
             raw = fn(application_id, wire)
             result_bytes = bytes(raw) if raw else b""
@@ -1941,14 +2064,14 @@ class Host:
 
     def application_get_metrics(self, application_id: str, node_id: str) -> Dict[str, Any]:
         """Get application metrics for a participating node."""
-        h = _get_host()
+        h = _get_host_actor()
         fn = getattr(h, "application_get_metrics", None) or getattr(
             h, "application-get-metrics", None
         )
         if fn is None:
             raise RuntimeError("application_get_metrics not available")
         raw = fn(application_id, node_id)
-        if _host_is_wit:
+        if _host_actor_is_wit:
             result_bytes = bytes(raw) if raw else b""
             return decode_application_metrics_response(result_bytes)
         else:
@@ -1959,14 +2082,14 @@ class Host:
 
     def application_get_status(self, application_id: str, node_id: str) -> Dict[str, Any]:
         """Get application status for a participating node."""
-        h = _get_host()
+        h = _get_host_actor()
         fn = getattr(h, "application_get_status", None) or getattr(
             h, "application-get-status", None
         )
         if fn is None:
             raise RuntimeError("application_get_status not available")
         raw = fn(application_id, node_id)
-        if _host_is_wit:
+        if _host_actor_is_wit:
             result_bytes = bytes(raw) if raw else b""
             return decode_application_get_status_response(result_bytes)
         else:
@@ -1993,78 +2116,52 @@ class Host:
         Returns:
             Timer ID string (for tracking/observability)
         """
-        h = _get_host()
+        h = _get_host_actor()
         payload_json = json.dumps(payload) if payload is not None else "{}"
         return h.send_after(delay_ms, msg_type, _to_payload_bytes(payload_json))
 
-    # ========================================================================
-    # Outbound HTTP (service links)
-    # ========================================================================
-
-    def http_fetch(
-        self,
-        link_name: str,
-        method: str,
-        path_and_query: str,
-        headers: Optional[Dict[str, str]] = None,
-        body: Optional[Union[str, bytes]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Execute an outbound HTTP request via a named service link.
-
-        The link must be pre-configured in RuntimeConfig.service_links.
-        The host handles retries, circuit breaking, and auth injection.
-
-        Args:
-            link_name: Service link name (e.g. "payments-api")
-            method: HTTP method ("GET", "POST", "PUT", "DELETE", "PATCH")
-            path_and_query: Path and optional query string (e.g. "/v1/users?limit=10")
-            headers: Optional extra headers dict
-            body: Optional request body (string or bytes; bytes are base64-encoded)
-
-        Returns:
-            Dict with "status" (int), "headers" (dict), "body" (str: UTF-8 text when
-            possible, otherwise base64 for WASM; mock returns JSON string as today).
-
-        Raises:
-            RuntimeError: If the host returns an ERROR: response.
-        """
-        import base64
-        h = _get_host()
-        hdrs = headers or {}
-        headers_json = json.dumps(hdrs)
-        if isinstance(body, bytes):
-            body_str = base64.b64encode(body).decode("ascii")
-            body_bytes = body
-        else:
-            body_str = body or ""
-            body_bytes = body_str.encode("utf-8") if body_str else b""
-        fn = getattr(h, "http_fetch", None) or getattr(h, "http-fetch", None)
-        if fn is None:
-            raise RuntimeError("http_fetch not available (no service links configured)")
-        if _host_is_wit:
-            # WIT: request bytes are plexspaces.wasm.v1.HttpFetchRequest (prost); response is HttpFetchResponse.
-            wire_req = encode_http_fetch_request(hdrs, body_bytes)
-            raw = fn(link_name, method, path_and_query, _to_payload_bytes(wire_req))
-            result_bytes = bytes(raw) if raw else b""
-            status, resp_headers, resp_body = decode_http_fetch_response(result_bytes)
-            try:
-                body_out = resp_body.decode("utf-8")
-            except UnicodeDecodeError:
-                body_out = base64.b64encode(resp_body).decode("ascii")
-            return {
-                "status": int(status),
-                "headers": dict(resp_headers),
-                "body": body_out,
-            }
-        else:
-            # Mock: http_fetch(link_name, method, path_and_query, headers_json, body)
-            result = fn(link_name, method, path_and_query, headers_json, body_str)
-        if isinstance(result, str) and result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        if isinstance(result, str):
-            return json.loads(result)
-        return result
+def _http_fetch(
+    link_name: str,
+    method: str,
+    path_and_query: str,
+    headers: Optional[Dict[str, str]] = None,
+    body: Optional[Union[str, bytes]] = None,
+) -> Dict[str, Any]:
+    """Execute an outbound HTTP request via a named service link."""
+    import base64
+    hdrs = headers or {}
+    headers_json = json.dumps(hdrs)
+    if isinstance(body, bytes):
+        body_str = base64.b64encode(body).decode("ascii")
+        body_bytes = body
+    else:
+        body_str = body or ""
+        body_bytes = body_str.encode("utf-8") if body_str else b""
+    h = _get_host_http()
+    fn = getattr(h, "http_fetch", None) or getattr(h, "http-fetch", None)
+    if fn is None:
+        raise RuntimeError("http_fetch not available (no service links configured)")
+    if _host_http_is_wit:
+        wire_req = encode_http_fetch_request(hdrs, body_bytes)
+        raw = fn(link_name, method, path_and_query, _to_payload_bytes(wire_req))
+        result_bytes = bytes(raw) if raw else b""
+        status, resp_headers, resp_body = decode_http_fetch_response(result_bytes)
+        try:
+            body_out = resp_body.decode("utf-8")
+        except UnicodeDecodeError:
+            body_out = base64.b64encode(resp_body).decode("ascii")
+        return {
+            "status": int(status),
+            "headers": dict(resp_headers),
+            "body": body_out,
+        }
+    else:
+        result = fn(link_name, method, path_and_query, headers_json, body_str)
+    if isinstance(result, str) and result.startswith("ERROR:"):
+        raise RuntimeError(result)
+    if isinstance(result, str):
+        return json.loads(result)
+    return result
 
 
 class ServiceHttpClient:
@@ -2086,7 +2183,6 @@ class ServiceHttpClient:
 
     def __init__(self, link_name: str):
         self._link_name = link_name
-        self._host = Host()
 
     def get(
         self,
@@ -2094,7 +2190,7 @@ class ServiceHttpClient:
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """GET request. Returns response dict with status, headers, body."""
-        return self._host.http_fetch(self._link_name, "GET", path_and_query, headers)
+        return _http_fetch(self._link_name, "GET", path_and_query, headers)
 
     def post(
         self,
@@ -2104,7 +2200,7 @@ class ServiceHttpClient:
     ) -> Dict[str, Any]:
         """POST JSON request. body is serialized to JSON."""
         body_str = json.dumps(body) if body is not None else ""
-        return self._host.http_fetch(self._link_name, "POST", path_and_query, headers, body_str)
+        return _http_fetch(self._link_name, "POST", path_and_query, headers, body_str)
 
     def put(
         self,
@@ -2114,7 +2210,7 @@ class ServiceHttpClient:
     ) -> Dict[str, Any]:
         """PUT JSON request."""
         body_str = json.dumps(body) if body is not None else ""
-        return self._host.http_fetch(self._link_name, "PUT", path_and_query, headers, body_str)
+        return _http_fetch(self._link_name, "PUT", path_and_query, headers, body_str)
 
     def delete(
         self,
@@ -2122,7 +2218,7 @@ class ServiceHttpClient:
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """DELETE request."""
-        return self._host.http_fetch(self._link_name, "DELETE", path_and_query, headers)
+        return _http_fetch(self._link_name, "DELETE", path_and_query, headers)
 
 
 # Global host instance

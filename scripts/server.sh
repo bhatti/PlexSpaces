@@ -59,11 +59,10 @@ elif [ ! -f "./certs/server-${GRPC_PORT}.crt" ]; then
     mv ./certs/server.key "./certs/server-${GRPC_PORT}.key"
 fi
 
-# Optional: clear apps for this run (comment out to keep apps across restarts)
+# Uncomment to clean apps and DB for a fresh start
 # rm -rf ~/plexspaces/apps/*
-
-# Each node gets its own DB file based on port to avoid SQLite concurrent access errors
 PLEXSPACES_DB_DIR="${HOME}/plexspaces/db"
+# rm -f "${PLEXSPACES_DB_DIR}/plexspaces-${GRPC_PORT}.db"
 mkdir -p "$PLEXSPACES_DB_DIR"
 export PLEXSPACES_DATABASE_URL="${PLEXSPACES_DATABASE_URL:-sqlite://${PLEXSPACES_DB_DIR}/plexspaces-${GRPC_PORT}.db?mode=rwc}"
 

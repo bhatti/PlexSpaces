@@ -425,28 +425,29 @@ pub struct LoggingMiddlewareConfig {
 pub struct InterceptorRequest {
     /// gRPC method full path (e.g., "/plexspaces.actor.v1.ActorService/SpawnActor")
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub method: ::prost::alloc::string::String,
     /// Request headers/metadata
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Remote client address
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub remote_addr: ::prost::alloc::string::String,
     /// Request timestamp
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
-    /// Request ID for correlation
-    #[prost(string, tag="5")]
-    pub request_id: ::prost::alloc::string::String,
+    // Request ID for correlation (moved to request_id = 1)
+
     /// TLS peer certificate (PEM format) for mTLS authentication
     /// Extracted from TLS connection during handshake
     /// Empty if connection is not using TLS or mTLS is not enabled
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub peer_certificate: ::prost::alloc::string::String,
     /// Service identity extracted from peer certificate (CN or SAN)
     /// Set by TLS layer after certificate validation
     /// Used by mTLS interceptor for service-to-service authentication
-    #[prost(string, tag="7")]
+    #[prost(string, tag="8")]
     pub peer_service_id: ::prost::alloc::string::String,
 }
 /// Interceptor response context
@@ -461,22 +462,23 @@ pub struct InterceptorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InterceptorResponse {
     /// Response status code
-    #[prost(int32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
     pub status_code: i32,
     /// Response headers/metadata
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Response timestamp
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
     /// Request duration (calculated by interceptor chain)
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub duration: ::core::option::Option<::prost_types::Duration>,
-    /// Request ID for correlation with InterceptorRequest
-    #[prost(string, tag="5")]
-    pub request_id: ::prost::alloc::string::String,
+    // Request ID for correlation with InterceptorRequest (moved to request_id = 1)
+
     /// gRPC method full path (echoed from the originating InterceptorRequest)
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub method: ::prost::alloc::string::String,
 }
 /// Interceptor result

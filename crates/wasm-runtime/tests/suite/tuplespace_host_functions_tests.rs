@@ -41,7 +41,7 @@ mod tests {
         use TuplespaceHost;
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -85,7 +85,7 @@ mod tests {
         use plexspaces_wasm_runtime::component_host::plexspaces::actor::types;
         use TuplespaceHost;
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl = TuplespaceImpl::new(None, actor_id);
 
         let wit_tuple = vec![types::TupleField::StringVal("test".to_string())];
@@ -112,7 +112,7 @@ mod tests {
     async fn test_tuplespace_impl_read() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -155,7 +155,7 @@ mod tests {
     async fn test_tuplespace_impl_read_no_match() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl = TuplespaceImpl::new(Some(tuplespace_provider), actor_id);
 
         // Create pattern that won't match anything
@@ -183,7 +183,7 @@ mod tests {
     async fn test_tuplespace_impl_take() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -227,7 +227,7 @@ mod tests {
     async fn test_tuplespace_impl_count() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -265,7 +265,7 @@ mod tests {
     async fn test_tuplespace_impl_read_all() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -304,7 +304,7 @@ mod tests {
     async fn test_tuplespace_impl_read_all_with_limit() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -339,7 +339,7 @@ mod tests {
     async fn test_tuplespace_impl_write_with_ttl() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace_impl =
             TuplespaceImpl::new(Some(tuplespace_provider.clone()), actor_id.clone());
 
@@ -372,7 +372,7 @@ mod tests {
     async fn test_tuplespace_type_conversion() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let tuplespace_impl = TuplespaceImpl::new(Some(tuplespace_provider), actor_id);
 
         use plexspaces_wasm_runtime::component_host::plexspaces::actor::types;
@@ -421,7 +421,7 @@ mod tests {
     async fn test_tuplespace_pattern_conversion() {
         // ARRANGE
         let tuplespace_provider = create_test_tuplespace();
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let tuplespace_impl = TuplespaceImpl::new(Some(tuplespace_provider), actor_id);
 
         use plexspaces_wasm_runtime::component_host::plexspaces::actor::types;

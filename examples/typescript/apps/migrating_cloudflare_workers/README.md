@@ -1,6 +1,8 @@
 # Cloudflare Workers - Discord-style Guild Chat Server (TypeScript)
 
-Demonstrates **Cloudflare Workers Durable Objects** pattern for real-time chat.
+Demonstrates **full feature parity** with Cloudflare Workers Durable Objects
+for real-time chat, including durable alarms, atomic KV operations, batch
+reads/writes, and real fan-out via actor messaging.
 
 **Real-world use case**: Chat platforms (Discord, Slack), collaborative editors,
 multiplayer game lobbies — anywhere you need per-entity stateful coordination
@@ -19,27 +21,30 @@ and the [Cloudflare workers-chat-demo](https://github.com/cloudflare/workers-cha
               │  │  bob   ──┤   (ring buffer) │  │
               │  │  carol ──┘                 │  │
               │  └────────────────────────────┘  │
+              │  kvMultiGet/Put: batch history   │
+              │  host.send(): real fan-out       │
               └──────────────────────────────────┘
                     │           │           │
               join/leave   send_message  get_history
-                    │        (fan-out)      │
+                    │      (real fan-out)   │
               ┌─────▼───────────▼──────────▼──────┐
               │         Worker Router             │
-              └───────────────┬───────────────────┘
-                              │
-              ┌───────────────▼───────────────────┐
-              │   RateLimiter (Durable Object)    │
-              │   Per-user token bucket           │
-              │   user-1: [5 tokens, refill@1/s]  │
-              │   user-2: [3 tokens, refill@1/s]  │
-              └───────────────────────────────────┘
+              └─────────────┬────────┬────────────┘
+                            │        │
+              ┌─────────────▼──┐  ┌──▼─────────────────┐
+              │  RateLimiter   │  │    AlarmDemo        │
+              │  Token bucket  │  │  Deferred batch     │
+              │  kvIncrement() │  │  alarmSet/alarm()   │
+              └────────────────┘  └─────────────────────┘
 ```
 
 **Chat flow** (like Discord's guild process):
 1. Users `join` a room -> tracked in member list
-2. `send_message` -> add to history + fan-out to all members
-3. Rate limiter enforces per-user message limits (token bucket)
-4. Message history persisted via KV (like DO `state.storage.put`)
+2. `send_message` -> add to history + real `host.send()` fan-out to all members
+3. Rate limiter enforces per-user message limits (token bucket + `kvIncrement`)
+4. Message history persisted via `kvMultiPut` batch write (like DO `storage.put(map)`)
+5. History restored on init via `kvMultiGet` batch read (like DO `storage.get(keys[])`)
+6. `AlarmDemoActor`: enqueue items, schedule durable alarm, process batch on fire
 
 ## Quick Start
 
@@ -57,9 +62,17 @@ cd examples/typescript/apps/migrating_cloudflare_workers
 
 | Feature | How Used |
 |---------|----------|
-| `ActorRouter` | Routes to ChatRoom or RateLimiter by actor ID prefix |
+| `ActorRouter` | Routes to ChatRoom, RateLimiter, or AlarmDemo by actor ID prefix |
 | `PlexSpacesActor<T>` | TypeScript actor base with typed state + JSON serialization |
 | `host.kvPut()/kvGet()` | Durable message history (like DO `state.storage`) |
+| `host.kvMultiGet()` | Batch-fetch history + metadata on init (like DO `storage.get(keys[])`) |
+| `host.kvMultiPut()` | Batch-write history + metadata on persist (like DO `storage.put(map)`) |
+| `host.kvIncrement()` | Atomic distributed counter for rate limiting (cross-node safe) |
+| `host.kvCas()` | Atomic compare-and-swap for distributed state coordination |
+| `host.alarmSet()` | Schedule durable alarm (like DO `storage.setAlarm(timestamp)`) |
+| `host.alarmGet()` | Read scheduled alarm timestamp (like DO `storage.getAlarm()`) |
+| `on__alarm__()` | Alarm handler dispatched by reminder facet (like DO `alarm()`) |
+| `host.send()` | Real fan-out to member actors (like DO WebSocket broadcast) |
 | `host.nowMs()` | Timestamps for messages + token bucket refill |
 | `host.info()` | Structured logging |
 | `onInit()` | Initialize + restore persisted state (`blockConcurrencyWhile`) |
@@ -73,13 +86,19 @@ cd examples/typescript/apps/migrating_cloudflare_workers
 | Actor model | `export class ChatRoom extends DurableObject` | `ChatRoomActor extends PlexSpacesActor` |
 | Get instance | `env.CHAT_ROOM.get(id)` | `host.ask(actorID, ...)` |
 | Durable storage | `this.state.storage.put/get` | `host.kvPut()/kvGet()` + getState |
+| Batch KV write | `storage.put(new Map([...]))` | `host.kvMultiPut(entries)` |
+| Batch KV read | `storage.get(["k1","k2"])` | `host.kvMultiGet(keys)` |
+| Atomic counter | N/A (manual CAS) | `host.kvIncrement(key, delta)` |
+| Atomic CAS | N/A (manual retry) | `host.kvCas(key, expected, new)` |
 | Request handler | `async fetch(request)` | `on<Op>(payload)` handlers |
 | Init/migration | `blockConcurrencyWhile()` | `onInit()` (runs before any handle) |
 | Multi-actor | `wrangler.toml [[bindings]]` | `app-config.toml [[children]]` |
 | Routing | Worker fetch + URL path | `ActorRouter` prefix matching |
 | Fan-out | WebSocket broadcast | `host.send()` to member actors |
-| Rate limiting | Separate DO class per IP | RateLimiter actor per user |
-| Timer/alarm | `this.state.storage.setAlarm()` | `host.sendAfter()` |
+| Rate limiting | Separate DO class per IP | RateLimiter actor (kvIncrement) |
+| Schedule alarm | `storage.setAlarm(timestamp)` | `host.alarmSet(timestampMs)` |
+| Read alarm | `storage.getAlarm()` | `host.alarmGet()` |
+| Alarm handler | `async alarm() { ... }` | `on__alarm__(payload)` handler |
 | Deployment | `npx wrangler deploy` | HTTP multipart deploy API |
 | Language | JavaScript/TypeScript | TypeScript, Go, Python, Rust |
 | Distribution | Cloudflare edge network | HTTP/gRPC (multi-cloud) |
@@ -136,12 +155,12 @@ Higher granularity = more compute per coordination overhead = better efficiency.
 
 | File | Description |
 |------|-------------|
-| `guild_chat_actor.ts` | ChatRoom + RateLimiter actors (multi-actor router) |
+| `guild_chat_actor.ts` | ChatRoom + RateLimiter + AlarmDemo actors (multi-actor router) |
 | `package.json` | npm dependencies + build scripts |
 | `tsconfig.json` | TypeScript configuration |
 | `build-bundle.mjs` | esbuild bundler (TS + SDK -> ESM) |
-| `app-config.toml` | ApplicationSpec (supervisor + 2 DO actors) |
+| `app-config.toml` | ApplicationSpec (supervisor + 3 DO actors) |
 | `build.sh` | Build WASM component (TS -> JS -> ESM -> WASM) |
-| `test.sh` | Deploy + test chat + rate limiting + benchmarks |
+| `test.sh` | Deploy + test chat + rate limiting + alarm + benchmarks |
 | `verify.mjs` | In-process Node.js verification (no server) |
 | `native/guild_chat.js` | Native Cloudflare Worker/DO reference |

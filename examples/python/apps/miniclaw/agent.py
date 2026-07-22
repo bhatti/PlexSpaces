@@ -120,7 +120,7 @@ class AgentActor:
         # Persist history in KV if session provided
         if session_id:
             import json
-            host.kv_put(f"session_history:{session_id}", json.dumps(self.messages))
+            host.kv.put(f"session_history:{session_id}", json.dumps(self.messages))
 
         self.total_chats += 1
         fire_audit("agent_chat", f"session={session_id}")
@@ -179,8 +179,8 @@ class SessionManagerActor:
             "created_at": host.now_ms(),
             "status": "active",
         }
-        host.kv_put(f"session:{session_id}", json.dumps(meta))
-        host.kv_put(f"session_map:{channel}:{user_id}", session_id)
+        host.kv.put(f"session:{session_id}", json.dumps(meta))
+        host.kv.put(f"session_map:{channel}:{user_id}", session_id)
         self.session_ids.append(session_id)
         self.active_sessions += 1
         self.total_created += 1
@@ -192,10 +192,10 @@ class SessionManagerActor:
     def get_session(self, session_id: str = "", channel: str = "", user_id: str = "") -> dict:
         import json
         if not session_id and channel and user_id:
-            session_id = host.kv_get(f"session_map:{channel}:{user_id}")
+            session_id = host.kv.get(f"session_map:{channel}:{user_id}")
         if not session_id:
             return {"error": "session not found"}
-        raw = host.kv_get(f"session:{session_id}")
+        raw = host.kv.get(f"session:{session_id}")
         if not raw:
             return {"error": "session not found", "session_id": session_id}
         meta = json.loads(raw)
@@ -206,7 +206,7 @@ class SessionManagerActor:
     def end_session(self, session_id: str = "") -> dict:
         if not session_id:
             return {"error": "session_id is required"}
-        host.kv_delete(f"session:{session_id}")
+        host.kv.delete(f"session:{session_id}")
         self.session_ids = [s for s in self.session_ids if s != session_id]
         if self.active_sessions > 0:
             self.active_sessions -= 1
@@ -218,7 +218,7 @@ class SessionManagerActor:
         import json
         sessions = []
         for sid in self.session_ids:
-            raw = host.kv_get(f"session:{sid}")
+            raw = host.kv.get(f"session:{sid}")
             if raw:
                 try:
                     sessions.append(json.loads(raw))

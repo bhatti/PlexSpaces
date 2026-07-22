@@ -1,5 +1,8 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::{create_shard_group, scatter_gather};
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -162,10 +165,10 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         }
     };
 
-    let group_id = format!("genomics-pipeline-{}", host::now_ms());
+    let group_id = format!("genomics-pipeline-{}", now_ms());
     let create_request_bytes =
         shard_group_create_request_bytes(&group_id, "worker", request.worker_count);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
@@ -174,7 +177,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         Ok(actor_ids) => actor_ids,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
-    let leader_node_id = actor_node_id(&host::self_id());
+    let leader_node_id = actor_node_id(&self_id());
     let mut per_node_metrics: HashMap<String, NodeMetrics> = HashMap::new();
     let mut per_role_metrics: HashMap<String, RoleMetrics> = HashMap::new();
 
@@ -182,11 +185,11 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     let mut leader_compute_ms = 0_u64;
     let mut leader_coordination_ms = 0_u64;
 
-    let init_start = host::now_ms();
+    let init_start = now_ms();
     if let Err(err) = ensure_worker_initialization(&shard_actor_ids) {
         return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    leader_coordination_ms += host::now_ms().saturating_sub(init_start);
+    leader_coordination_ms += now_ms().saturating_sub(init_start);
     leader_message_count += shard_actor_ids.len() as u64;
 
     let participant_node_ids: BTreeSet<String> = std::iter::once(leader_node_id.clone())
@@ -216,7 +219,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         "variant_calling",
         "annotation",
     ];
-    let wall_start = host::now_ms();
+    let wall_start = now_ms();
     let mut stage_records = Vec::new();
     let mut remote_nodes_with_work = BTreeSet::new();
     let mut total_errors = 0_u64;
@@ -228,7 +231,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     for stage_name in stages {
         leader_message_count += 1;
         let scatter_request = stage_request(&request, stage_name);
-        let stage_wait_start = host::now_ms();
+        let stage_wait_start = now_ms();
         let scatter_request_bytes = scatter_gather_request_bytes(
             &group_id,
             plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
@@ -236,11 +239,11 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             request.worker_count,
             30_000,
         );
-        let response = match host::scatter_gather(&scatter_request_bytes) {
+        let response = match scatter_gather(&scatter_request_bytes) {
             Ok(response) => response,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        leader_coordination_ms += host::now_ms().saturating_sub(stage_wait_start);
+        leader_coordination_ms += now_ms().saturating_sub(stage_wait_start);
 
         let parsed = match decode_scatter_gather_response(&response) {
             Ok(shard_responses) => serde_json::json!({ "shard_responses": shard_responses }),
@@ -249,7 +252,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             })),
         };
 
-        let stage_compute_start = host::now_ms();
+        let stage_compute_start = now_ms();
         let (accumulator, record) = match collect_stage(
             stage_name,
             parsed,
@@ -262,7 +265,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             Ok(result) => result,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        leader_compute_ms += host::now_ms().saturating_sub(stage_compute_start);
+        leader_compute_ms += now_ms().saturating_sub(stage_compute_start);
         stage_records.push(record);
 
         match stage_name {
@@ -310,7 +313,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         }
     }
 
-    let report_compute_start = host::now_ms();
+    let report_compute_start = now_ms();
     let report_summary = serde_json::json!({
         "sample_id": request.sample_id,
         "reference_genome": request.reference_genome,
@@ -320,8 +323,8 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         "variant_calling": variant_result,
         "annotation": annotation_result,
     });
-    leader_compute_ms += host::now_ms().saturating_sub(report_compute_start);
-    let wall_time_ms = host::now_ms().saturating_sub(wall_start);
+    leader_compute_ms += now_ms().saturating_sub(report_compute_start);
+    let wall_time_ms = now_ms().saturating_sub(wall_start);
 
     if let Err(err) = require_application_metrics_merge(
         serde_json::json!({

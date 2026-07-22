@@ -22,8 +22,8 @@ syntax = "proto3";
 package plexspaces.v1;
 
 option go_package = "github.com/plexobject/plexspaces/gen/go/v1;plexspacesv1";
-option java_package = "com.plexspaces.v1";
 option java_outer_classname = "ExecutionTraceProto";
+option java_package = "com.plexspaces.v1";
 
 // A single step within an execution trace.
 //

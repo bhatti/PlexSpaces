@@ -139,14 +139,17 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_link() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
+        let actor_canonical = actor_id.to_string();
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
 
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
+        let target_canonical = "target-actor//test-type::test-ns@test-node".to_string();
+
         // ACT: Link two actors
-        let result = messaging.link("target-actor".to_string()).await;
+        let result = messaging.link(target_canonical.clone()).await;
 
         // ASSERT
         assert!(result.is_ok(), "link should succeed");
@@ -154,22 +157,25 @@ mod tests {
         // Verify that link_actor was called
         let calls = mock_sender.link_calls.lock().await;
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "test-actor");
-        assert_eq!(calls[0].1, "test-actor");
-        assert_eq!(calls[0].2, "target-actor");
+        assert_eq!(calls[0].0, actor_canonical);
+        assert_eq!(calls[0].1, actor_canonical);
+        assert_eq!(calls[0].2, target_canonical);
     }
 
     #[tokio::test]
     async fn test_messaging_impl_unlink() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
+        let actor_canonical = actor_id.to_string();
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
 
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
+        let target_canonical = "target-actor//test-type::test-ns@test-node".to_string();
+
         // ACT: Unlink two actors
-        let result = messaging.unlink("target-actor".to_string()).await;
+        let result = messaging.unlink(target_canonical.clone()).await;
 
         // ASSERT
         assert!(result.is_ok(), "unlink should succeed");
@@ -177,22 +183,24 @@ mod tests {
         // Verify that unlink_actor was called
         let calls = mock_sender.unlink_calls.lock().await;
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "test-actor");
-        assert_eq!(calls[0].1, "test-actor");
-        assert_eq!(calls[0].2, "target-actor");
+        assert_eq!(calls[0].0, actor_canonical);
+        assert_eq!(calls[0].1, actor_canonical);
+        assert_eq!(calls[0].2, target_canonical);
     }
 
     #[tokio::test]
     async fn test_messaging_impl_monitor() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
 
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
+        let target_canonical = "target-actor//test-type::test-ns@test-node".to_string();
+
         // ACT: Monitor an actor
-        let result = messaging.monitor("target-actor".to_string()).await;
+        let result = messaging.monitor(target_canonical.clone()).await;
 
         // ASSERT
         assert!(result.is_ok(), "monitor should succeed");
@@ -202,14 +210,14 @@ mod tests {
         // Verify that monitor_actor was called
         let calls = mock_sender.monitor_calls.lock().await;
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "test-actor");
-        assert_eq!(calls[0].1, "target-actor");
+        assert_eq!(calls[0].0, "test-actor//test-type::test-ns@test-node");
+        assert_eq!(calls[0].1, target_canonical);
     }
 
     #[tokio::test]
     async fn test_messaging_impl_demonitor_not_implemented() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
 
@@ -235,7 +243,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_link_no_message_sender() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = Arc::new(HostFunctions::new()); // No message sender
 
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());

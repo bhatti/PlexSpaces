@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # System Service Implementation
@@ -148,6 +148,7 @@ impl SystemService for SystemServiceImpl {
         };
 
         Ok(Response::new(GetSystemInfoResponse {
+            request_id: req.request_id.clone(),
             system_info: Some(system_info),
         }))
     }
@@ -176,6 +177,7 @@ impl SystemService for SystemServiceImpl {
 
         // Convert to GetHealthResponse (use component_checks, not dependency_checks)
         Ok(Response::new(GetHealthResponse {
+            request_id: req.request_id.clone(),
             overall_status: health.overall_status,
             checks: health.component_checks,
         }))
@@ -194,6 +196,7 @@ impl SystemService for SystemServiceImpl {
             .await;
 
         Ok(Response::new(GetDetailedHealthResponse {
+            request_id: req.request_id.clone(),
             health: Some(health),
         }))
     }
@@ -206,6 +209,7 @@ impl SystemService for SystemServiceImpl {
         let http_status_code = if is_alive { 200 } else { 503 };
 
         Ok(Response::new(LivenessProbeResponse {
+            request_id: ulid::Ulid::new().to_string(),
             is_alive,
             http_status_code,
         }))
@@ -219,6 +223,7 @@ impl SystemService for SystemServiceImpl {
         let http_status_code = if is_ready { 200 } else { 503 };
 
         Ok(Response::new(ReadinessProbeResponse {
+            request_id: ulid::Ulid::new().to_string(),
             is_ready,
             http_status_code,
             not_ready_reason: not_ready_reason.unwrap_or_default(),
@@ -233,6 +238,7 @@ impl SystemService for SystemServiceImpl {
         let http_status_code = if startup_complete { 200 } else { 503 };
 
         Ok(Response::new(StartupProbeResponse {
+            request_id: ulid::Ulid::new().to_string(),
             startup_complete,
             http_status_code,
             not_complete_reason: not_complete_reason.unwrap_or_default(),
@@ -246,6 +252,7 @@ impl SystemService for SystemServiceImpl {
         let readiness = self.health_reporter.get_readiness().await;
 
         Ok(Response::new(GetNodeReadinessResponse {
+            request_id: ulid::Ulid::new().to_string(),
             readiness: Some(readiness),
         }))
     }
@@ -268,6 +275,7 @@ impl SystemService for SystemServiceImpl {
         };
 
         Ok(Response::new(MarkStartupCompleteResponse {
+            request_id: req.request_id.clone(),
             status: status as i32,
             startup_duration: Some(duration),
         }))
@@ -284,6 +292,7 @@ impl SystemService for SystemServiceImpl {
             self.health_reporter.begin_shutdown(drain_timeout).await;
 
         Ok(Response::new(BeginShutdownResponse {
+            request_id: req.request_id.clone(),
             requests_drained,
             drain_duration: Some(drain_duration),
             drain_completed,
@@ -468,6 +477,7 @@ impl SystemService for SystemServiceImpl {
         };
 
         Ok(Response::new(GetMetricsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             metrics: vec![system_metrics],
         }))
     }
@@ -502,7 +512,7 @@ impl SystemService for SystemServiceImpl {
             settings.retain(|s: &_| regex.is_match(&s.key));
         }
 
-        Ok(Response::new(GetConfigResponse { settings }))
+        Ok(Response::new(GetConfigResponse { request_id: req.request_id.clone(), settings }))
     }
 
     async fn set_config(
@@ -542,6 +552,7 @@ impl SystemService for SystemServiceImpl {
         // In the future, we could integrate with a log aggregation system
         // or return recent logs from memory buffer
         Ok(Response::new(GetLogsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             entries: vec![], // Empty for now
             page_response: None,
         }))
@@ -588,6 +599,7 @@ impl SystemService for SystemServiceImpl {
         };
 
         Ok(Response::new(CreateBackupResponse {
+            request_id: req.request_id.clone(),
             backup: Some(backup),
         }))
     }
@@ -605,8 +617,10 @@ impl SystemService for SystemServiceImpl {
         // For now, return empty list (no backups implemented yet)
         use plexspaces_proto::common::v1::PageResponse;
         Ok(Response::new(ListBackupsResponse {
+            request_id: ulid::Ulid::new().to_string(),
             backups: vec![],
             page_response: Some(PageResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 offset: 0,
                 limit: 0,
                 has_next: false,
@@ -677,6 +691,7 @@ impl SystemService for SystemServiceImpl {
         };
 
         Ok(Response::new(GetShutdownStatusResponse {
+            request_id: ulid::Ulid::new().to_string(),
             status: Some(status),
         }))
     }
@@ -725,6 +740,7 @@ impl SystemService for SystemServiceImpl {
         // Node shutdown is handled via ServiceLocator::request_shutdown()
 
         Ok(Response::new(ShutdownResponse {
+            request_id: req.request_id.clone(),
             success: drain_completed,
             message: if drain_completed {
                 format!(
@@ -761,7 +777,7 @@ mod tests {
         let reporter = Arc::new(reporter);
         let service = SystemServiceImpl::new(reporter.clone());
 
-        let request = Request::new(LivenessProbeRequest {});
+        let request = Request::new(LivenessProbeRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.liveness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -784,7 +800,7 @@ mod tests {
         let service = SystemServiceImpl::new(reporter.clone());
 
         // Initially not ready (startup not complete)
-        let request = Request::new(ReadinessProbeRequest {});
+        let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.readiness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -810,7 +826,7 @@ mod tests {
 
         let service = SystemServiceImpl::new(reporter.clone());
 
-        let request = Request::new(ReadinessProbeRequest {});
+        let request = Request::new(ReadinessProbeRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.readiness_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -833,7 +849,7 @@ mod tests {
         let service = SystemServiceImpl::new(reporter.clone());
 
         // Initially not complete
-        let request = Request::new(StartupProbeRequest {});
+        let request = Request::new(StartupProbeRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.startup_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -843,7 +859,7 @@ mod tests {
         // Mark complete
         reporter.mark_startup_complete(None).await;
 
-        let request = Request::new(StartupProbeRequest {});
+        let request = Request::new(StartupProbeRequest { request_id: ulid::Ulid::new().to_string() });
         let response = service.startup_probe(request).await.unwrap();
         let resp = response.into_inner();
 
@@ -867,6 +883,7 @@ mod tests {
 
         let request = Request::new(GetDetailedHealthRequest {
             include_non_critical: true,
+            request_id: ulid::Ulid::new().to_string(),
         });
         let response = service.get_detailed_health(request).await.unwrap();
         let resp = response.into_inner();

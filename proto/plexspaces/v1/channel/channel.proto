@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Channel/Queue API
@@ -406,77 +406,87 @@ message ChannelStats {
 
 // CreateChannel request
 message CreateChannelRequest {
-  ChannelConfig config = 1 [(buf.validate.field).required = true];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ChannelConfig config = 2 [(buf.validate.field).required = true];
 }
 
 // CreateChannel response
 message CreateChannelResponse {
-  string channel_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel_id = 2;
 }
 
 // Send request
 message SendRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  plexspaces.common.v1.Message message = 2 [(buf.validate.field).required = true];
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  plexspaces.common.v1.Message message = 3 [(buf.validate.field).required = true];
+  google.protobuf.Duration timeout = 4 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 // Send response
 message SendResponse {
-  string message_id = 1;
-  bool sent = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string message_id = 2;
+  bool sent = 3;
 }
 
 // Receive request
 message ReceiveRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
-  uint32 max_messages = 3 [(buf.validate.field).uint32 = {lte: 10000}]; // Max 10K messages per batch
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  uint32 max_messages = 4 [(buf.validate.field).uint32 = {lte: 10000}]; // Max 10K messages per batch
 }
 
 // Receive response
 message ReceiveResponse {
-  repeated plexspaces.common.v1.Message messages = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.common.v1.Message messages = 2;
 }
 
 // Subscribe request (streaming)
 message SubscribeRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  string consumer_group = 2 [(buf.validate.field).string.max_len = 255]; // For load-balanced consumption
-  map<string, string> filters = 3; // Header-based filtering
+  string consumer_group = 3 [(buf.validate.field).string.max_len = 255]; // For load-balanced consumption
+  map<string, string> filters = 4; // Header-based filtering
 }
 
 // Publish request (pub/sub)
 message PublishRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  plexspaces.common.v1.Message message = 2 [(buf.validate.field).required = true];
+  plexspaces.common.v1.Message message = 3 [(buf.validate.field).required = true];
 }
 
 // Publish response
 message PublishResponse {
-  string message_id = 1;
-  uint32 subscriber_count = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string message_id = 2;
+  uint32 subscriber_count = 3;
 }
 
 // Ack request
 message AckRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  string message_id = 2 [(buf.validate.field).string = {
+  string message_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
@@ -484,30 +494,34 @@ message AckRequest {
 
 // Ack response
 message AckResponse {
-  bool acknowledged = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool acknowledged = 2;
 }
 
 // Nack request
 message NackRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  string message_id = 2 [(buf.validate.field).string = {
+  string message_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  bool requeue = 3;
+  bool requeue = 4;
 }
 
 // Nack response
 message NackResponse {
-  bool requeued = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool requeued = 2;
 }
 
 // GetStats request
 message GetStatsRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
@@ -515,12 +529,14 @@ message GetStatsRequest {
 
 // GetStats response
 message GetStatsResponse {
-  ChannelStats stats = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ChannelStats stats = 2;
 }
 
 // DeleteChannel request
 message DeleteChannelRequest {
-  string channel = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
@@ -528,7 +544,8 @@ message DeleteChannelRequest {
 
 // DeleteChannel response
 message DeleteChannelResponse {
-  bool deleted = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool deleted = 2;
 }
 
 // ChannelService — public gRPC service for channel operations.

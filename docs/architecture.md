@@ -95,7 +95,7 @@ graph TB
     end
 
     subgraph Comms["📡 Communication"]
-        CM1["gRPC / Protobuf<br/>Proto-First"] ~~~ CM2["HTTP Gateway<br/>REST · Lambda URLs"] ~~~ CM3["Multi-Tenancy<br/>JWT · mTLS"]
+        CM1["gRPC / Protobuf<br/>Proto-First"] ~~~ CM2["HTTP Gateway<br/>REST · Lambda URLs"] ~~~ CM3["WebSocket<br/>Thin Clients"] ~~~ CM4["Multi-Tenancy<br/>JWT · mTLS"]
     end
 
     SDKs --> UseCases
@@ -463,8 +463,8 @@ graph TB
 **Example**: See [Event Analytics Example](../examples/rust/embedded/event_analytics/) for a complete demonstration of shard groups with hash-based routing and scatter-gather queries using SDK patterns (`#[gen_server_actor]`, SDK spawn helpers, `GenServerRef.cast()`/`call()`).
 
 **Routing Architecture**:
-- **Unified Routing Module**: `crates/actor/src/routing.rs` centralizes all routing logic
-- **Location Transparency**: `is_actor_local()` determines locality by comparing node_id from actor_id with local_node_id
+- **ActorRegistry as Routing Authority**: `ActorRegistry::tell()`/`ask()`/`ask_with_sender()` centralize all routing logic
+- **Location Transparency**: `ActorId::is_on_node()` determines locality by comparing node_id suffix
 - **RequestContext Required**: All routing functions require RequestContext for tenant/namespace isolation
 - **Ask Pattern**: Uses temporary sender ActorRef + ReplyWaiterRegistry for request-reply semantics
 - **Error Reply Propagation**: Handler failures produce `message_type: "error_reply"` — conveyed through gRPC via `AskReplyResponse.success=false` and reconstructed on the caller side, giving immediate failure notification (Erlang/Orleans semantics) without caller timeout
@@ -706,6 +706,48 @@ sequenceDiagram
     TupleSpace-->>Consumer2: Tuple (destructive)
     Note over TupleSpace: Tuple Removed
 ```
+
+## WebSocket Transport
+
+PlexSpaces supports WebSocket as a first-class transport for **thin clients** — browsers, edge devices, and clients behind firewalls that can make outbound TCP connections but cannot accept inbound gRPC.
+
+### Transport Layer
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  High-level Services (ActorServiceImpl, NodeRegistry)   │
+└───────────────────────────┬─────────────────────────────┘
+                            │ uses trait
+┌───────────────────────────▼─────────────────────────────┐
+│  ActorTransportClient / NodeTransportClient traits      │
+└───────────────┬───────────────────────┬─────────────────┘
+                │                       │
+    ┌───────────▼──────────┐  ┌────────▼──────────────┐
+    │  GrpcTransportClient │  │  WsTransportClient    │
+    │  (default path)      │  │  (WsRegistry lookup)  │
+    └──────────────────────┘  └───────────────────────┘
+```
+
+Routing is transparent to services: `WsRegistry.get_sender(node_id) → Some` routes via WebSocket; `None` falls back to gRPC. Full nodes never appear in `WsRegistry`.
+
+### Thin Nodes
+
+A node connecting via WebSocket is automatically assigned `NodeRoleThin`:
+- Appears in `list_connected_nodes()` as `NODE_ROLE_THIN`
+- Registered in `NodeRegistry` for cluster membership and discovery
+- **Excluded** from SWIM indirect-ping intermediary pool (no inbound gRPC port)
+- Unregistered from both `WsRegistry` and `NodeRegistry` on disconnect
+
+### Protocol
+
+All frames are binary Protobuf `WsFrame` envelopes over the `/ws` HTTP upgrade endpoint. The handshake sequence:
+
+1. Client upgrades HTTP → WebSocket (JWT validated at this point)
+2. Client sends `NodeRegister` frame (must arrive within 10s)
+3. Server registers session in `WsRegistry`, then sends `NodeRegisterAck`
+4. Client may now send `Tell`, `Ask`, or `Heartbeat` frames
+
+See [WebSocket Transport](websocket.md) for full protocol details, frame definitions, and client examples.
 
 ## Design Principles
 

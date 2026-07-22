@@ -27,22 +27,22 @@ PREFIX_RATELIMIT = "ratelimit:"
 
 
 def _kv_get(key: str) -> str:
-    r = host.kv_get(key)
+    r = host.kv.get(key)
     return r if r and not r.startswith("ERROR") else ""
 
 
 def _kv_put(key: str, value: str) -> bool:
-    r = host.kv_put(key, value)
+    r = host.kv.put(key, value)
     return not (r and r.startswith("ERROR"))
 
 
 def _kv_delete(key: str) -> bool:
-    r = host.kv_delete(key)
+    r = host.kv.delete(key)
     return not (r and r.startswith("ERROR"))
 
 
 def _kv_list(prefix: str) -> list:
-    r = host.kv_list(prefix)
+    r = host.kv.list(prefix)
     if not r or r.startswith("ERROR"):
         return []
     try:

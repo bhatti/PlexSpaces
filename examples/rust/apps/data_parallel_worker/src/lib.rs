@@ -27,7 +27,8 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::{application_get_metrics, application_get_status, application_metrics_add};
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 
 mod leader;
@@ -259,7 +260,7 @@ fn application_status_response_to_json(response: &GetApplicationStatusResponse) 
 
 fn merge_application_metrics(metrics: serde_json::Value) -> Result<serde_json::Value, String> {
     let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
-    let response = host::application_metrics_add(&current_application_id(), &metrics_bytes)?;
+    let response = application_metrics_add(&current_application_id(), &metrics_bytes)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
@@ -273,14 +274,14 @@ fn require_application_metrics_merge(
 }
 
 fn application_metrics(node_id: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_metrics(&current_application_id(), node_id)?;
+    let response = application_get_metrics(&current_application_id(), node_id)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
 }
 
 fn application_status(node_id: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_status(&current_application_id(), node_id)?;
+    let response = application_get_status(&current_application_id(), node_id)?;
     let response = GetApplicationStatusResponse::decode(response.as_slice())
         .map_err(|err| format!("invalid GetApplicationStatusResponse protobuf: {}", err))?;
     Ok(application_status_response_to_json(&response))
@@ -288,6 +289,7 @@ fn application_status(node_id: &str) -> Result<serde_json::Value, String> {
 
 fn shard_group_create_request_bytes(group_id: &str, actor_type: &str, shard_count: usize) -> Vec<u8> {
     CreateShardGroupRequest {
+        request_id: String::new(),
         config: Some(DataParallelConfig {
             group_id: group_id.to_string(),
             shard_count: shard_count as u32,
@@ -320,9 +322,10 @@ fn scatter_gather_request_bytes(
     timeout_ms: u64,
 ) -> Vec<u8> {
     ScatterGatherRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         query: Some(ProtoMessage {
-            id: format!("req-{}", host::now_ms()),
+            id: format!("req-{}", now_ms()),
             message_type: "call".to_string(),
             payload: json_bytes(payload),
             ..Default::default()

@@ -153,6 +153,7 @@ mod sqlite_tests {
 
         // First page
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 3,
             filter: String::new(),
@@ -170,6 +171,7 @@ mod sqlite_tests {
 
         // Second page: use offset from previous page (already the next skip count)
         let page_request2 = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: page_response.offset, // Already the next offset (skip count)
             limit: 3,
             filter: String::new(),
@@ -207,6 +209,7 @@ mod sqlite_tests {
 
         // First page
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 2,
             filter: String::new(),
@@ -226,6 +229,7 @@ mod sqlite_tests {
         // Second page: use offset from previous page (already the next skip count)
         let page_response = history.page_response.as_ref().unwrap();
         let page_request2 = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: page_response.offset, // Already the next offset (skip count)
             limit: 2,
             filter: String::new(),
@@ -311,6 +315,7 @@ mod sqlite_tests {
 
         // Test pagination with large event log
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 20,
             filter: String::new(),
@@ -332,6 +337,7 @@ mod sqlite_tests {
 
         loop {
             let page_request = PageRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 offset: current_offset,
                 limit: 20,
                 filter: String::new(),
@@ -432,6 +438,7 @@ mod sqlite_tests {
 
         // Replay from sequence 5 with pagination
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 3,
             filter: String::new(),

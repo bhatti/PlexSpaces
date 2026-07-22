@@ -39,7 +39,7 @@ class JobSchedulerActor:
 
     def _restore_scheduler_state(self) -> None:
         """Load queue and counters from KV (authoritative across WASM handle/re-instantiate cycles)."""
-        raw = host.kv_get(SCHEDULER_STATE_KEY)
+        raw = host.kv.get(SCHEDULER_STATE_KEY)
         if not raw or not str(raw).strip():
             return
         try:
@@ -72,7 +72,7 @@ class JobSchedulerActor:
                 "total_coord_ms": self.total_coord_ms,
             }
         )
-        err = host.kv_put(SCHEDULER_STATE_KEY, blob)
+        err = host.kv.put(SCHEDULER_STATE_KEY, blob)
         if err and str(err).startswith("ERROR"):
             host.log("warn", f"scheduler KV save failed: {err}")
 
@@ -84,7 +84,7 @@ class JobSchedulerActor:
 
     def _put_job_entry(self, entry: dict) -> None:
         """Persist single job record; survives WASM re-instantiation when host KV is available."""
-        err = host.kv_put(self._job_kv_key(entry["job_id"]), json.dumps(entry))
+        err = host.kv.put(self._job_kv_key(entry["job_id"]), json.dumps(entry))
         if err and str(err).startswith("ERROR"):
             host.log("warn", f"job KV put failed job_id={entry.get('job_id')}: {err}")
 
@@ -161,7 +161,7 @@ class JobSchedulerActor:
             return {"ok": False, "error": "job_id required"}
 
         # Prefer per-job KV (authoritative across WASM handle cycles; allocate updates this key).
-        raw = host.kv_get(self._job_kv_key(job_id))
+        raw = host.kv.get(self._job_kv_key(job_id))
         if raw and not str(raw).startswith("ERROR") and str(raw).strip():
             try:
                 entry = json.loads(raw)
@@ -213,7 +213,7 @@ class JobSchedulerActor:
                 self._put_job_entry(j)
                 self._save_scheduler_state()
                 return {"ok": True, "job_id": job_id, "requeued": True}
-        rawp = host.kv_get(self._job_kv_key(job_id))
+        rawp = host.kv.get(self._job_kv_key(job_id))
         if rawp and str(rawp).strip() and not str(rawp).startswith("ERROR"):
             try:
                 ent = json.loads(rawp)

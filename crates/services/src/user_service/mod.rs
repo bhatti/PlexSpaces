@@ -79,6 +79,7 @@ impl UserServiceImpl {
 
 fn build_page_response(total: i32, offset: i32, limit: i32) -> PageResponse {
     PageResponse {
+        request_id: ulid::Ulid::new().to_string(),
         total_size: total,
         offset,
         limit,
@@ -128,6 +129,7 @@ impl UserService for UserServiceImpl {
         }
 
         Ok(Response::new(GetOrCreateByEmailResponse {
+            request_id: req.request_id.clone(),
             user: Some(user),
             created,
         }))
@@ -176,7 +178,7 @@ impl UserService for UserServiceImpl {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(Response::new(UpdateUserResponse { user: Some(user) }))
+        Ok(Response::new(UpdateUserResponse { request_id: req.request_id.clone(), user: Some(user) }))
     }
 
     async fn list_users(
@@ -215,6 +217,7 @@ impl UserService for UserServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(ListUsersResponse {
+            request_id: req.request_id.clone(),
             users,
             page: Some(build_page_response(total, offset, limit)),
         }))
@@ -247,6 +250,7 @@ impl UserService for UserServiceImpl {
                 .map_err(|e| Status::internal(e.to_string()))?;
 
             Ok(Response::new(ListTenantsResponse {
+                request_id: req.request_id.clone(),
                 tenants,
                 page: Some(build_page_response(total, offset, limit)),
             }))
@@ -261,6 +265,7 @@ impl UserService for UserServiceImpl {
             let tenants: Vec<_> = tenant.into_iter().collect();
             let total = tenants.len() as i32;
             Ok(Response::new(ListTenantsResponse {
+                request_id: req.request_id.clone(),
                 tenants,
                 page: Some(build_page_response(total, 0, limit)),
             }))
@@ -322,6 +327,7 @@ impl UserService for UserServiceImpl {
         // which has access to the signing key. The gRPC layer returns token_id
         // so the caller can embed it as the JWT jti claim.
         Ok(Response::new(CreateApiTokenResponse {
+            request_id: req.request_id.clone(),
             token: Some(token),
             plaintext: token_id,
         }))
@@ -368,7 +374,7 @@ impl UserService for UserServiceImpl {
         metrics::counter!("plexspaces_api_tokens_revoked_total").increment(1);
         tracing::info!(user_id = %user_id, token_id = %req.token_id, "auth.api_token.revoked");
 
-        Ok(Response::new(DeleteApiTokenResponse {}))
+        Ok(Response::new(DeleteApiTokenResponse { request_id: req.request_id.clone() }))
     }
 
     async fn list_api_tokens(
@@ -400,6 +406,7 @@ impl UserService for UserServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(ListApiTokensResponse {
+            request_id: req.request_id.clone(),
             tokens,
             page: Some(build_page_response(total, offset, limit)),
         }))

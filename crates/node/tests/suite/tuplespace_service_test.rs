@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Integration tests for gRPC TupleSpaceService implementation
@@ -108,6 +108,7 @@ async fn test_write_tuple_via_grpc() {
     // Create write request
     let tuple = create_int_tuple(vec![1, 2, 3]);
     let request = Request::new(WriteRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tuples: vec![tuple],
         transaction_id: String::new(),
     });
@@ -167,6 +168,7 @@ async fn test_read_tuple_via_grpc() {
     ]);
 
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         timeout: None,
         blocking: false,
@@ -229,6 +231,7 @@ async fn test_take_tuple_via_grpc() {
     ]);
 
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         timeout: None,
         blocking: false,
@@ -276,6 +279,7 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
 
     // Create request with valid tenant context (using defaults when auth disabled)
     let mut request = Request::new(WriteRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tuples: vec![create_int_tuple(vec![1, 2, 3])],
         transaction_id: String::new(),
     });
@@ -346,6 +350,7 @@ async fn test_count_tuples_via_grpc() {
     ]);
 
     let request = Request::new(CountRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         transaction_id: String::new(),
         spatial_filter: None,
@@ -392,6 +397,7 @@ async fn test_exists_tuples_via_grpc() {
     ]);
 
     let request = Request::new(ExistsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern_exists),
         transaction_id: String::new(),
     });
@@ -409,6 +415,7 @@ async fn test_exists_tuples_via_grpc() {
     ]);
 
     let request = Request::new(ExistsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern_not_exists),
         transaction_id: String::new(),
     });
@@ -468,6 +475,7 @@ async fn test_read_with_wildcard_pattern() {
     ];
 
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         timeout: None,
         blocking: false,
@@ -502,6 +510,7 @@ async fn test_read_no_match() {
     let pattern = create_exact_pattern(vec![tuple_field::Value::String("nonexistent".to_string())]);
 
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: Some(pattern),
         timeout: None,
         blocking: false,
@@ -541,6 +550,7 @@ async fn test_write_multiple_tuples() {
     ];
 
     let request = Request::new(WriteRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tuples,
         transaction_id: String::new(),
     });
@@ -571,6 +581,7 @@ async fn test_write_with_missing_template() {
 
     // Request with no template
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: None,
         timeout: None,
         blocking: false,
@@ -604,6 +615,7 @@ async fn test_take_with_missing_template() {
 
     // Request with no template
     let request = Request::new(ReadRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: None,
         timeout: None,
         blocking: false,
@@ -637,6 +649,7 @@ async fn test_count_with_missing_template() {
 
     // Request with no template
     let request = Request::new(CountRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: None,
         transaction_id: String::new(),
         spatial_filter: None,
@@ -666,6 +679,7 @@ async fn test_exists_with_missing_template() {
 
     // Request with no template
     let request = Request::new(ExistsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         template: None,
         transaction_id: String::new(),
     });

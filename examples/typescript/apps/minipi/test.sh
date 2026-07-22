@@ -105,6 +105,10 @@ echo ""
 echo "Step 1: Check node"
 HTTP_CHECK="000"
 for _i in 1 2 3; do
+  trap 'rm -f "${APP_ZIP:-}"' EXIT
+  APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+  zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
   HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
   [ "$HTTP_CHECK" != "000" ] && break
   sleep 2
@@ -137,8 +141,7 @@ for _attempt in 1 2 3; do
       -F "application_id=$APP_ID" \
       -F "name=ts-minipi" \
       -F "version=1.0.0" \
-      -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-      -F "config=@$CONFIG_FILE") || true
+      -F "app_file=@$APP_ZIP") || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then

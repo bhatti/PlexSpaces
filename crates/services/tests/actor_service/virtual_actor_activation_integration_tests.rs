@@ -642,6 +642,7 @@ async fn invoke_virtual_actor(
 ) -> Result<LocalInvokeResponse, tonic::Status> {
     if ask {
         let mut request = Request::new(AskReplyRequest {
+            request_id: ulid::Ulid::new().to_string(),
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
             actor_name: String::new(),
@@ -677,6 +678,7 @@ async fn invoke_virtual_actor(
             })
     } else {
         let mut request = Request::new(SendMessageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             namespace: namespace.to_string(),
             actor_type: actor_type.to_string(),
             actor_name: String::new(),

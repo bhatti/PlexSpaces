@@ -448,6 +448,7 @@ fn build_ask_request(
     query_params: HashMap<String, String>,
 ) -> AskReplyRequest {
     AskReplyRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
         actor_name: String::new(),
@@ -468,6 +469,7 @@ fn build_ask_request(
 
 fn build_send_request(actor_type: &str, payload: Vec<u8>) -> SendMessageRequest {
     SendMessageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: "default".to_string(),
         actor_type: actor_type.to_string(),
         actor_name: String::new(),

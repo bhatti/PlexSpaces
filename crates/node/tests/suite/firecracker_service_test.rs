@@ -69,6 +69,7 @@ mod firecracker_service_tests {
         };
 
         let request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -87,7 +88,10 @@ mod firecracker_service_tests {
         let node = create_test_node().await;
         let service = create_service(node);
 
-        let request = Request::new(CreateVmRequest { config: None });
+        let request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
+            config: None,
+        });
 
         let response = FirecrackerVmService::create_vm(&service, request).await;
 
@@ -103,6 +107,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(BootVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "nonexistent-vm".to_string(),
         });
 
@@ -135,6 +140,7 @@ mod firecracker_service_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -145,6 +151,7 @@ mod firecracker_service_tests {
         // Note: This will fail in unit tests because FirecrackerVm::boot() requires
         // actual Firecracker binary, but we can test the service logic
         let boot_request = Request::new(BootVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-2".to_string(),
         });
 
@@ -167,6 +174,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(GetVmStateRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "nonexistent-vm".to_string(),
         });
 
@@ -184,6 +192,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![],
             node_id: String::new(),
             page_size: 10,
@@ -220,6 +229,7 @@ mod firecracker_service_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -228,6 +238,7 @@ mod firecracker_service_tests {
 
         // List VMs
         let list_request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![],
             node_id: String::new(),
             page_size: 10,
@@ -264,6 +275,7 @@ mod firecracker_service_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -272,6 +284,7 @@ mod firecracker_service_tests {
 
         // List VMs with state filter (Created state)
         let list_request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![ProtoVmState::VmStateCreated as i32],
             node_id: String::new(),
             page_size: 10,
@@ -298,6 +311,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(DeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "new-vm-1".to_string(),
             application_id: "app-1".to_string(),
             application_bundle: vec![],
@@ -338,6 +352,7 @@ mod firecracker_service_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -346,6 +361,7 @@ mod firecracker_service_tests {
 
         // Deploy application to existing VM
         let deploy_request = Request::new(DeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "existing-vm-1".to_string(),
             application_id: "app-2".to_string(),
             application_bundle: vec![],
@@ -367,6 +383,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(UndeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "vm-1".to_string(),
             application_id: "app-1".to_string(),
             force: false,
@@ -386,6 +403,7 @@ mod firecracker_service_tests {
         let service = create_service(node);
 
         let request = Request::new(StopVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "nonexistent-vm".to_string(),
             force: false,
         });
@@ -419,6 +437,7 @@ mod firecracker_service_tests {
         };
 
         let create_request = Request::new(CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(vm_config),
         });
 
@@ -427,6 +446,7 @@ mod firecracker_service_tests {
 
         // Stop VM
         let stop_request = Request::new(StopVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "test-vm-stop".to_string(),
             force: false,
         });
@@ -470,6 +490,7 @@ mod firecracker_service_tests {
             };
 
             let create_request = Request::new(CreateVmRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 config: Some(vm_config),
             });
 
@@ -479,6 +500,7 @@ mod firecracker_service_tests {
 
         // List all VMs
         let list_request = Request::new(ListVmsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             states: vec![],
             node_id: String::new(),
             page_size: 10,

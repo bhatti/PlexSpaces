@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Actor registry for local actor lifecycle, lookup, and message delivery.
@@ -1076,8 +1076,11 @@ impl ActorRegistry {
 
         // Routing: local fast-path when the actor is on this node, or its node_id is
         // an unresolved local placeholder. Route via ActorService only when the actor
-        // is on an explicit, different node.
-        let is_remote = !actor_id.is_on_node(&self.local_node_id);
+        // is on an explicit, different node AND is not registered locally.
+        // The registry check handles simulated/aliased actors that carry a remote-looking
+        // node_id but are actually backed by a local sender (e.g. in integration tests).
+        let is_remote = !actor_id.is_on_node(&self.local_node_id)
+            && self.lookup_actor(actor_id).await.is_none();
 
         let result = if is_remote {
             // Remote node: route via ActorService (gRPC).
@@ -1143,15 +1146,20 @@ impl ActorRegistry {
         // Only route remotely when node_id is an explicit non-local node name.
         let is_remote = !actor_id.is_on_node(&self.local_node_id);
 
-        let dispatch_result = if is_remote {
+        if is_remote {
+            // For remote actors use ask_reply gRPC (send_and_wait) so the reply is returned
+            // synchronously. The fire-and-forget send() path converts "call" → "cast" on the
+            // remote side and never produces a reply back to the temp sender waiter.
+            waiter_registry.remove(&correlation_id).await;
+            self.remove_temporary_sender(&temp_sender_id).await;
             let svc = self.actor_service.read().await.clone();
-            svc.send(ctx, actor_id.as_ref(), message)
+            return svc
+                .send_and_wait(ctx, actor_id.as_ref(), message, Some(timeout))
                 .await
-                .map(|_| ())
-                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))
-        } else {
-            self.dispatch_local_message(ctx, actor_id, message).await
-        };
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
+        }
+
+        let dispatch_result = self.dispatch_local_message(ctx, actor_id, message).await;
         if let Err(err) = dispatch_result {
             waiter_registry.remove(&correlation_id).await;
             self.remove_temporary_sender(&temp_sender_id).await;
@@ -1165,6 +1173,70 @@ impl ActorRegistry {
 
         waiter_registry.remove(&correlation_id).await;
         self.remove_temporary_sender(&temp_sender_id).await;
+        reply
+    }
+
+    /// Ask with a caller-supplied temporary sender and correlation ID.
+    ///
+    /// Same as [`ask`] but the caller creates the temporary sender and correlation ID (e.g. for
+    /// shard-group fanout where one temp sender is shared across many concurrent asks).
+    /// The caller is responsible for creating and cleaning up the temporary sender.
+    /// This method owns the per-correlation `ReplyWaiter` registration and removal.
+    ///
+    /// ## Arguments
+    /// * `ctx` - RequestContext with tenant_id and namespace
+    /// * `actor_id` - Target actor to send to
+    /// * `message` - Message to send (sender_id and correlation_id will be set)
+    /// * `timeout` - How long to wait for the reply
+    /// * `temp_sender_id` - Pre-created temporary sender actor ID
+    /// * `correlation_id` - Correlation ID for this specific ask
+    pub async fn ask_with_sender(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        mut message: Message,
+        timeout: Duration,
+        temp_sender_id: ActorId,
+        correlation_id: String,
+    ) -> Result<Message, ActorRegistryError> {
+        let waiter_registry = self.require_reply_waiter_registry().await?;
+
+        message.sender_id = temp_sender_id.to_string();
+        message.correlation_id = correlation_id.clone();
+        if message.receiver_id.is_empty() {
+            message.receiver_id = actor_id.to_string();
+        }
+
+        let waiter = ReplyWaiter::new();
+        waiter_registry
+            .register(correlation_id.clone(), waiter.clone())
+            .await;
+
+        let is_remote = !actor_id.is_on_node(&self.local_node_id);
+        if is_remote {
+            // For remote actors use ask_reply gRPC (send_and_wait) so the reply is returned
+            // synchronously over the same connection. The fire-and-forget send() path would
+            // convert message_type "call" → "cast" on the remote side and never produce a reply.
+            waiter_registry.remove(&correlation_id).await;
+            let svc = self.actor_service.read().await.clone();
+            return svc
+                .send_and_wait(ctx, actor_id.as_ref(), message, Some(timeout))
+                .await
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
+        }
+
+        let dispatch_result = self.dispatch_local_message(ctx, actor_id, message).await;
+
+        if let Err(err) = dispatch_result {
+            waiter_registry.remove(&correlation_id).await;
+            return Err(err);
+        }
+
+        let reply = waiter.wait(timeout).await.map_err(|e| match e {
+            crate::ReplyWaiterError::Timeout => ActorRegistryError::Timeout,
+            other => ActorRegistryError::SendFailed(other.to_string()),
+        });
+        waiter_registry.remove(&correlation_id).await;
         reply
     }
 

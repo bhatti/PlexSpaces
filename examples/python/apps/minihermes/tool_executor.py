@@ -29,7 +29,7 @@ class ToolExecutorActor:
         host.process_groups.join("svc:tools")
         # Seed built-in tools into KV
         for tool in _BUILTIN_TOOLS:
-            host.kv_put(f"tool_def:{tool['name']}", json.dumps(tool))
+            host.kv.put(f"tool_def:{tool['name']}", json.dumps(tool))
         self.tool_names = [t["name"] for t in _BUILTIN_TOOLS]
         host.info(f"ToolExecutorActor init actor_id={self.actor_id} tools={len(self.tool_names)}")
 
@@ -37,7 +37,7 @@ class ToolExecutorActor:
     def list_tools(self) -> dict:
         tools = []
         for name in self.tool_names:
-            raw = host.kv_get(f"tool_def:{name}")
+            raw = host.kv.get(f"tool_def:{name}")
             if raw:
                 try:
                     tools.append(json.loads(raw))
@@ -50,7 +50,7 @@ class ToolExecutorActor:
         if not name:
             return {"error": "name is required"}
         tool_def = {"name": name, "description": description, "input_schema": input_schema or {}, "handler_type": handler_type}
-        host.kv_put(f"tool_def:{name}", json.dumps(tool_def))
+        host.kv.put(f"tool_def:{name}", json.dumps(tool_def))
         if name not in self.tool_names:
             self.tool_names.append(name)
         fire_audit("tool_registered", f"name={name} type={handler_type}")
@@ -59,7 +59,7 @@ class ToolExecutorActor:
     @handler("execute")
     def execute(self, name: str = "", input: dict = None) -> dict:
         input = input or {}
-        raw = host.kv_get(f"tool_def:{name}")
+        raw = host.kv.get(f"tool_def:{name}")
         if not raw:
             return {"error": f"unknown tool: {name}"}
 

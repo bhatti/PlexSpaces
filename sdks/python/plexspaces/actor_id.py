@@ -112,3 +112,4 @@ class ActorID:
     def with_type(self, name: str, actor_type: str) -> "ActorID":
         """Return a copy with a different name and actor_type."""
         return ActorID(name=name, actor_type=actor_type, namespace=self.namespace, node_id=self.node_id)
+

@@ -17,7 +17,10 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{ask, pg_broadcast, pg_join, pg_members, self_id, send, send_after};
+use plexspaces::actor::host_kv::kv_put;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::application_metrics_add;
 use plexspaces::actor::registry;
 
 // ============================================================================
@@ -52,7 +55,7 @@ fn actor_instance_name(actor_id: &str) -> String {
 }
 
 fn peer(actor_type: &str, name: &str) -> String {
-    let self_id = host::self_id();
+    let self_id = self_id();
     if self_id.contains("//") {
         let rest = &self_id[self_id.find("//").unwrap() + 2..];
         if let Some(at) = rest.find('@') {
@@ -155,7 +158,7 @@ fn safe_metrics_add(app_id: &str, counters: &[(&str, u64)]) {
         ..Default::default()
     };
     let bytes = metrics.encode_to_vec();
-    let _ = host::application_metrics_add(app_id, &bytes);
+    let _ = application_metrics_add(app_id, &bytes);
 }
 
 /// Encode a RegisterRequest proto for the registry WIT interface.
@@ -231,7 +234,7 @@ fn session_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -306,13 +309,13 @@ fn session_connect(v: &Value) -> Result<Vec<u8>, String> {
             s.guild_id = guild_id.clone();
             s.joined_channels = channels.clone();
 
-            let _ = host::pg_join(&user_session_group(&user_id));
+            let _ = pg_join(&user_session_group(&user_id));
             for ch in &channels {
-                let _ = host::pg_join(&channel_group(&guild_id, ch));
+                let _ = pg_join(&channel_group(&guild_id, ch));
                 let msg = json!({ "user_id": user_id, "session_id": s.session_id })
                     .to_string()
                     .into_bytes();
-                let _ = host::send(&channel_actor_id(&guild_id, ch), "join_member", &msg);
+                let _ = send(&channel_actor_id(&guild_id, ch), "join_member", &msg);
             }
 
             let reg_msg = json!({
@@ -322,7 +325,7 @@ fn session_connect(v: &Value) -> Result<Vec<u8>, String> {
             })
             .to_string()
             .into_bytes();
-            let _ = host::send(&guild_actor_id(&guild_id), "register_session", &reg_msg);
+            let _ = send(&guild_actor_id(&guild_id), "register_session", &reg_msg);
 
             let presence_msg = json!({
                 "user_id": user_id,
@@ -332,17 +335,17 @@ fn session_connect(v: &Value) -> Result<Vec<u8>, String> {
             })
             .to_string()
             .into_bytes();
-            let _ = host::send(&presence_actor_id(&user_id), "set_presence", &presence_msg);
+            let _ = send(&presence_actor_id(&user_id), "set_presence", &presence_msg);
 
             let to_connected =
                 json!({ "to": "connected" }).to_string().into_bytes();
             let to_joined = json!({ "to": "joined" }).to_string().into_bytes();
-            let _ = host::send(
+            let _ = send(
                 &connection_fsm_actor_id(&s.session_id),
                 "transition",
                 &to_connected,
             );
-            let _ = host::send(
+            let _ = send(
                 &connection_fsm_actor_id(&s.session_id),
                 "transition",
                 &to_joined,
@@ -383,7 +386,7 @@ fn session_send_channel_message(v: &Value) -> Result<Vec<u8>, String> {
             })
             .to_string()
             .into_bytes();
-            match host::ask(&channel_actor_id(&s.guild_id, channel_id), "post_message", &msg, 5000) {
+            match ask(&channel_actor_id(&s.guild_id, channel_id), "post_message", &msg, 5000) {
                 Ok(resp) => resp,
                 Err(e) => json_err(e),
             }
@@ -410,7 +413,7 @@ fn session_set_typing(v: &Value) -> Result<Vec<u8>, String> {
             let msg = json!({ "user_id": s.user_id, "ttl_ms": ttl_ms })
                 .to_string()
                 .into_bytes();
-            match host::ask(
+            match ask(
                 &channel_actor_id(&s.guild_id, channel_id),
                 "mark_typing",
                 &msg,
@@ -479,7 +482,7 @@ fn session_read_channel(v: &Value) -> Result<Vec<u8>, String> {
             }
             s.unread_by_channel.insert(channel_id.to_string(), 0);
             let idle_msg = json!({ "to": "idle" }).to_string().into_bytes();
-            let _ = host::ask(
+            let _ = ask(
                 &connection_fsm_actor_id(&s.session_id),
                 "transition",
                 &idle_msg,
@@ -541,7 +544,7 @@ fn presence_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -581,13 +584,13 @@ fn presence_set(v: &Value) -> Result<Vec<u8>, String> {
                 .unwrap_or("online")
                 .to_string();
             let ttl_ms = v.get("ttl_ms").and_then(|x| x.as_u64()).unwrap_or(60000);
-            let now_ms = host::now_ms();
+            let now_ms = now_ms();
             s.status = status.clone();
             s.last_seen_ms = now_ms;
             s.expiry_deadline_ms = now_ms + ttl_ms;
             let deadline = s.expiry_deadline_ms;
             let expire_msg = json!({ "deadline_ms": deadline }).to_string().into_bytes();
-            let _ = host::send_after(ttl_ms, "expire_presence", &expire_msg);
+            let _ = send_after(ttl_ms, "expire_presence", &expire_msg);
             safe_metrics_add(&s.application_id, &[("chat_presence_updates", 1)]);
             json_bytes(json!({
                 "user_id": s.user_id,
@@ -664,7 +667,7 @@ fn fsm_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -755,7 +758,7 @@ fn guild_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -841,7 +844,7 @@ fn guild_create_channel(v: &Value) -> Result<Vec<u8>, String> {
                 s.channels.push(channel_id.to_string());
             }
             let kv_val = serde_json::to_string(&s.channels).unwrap_or_default();
-            let _ = host::kv_put(
+            let _ = kv_put(
                 &format!("guild:{}:channels", s.guild_id),
                 kv_val.as_bytes(),
             );
@@ -895,7 +898,7 @@ fn channel_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -945,7 +948,7 @@ fn channel_join_member(v: &Value) -> Result<Vec<u8>, String> {
             );
             let members: Vec<&str> = s.member_index.keys().map(|k| k.as_str()).collect();
             let kv_val = serde_json::to_string(&members).unwrap_or_default();
-            let _ = host::kv_put(
+            let _ = kv_put(
                 &format!("channel:{}:{}:members", s.guild_id, s.channel_id),
                 kv_val.as_bytes(),
             );
@@ -971,13 +974,13 @@ fn channel_mark_typing(v: &Value) -> Result<Vec<u8>, String> {
                 return json_err("user_id is required");
             }
             let ttl_ms = v.get("ttl_ms").and_then(|x| x.as_u64()).unwrap_or(2000);
-            let deadline_ms = host::now_ms() + ttl_ms;
+            let deadline_ms = now_ms() + ttl_ms;
             s.typing_deadlines
                 .insert(user_id.to_string(), deadline_ms);
             let clear_msg = json!({ "user_id": user_id, "deadline_ms": deadline_ms })
                 .to_string()
                 .into_bytes();
-            let _ = host::send_after(ttl_ms, "clear_typing", &clear_msg);
+            let _ = send_after(ttl_ms, "clear_typing", &clear_msg);
             let typing_users: Vec<&str> =
                 s.typing_deadlines.keys().map(|k| k.as_str()).collect();
             json_bytes(json!({
@@ -1037,7 +1040,7 @@ fn channel_post_message(v: &Value) -> Result<Vec<u8>, String> {
                 .unwrap_or("");
             let next_seq = s.total_messages + 1;
             let message_id = format!("{}-{}", s.channel_id, next_seq);
-            let stored_at_ms = host::now_ms();
+            let stored_at_ms = now_ms();
 
             let store_msg = json!({
                 "guild_id": s.guild_id,
@@ -1050,7 +1053,7 @@ fn channel_post_message(v: &Value) -> Result<Vec<u8>, String> {
             })
             .to_string()
             .into_bytes();
-            let _ = host::send(
+            let _ = send(
                 &message_store_actor_id(&s.guild_id, &s.channel_id),
                 "append_message",
                 &store_msg,
@@ -1072,7 +1075,7 @@ fn channel_post_message(v: &Value) -> Result<Vec<u8>, String> {
             }
 
             let fanout_msg = event.to_string().into_bytes();
-            let _ = host::send(&fanout_actor_id(), "deliver_channel_event", &fanout_msg);
+            let _ = send(&fanout_actor_id(), "deliver_channel_event", &fanout_msg);
 
             let audit_msg = json!({
                 "event_type": "channel_message",
@@ -1083,7 +1086,7 @@ fn channel_post_message(v: &Value) -> Result<Vec<u8>, String> {
             })
             .to_string()
             .into_bytes();
-            let _ = host::send(&audit_event_actor_id(), "record_event", &audit_msg);
+            let _ = send(&audit_event_actor_id(), "record_event", &audit_msg);
 
             s.last_message_id = message_id.clone();
             s.total_messages = next_seq;
@@ -1166,7 +1169,7 @@ fn message_store_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -1209,7 +1212,7 @@ fn message_store_append(v: &Value) -> Result<Vec<u8>, String> {
             let stored_at_ms = v
                 .get("stored_at_ms")
                 .and_then(|x| x.as_u64())
-                .unwrap_or_else(|| host::now_ms());
+                .unwrap_or_else(|| now_ms());
             let message = json!({
                 "message_id": message_id,
                 "guild_id": s.guild_id,
@@ -1276,7 +1279,7 @@ fn fanout_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -1315,8 +1318,8 @@ fn fanout_deliver(v: &Value, raw: &[u8]) -> Result<Vec<u8>, String> {
                 .and_then(|x| x.as_str())
                 .unwrap_or("");
             let group = channel_group(guild_id, channel_id);
-            let members = host::pg_members(&group).unwrap_or_default();
-            let _ = host::pg_broadcast(&group, "deliver_channel_event", raw);
+            let members = pg_members(&group).unwrap_or_default();
+            let _ = pg_broadcast(&group, "deliver_channel_event", raw);
             s.deliveries += 1;
             safe_metrics_add(&s.application_id, &[("chat_fanout_events", 1)]);
             json_bytes(json!({
@@ -1361,7 +1364,7 @@ fn audit_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -1397,7 +1400,7 @@ fn audit_record(v: &Value) -> Result<Vec<u8>, String> {
                 "channel_id": v.get("channel_id").and_then(|x| x.as_str()).unwrap_or(""),
                 "message_id": v.get("message_id").and_then(|x| x.as_str()).unwrap_or(""),
                 "user_id": v.get("user_id").and_then(|x| x.as_str()).unwrap_or(""),
-                "recorded_at_ms": host::now_ms(),
+                "recorded_at_ms": now_ms(),
             });
             s.recent_events.push(event);
             if s.recent_events.len() > 100 {
@@ -1465,7 +1468,7 @@ fn workflow_init(config: &[u8]) -> Result<(), String> {
         .unwrap_or("")
         .to_string();
     let app_id = if actor_id.is_empty() {
-        actor_application_id(&host::self_id())
+        actor_application_id(&self_id())
     } else {
         actor_application_id(&actor_id)
     };
@@ -1500,7 +1503,7 @@ fn workflow_run(v: &Value) -> Result<Vec<u8>, String> {
     with_state(|state| {
         if let ActorState::ModerationWorkflow(s) = state {
             if s.application_id.is_empty() {
-                s.application_id = actor_application_id(&host::self_id());
+                s.application_id = actor_application_id(&self_id());
             }
             let report_id = v
                 .get("report_id")
@@ -1509,7 +1512,7 @@ fn workflow_run(v: &Value) -> Result<Vec<u8>, String> {
                 .to_string();
             if s.report_id.is_empty() {
                 s.report_id = if report_id.is_empty() {
-                    actor_instance_name(&host::self_id())
+                    actor_instance_name(&self_id())
                 } else {
                     report_id
                 };

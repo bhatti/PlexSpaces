@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 syntax = "proto3";
@@ -104,6 +104,16 @@ enum NodeType {
   NODE_TYPE_PROCESS = 1; // Simple OS process
   NODE_TYPE_KUBERNETES = 2; // Kubernetes pod
   NODE_TYPE_FIRECRACKER = 3; // Firecracker microVM
+  NODE_TYPE_THIN = 4; // WebSocket-only thin client node (no inbound gRPC)
+}
+
+// Node connectivity role.
+// gRPC-connected nodes are always FULL. WebSocket-connected nodes declare
+// their role in the WS handshake frame; thin nodes cannot accept inbound gRPC.
+enum NodeRole {
+  NODE_ROLE_UNSPECIFIED = 0;
+  NODE_ROLE_FULL = 1; // accepts inbound gRPC (bidirectional)
+  NODE_ROLE_THIN = 2; // outbound-only WS connection (behind VPN/firewall)
 }
 
 // Node status
@@ -125,6 +135,20 @@ message NodeCapabilities {
   bool supports_wasm = 4;
   bool supports_isolation = 5;
   repeated string supported_runtimes = 6;
+}
+
+// Real-time resource snapshot shared by PingResponse (live) and
+// NodeRegistration.resource_hints (startup estimate from thin nodes).
+// 0 means unavailable on the reporting host.
+message NodeResourceHints {
+  // Current CPU utilisation, 0–100. Populated from sysinfo on full nodes;
+  // set to 0 by thin nodes (browsers cannot read CPU usage).
+  float cpu_percent = 1;
+  // Available RAM in MiB. Populated from sysinfo; 0 means unavailable.
+  uint64 memory_available_mb = 2;
+  // Logical CPU count (hardware_concurrency). Populated from
+  // std::thread::available_parallelism (Rust) / navigator.hardwareConcurrency (JS).
+  uint32 available_cores = 3;
 }
 
 // Node metrics (combined resource usage and operational metrics)
@@ -186,60 +210,69 @@ message NodeMetrics {
 
 // Request to register a node
 message RegisterNodeRequest {
-  Node node = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Node node = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Response for node registration
 message RegisterNodeResponse {
-  string node_id = 1;
-  google.protobuf.Timestamp registered_at = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2;
+  google.protobuf.Timestamp registered_at = 3;
 }
 
 // Request to unregister a node
 message UnregisterNodeRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
-  bool force = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
+  bool force = 3;
 }
 
 // Request to get node status
 message GetNodeRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Request to list nodes
 message ListNodesRequest {
-  NodeType node_type = 1;
-  NodeStatus status = 2;
-  int32 page_size = 3;
-  string page_token = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  NodeType node_type = 2;
+  NodeStatus status = 3;
+  int32 page_size = 4;
+  string page_token = 5;
 }
 
 // Response for list nodes
 message ListNodesResponse {
-  repeated Node nodes = 1;
-  string next_page_token = 2;
-  int32 total_count = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Node nodes = 2;
+  string next_page_token = 3;
+  int32 total_count = 4;
 }
 
 // Request to assign an actor to a node
 message AssignActorRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
-  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
-  plexspaces.actor.v1.ActorConfig config = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string actor_id = 3 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.actor.v1.ActorConfig config = 4;
 }
 
 // Response for actor assignment
 message AssignActorResponse {
-  string node_id = 1;
-  string actor_id = 2;
-  google.protobuf.Timestamp assigned_at = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2;
+  string actor_id = 3;
+  google.protobuf.Timestamp assigned_at = 4;
 }
 
 // Request to remove an actor from a node
 message RemoveActorRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
-  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
-  bool graceful = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string actor_id = 3 [(google.api.field_behavior) = REQUIRED];
+  bool graceful = 4;
 }
 
 // ============================================================================
@@ -257,20 +290,23 @@ message ActorLock {
 }
 
 message AcquireActorLockRequest {
-  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
-  string requesting_node_id = 2 [(google.api.field_behavior) = REQUIRED];
-  google.protobuf.Duration lease_duration = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string requesting_node_id = 3 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Duration lease_duration = 4;
 }
 
 message AcquireActorLockResponse {
-  bool success = 1;
-  ActorLock lock = 2;
-  string conflict_node_id = 3; // If failed, who has it
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  ActorLock lock = 3;
+  string conflict_node_id = 4; // If failed, who has it
 }
 
 message ReleaseActorLockRequest {
-  string actor_id = 1 [(google.api.field_behavior) = REQUIRED];
-  string lock_token = 2 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string lock_token = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
 // ============================================================================
@@ -307,6 +343,12 @@ message NodeRegistration {
   uint64 message_count = 7;
   uint64 error_count = 8;
   google.protobuf.Timestamp registered_at = 9;
+  // Connectivity role; defaults to FULL for all gRPC-registered nodes.
+  // Thin nodes set this to NODE_ROLE_THIN in the WS handshake.
+  NodeRole node_role = 10;
+  // Startup resource estimate from thin nodes (browser hardwareConcurrency etc.).
+  // For full nodes this is populated from sysinfo at registration time.
+  NodeResourceHints resource_hints = 11;
 }
 
 // Node capacity for resource-aware scheduling
@@ -352,24 +394,29 @@ message Heartbeat {
 
 // Lattice service requests
 message JoinLatticeRequest {
-  NodeDiscovery node = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  NodeDiscovery node = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message JoinLatticeResponse {
-  bool success = 1;
-  repeated NodeDiscovery existing_nodes = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  repeated NodeDiscovery existing_nodes = 3;
 }
 
 message LeaveLatticeRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message DiscoverNodesRequest {
-  map<string, string> capability_filters = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  map<string, string> capability_filters = 2;
 }
 
 message DiscoverNodesResponse {
-  repeated NodeDiscovery nodes = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated NodeDiscovery nodes = 2;
 }
 
 // ============================================================================
@@ -633,95 +680,107 @@ service NodeService {
 
 // GetReleaseSpec request
 message GetReleaseSpecRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // GetReleaseSpec response
 message GetReleaseSpecResponse {
-  ReleaseSpec release_spec = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ReleaseSpec release_spec = 2;
 }
 
 // RegisterNodes request - supports multiple nodes
 message RegisterNodesRequest {
   // Nodes to register
-  repeated NodeRegistration nodes = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated NodeRegistration nodes = 2 [(google.api.field_behavior) = REQUIRED];
   // Cluster name for grouping
-  string cluster = 2;
+  string cluster = 3;
   // Labels for categorization
-  map<string, string> labels = 3;
+  map<string, string> labels = 4;
 }
 
 // RegisterNodes response
 message RegisterNodesResponse {
   // IDs of successfully registered nodes
-  repeated string registered_node_ids = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string registered_node_ids = 2;
   // Errors for nodes that failed to register
-  map<string, string> errors = 2;
+  map<string, string> errors = 3;
 }
 
 // UnregisterNode response
 message UnregisterNodeResponse {
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 // ListConnectedNodes request (paginated)
 message ListConnectedNodesRequest {
   // Filter by cluster name
-  string cluster = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string cluster = 2;
   // Page size (default: 100, max: 1000)
-  int32 page_size = 2;
+  int32 page_size = 3;
   // Page token for pagination
-  string page_token = 3;
+  string page_token = 4;
   // Include health status in response
-  bool include_health = 4;
+  bool include_health = 5;
 }
 
 // ListConnectedNodes response
 message ListConnectedNodesResponse {
   // List of node registrations
-  repeated NodeRegistration nodes = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated NodeRegistration nodes = 2;
   // Token for next page
-  string next_page_token = 2;
+  string next_page_token = 3;
   // Total count (if available)
-  int32 total_count = 3;
+  int32 total_count = 4;
 }
 
 // StreamConnectedNodes request
 message StreamConnectedNodesRequest {
   // Filter by cluster name
-  string cluster = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string cluster = 2;
   // Include health status
-  bool include_health = 2;
+  bool include_health = 3;
 }
 
 // GetMetrics request
 message GetMetricsRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
   // Include extended metrics (actor details, etc.)
-  bool include_extended = 2;
+  bool include_extended = 3;
 }
 
 // CalculateCapacity request
 message CalculateCapacityRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // ListNodeApplications request
 message ListNodeApplicationsRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
   // Page size
-  int32 page_size = 2;
+  int32 page_size = 3;
   // Page token
-  string page_token = 3;
+  string page_token = 4;
   // Filter by status
-  string status_filter = 4;
+  string status_filter = 5;
 }
 
 // ListNodeApplications response
 message ListNodeApplicationsResponse {
-  repeated NodeApplicationInfo applications = 1;
-  string next_page_token = 2;
-  int32 total_count = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated NodeApplicationInfo applications = 2;
+  string next_page_token = 3;
+  int32 total_count = 4;
 }
 
 // NodeApplicationInfo - Information about an application on a node
@@ -736,28 +795,32 @@ message NodeApplicationInfo {
 
 // GetHealth request
 message GetHealthRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // GetHealth response
 message GetHealthResponse {
-  NodeHealthStatus status = 1;
-  string message = 2;
-  google.protobuf.Timestamp last_checked = 3;
-  map<string, string> details = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  NodeHealthStatus status = 2;
+  string message = 3;
+  google.protobuf.Timestamp last_checked = 4;
+  map<string, string> details = 5;
 }
 
 // SendHeartbeat request
 message SendHeartbeatRequest {
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED];
-  NodeCapacity capacity = 2;
-  map<string, double> metrics = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(google.api.field_behavior) = REQUIRED];
+  NodeCapacity capacity = 3;
+  map<string, double> metrics = 4;
 }
 
 // SendHeartbeat response
 message SendHeartbeatResponse {
-  bool acknowledged = 1;
-  google.protobuf.Timestamp server_time = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool acknowledged = 2;
+  google.protobuf.Timestamp server_time = 3;
 }
 
 // ============================================================================
@@ -767,51 +830,58 @@ message SendHeartbeatResponse {
 // Ping request - Direct failure detection
 message PingRequest {
   // Source node sending the ping
-  string source_node_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string source_node_id = 2;
   // Sequence number for correlation
-  uint64 sequence_number = 2;
+  uint64 sequence_number = 3;
   // Piggybacked membership updates (for efficient dissemination)
-  repeated MembershipUpdate updates = 3;
+  repeated MembershipUpdate updates = 4;
 }
 
 // Ping response
 message PingResponse {
   // Responding node's ID
-  string node_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2;
   // Echo back sequence number
-  uint64 sequence_number = 2;
+  uint64 sequence_number = 3;
   // Current incarnation number (for conflict resolution)
-  uint64 incarnation = 3;
+  uint64 incarnation = 4;
   // Piggybacked membership updates
-  repeated MembershipUpdate updates = 4;
+  repeated MembershipUpdate updates = 5;
   // Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
-  string cluster_name = 5;
+  string cluster_name = 6;
   // Responding node's gRPC address
-  string node_address = 6;
+  string node_address = 7;
   // Last heartbeat observed by the responding node for itself
-  google.protobuf.Timestamp last_heartbeat = 7;
+  google.protobuf.Timestamp last_heartbeat = 8;
+  // Live resource snapshot from the responding node.
+  // Used by thin-node clients for work-aware task scheduling.
+  NodeResourceHints resources = 9;
 }
 
 // Indirect ping request - Ask intermediary to ping target
 message PingReqRequest {
   // Node requesting the indirect ping
-  string source_node_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string source_node_id = 2;
   // Target node to ping
-  string target_node_id = 2;
+  string target_node_id = 3;
   // Target's address (in case intermediary doesn't know it)
-  string target_address = 3;
+  string target_address = 4;
   // Sequence number for correlation
-  uint64 sequence_number = 4;
+  uint64 sequence_number = 5;
 }
 
 // Indirect ping response
 message PingReqResponse {
   // Whether the target responded to indirect ping
-  bool target_alive = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool target_alive = 2;
   // Target's incarnation (if alive)
-  uint64 target_incarnation = 2;
+  uint64 target_incarnation = 3;
   // Piggybacked membership updates
-  repeated MembershipUpdate updates = 3;
+  repeated MembershipUpdate updates = 4;
 }
 
 // Membership update - Piggybacked on protocol messages
@@ -840,19 +910,21 @@ enum MemberState {
 // Sync membership request - Full state exchange
 message SyncMembershipRequest {
   // Requesting node's ID
-  string source_node_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string source_node_id = 2;
   // Requesting node's full membership state
-  repeated MembershipUpdate members = 2;
+  repeated MembershipUpdate members = 3;
   // Whether this is a push (true) or pull (false) sync
-  bool is_push = 3;
+  bool is_push = 4;
 }
 
 // Sync membership response
 message SyncMembershipResponse {
   // Responding node's full membership state
-  repeated MembershipUpdate members = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated MembershipUpdate members = 2;
   // Number of updates received that were new/updated
-  int32 updates_applied = 2;
+  int32 updates_applied = 3;
 }
 
 // ============================================================================
@@ -890,7 +962,8 @@ message ConnectNodesRequest {
   // Node addresses to connect to (e.g., "node2:8000", "192.168.1.10:8000")
   // Each address will be pinged to verify connectivity.
   // At least one address is required, maximum 100 addresses per request.
-  repeated string node_addresses = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string node_addresses = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {
       min_items: 1
@@ -908,10 +981,10 @@ message ConnectNodesRequest {
   // Optional: cluster name for grouping connected nodes.
   // If specified, nodes are tagged with this cluster for filtering.
   // Must be alphanumeric with hyphens, max 63 characters (DNS label format).
-  string cluster = 2 [(buf.validate.field).string.max_len = 63]; // Optional: timeout for each connection attempt.
+  string cluster = 3 [(buf.validate.field).string.max_len = 63]; // Optional: timeout for each connection attempt.
   // Default: 5 seconds if not specified.
   // Range: 1 second to 60 seconds.
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration = {
+  google.protobuf.Duration timeout = 4 [(buf.validate.field).duration = {
     gte: {seconds: 1}
     lte: {seconds: 60}
   }];
@@ -933,14 +1006,15 @@ message ConnectNodesResponse {
 
   // Successfully connected nodes: node_id -> address.
   // The node_id is retrieved from the remote node via Ping RPC.
-  map<string, string> connected = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  map<string, string> connected = 2;
 
   // Failed connections: address -> error message.
   // Contains addresses that could not be connected with error details.
-  map<string, string> failed = 2;
+  map<string, string> failed = 3;
 
   // Total time taken for all connection attempts (parallel execution).
-  google.protobuf.Duration total_time = 3;
+  google.protobuf.Duration total_time = 4;
 }
 
 // DisconnectNodes request - Erlang-style erlang:disconnect_node
@@ -969,7 +1043,8 @@ message DisconnectNodesRequest {
   // Node IDs to disconnect from.
   // Use ListConnectedNodes to get current node IDs.
   // At least one node_id is required, maximum 100 per request.
-  repeated string node_ids = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string node_ids = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {
       min_items: 1
@@ -986,7 +1061,7 @@ message DisconnectNodesRequest {
   // Optional: graceful disconnect with notification.
   // If true, attempts to notify remote node before disconnecting.
   // Default: false (silent disconnect, remote detects via SWIM timeout).
-  bool notify_remote = 2;
+  bool notify_remote = 3;
 }
 
 // DisconnectNodes response
@@ -1000,8 +1075,9 @@ message DisconnectNodesResponse {
   };
 
   // Successfully disconnected node IDs.
-  repeated string disconnected = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string disconnected = 2;
 
   // Failed disconnections: node_id -> error message.
-  map<string, string> failed = 2;
+  map<string, string> failed = 3;
 }

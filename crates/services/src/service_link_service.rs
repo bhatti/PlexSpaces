@@ -125,7 +125,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         }
         self.rebuild_client().await;
         tracing::info!(name = %link.name, "ServiceLinkService: added service link");
-        Ok(Response::new(AddServiceLinkResponse { link: Some(link) }))
+        Ok(Response::new(AddServiceLinkResponse { request_id: ulid::Ulid::new().to_string(), link: Some(link) }))
     }
 
     async fn remove_service_link(
@@ -181,6 +181,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         let guard = self.links.read().await;
         match guard.get(&name) {
             Some(link) => Ok(Response::new(GetServiceLinkResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 link: Some(link.clone()),
             })),
             None => Err(Status::not_found(format!(
@@ -230,6 +231,7 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
             String::new()
         };
         Ok(Response::new(ListServiceLinksResponse {
+            request_id: req.request_id.clone(),
             links: page,
             next_page_token,
         }))
@@ -286,12 +288,14 @@ mod tests {
 
         let req = authed_request(AddServiceLinkRequest {
             link: Some(weather_link("payments-api")),
+            request_id: ulid::Ulid::new().to_string(),
         });
         let resp = svc.add_service_link(req).await.unwrap();
         assert_eq!(resp.into_inner().link.unwrap().name, "payments-api");
 
         let get_req = authed_request(GetServiceLinkRequest {
             name: "payments-api".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
         let get_resp = svc.get_service_link(get_req).await.unwrap();
         assert_eq!(
@@ -307,11 +311,13 @@ mod tests {
 
         svc.add_service_link(authed_request(AddServiceLinkRequest {
             link: Some(weather_link("svc-a")),
+            request_id: ulid::Ulid::new().to_string(),
         }))
         .await
         .unwrap();
         svc.remove_service_link(authed_request(RemoveServiceLinkRequest {
             name: "svc-a".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         }))
         .await
         .unwrap();
@@ -319,6 +325,7 @@ mod tests {
         let err = svc
             .get_service_link(authed_request(GetServiceLinkRequest {
                 name: "svc-a".to_string(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -333,6 +340,7 @@ mod tests {
         // Add a link so a client gets registered
         svc.add_service_link(authed_request(AddServiceLinkRequest {
             link: Some(weather_link("temp-link")),
+            request_id: ulid::Ulid::new().to_string(),
         }))
         .await
         .unwrap();
@@ -341,6 +349,7 @@ mod tests {
         // Remove it — client must be unregistered
         svc.remove_service_link(authed_request(RemoveServiceLinkRequest {
             name: "temp-link".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         }))
         .await
         .unwrap();
@@ -354,6 +363,7 @@ mod tests {
         let err = svc
             .remove_service_link(authed_request(RemoveServiceLinkRequest {
                 name: "no-such".to_string(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -368,6 +378,7 @@ mod tests {
         for name in &["svc-z", "svc-a", "svc-m"] {
             svc.add_service_link(authed_request(AddServiceLinkRequest {
                 link: Some(weather_link(name)),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap();
@@ -377,6 +388,7 @@ mod tests {
             .list_service_links(authed_request(ListServiceLinksRequest {
                 page_size: 0,
                 page_token: String::new(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -396,6 +408,7 @@ mod tests {
         for name in &["alpha", "beta", "gamma", "delta", "epsilon"] {
             svc.add_service_link(authed_request(AddServiceLinkRequest {
                 link: Some(weather_link(name)),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap();
@@ -406,6 +419,7 @@ mod tests {
             .list_service_links(authed_request(ListServiceLinksRequest {
                 page_size: 2,
                 page_token: String::new(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -420,6 +434,7 @@ mod tests {
             .list_service_links(authed_request(ListServiceLinksRequest {
                 page_size: 2,
                 page_token: page1.next_page_token,
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()
@@ -438,6 +453,7 @@ mod tests {
                     base_url: "https://example.com".to_string(),
                     ..Default::default()
                 }),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -455,6 +471,7 @@ mod tests {
                     base_url: String::new(),
                     ..Default::default()
                 }),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap_err();
@@ -466,7 +483,7 @@ mod tests {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
         let err = svc
-            .add_service_link(authed_request(AddServiceLinkRequest { link: None }))
+            .add_service_link(authed_request(AddServiceLinkRequest { link: None, request_id: ulid::Ulid::new().to_string() }))
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -485,6 +502,7 @@ mod tests {
 
         let get = authed_request(GetServiceLinkRequest {
             name: "pre-seeded".to_string(),
+            request_id: ulid::Ulid::new().to_string(),
         });
         let resp = svc.get_service_link(get).await.unwrap();
         assert_eq!(resp.into_inner().link.unwrap().name, "pre-seeded");

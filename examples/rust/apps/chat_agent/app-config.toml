@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Chat Agent Application Configuration (Rust)
+#
+# Equivalent to Cloudflare wrangler.toml with AI binding + Durable Object.
+
+name = "rs-chat-agent"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 5
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "ChatAgentActor"
+actor_type = "ChatAgentActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+tenant_id = "default"
+facets = [
+  # virtual_actor: durable actor lifecycle (like a Durable Object instance)
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  # reminder: provides alarm_set/alarm_get/alarm_delete (DO setAlarm equivalent)
+  { type = "reminder", priority = 90, config = {} }
+]
+
+# Service links — equivalent to Cloudflare AI binding (env.AI).
+# Requires ANTHROPIC_API_KEY in the environment.
+[service_links]
+[service_links.llm-link]
+url = "https://api.anthropic.com"
+
+[service_links.llm-link.headers]
+"x-api-key" = "${ANTHROPIC_API_KEY}"
+"anthropic-version" = "2023-06-01"
+"content-type" = "application/json"

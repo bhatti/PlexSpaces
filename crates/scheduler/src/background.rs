@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Background scheduler with lease-based coordination.
@@ -604,6 +604,19 @@ mod tests {
         Arc<SqliteSchedulingStateStore>,
         Arc<dyn Channel>,
     ) {
+        // Unique node ID per call so parallel tests don't collide in the global active set.
+        let node_id = format!("test-node-{}", ulid::Ulid::new());
+        create_test_scheduler_with_id(&node_id).await
+    }
+
+    async fn create_test_scheduler_with_id(
+        node_id: &str,
+    ) -> (
+        Arc<BackgroundScheduler>,
+        Arc<SqliteLockManager>,
+        Arc<SqliteSchedulingStateStore>,
+        Arc<dyn Channel>,
+    ) {
         let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let state_store = Arc::new(SqliteSchedulingStateStore::new(":memory:").await.unwrap());
         let repo = Arc::new(
@@ -628,7 +641,7 @@ mod tests {
         let channel = Arc::new(InMemoryChannel::new(channel_config).await.unwrap());
 
         let scheduler = Arc::new(BackgroundScheduler::new(
-            "test-node".to_string(),
+            node_id.to_string(),
             lock_manager.clone(),
             state_store.clone(),
             capacity_tracker,
@@ -644,8 +657,8 @@ mod tests {
     async fn test_acquire_lease() {
         let (scheduler, _, _, _) = create_test_scheduler().await;
         let lease = scheduler.acquire_lease().await.unwrap();
-        assert_eq!(lease.holder_id, "test-node");
-        assert_eq!(lease.lock_key, "scheduler:background:lease:test-node");
+        assert_eq!(lease.holder_id, scheduler.node_id);
+        assert_eq!(lease.lock_key, scheduler.lease_key);
     }
 
     #[tokio::test]
@@ -746,7 +759,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_rejects_duplicate_scheduler_for_same_node() {
-        let (scheduler1, lock_manager, state_store, channel) = create_test_scheduler().await;
+        // Both schedulers share the same node_id — the global active-set guard must reject
+        // the second start() call with AlreadyStarted before it even tries to acquire the lock.
+        let node_id = format!("test-dup-{}", ulid::Ulid::new());
+        let (scheduler1, lock_manager, state_store, channel) =
+            create_test_scheduler_with_id(&node_id).await;
         let repo = Arc::new(
             SqliteObjectRegistryRepository::new(":memory:")
                 .await
@@ -755,7 +772,7 @@ mod tests {
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
         let scheduler2 = Arc::new(BackgroundScheduler::new(
-            "test-node".to_string(),
+            node_id.clone(),
             lock_manager,
             state_store,
             capacity_tracker,
@@ -783,16 +800,17 @@ mod tests {
             sleep(Duration::from_millis(10)).await;
         }
 
+        // scheduler1 has inserted node_id into the global active set; scheduler2 must be rejected.
         let duplicate_start = scheduler2.start().await;
-        assert!(matches!(
-            duplicate_start,
-            Err(BackgroundSchedulerError::AlreadyStarted(node_id)) if node_id == "test-node"
-        ));
+        assert!(
+            matches!(duplicate_start, Err(BackgroundSchedulerError::AlreadyStarted(ref id)) if id == &node_id),
+            "expected AlreadyStarted({node_id}), got {duplicate_start:?}"
+        );
 
         scheduler1.stop();
         let stop_result = tokio::time::timeout(Duration::from_secs(2), scheduler1_task)
             .await
-            .expect("primary scheduler should stop")
+            .expect("primary scheduler should stop within 2 s")
             .expect("scheduler task should join");
         assert!(stop_result.is_ok(), "primary scheduler should stop cleanly");
     }

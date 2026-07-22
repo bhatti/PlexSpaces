@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Shard groups, ML collectives, and application metrics for deployable WASM actors.
+
+interface host-shard {
+    use types.{payload, actor-error};
+
+    create-shard-group: func(request: payload) -> result<payload, actor-error>;
+    bulk-update-shard-group: func(request: payload) -> result<payload, actor-error>;
+    map-shard-group: func(request: payload) -> result<payload, actor-error>;
+    broadcast-shard-group: func(request: payload) -> result<payload, actor-error>;
+    reduce-shard-group: func(request: payload) -> result<payload, actor-error>;
+    all-reduce-shard-group: func(request: payload) -> result<payload, actor-error>;
+    barrier-shard-group: func(request: payload) -> result<payload, actor-error>;
+    scatter-gather: func(request: payload) -> result<payload, actor-error>;
+    spawn-actors: func(request: payload) -> result<payload, actor-error>;
+    application-metrics-add: func(application-id: string, metrics: payload) -> result<payload, actor-error>;
+    application-get-metrics: func(application-id: string, node-id: string) -> result<payload, actor-error>;
+    application-get-status: func(application-id: string, node-id: string) -> result<payload, actor-error>;
+}

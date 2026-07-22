@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces TupleSpace API
@@ -383,18 +383,20 @@ message WriteRequest {
     }
   };
 
-  repeated Tuple tuples = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Tuple tuples = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {
       min_items: 1
       max_items: 10000
     } /* At least 1, max 10K tuples */
   ];
-  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+  string transaction_id = 3 [(buf.validate.field).string.max_len = 255];
 }
 
 message WriteResponse {
-  repeated string tuple_ids = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string tuple_ids = 2;
 }
 
 message ReadRequest {
@@ -406,21 +408,23 @@ message ReadRequest {
     }
   };
 
-  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
-  bool blocking = 3;
-  bool take = 4; // true for take operations
-  int32 max_results = 5 [(buf.validate.field).int32 = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  bool blocking = 4;
+  bool take = 5; // true for take operations
+  int32 max_results = 6 [(buf.validate.field).int32 = {
     gte: 1
     lte: 10000
   }]; // 1 to 10K results
-  string transaction_id = 6 [(buf.validate.field).string.max_len = 255];
-  SpatialRegion spatial_filter = 7;
+  string transaction_id = 7 [(buf.validate.field).string.max_len = 255];
+  SpatialRegion spatial_filter = 8;
 }
 
 message ReadResponse {
-  repeated Tuple tuples = 1;
-  bool has_more = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Tuple tuples = 2;
+  bool has_more = 3;
 }
 
 message CountRequest {
@@ -432,13 +436,15 @@ message CountRequest {
     }
   };
 
-  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
-  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
-  SpatialRegion spatial_filter = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
+  string transaction_id = 3 [(buf.validate.field).string.max_len = 255];
+  SpatialRegion spatial_filter = 4;
 }
 
 message CountResponse {
-  int64 count = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int64 count = 2;
 }
 
 message ExistsRequest {
@@ -450,12 +456,14 @@ message ExistsRequest {
     }
   };
 
-  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
-  string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
+  string transaction_id = 3 [(buf.validate.field).string.max_len = 255];
 }
 
 message ExistsResponse {
-  bool exists = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool exists = 2;
 }
 
 // Barrier synchronization request
@@ -497,14 +505,16 @@ message SubscribeRequest {
     }
   };
 
-  Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
-  plexspaces.common.v1.QoSLevel qos = 2;
-  ActionType actions = 3;
-  string callback_url = 4 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
+  plexspaces.common.v1.QoSLevel qos = 3;
+  ActionType actions = 4;
+  string callback_url = 5 [(buf.validate.field).string.max_len = 512];
 }
 
 message SubscribeResponse {
-  Subscription subscription = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Subscription subscription = 2;
 }
 
 message UnsubscribeRequest {
@@ -516,7 +526,8 @@ message UnsubscribeRequest {
     }
   };
 
-  string subscription_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string subscription_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -533,12 +544,14 @@ message BeginTransactionRequest {
     }
   };
 
-  IsolationLevel isolation_level = 1;
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  IsolationLevel isolation_level = 2;
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 message BeginTransactionResponse {
-  Transaction transaction = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Transaction transaction = 2;
 }
 
 message CommitTransactionRequest {
@@ -550,7 +563,8 @@ message CommitTransactionRequest {
     }
   };
 
-  string transaction_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string transaction_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -560,7 +574,8 @@ message CommitTransactionRequest {
 }
 
 message CommitTransactionResponse {
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 message AbortTransactionRequest {
@@ -572,7 +587,8 @@ message AbortTransactionRequest {
     }
   };
 
-  string transaction_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string transaction_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -582,7 +598,8 @@ message AbortTransactionRequest {
 }
 
 message AbortTransactionResponse {
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 message RenewLeaseRequest {
@@ -594,19 +611,21 @@ message RenewLeaseRequest {
     }
   };
 
-  string tuple_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tuple_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  google.protobuf.Duration new_ttl = 2 [(buf.validate.field).duration.lte.seconds = 2592000]; // Max 30 days
+  google.protobuf.Duration new_ttl = 3 [(buf.validate.field).duration.lte.seconds = 2592000]; // Max 30 days
 }
 
 message RenewLeaseResponse {
-  bool success = 1;
-  google.protobuf.Timestamp new_expires_at = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  google.protobuf.Timestamp new_expires_at = 3;
 }
 
 // Response message for GetStats RPC
@@ -633,7 +652,8 @@ message GetStatsResponse {
   // - write_operations: Count of write operations
   // - take_operations: Count of take operations
   // - avg_latency_ms: Average operation latency in milliseconds
-  plexspaces.tuplespace.v1.StorageStats stats = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.tuplespace.v1.StorageStats stats = 2;
 }
 
 // Configuration messages for TupleSpace

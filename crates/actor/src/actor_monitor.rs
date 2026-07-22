@@ -571,6 +571,7 @@ async fn run_gc_pass(
         let mut client = ActorServiceClient::new(channel);
         let resp = match client
             .get_actor_states(tonic::Request::new(GetActorStatesRequest {
+                request_id: Ulid::new().to_string(),
                 actor_ids: actor_ids.iter().map(|id| id.to_string()).collect(),
             }))
             .await

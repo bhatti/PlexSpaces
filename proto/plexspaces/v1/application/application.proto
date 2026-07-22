@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Application API
@@ -145,6 +145,17 @@ message ApplicationSpec {
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).repeated = {max_items: 128},
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Links that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys."}
+  ];
+
+  // URL mount path for static files bundled in the app zip.
+  //
+  // When non-empty, the node serves the app's static/ directory at this path.
+  // Example: "apps/chat" → files accessible at http://<node>/apps/chat/
+  // Defaults to "apps/<application_id>" when static files are present but mount is empty.
+  // Set in app-config.toml under [static] mount = "apps/chat"
+  string static_mount = 16 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "URL prefix for serving bundled static files (e.g. 'apps/chat')."}
   ];
 }
 
@@ -479,71 +490,77 @@ service ApplicationService {
 // Deploy application request
 message DeployApplicationRequest {
   // Application identifier (unique per node)
-  string application_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string application_id = 2;
 
   // Application name
-  string name = 2;
+  string name = 3;
 
   // Application version
-  string version = 3;
+  string version = 4;
 
   // WASM module (if WASM application)
   // If provided, application code is loaded from WASM.
   // If not provided, application must be pre-registered (native Rust).
-  optional plexspaces.wasm.v1.WasmModule wasm_module = 4;
+  optional plexspaces.wasm.v1.WasmModule wasm_module = 5;
 
   // Application configuration
   // Defines supervision tree, dependencies, environment variables, etc.
-  ApplicationSpec config = 5;
+  ApplicationSpec config = 6;
 
   // Initial state (optional, for stateful applications)
   // Passed to application's start() method.
-  bytes initial_state = 6;
+  bytes initial_state = 7;
 }
 
 // Deploy application response
 message DeployApplicationResponse {
   // Success flag
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Application ID (may differ from request if auto-generated)
-  string application_id = 2;
+  string application_id = 3;
 
   // Application status after deployment
-  ApplicationStatus status = 3;
+  ApplicationStatus status = 4;
 
   // Error details (if success=false)
-  optional string error = 4;
+  optional string error = 5;
 }
 
 // Undeploy application request
 message UndeployApplicationRequest {
   // Application ID to undeploy
-  string application_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string application_id = 2;
 
   // Graceful shutdown timeout (optional, uses app config default if not provided)
-  optional google.protobuf.Duration timeout = 2;
+  optional google.protobuf.Duration timeout = 3;
 }
 
 // Undeploy application response
 message UndeployApplicationResponse {
   // Success flag
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Error details (if success=false)
-  optional string error = 2;
+  optional string error = 3;
 }
 
 // List applications request
 message ListApplicationsRequest {
   // Filter by status (optional, empty = all applications)
-  optional ApplicationStatus status_filter = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  optional ApplicationStatus status_filter = 2;
 }
 
 // List applications response
 message ListApplicationsResponse {
   // List of deployed applications
-  repeated ApplicationInfo applications = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ApplicationInfo applications = 2;
 }
 
 // Application information
@@ -616,25 +633,27 @@ message ApplicationMetrics {
 // Get application status request
 message GetApplicationStatusRequest {
   // Application ID
-  string application_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string application_id = 2;
 }
 
 // Get application status response
 message GetApplicationStatusResponse {
   // Application information
-  optional ApplicationInfo application = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  optional ApplicationInfo application = 2;
 
   // Detailed application state
-  optional ApplicationRuntimeState state = 2;
+  optional ApplicationRuntimeState state = 3;
 
   // Error if application not found
-  optional string error = 3;
+  optional string error = 4;
 
   // Node ID that served this status response.
-  string node_id = 4;
+  string node_id = 5;
 
   // Node address that served this status response.
-  string node_address = 5;
+  string node_address = 6;
 }
 
 // Error codes for ApplicationError

@@ -101,26 +101,26 @@ func (m *MemoryActor) storeMemory(p map[string]any) string {
 	switch tier {
 	case "core":
 		kvKey := fmt.Sprintf("mem:core:%s:%s:%s", scope, scopeID, key)
-		host.KVPut(kvKey, value)
+		host.KV().Put(kvKey, value)
 		// Also index in TupleSpace for querying
 		_ = host.TS().Write([]any{"memory", "core", scope, scopeID, key, value})
 		m.CoreCount++
 
 	case "deep":
 		blobKey := "deep:" + scope + ":" + scopeID + ":" + key
-		storedID := host.BlobUpload(blobKey, value, "text/plain")
-		if plexspaces.IsHostError(storedID) {
-			host.Warn(fmt.Sprintf("MemoryActor: blob upload failed: %s", storedID))
-			host.KVPut(fmt.Sprintf("mem:deep:%s:%s:%s", scope, scopeID, key), value)
+		storedID, uploadErr := host.Blob().Upload(blobKey, []byte(value), "text/plain")
+		if uploadErr != nil {
+			host.Warn(fmt.Sprintf("MemoryActor: blob upload failed: %s", uploadErr.Error()))
+			_ = host.KV().Put(fmt.Sprintf("mem:deep:%s:%s:%s", scope, scopeID, key), value)
 		} else {
-			host.KVPut("mem:deep_blob:"+scope+":"+scopeID+":"+key, storedID)
+			_ = host.KV().Put("mem:deep_blob:"+scope+":"+scopeID+":"+key, storedID)
 		}
 		_ = host.TS().Write([]any{"memory", "deep", scope, scopeID, key, value[:min(200, len(value))]})
 		m.DeepCount++
 
 	default: // reachable
 		kvKey := fmt.Sprintf("mem:reachable:%s:%s:%s", scope, scopeID, key)
-		host.KVPut(kvKey, value) // TTL-like eviction handled by skill maintenance tick
+		host.KV().Put(kvKey, value) // TTL-like eviction handled by skill maintenance tick
 		// TupleSpace entry for pattern-based recall (write without TTL; eviction is handled by KV)
 		_ = host.TS().Write([]any{"memory", "reachable", scope, scopeID, key, value})
 		m.ReachableCount++
@@ -213,8 +213,8 @@ func (m *MemoryActor) deleteMemory(p map[string]any) string {
 	if key == "" {
 		return marshal(map[string]any{"error": "key is required"})
 	}
-	host.KVDelete(fmt.Sprintf("mem:%s:%s:%s:%s", tier, scope, scopeID, key))
-	host.KVDelete(fmt.Sprintf("mem:deep_blob:%s:%s:%s", scope, scopeID, key))
+	host.KV().Delete(fmt.Sprintf("mem:%s:%s:%s:%s", tier, scope, scopeID, key))
+	host.KV().Delete(fmt.Sprintf("mem:deep_blob:%s:%s:%s", scope, scopeID, key))
 	switch tier {
 	case "core":
 		if m.CoreCount > 0 {
@@ -241,9 +241,9 @@ func (m *MemoryActor) archiveMemory(p map[string]any) string {
 		return marshal(map[string]any{"error": "key is required"})
 	}
 	// Read current value from reachable tier
-	value := host.KVGet(fmt.Sprintf("mem:reachable:%s:%s:%s", scope, scopeID, key))
+	value, _ := host.KV().Get(fmt.Sprintf("mem:reachable:%s:%s:%s", scope, scopeID, key))
 	if value == "" {
-		value = host.KVGet(fmt.Sprintf("mem:core:%s:%s:%s", scope, scopeID, key))
+		value, _ = host.KV().Get(fmt.Sprintf("mem:core:%s:%s:%s", scope, scopeID, key))
 	}
 	if value == "" {
 		return marshal(map[string]any{"error": "memory not found", "key": key})
@@ -257,7 +257,7 @@ func (m *MemoryActor) archiveMemory(p map[string]any) string {
 		"scope_id": scopeID,
 	})
 	// Delete from reachable
-	host.KVDelete(fmt.Sprintf("mem:reachable:%s:%s:%s", scope, scopeID, key))
+	host.KV().Delete(fmt.Sprintf("mem:reachable:%s:%s:%s", scope, scopeID, key))
 	return result
 }
 
@@ -347,7 +347,7 @@ func (a *AuditEventActor) logEvent(p map[string]any) string {
 		return marshal(map[string]any{"ok": false, "error": "marshal_failed"})
 	}
 
-	host.KVPut(fmt.Sprintf("audit:seq:%d", seq), string(entryJSON))
+	host.KV().Put(fmt.Sprintf("audit:seq:%d", seq), string(entryJSON))
 	_ = host.TS().Write([]any{"audit", eventType, ts, string(entryJSON)})
 
 	a.EventsLogged++
@@ -361,7 +361,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 	limit := intVal(p, "limit", 50)
 
 	cursorKey := "audit:cursor:" + consumerID
-	cursorRaw := host.KVGet(cursorKey)
+	cursorRaw, _ := host.KV().Get(cursorKey)
 	var cursor int64
 	if cursorRaw != "" {
 		if n, err := fmt.Sscan(cursorRaw, &cursor); n == 1 && err == nil {
@@ -372,7 +372,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 	events := make([]any, 0)
 	newCursor := cursor
 	for seq := cursor + 1; seq <= a.Watermark && len(events) < limit; seq++ {
-		raw := host.KVGet(fmt.Sprintf("audit:seq:%d", seq))
+		raw, _ := host.KV().Get(fmt.Sprintf("audit:seq:%d", seq))
 		if raw == "" {
 			continue
 		}
@@ -383,7 +383,7 @@ func (a *AuditEventActor) pollEvents(p map[string]any) string {
 		}
 	}
 
-	host.KVPut(cursorKey, fmt.Sprintf("%d", newCursor))
+	host.KV().Put(cursorKey, fmt.Sprintf("%d", newCursor))
 	return marshal(map[string]any{
 		"status": "ok", "consumer_id": consumerID,
 		"events": events, "count": len(events),

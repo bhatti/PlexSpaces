@@ -331,11 +331,11 @@ class AgentActor extends WorkflowActor<AgentState> {
   query(name: string, _params: Record<string, unknown>): Record<string, unknown> {
     if (name === "execution_trace") {
       try {
-        const indexRaw = host.kvGet(`trace_index:${this.state.actor_id}`);
+        const indexRaw = host.kv.get(`trace_index:${this.state.actor_id}`);
         if (indexRaw && !indexRaw.startsWith("ERROR:")) {
           const traceIds = JSON.parse(indexRaw) as string[];
           if (traceIds.length > 0) {
-            const raw = host.kvGet(`trace:${traceIds[traceIds.length - 1]}`);
+            const raw = host.kv.get(`trace:${traceIds[traceIds.length - 1]}`);
             if (raw && !raw.startsWith("ERROR:")) {
               return JSON.parse(raw) as Record<string, unknown>;
             }
@@ -359,7 +359,7 @@ class AgentActor extends WorkflowActor<AgentState> {
     const memoryKey = `agent_memory:${this.state.actor_id}`;
     let priorContext: Record<string, unknown> = {};
     try {
-      const raw = host.kvGet(memoryKey);
+      const raw = host.kv.get(memoryKey);
       if (raw && !raw.startsWith("ERROR:")) priorContext = JSON.parse(raw) as Record<string, unknown>;
     } catch { /* ignore */ }
 
@@ -434,15 +434,15 @@ class AgentActor extends WorkflowActor<AgentState> {
   private exportTrajectory(traj: Record<string, unknown>): void {
     try {
       const key = `agent_trajectory:${traj.trajectoryId ?? ""}`;
-      host.kvPut(key, JSON.stringify(traj));
+      host.kv.put(key, JSON.stringify(traj));
       const indexKey = `agent_trajectory_index:${this.state.actor_id}`;
       let existing: string[] = [];
       try {
-        const raw = host.kvGet(indexKey);
+        const raw = host.kv.get(indexKey);
         if (raw && !raw.startsWith("ERROR:")) existing = JSON.parse(raw) as string[];
       } catch { /* ignore */ }
       existing.push(String(traj.trajectoryId ?? ""));
-      host.kvPut(indexKey, JSON.stringify(existing));
+      host.kv.put(indexKey, JSON.stringify(existing));
     } catch (e) {
       host.log("warn", `Failed to export trajectory: ${e}`);
     }
@@ -651,7 +651,7 @@ class LLMGatewayActor extends PlexSpacesActor<LLMGatewayState> {
 
   private getCached(key: string): Record<string, unknown> | null {
     try {
-      const raw = host.kvGet(key);
+      const raw = host.kv.get(key);
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw) as Record<string, unknown>;
     } catch { /* ignore */ }
     return null;
@@ -659,7 +659,7 @@ class LLMGatewayActor extends PlexSpacesActor<LLMGatewayState> {
 
   private putCached(key: string, value: Record<string, unknown>): void {
     try {
-      host.kvPut(key, JSON.stringify({ ...value, _cached_at: host.nowMs(), _ttl_ms: CACHE_TTL_MS }));
+      host.kv.put(key, JSON.stringify({ ...value, _cached_at: host.nowMs(), _ttl_ms: CACHE_TTL_MS }));
     } catch { /* ignore */ }
   }
 }
@@ -685,7 +685,7 @@ class ToolRegistryActor extends PlexSpacesActor<ToolRegistryState> {
     // Register built-in tool schemas in KV for SchemaValidationFacet
     for (const [toolName, toolDef] of Object.entries(BUILTIN_TOOLS)) {
       try {
-        host.kvPut(`tool_schema:${toolName}`, JSON.stringify(toolDef.schema));
+        host.kv.put(`tool_schema:${toolName}`, JSON.stringify(toolDef.schema));
       } catch { /* ignore */ }
     }
     host.log("info", `ToolRegistryActor init actor_id=${this.state.actor_id} tools=${Object.keys(BUILTIN_TOOLS).join(",")}`);
@@ -749,9 +749,9 @@ class ToolRegistryActor extends PlexSpacesActor<ToolRegistryState> {
     const name = typeof payload.name === "string" ? payload.name : "";
     if (!name) return { error: "tool name is required" };
     if (payload.schema) {
-      host.kvPut(`tool_schema:${name}`, JSON.stringify(payload.schema));
+      host.kv.put(`tool_schema:${name}`, JSON.stringify(payload.schema));
     }
-    host.kvPut(`tool_desc:${name}`, typeof payload.description === "string" ? payload.description : "");
+    host.kv.put(`tool_desc:${name}`, typeof payload.description === "string" ? payload.description : "");
     return { status: "ok", tool: name };
   }
 
@@ -790,7 +790,7 @@ class ToolRegistryActor extends PlexSpacesActor<ToolRegistryState> {
 
   private kvRead(key: string): Record<string, unknown> {
     try {
-      const value = host.kvGet(`tool_kv:${key}`);
+      const value = host.kv.get(`tool_kv:${key}`);
       return { status: "ok", key, value };
     } catch (e) {
       return { error: String(e) };
@@ -799,7 +799,7 @@ class ToolRegistryActor extends PlexSpacesActor<ToolRegistryState> {
 
   private kvWrite(key: string, value: string): Record<string, unknown> {
     try {
-      host.kvPut(`tool_kv:${key}`, value);
+      host.kv.put(`tool_kv:${key}`, value);
       return { status: "ok", key };
     } catch (e) {
       return { error: String(e) };
@@ -900,7 +900,7 @@ class EvalRunnerActor extends WorkflowActor<EvalRunnerState> {
 
       // Store trajectory in KV for cross-actor retrieval
       try {
-        host.kvPut(`trajectory:traj-${evalRunId}-${i}`, JSON.stringify(traj));
+        host.kv.put(`trajectory:traj-${evalRunId}-${i}`, JSON.stringify(traj));
       } catch { /* ignore */ }
 
       // Score via scorer actor or inline heuristic
@@ -968,7 +968,7 @@ class EvalRunnerActor extends WorkflowActor<EvalRunnerState> {
     };
 
     try {
-      host.kvPut(`eval_report:${evalRunId}`, JSON.stringify(report));
+      host.kv.put(`eval_report:${evalRunId}`, JSON.stringify(report));
     } catch { /* ignore */ }
 
     host.log("info", `EvalRunner completed: pass_rate=${passRate.toFixed(3)} avg_score=${avgScore.toFixed(3)} scenarios=${this.state.completed_scenarios} tokens=${totalInputTokens}in/${totalOutputTokens}out`);
@@ -1007,7 +1007,7 @@ class EvalRunnerActor extends WorkflowActor<EvalRunnerState> {
           const entry = tuple[0] as Record<string, unknown>;
           const trajId = entry?.trajectory_id ?? entry?.trajectoryId;
           if (!trajId) continue;
-          const raw = host.kvGet(`trajectory:${trajId}`);
+          const raw = host.kv.get(`trajectory:${trajId}`);
           if (raw && !raw.startsWith("ERROR:")) {
             collected.push(JSON.parse(raw) as Record<string, unknown>);
           } else {
@@ -1024,13 +1024,13 @@ class EvalRunnerActor extends WorkflowActor<EvalRunnerState> {
       for (const agentId of agentIds) {
         const indexKey = `agent_trajectory_index:${agentId}`;
         try {
-          const raw = host.kvGet(indexKey);
+          const raw = host.kv.get(indexKey);
           if (raw && !raw.startsWith("ERROR:")) {
             const trajIds = JSON.parse(raw) as string[];
             for (const trajId of trajIds) {
               const alreadyHave = collected.some((t) => (t.trajectory_id ?? t.trajectoryId) === trajId);
               if (!alreadyHave) {
-                const trajRaw = host.kvGet(`agent_trajectory:${trajId}`);
+                const trajRaw = host.kv.get(`agent_trajectory:${trajId}`);
                 if (trajRaw && !trajRaw.startsWith("ERROR:")) {
                   collected.push(JSON.parse(trajRaw) as Record<string, unknown>);
                 }
@@ -1089,7 +1089,7 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
   protected onGet_scenario(payload: Record<string, unknown>): Record<string, unknown> {
     const scenarioId = typeof payload.scenario_id === "string" ? payload.scenario_id : "";
     if (!scenarioId) return { error: "scenario_id is required" };
-    const raw = host.kvGet(`scenario:${scenarioId}`);
+    const raw = host.kv.get(`scenario:${scenarioId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `scenario ${scenarioId} not found` };
     try { return { status: "ok", scenario: JSON.parse(raw) }; } catch { return { error: "failed to parse scenario" }; }
   }
@@ -1100,12 +1100,10 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
     const limit = typeof payload.limit === "number" ? payload.limit : 50;
 
     try {
-      const keysJson = host.kvList("scenario:");
-      if (keysJson.startsWith("ERROR:")) return { error: keysJson };
-      const keys = JSON.parse(keysJson) as string[];
+      const keys = host.kv.list("scenario:");
       const scenarios: Array<Record<string, unknown>> = [];
       for (const key of keys.slice(0, limit * 2)) {
-        const raw = host.kvGet(key);
+        const raw = host.kv.get(key);
         if (!raw || raw.startsWith("ERROR:")) continue;
         let sc: Record<string, unknown>;
         try { sc = JSON.parse(raw) as Record<string, unknown>; } catch { continue; }
@@ -1132,7 +1130,7 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
       scenario.scenario_id = scenarioId;
     }
     try {
-      host.kvPut(`scenario:${scenarioId}`, JSON.stringify(scenario));
+      host.kv.put(`scenario:${scenarioId}`, JSON.stringify(scenario));
       this.state.scenario_count++;
       return { status: "ok", scenario_id: scenarioId };
     } catch (e) {
@@ -1154,7 +1152,7 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
     } else if (suiteName === "full") {
       ids = BUILTIN_SCENARIOS.map((s) => s.scenario_id);
     } else {
-      const raw = host.kvGet(`suite:${suiteName}`);
+      const raw = host.kv.get(`suite:${suiteName}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try { ids = (JSON.parse(raw) as { scenario_ids: string[] }).scenario_ids ?? []; } catch { /* ignore */ }
       } else {
@@ -1164,7 +1162,7 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
 
     const scenarios: Array<Record<string, unknown>> = [];
     for (const sid of ids) {
-      const raw = host.kvGet(`scenario:${sid}`);
+      const raw = host.kv.get(`scenario:${sid}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try { scenarios.push(JSON.parse(raw) as Record<string, unknown>); } catch { /* ignore */ }
       }
@@ -1177,7 +1175,7 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
     const scenarioIds = Array.isArray(payload.scenario_ids) ? payload.scenario_ids : [];
     if (!suiteName || !scenarioIds.length) return { error: "suite_name and scenario_ids are required" };
     try {
-      host.kvPut(`suite:${suiteName}`, JSON.stringify({ scenario_ids: scenarioIds }));
+      host.kv.put(`suite:${suiteName}`, JSON.stringify({ scenario_ids: scenarioIds }));
       return { status: "ok", suite_name: suiteName, count: scenarioIds.length };
     } catch (e) {
       return { error: String(e) };
@@ -1192,10 +1190,10 @@ class ScenarioStoreActor extends PlexSpacesActor<ScenarioStoreState> {
     let seeded = 0;
     for (const sc of BUILTIN_SCENARIOS) {
       const key = `scenario:${sc.scenario_id}`;
-      const existing = host.kvGet(key);
+      const existing = host.kv.get(key);
       if (!existing || existing.startsWith("ERROR:")) {
         try {
-          host.kvPut(key, JSON.stringify(sc));
+          host.kv.put(key, JSON.stringify(sc));
           seeded++;
         } catch (e) {
           host.log("warn", `Failed to seed scenario ${sc.scenario_id}: ${e}`);
@@ -1397,7 +1395,7 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
     const agentActorId = String(trajectory.agent_actor_id ?? trajectory.agentActorId ?? "");
 
     try {
-      host.kvPut(`trajectory:${trajId}`, JSON.stringify(trajectory));
+      host.kv.put(`trajectory:${trajId}`, JSON.stringify(trajectory));
     } catch (e) {
       this.state.failed_count++;
       host.log("warn", `Failed to store trajectory ${trajId}: ${e}`);
@@ -1416,16 +1414,16 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
       stored_at_ms: host.nowMs(),
     };
 
-    try { host.kvPut(`traj_meta:${trajId}`, JSON.stringify(meta)); } catch { /* ignore */ }
+    try { host.kv.put(`traj_meta:${trajId}`, JSON.stringify(meta)); } catch { /* ignore */ }
 
     if (evalRunId) {
       try {
         const indexKey = `traj_index:${evalRunId}`;
-        const existingRaw = host.kvGet(indexKey);
+        const existingRaw = host.kv.get(indexKey);
         const index: string[] = existingRaw && !existingRaw.startsWith("ERROR:") ? JSON.parse(existingRaw) : [];
         if (!index.includes(trajId)) {
           index.push(trajId);
-          host.kvPut(indexKey, JSON.stringify(index));
+          host.kv.put(indexKey, JSON.stringify(index));
         }
       } catch { /* ignore */ }
     }
@@ -1438,7 +1436,7 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
   protected onGet(payload: Record<string, unknown>): Record<string, unknown> {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
-    const raw = host.kvGet(`trajectory:${trajId}`);
+    const raw = host.kv.get(`trajectory:${trajId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `trajectory ${trajId} not found` };
     try { return { status: "ok", trajectory: JSON.parse(raw) }; } catch { return { error: "failed to parse trajectory" }; }
   }
@@ -1460,7 +1458,7 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
     // KV index
     let trajIdsFromKv: string[] = [];
     try {
-      const indexRaw = host.kvGet(`traj_index:${evalRunId}`);
+      const indexRaw = host.kv.get(`traj_index:${evalRunId}`);
       if (indexRaw && !indexRaw.startsWith("ERROR:")) trajIdsFromKv = JSON.parse(indexRaw) as string[];
     } catch { /* ignore */ }
 
@@ -1468,7 +1466,7 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
     const trajectories: Array<Record<string, unknown>> = [];
     for (const trajId of allIds) {
       const keyPrefix = includeFull ? "trajectory" : "traj_meta";
-      const raw = host.kvGet(`${keyPrefix}:${trajId}`);
+      const raw = host.kv.get(`${keyPrefix}:${trajId}`);
       if (raw && !raw.startsWith("ERROR:")) {
         try { trajectories.push(JSON.parse(raw) as Record<string, unknown>); } catch { /* ignore */ }
       }
@@ -1481,8 +1479,8 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
     try {
-      host.kvDelete(`trajectory:${trajId}`);
-      host.kvDelete(`traj_meta:${trajId}`);
+      host.kv.delete(`trajectory:${trajId}`);
+      host.kv.delete(`traj_meta:${trajId}`);
       return { status: "ok", trajectory_id: trajId };
     } catch (e) {
       return { error: String(e) };
@@ -1493,15 +1491,15 @@ class TrajectoryStoreActor extends PlexSpacesActor<TrajectoryStoreState> {
     const evalRunId = typeof payload.eval_run_id === "string" ? payload.eval_run_id : "";
     if (!evalRunId) return { error: "eval_run_id is required" };
     try {
-      const indexRaw = host.kvGet(`traj_index:${evalRunId}`);
+      const indexRaw = host.kv.get(`traj_index:${evalRunId}`);
       const trajIds: string[] = indexRaw && !indexRaw.startsWith("ERROR:") ? JSON.parse(indexRaw) : [];
       let deleted = 0;
       for (const trajId of trajIds) {
-        host.kvDelete(`trajectory:${trajId}`);
-        host.kvDelete(`traj_meta:${trajId}`);
+        host.kv.delete(`trajectory:${trajId}`);
+        host.kv.delete(`traj_meta:${trajId}`);
         deleted++;
       }
-      host.kvDelete(`traj_index:${evalRunId}`);
+      host.kv.delete(`traj_index:${evalRunId}`);
       return { status: "ok", eval_run_id: evalRunId, deleted };
     } catch (e) {
       return { error: String(e) };
@@ -1653,7 +1651,7 @@ class RegressionDetectorActor extends PlexSpacesActor<RegressionDetectorState> {
 
   private loadBaseline(): Record<string, Record<string, unknown>> | null {
     try {
-      const raw = host.kvGet("regression_baseline");
+      const raw = host.kv.get("regression_baseline");
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw) as Record<string, Record<string, unknown>>;
     } catch { /* ignore */ }
     return null;
@@ -1666,8 +1664,8 @@ class RegressionDetectorActor extends PlexSpacesActor<RegressionDetectorState> {
       baseline[trajId] = { score: s.score ?? 0.0, eval_run_id: evalRunId };
     }
     try {
-      host.kvPut("regression_baseline", JSON.stringify(baseline));
-      host.kvPut("regression_baseline_eval_run", evalRunId);
+      host.kv.put("regression_baseline", JSON.stringify(baseline));
+      host.kv.put("regression_baseline_eval_run", evalRunId);
     } catch (e) {
       host.log("warn", `Failed to store baseline: ${e}`);
     }
@@ -1675,7 +1673,7 @@ class RegressionDetectorActor extends PlexSpacesActor<RegressionDetectorState> {
 
   private loadTrajectory(trajId: string): Record<string, unknown> | null {
     try {
-      const raw = host.kvGet(`trajectory:${trajId}`);
+      const raw = host.kv.get(`trajectory:${trajId}`);
       if (raw && !raw.startsWith("ERROR:")) return JSON.parse(raw) as Record<string, unknown>;
     } catch { /* ignore */ }
     return null;
@@ -1746,7 +1744,7 @@ class BenchmarkActor extends WorkflowActor<BenchmarkState> {
     const totalMs = host.nowMs() - startMs;
 
     for (const runInfo of evalRunIds) {
-      const reportRaw = host.kvGet(`eval_report:${runInfo.eval_run_id}`);
+      const reportRaw = host.kv.get(`eval_report:${runInfo.eval_run_id}`);
       let report: Record<string, unknown>;
       if (reportRaw && !reportRaw.startsWith("ERROR:")) {
         try { report = JSON.parse(reportRaw) as Record<string, unknown>; } catch { report = {}; }
@@ -1852,7 +1850,7 @@ class ApprovalGateActor extends PlexSpacesActor<ApprovalGateState> {
     host.log("info", `ApprovalGate: request from agent=${agentId} action=${action}`);
 
     try {
-      host.kvPut(
+      host.kv.put(
         `approval_request:${this.state.actor_id}`,
         JSON.stringify({ ...this.state.pending_request, agent_id: agentId }),
       );
@@ -1974,7 +1972,7 @@ class DashboardActor extends PlexSpacesActor<DashboardState> {
       ? payload.report as Record<string, unknown>
       : payload;
     try {
-      host.kvPut(`eval_report:${evalRunId}`, JSON.stringify(reportData));
+      host.kv.put(`eval_report:${evalRunId}`, JSON.stringify(reportData));
       host.log("info", `DashboardActor: stored eval report eval_run_id=${evalRunId}`);
       return { status: "ok", eval_run_id: evalRunId };
     } catch (e) {
@@ -1985,7 +1983,7 @@ class DashboardActor extends PlexSpacesActor<DashboardState> {
   protected onGet_eval_report(payload: Record<string, unknown>): Record<string, unknown> {
     const evalRunId = typeof payload.eval_run_id === "string" ? payload.eval_run_id : "";
     if (!evalRunId) return { error: "eval_run_id is required" };
-    const raw = host.kvGet(`eval_report:${evalRunId}`);
+    const raw = host.kv.get(`eval_report:${evalRunId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `eval run ${evalRunId} not found` };
     try { return JSON.parse(raw) as Record<string, unknown>; } catch { return { error: "failed to parse report" }; }
   }
@@ -1995,20 +1993,17 @@ class DashboardActor extends PlexSpacesActor<DashboardState> {
     const reports: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
     const candidateIds = ["eval-smoke-001", "eval-smoke-002", "eval-bench-001", "bench-001", "bench-002"];
-    // Try kvList first
+    // Try kv.list first
     try {
-      const keysJson = host.kvList("eval_report:");
-      if (!keysJson.startsWith("ERROR:")) {
-        const keys = JSON.parse(keysJson) as string[];
-        for (const k of keys) {
-          const runId = k.replace("eval_report:", "");
-          if (!seen.has(runId)) candidateIds.unshift(runId);
-        }
+      const keys = host.kv.list("eval_report:");
+      for (const k of keys) {
+        const runId = k.replace("eval_report:", "");
+        if (!seen.has(runId)) candidateIds.unshift(runId);
       }
     } catch { /* ignore */ }
     for (const runId of candidateIds) {
       if (seen.has(runId) || reports.length >= limit) break;
-      const raw = host.kvGet(`eval_report:${runId}`);
+      const raw = host.kv.get(`eval_report:${runId}`);
       if (!raw || raw.startsWith("ERROR:")) continue;
       seen.add(runId);
       try {
@@ -2030,14 +2025,14 @@ class DashboardActor extends PlexSpacesActor<DashboardState> {
   protected onGet_trajectory(payload: Record<string, unknown>): Record<string, unknown> {
     const trajId = typeof payload.trajectory_id === "string" ? payload.trajectory_id : "";
     if (!trajId) return { error: "trajectory_id is required" };
-    const raw = host.kvGet(`trajectory:${trajId}`);
+    const raw = host.kv.get(`trajectory:${trajId}`);
     if (!raw || raw.startsWith("ERROR:")) return { error: `trajectory ${trajId} not found` };
     try { return JSON.parse(raw) as Record<string, unknown>; } catch { return { error: "failed to parse trajectory" }; }
   }
 
   protected onGet_regressions(_payload: Record<string, unknown>): Record<string, unknown> {
-    const baselineRun = host.kvGet("regression_baseline_eval_run") ?? "";
-    const baselineRaw = host.kvGet("regression_baseline") ?? "{}";
+    const baselineRun = host.kv.get("regression_baseline_eval_run") ?? "";
+    const baselineRaw = host.kv.get("regression_baseline") ?? "{}";
     try {
       const baselineData = JSON.parse(baselineRaw) as Record<string, unknown>;
       return {
@@ -2055,7 +2050,7 @@ class DashboardActor extends PlexSpacesActor<DashboardState> {
     let totalEvals = 0;
     let scoreSum = 0.0;
     for (const id of candidateIds) {
-      const raw = host.kvGet(`eval_report:${id}`);
+      const raw = host.kv.get(`eval_report:${id}`);
       if (!raw || raw.startsWith("ERROR:")) continue;
       try {
         const report = JSON.parse(raw) as Record<string, unknown>;

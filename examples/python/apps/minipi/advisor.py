@@ -48,7 +48,7 @@ class AdvisorActor:
             except (ValueError, TypeError):
                 pass
         try:
-            host.kv_put("svc:advisor", host.self_id())
+            host.kv.put("svc:advisor", host.self_id())
         except Exception:
             pass
         try:

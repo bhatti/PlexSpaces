@@ -117,7 +117,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_functions_accessible() {
         use MessagingHost;
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -208,7 +208,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_functions_accessible() {
         use TuplespaceHost;
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace = TuplespaceImpl::new(None, actor_id);
 
         // All tuplespace functions should be accessible
@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_durability_functions_accessible() {
         use DurabilityHost;
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut durability = DurabilityImpl::new(actor_id, host_functions);
 
@@ -262,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn test_logging_functions_accessible() {
         use LoggingHost;
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut logging = LoggingImpl { actor_id };
 
         // All logging functions should be accessible

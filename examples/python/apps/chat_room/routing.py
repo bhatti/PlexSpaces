@@ -50,7 +50,7 @@ class GuildActor:
     @handler("create_channel")
     def create_channel(self, channel_id: str) -> dict:
         self.channels = sorted({*self.channels, channel_id})
-        host.kv_put(f"guild:{self.guild_id}:channels", json.dumps(self.channels))
+        host.kv.put(f"guild:{self.guild_id}:channels", json.dumps(self.channels))
         return {
             "guild_id": self.guild_id,
             "channel_id": channel_id,
@@ -91,7 +91,7 @@ class ChannelActor:
         member_index = dict(self.member_index)
         member_index[user_id] = {"session_id": session_id}
         self.member_index = member_index
-        host.kv_put(
+        host.kv.put(
             f"channel:{self.guild_id}:{self.channel_id}:members",
             json.dumps(sorted(self.member_index.keys())),
         )

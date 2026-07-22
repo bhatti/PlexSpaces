@@ -54,7 +54,7 @@ func (s *SkillStoreActor) Init(configJSON string) string {
 		host.Warn(fmt.Sprintf("SkillStoreActor: failed to join svc:skills: %v", err))
 	}
 	// Schedule daily skill maintenance
-	_ = host.SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
+	_, _ = host.Actor().SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
 	host.Info(fmt.Sprintf("SkillStoreActor Init actor_id=%s", config.ActorID))
 	return ""
 }
@@ -143,16 +143,16 @@ func (s *SkillStoreActor) proposeSkill(p map[string]any) string {
 		"session_id":       sessionID,
 	}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("skill_meta:"+skillID, string(metaJSON))
+	host.KV().Put("skill_meta:"+skillID, string(metaJSON))
 
 	// Store procedure body in BlobStorage
-	storedBlobID := host.BlobUpload("skill_procedure:"+skillID, procedure, "text/plain")
-	if plexspaces.IsHostError(storedBlobID) {
-		host.Warn(fmt.Sprintf("SkillStoreActor: blob upload failed for skill %s: %s", skillID, storedBlobID))
+	storedBlobID, blobErr := host.Blob().Upload("skill_procedure:"+skillID, []byte(procedure), "text/plain")
+	if blobErr != nil {
+		host.Warn(fmt.Sprintf("SkillStoreActor: blob upload failed for skill %s: %s", skillID, blobErr.Error()))
 		// Fallback: store procedure in KV
-		host.KVPut("skill_proc:"+skillID, procedure)
+		_ = host.KV().Put("skill_proc:"+skillID, procedure)
 	} else {
-		host.KVPut("skill_blob:"+skillID, storedBlobID)
+		_ = host.KV().Put("skill_blob:"+skillID, storedBlobID)
 	}
 
 	// Index by tags in TupleSpace
@@ -165,13 +165,13 @@ func (s *SkillStoreActor) proposeSkill(p map[string]any) string {
 	}
 
 	// Track in skills list
-	existing := host.KVGet("skill_ids")
+	existing, _ := host.KV().Get("skill_ids")
 	ids := []string{}
 	if existing != "" {
 		ids = strings.Split(existing, ",")
 	}
 	ids = append(ids, skillID)
-	host.KVPut("skill_ids", strings.Join(ids, ","))
+	host.KV().Put("skill_ids", strings.Join(ids, ","))
 
 	s.SkillCount++
 	s.LearnCount++
@@ -247,7 +247,7 @@ func (s *SkillStoreActor) matchSkills(p map[string]any) string {
 
 func (s *SkillStoreActor) listSkills(p map[string]any) string {
 	status := stringVal(p, "status", "")
-	existing := host.KVGet("skill_ids")
+	existing, _ := host.KV().Get("skill_ids")
 	if existing == "" {
 		return marshal(map[string]any{"status": "ok", "skills": []any{}, "count": 0})
 	}
@@ -299,18 +299,18 @@ func (s *SkillStoreActor) updateSkill(p map[string]any) string {
 		meta["description"] = desc
 	}
 	if proc := stringVal(p, "procedure", ""); proc != "" {
-		updatedBlobID := host.BlobUpload("skill_procedure:"+skillID, proc, "text/plain")
-		if plexspaces.IsHostError(updatedBlobID) {
-			host.KVPut("skill_proc:"+skillID, proc)
+		updatedBlobID, blobErr := host.Blob().Upload("skill_procedure:"+skillID, []byte(proc), "text/plain")
+		if blobErr != nil {
+			_ = host.KV().Put("skill_proc:"+skillID, proc)
 		} else {
-			host.KVPut("skill_blob:"+skillID, updatedBlobID)
+			_ = host.KV().Put("skill_blob:"+skillID, updatedBlobID)
 		}
 	}
 	if v, ok := meta["version"].(float64); ok {
 		meta["version"] = int(v) + 1
 	}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("skill_meta:"+skillID, string(metaJSON))
+	host.KV().Put("skill_meta:"+skillID, string(metaJSON))
 	return marshal(map[string]any{"status": "ok", "skill_id": skillID})
 }
 
@@ -319,11 +319,11 @@ func (s *SkillStoreActor) deleteSkill(p map[string]any) string {
 	if skillID == "" {
 		return marshal(map[string]any{"error": "skill_id is required"})
 	}
-	host.KVDelete("skill_meta:" + skillID)
-	host.KVDelete("skill_proc:" + skillID)
-	host.KVDelete("skill_blob:" + skillID)
+	host.KV().Delete("skill_meta:" + skillID)
+	host.KV().Delete("skill_proc:" + skillID)
+	host.KV().Delete("skill_blob:" + skillID)
 
-	existing := host.KVGet("skill_ids")
+	existing, _ := host.KV().Get("skill_ids")
 	if existing != "" {
 		ids := strings.Split(existing, ",")
 		newIDs := make([]string, 0, len(ids))
@@ -332,7 +332,7 @@ func (s *SkillStoreActor) deleteSkill(p map[string]any) string {
 				newIDs = append(newIDs, id)
 			}
 		}
-		host.KVPut("skill_ids", strings.Join(newIDs, ","))
+		host.KV().Put("skill_ids", strings.Join(newIDs, ","))
 	}
 	if s.SkillCount > 0 {
 		s.SkillCount--
@@ -379,11 +379,11 @@ func (s *SkillStoreActor) evaluateForLearning(p map[string]any) string {
 
 	// Check if this pattern was already learned
 	patternKey := strings.Join(toolSeq, "→")
-	existing := host.KVGet("learned_pattern:" + llmCacheKeyFor(patternKey))
+	existing, _ := host.KV().Get("learned_pattern:" + llmCacheKeyFor(patternKey))
 	if existing != "" {
 		return marshal(map[string]any{"status": "ok", "action": "pattern_already_known"})
 	}
-	host.KVPut("learned_pattern:"+llmCacheKeyFor(patternKey), sessionID)
+	host.KV().Put("learned_pattern:"+llmCacheKeyFor(patternKey), sessionID)
 
 	// Generate a skill from the pattern
 	skillName := fmt.Sprintf("Auto: %s", truncateStr(userIntent, 40))
@@ -417,7 +417,7 @@ func (s *SkillStoreActor) recordUsage(p map[string]any) string {
 	meta["last_used_at"] = host.NowMs()
 	meta["status"] = skillActive // reactivate if stale
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("skill_meta:"+skillID, string(metaJSON))
+	host.KV().Put("skill_meta:"+skillID, string(metaJSON))
 	s.IncrCounter(host, "skill_usages")
 	return marshal(map[string]any{"status": "ok", "skill_id": skillID, "usage_count": usage + 1})
 }
@@ -428,9 +428,9 @@ func (s *SkillStoreActor) maintenanceTick() string {
 	staleThresholdMs := uint64(30 * 24 * 3600 * 1000)  // 30 days
 	archiveThresholdMs := uint64(90 * 24 * 3600 * 1000) // 90 days
 
-	existing := host.KVGet("skill_ids")
+	existing, _ := host.KV().Get("skill_ids")
 	if existing == "" {
-		_ = host.SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
+		_, _ = host.Actor().SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
 		return marshal(map[string]any{"status": "ok", "checked": 0})
 	}
 
@@ -451,25 +451,25 @@ func (s *SkillStoreActor) maintenanceTick() string {
 		if age > archiveThresholdMs && currentStatus != skillArchived {
 			meta["status"] = skillArchived
 			metaJSON, _ := json.Marshal(meta)
-			host.KVPut("skill_meta:"+id, string(metaJSON))
+			host.KV().Put("skill_meta:"+id, string(metaJSON))
 			archived++
 			s.ArchiveCount++
 		} else if age > staleThresholdMs && currentStatus == skillActive {
 			meta["status"] = skillStale
 			metaJSON, _ := json.Marshal(meta)
-			host.KVPut("skill_meta:"+id, string(metaJSON))
+			host.KV().Put("skill_meta:"+id, string(metaJSON))
 			staled++
 		}
 	}
 
-	_ = host.SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
+	_, _ = host.Actor().SendAfter(86400000, "maintenance_tick", map[string]any{"op": "maintenance_tick"})
 	host.Info(fmt.Sprintf("SkillStoreActor: maintenance done staled=%d archived=%d", staled, archived))
 	fireAudit("skill_maintenance", fmt.Sprintf("staled=%d archived=%d", staled, archived))
 	return marshal(map[string]any{"status": "ok", "checked": len(ids), "staled": staled, "archived": archived})
 }
 
 func (s *SkillStoreActor) loadSkillMeta(skillID string) map[string]any {
-	raw := host.KVGet("skill_meta:" + skillID)
+	raw, _ := host.KV().Get("skill_meta:" + skillID)
 	if raw == "" {
 		return nil
 	}
@@ -482,15 +482,16 @@ func (s *SkillStoreActor) loadSkillMeta(skillID string) map[string]any {
 
 func (s *SkillStoreActor) loadProcedure(skillID string) string {
 	// Try BlobStorage first
-	blobID := host.KVGet("skill_blob:" + skillID)
+	blobID, _ := host.KV().Get("skill_blob:" + skillID)
 	if blobID != "" {
-		data := host.BlobDownload(blobID)
-		if data != "" && !plexspaces.IsHostError(data) {
-			return data
+		data, blobErr := host.Blob().Download(blobID)
+		if blobErr == nil && len(data) > 0 {
+			return string(data)
 		}
 	}
 	// Fallback to KV
-	return host.KVGet("skill_proc:" + skillID)
+	v, _ := host.KV().Get("skill_proc:" + skillID)
+	return v
 }
 
 func truncateStr(s string, maxLen int) string {

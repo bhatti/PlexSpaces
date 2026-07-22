@@ -227,15 +227,18 @@ message ServiceLinkConfig {
 // ---------------------------------------------------------------------------
 
 message AddServiceLinkRequest {
-  ServiceLinkConfig link = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ServiceLinkConfig link = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message AddServiceLinkResponse {
-  ServiceLinkConfig link = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ServiceLinkConfig link = 2;
 }
 
 message RemoveServiceLinkRequest {
-  string name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -245,7 +248,8 @@ message RemoveServiceLinkRequest {
 }
 
 message GetServiceLinkRequest {
-  string name = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -255,17 +259,20 @@ message GetServiceLinkRequest {
 }
 
 message GetServiceLinkResponse {
-  ServiceLinkConfig link = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ServiceLinkConfig link = 2;
 }
 
 message ListServiceLinksRequest {
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
 message ListServiceLinksResponse {
-  repeated ServiceLinkConfig links = 1;
-  string next_page_token = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ServiceLinkConfig links = 2;
+  string next_page_token = 3;
 }
 
 // ServiceLinkService manages outbound service links at runtime.

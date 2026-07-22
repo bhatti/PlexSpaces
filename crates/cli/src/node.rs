@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Node status, health, and lifecycle commands
@@ -28,6 +28,7 @@ use plexspaces_proto::node::v1::{
 use plexspaces_proto::prost_types;
 use plexspaces_proto::system::v1::{system_service_client::SystemServiceClient, GetHealthRequest};
 use std::sync::Arc;
+use ulid::Ulid;
 use tokio::signal;
 use tonic::transport::Channel;
 use tonic::Request;
@@ -44,7 +45,7 @@ pub async fn status(node_addr: &str) -> Result<()> {
 
     println!("📊 Node Status: {}", node_addr);
 
-    let request = GetHealthRequest { components: vec![] };
+    let request = GetHealthRequest { request_id: Ulid::new().to_string(), components: vec![] };
     let response = client
         .get_health(tonic::Request::new(request))
         .await
@@ -291,6 +292,7 @@ pub async fn list_connected_nodes(
 
     let mut client = NodeServiceClient::new(channel);
     let req = Request::new(ListConnectedNodesRequest {
+        request_id: Ulid::new().to_string(),
         cluster: cluster.to_string(),
         page_size: 100,
         page_token: String::new(),
@@ -333,6 +335,7 @@ pub async fn connect_nodes(
 
     let mut client = NodeServiceClient::new(channel);
     let req = Request::new(ConnectNodesRequest {
+        request_id: Ulid::new().to_string(),
         node_addresses: addresses.to_vec(),
         cluster: cluster.to_string(),
         timeout: Some(prost_types::Duration {
@@ -378,6 +381,7 @@ pub async fn disconnect_nodes(
 
     let mut client = NodeServiceClient::new(channel);
     let req = Request::new(DisconnectNodesRequest {
+        request_id: Ulid::new().to_string(),
         node_ids: node_ids.to_vec(),
         notify_remote,
     });

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Node module for distribution and clustering
@@ -1138,7 +1138,7 @@ impl Node {
             let actor_ids: Vec<String> = actor_entries.iter().map(|(id, _, _)| id.clone()).collect();
             let mut client = ActorServiceClient::new(channel);
             let resp = match client
-                .get_actor_states(tonic::Request::new(GetActorStatesRequest { actor_ids }))
+                .get_actor_states(tonic::Request::new(GetActorStatesRequest { request_id: ulid::Ulid::new().to_string(), actor_ids }))
                 .await
             {
                 Ok(r) => r.into_inner(),
@@ -2372,6 +2372,54 @@ impl Node {
             auth_route_state.as_ref().map(|s| s.token_repo.clone());
         let node_connectivity_for_http =
             node_service.clone() as Arc<dyn plexspaces_actor::NodeConnectivity>;
+
+        // Construct WS registry and pending asks for WebSocket thin-client support.
+        let ws_registry = Arc::new(crate::ws_registry::WsRegistry::new());
+        let pending_asks = std::sync::Arc::new(crate::ws_transport_client::PendingAsks::new());
+        let ws_node_registry = self.service_locator.get_node_registry().await;
+        let ws_state = crate::http_routes::WsRouteState {
+            actor_service: actor_service_for_http.clone(),
+            ws_registry: ws_registry.clone(),
+            pending_asks: pending_asks.clone(),
+            service_locator: self.service_locator.clone(),
+            node_registry: ws_node_registry,
+            auth_disabled,
+            jwt_key_pair: jwt_key_pair.clone(),
+        };
+
+        // Register WS transport clients in ServiceLocator for outbound WS routing.
+        {
+            use plexspaces_actor::InitializableServiceLocator;
+            use plexspaces_actor::{GrpcActorTransportClient, GrpcNodeTransportClient};
+            use crate::ws_transport_client::{WsActorTransportClient, WsNodeTransportClient};
+
+            let grpc_actor = std::sync::Arc::new(GrpcActorTransportClient::new(self.service_locator.clone()));
+            let grpc_node = std::sync::Arc::new(GrpcNodeTransportClient::new(self.service_locator.clone()));
+
+            let ws_actor = std::sync::Arc::new(WsActorTransportClient::new(
+                ws_registry.clone(),
+                pending_asks.clone(),
+                grpc_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+            ));
+            let ws_node = std::sync::Arc::new(WsNodeTransportClient::new(
+                ws_registry.clone(),
+                pending_asks.clone(),
+                grpc_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+            ));
+
+            self.service_locator.register_actor_transport_client(
+                ws_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+            ).await;
+            self.service_locator.register_node_transport_client(
+                ws_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
+            ).await;
+            let ws_reg_trait: std::sync::Arc<dyn plexspaces_actor::WsRegistryTrait> = ws_registry.clone();
+            self.service_locator.register_ws_registry(ws_reg_trait).await;
+        }
+
+        let static_registry: crate::http_routes::StaticRegistry =
+            Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
         let http_routes = crate::http_routes::all_http_routes(
             actor_service_for_http.clone(),
             self.service_locator.clone(),
@@ -2379,6 +2427,8 @@ impl Node {
             auth_disabled,
             jwt_key_pair.clone(),
             auth_route_state,
+            ws_state,
+            static_registry,
         );
 
         #[cfg(feature = "dashboard")]

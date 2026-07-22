@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Tests for Firecracker Proto Definitions (Phase 2.3 - TDD)
@@ -43,6 +43,7 @@ mod tests {
         // These are verified by the existence of request/response types
 
         let _create_req: CreateVmRequest = CreateVmRequest {
+            request_id: ulid::Ulid::new().to_string(),
             config: Some(VmConfig {
                 vm_id: "test-vm".to_string(),
                 vcpu_count: 2,
@@ -104,6 +105,7 @@ mod tests {
     fn test_firecracker_has_application_deployment_rpcs() {
         // Verify DeployApplication request/response exist
         let _deploy_req = DeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "vm-001".to_string(),
             application_id: "app-001".to_string(),
             application_bundle: vec![],
@@ -111,6 +113,7 @@ mod tests {
         };
 
         let _deploy_resp = DeployApplicationResponse {
+            request_id: ulid::Ulid::new().to_string(),
             success: true,
             application_id: "app-001".to_string(),
             vm_id: "vm-001".to_string(),
@@ -119,12 +122,14 @@ mod tests {
 
         // Verify UndeployApplication request/response exist
         let _undeploy_req = UndeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             vm_id: "vm-001".to_string(),
             application_id: "app-001".to_string(),
             force: false,
         };
 
         let _undeploy_resp = UndeployApplicationResponse {
+            request_id: ulid::Ulid::new().to_string(),
             success: true,
             error: None,
         };

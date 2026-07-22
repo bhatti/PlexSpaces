@@ -123,19 +123,23 @@ pub struct GroupMembership {
 pub struct CreateGroupRequest {
     /// Group name (required)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
     /// Namespace (optional hierarchical isolation within tenant)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
     /// Metadata (labels, annotations)
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub metadata: ::core::option::Option<super::super::common::v1::Metadata>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateGroupResponse {
     /// Created group
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub group: ::core::option::Option<ProcessGroup>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -143,6 +147,8 @@ pub struct CreateGroupResponse {
 pub struct DeleteGroupRequest {
     /// Group name to delete
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -150,12 +156,14 @@ pub struct DeleteGroupRequest {
 pub struct JoinGroupRequest {
     /// Group to join
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
     /// Actor ID to add to group
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub actor_id: ::prost::alloc::string::String,
     /// Node hosting this actor (optional - can be looked up via ActorRegistry)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub node_id: ::prost::alloc::string::String,
     /// Topics to subscribe to within the group (optional - empty = all topics)
     ///
@@ -173,7 +181,7 @@ pub struct JoinGroupRequest {
     /// - \["config.database"\] → only database config updates
     /// - \["events.user.login", "events.user.logout"\] → only user login/logout events
     /// - \[\] → all messages (default)
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag="6")]
     pub topics: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -181,9 +189,11 @@ pub struct JoinGroupRequest {
 pub struct LeaveGroupRequest {
     /// Group to leave
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
     /// Actor ID to remove from group
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub actor_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -191,52 +201,10 @@ pub struct LeaveGroupRequest {
 pub struct GetMembersRequest {
     /// Group name
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
     /// Pagination (optional)
-    #[prost(int32, tag="3")]
-    pub page_size: i32,
-    #[prost(string, tag="4")]
-    pub page_token: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetMembersResponse {
-    /// All members (cluster-wide)
-    #[prost(string, repeated, tag="1")]
-    pub member_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Pagination
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub total_count: i32,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetLocalMembersRequest {
-    /// Group name
-    #[prost(string, tag="1")]
-    pub group_name: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetLocalMembersResponse {
-    /// Local members only (this node)
-    #[prost(string, repeated, tag="1")]
-    pub member_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Total count (local only)
-    #[prost(int32, tag="2")]
-    pub local_count: i32,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListGroupsRequest {
-    /// Filter by namespace (optional)
-    #[prost(string, tag="2")]
-    pub namespace: ::prost::alloc::string::String,
-    /// Filter by group name pattern (optional, e.g., "config-*")
-    #[prost(string, tag="3")]
-    pub name_pattern: ::prost::alloc::string::String,
-    /// Pagination
     #[prost(int32, tag="4")]
     pub page_size: i32,
     #[prost(string, tag="5")]
@@ -244,14 +212,68 @@ pub struct ListGroupsRequest {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetMembersResponse {
+    /// All members (cluster-wide)
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
+    pub member_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Pagination
+    #[prost(string, tag="3")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="4")]
+    pub total_count: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetLocalMembersRequest {
+    /// Group name
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub group_name: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetLocalMembersResponse {
+    /// Local members only (this node)
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
+    pub member_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Total count (local only)
+    #[prost(int32, tag="3")]
+    pub local_count: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListGroupsRequest {
+    /// Filter by namespace (optional)
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Filter by group name pattern (optional, e.g., "config-*")
+    #[prost(string, tag="4")]
+    pub name_pattern: ::prost::alloc::string::String,
+    /// Pagination
+    #[prost(int32, tag="5")]
+    pub page_size: i32,
+    #[prost(string, tag="6")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListGroupsResponse {
     /// Groups matching filter
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub groups: ::prost::alloc::vec::Vec<ProcessGroup>,
     /// Pagination
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub total_count: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -259,6 +281,8 @@ pub struct ListGroupsResponse {
 pub struct PublishToGroupRequest {
     /// Group to publish to
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub group_name: ::prost::alloc::string::String,
     /// Topic within the group (optional - if not specified, publishes to all members)
     ///
@@ -276,7 +300,7 @@ pub struct PublishToGroupRequest {
     /// - group_name="config-updates", topic="database" → only database config subscribers
     /// - group_name="events", topic="user.login" → only user login event subscribers
     /// - group_name="events", topic="" → all event subscribers
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub topic: ::prost::alloc::string::String,
     /// Message to broadcast to all members
     ///
@@ -287,7 +311,7 @@ pub struct PublishToGroupRequest {
     /// - payload: Message content
     /// - priority: Message priority (system=75, high=50, normal=25, low=0)
     /// - ttl: How long to retry failed deliveries
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub message: ::core::option::Option<super::super::common::v1::Message>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -298,15 +322,200 @@ pub struct PublishToGroupResponse {
     /// NOTE: This is best-effort count (async delivery)
     /// - Local members: Counted immediately
     /// - Remote members: May still be in-flight
-    #[prost(uint32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
     pub recipients_count: u32,
     /// How many members were unreachable
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag="3")]
     pub failures_count: u32,
     /// Breakdown by node (for debugging)
-    #[prost(map="string, uint32", tag="3")]
+    #[prost(map="string, uint32", tag="4")]
     pub recipients_per_node: ::std::collections::HashMap<::prost::alloc::string::String, u32>,
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

@@ -85,6 +85,10 @@ if [ "$http_code" = "000" ]; then
 fi
 
 TEMP_CONFIG="$(mktemp -t go-web-crawl-config)"
+trap 'rm -f "${APP_ZIP:-}" "${TEMP_CONFIG:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$TEMP_CONFIG" >/dev/null
 cp "$CONFIG_FILE" "$TEMP_CONFIG"
 
 echo "Step 1: Deploy to ${ENTRY_HOST}:${ENTRY_PORT}"
@@ -98,8 +102,7 @@ for _attempt in 1 2 3; do
     -F "application_id=$APP_ID" \
     -F "name=$APP_NAME" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$TEMP_CONFIG" 2>&1)
+    -F "app_file=@$APP_ZIP" 2>&1)
   http_code=$(echo "$deploy_output" | tail -n1)
   response=$(echo "$deploy_output" | sed '$d')
   if [ "$http_code" = "200" ] && echo "$response" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then

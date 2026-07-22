@@ -10,7 +10,7 @@ SDK Features Used
 - @gen_server_actor        — GenServer (request-reply) actor
 - @handler("get_weather")  — message handler
 - ServiceHttpClient        — ergonomic outbound HTTP via service link
-- host.kv_get / kv_put     — internal KV store for caching
+- host.kv.get / kv_put     — internal KV store for caching
 - host.log                 — structured logging
 
 Service Link Configuration
@@ -112,7 +112,7 @@ class WeatherActor:
     def get_weather(self, city: str = "London") -> dict:
         """Fetch weather for a city, using KV cache to avoid redundant calls."""
         cache_key = f"{self._cache_key_prefix()}{city}"
-        cached_raw = host.kv_get(cache_key) or ""
+        cached_raw = host.kv.get(cache_key) or ""
         if cached_raw.startswith("ERROR:"):
             host.log("warn", f"Cache read failed for {city}: {cached_raw}")
         elif cached_raw:
@@ -147,7 +147,7 @@ class WeatherActor:
                 "wind_kph": current.get("wind_speed_10m", 0),
                 "fetched_at_ms": host.now_ms(),
             }
-            cache_write = host.kv_put(cache_key, json.dumps(result)) or ""
+            cache_write = host.kv.put(cache_key, json.dumps(result)) or ""
             if cache_write.startswith("ERROR:"):
                 host.log("warn", f"Cache write failed for {city}: {cache_write}")
             self._record_metrics("weather_api_calls", {"weather_api_calls": 1})
@@ -169,7 +169,7 @@ class WeatherActor:
         self.cache_hits = 0
         self.cache_misses = 0
         prefix = self._cache_key_prefix()
-        keys_raw = host.kv_list(prefix) or "[]"
+        keys_raw = host.kv.list(prefix) or "[]"
         try:
             keys = json.loads(keys_raw)
         except json.JSONDecodeError:
@@ -177,7 +177,7 @@ class WeatherActor:
         if isinstance(keys, list):
             for key in keys:
                 if isinstance(key, str):
-                    host.kv_delete(key)
+                    host.kv.delete(key)
         self._record_metrics("weather_cache_clears")
         return {"cleared": True}
 

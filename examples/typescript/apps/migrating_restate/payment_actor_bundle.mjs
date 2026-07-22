@@ -1,5 +1,5 @@
 // ../../../../sdks/typescript/dist/actor.js
-import { log as hostLog } from "plexspaces:actor/host@0.1.0";
+import { log as hostLog } from "plexspaces:actor/host-logging@0.1.0";
 
 // ../../../../sdks/typescript/dist/decorators.js
 var ACTOR_METADATA = Symbol.for("plexspaces.actor.metadata");
@@ -1513,63 +1513,16 @@ function firstGroupMemberOrThrow(group, members) {
 }
 
 // ../../../../sdks/typescript/dist/host.js
-import {
-  send as hostSend,
-  ask as hostAsk,
-  log as hostLog2,
-  nowMs as hostNowMs,
-  selfId as hostSelfId,
-  spawn as hostSpawn,
-  stop as hostStop,
-  link as hostLink,
-  unlink as hostUnlink,
-  monitor as hostMonitor,
-  demonitor as hostDemonitor,
-  sendAfter as hostSendAfter,
-  kvGet as hostKvGet,
-  kvPut as hostKvPut,
-  kvDelete as hostKvDelete,
-  kvList as hostKvList,
-  tsWrite as hostTsWrite,
-  tsRead as hostTsRead,
-  tsTake as hostTsTake,
-  tsReadAll as hostTsReadAll,
-  lockAcquire as hostLockAcquire,
-  lockRelease as hostLockRelease,
-  lockRenew as hostLockRenew,
-  blobUpload as hostBlobUpload,
-  blobDownload as hostBlobDownload,
-  blobDelete as hostBlobDelete,
-  blobList as hostBlobList,
-  pgJoin as hostPgJoin,
-  pgLeave as hostPgLeave,
-  pgMembers as hostPgMembers,
-  pgBroadcast as hostPgBroadcast,
-  poolCheckout as hostPoolCheckout,
-  poolCheckin as hostPoolCheckin,
-  poolGetMetrics as hostPoolGetMetrics,
-  createShardGroup as hostCreateShardGroup,
-  bulkUpdateShardGroup as hostBulkUpdateShardGroup,
-  mapShardGroup as hostMapShardGroup,
-  scatterGather as hostScatterGather,
-  broadcastShardGroup as hostBroadcastShardGroup,
-  reduceShardGroup as hostReduceShardGroup,
-  allReduceShardGroup as hostAllReduceShardGroup,
-  barrierShardGroup as hostBarrierShardGroup,
-  spawnActors as hostSpawnActors,
-  applicationMetricsAdd as hostApplicationMetricsAdd,
-  applicationGetMetrics as hostApplicationGetMetrics,
-  applicationGetStatus as hostApplicationGetStatus,
-  httpFetch as hostHttpFetch
-} from "plexspaces:actor/host@0.1.0";
-import {
-  register as hostRegistryRegister,
-  unregister as hostRegistryUnregister,
-  lookup as hostRegistryLookup,
-  lookupByAlias as hostRegistryLookupByAlias,
-  discover as hostRegistryDiscover,
-  heartbeat as hostRegistryHeartbeat
-} from "plexspaces:actor/registry@0.1.0";
+import { log as hostLog2, nowMs as hostNowMs } from "plexspaces:actor/host-logging@0.1.0";
+import { send as hostSend, ask as hostAsk, selfId as hostSelfId, spawn as hostSpawn, stop as hostStop, link as hostLink, unlink as hostUnlink, monitor as hostMonitor, demonitor as hostDemonitor, sendAfter as hostSendAfter, pgJoin as hostPgJoin, pgLeave as hostPgLeave, pgMembers as hostPgMembers, pgBroadcast as hostPgBroadcast } from "plexspaces:actor/host-actor@0.1.0";
+import { kvGet as hostKvGet, kvPut as hostKvPut, kvDelete as hostKvDelete, kvList as hostKvList, kvPutWithTtl as hostKvPutWithTtl, kvGetTtl as hostKvGetTtl, kvCas as hostKvCas, kvIncrement as hostKvIncrement, kvMultiGet as hostKvMultiGet, kvMultiPut as hostKvMultiPut, alarmSet as hostAlarmSet, alarmGet as hostAlarmGet, alarmDelete as hostAlarmDelete } from "plexspaces:actor/host-kv@0.1.0";
+import { tsWrite as hostTsWrite, tsRead as hostTsRead, tsTake as hostTsTake, tsReadAll as hostTsReadAll } from "plexspaces:actor/host-ts@0.1.0";
+import { lockAcquire as hostLockAcquire, lockRelease as hostLockRelease, lockRenew as hostLockRenew } from "plexspaces:actor/host-locks@0.1.0";
+import { blobUpload as hostBlobUpload, blobDownload as hostBlobDownload, blobDelete as hostBlobDelete, blobList as hostBlobList } from "plexspaces:actor/host-blob@0.1.0";
+import { poolCheckout as hostPoolCheckout, poolCheckin as hostPoolCheckin, poolGetMetrics as hostPoolGetMetrics } from "plexspaces:actor/host-pool@0.1.0";
+import { createShardGroup as hostCreateShardGroup, bulkUpdateShardGroup as hostBulkUpdateShardGroup, mapShardGroup as hostMapShardGroup, broadcastShardGroup as hostBroadcastShardGroup, reduceShardGroup as hostReduceShardGroup, allReduceShardGroup as hostAllReduceShardGroup, barrierShardGroup as hostBarrierShardGroup, scatterGather as hostScatterGather, spawnActors as hostSpawnActors, applicationMetricsAdd as hostApplicationMetricsAdd, applicationGetMetrics as hostApplicationGetMetrics, applicationGetStatus as hostApplicationGetStatus } from "plexspaces:actor/host-shard@0.1.0";
+import { httpFetch as hostHttpFetch } from "plexspaces:actor/host-http@0.1.0";
+import { register as hostRegistryRegister, unregister as hostRegistryUnregister, lookup as hostRegistryLookup, lookupByAlias as hostRegistryLookupByAlias, discover as hostRegistryDiscover, heartbeat as hostRegistryHeartbeat } from "plexspaces:actor/registry@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
     return fn(...args);
@@ -1603,6 +1556,37 @@ function hostErrorPrefixBytes(raw) {
       return false;
   }
   return true;
+}
+function bytesToBase64(bytes) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let result = "";
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += chars[b0 >> 2] + chars[(b0 & 3) << 4 | b1 >> 4] + (i + 1 < len ? chars[(b1 & 15) << 2 | b2 >> 6] : "=") + (i + 2 < len ? chars[b2 & 63] : "=");
+  }
+  return result;
+}
+function base64ToBytes(b64) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const clean = b64.replace(/=+$/, "");
+  const len = clean.length;
+  const bytes = new Uint8Array(Math.floor(len * 3 / 4));
+  let pos = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c0 = chars.indexOf(clean[i]);
+    const c1 = chars.indexOf(clean[i + 1]);
+    const c2 = i + 2 < len ? chars.indexOf(clean[i + 2]) : 0;
+    const c3 = i + 3 < len ? chars.indexOf(clean[i + 3]) : 0;
+    bytes[pos++] = c0 << 2 | c1 >> 4;
+    if (i + 2 < len)
+      bytes[pos++] = (c1 & 15) << 4 | c2 >> 2;
+    if (i + 3 < len)
+      bytes[pos++] = (c2 & 3) << 6 | c3;
+  }
+  return bytes.subarray(0, pos);
 }
 var TupleSpace = class {
   constructor(host2) {
@@ -1783,11 +1767,213 @@ var Registry = class {
     }
   }
 };
+var KVStore = class {
+  get(key) {
+    if (typeof hostKvGet !== "function")
+      return null;
+    try {
+      const v = decodeWitPayloadUtf8(hostKvGet(key));
+      return v || null;
+    } catch {
+      return null;
+    }
+  }
+  put(key, value) {
+    if (typeof hostKvPut !== "function")
+      return;
+    try {
+      hostKvPut(key, encodeWitPayloadUtf8(value));
+    } catch {
+    }
+  }
+  delete(key) {
+    if (typeof hostKvDelete !== "function")
+      return;
+    try {
+      hostKvDelete(key);
+    } catch {
+    }
+  }
+  list(prefix) {
+    if (typeof hostKvList !== "function")
+      return [];
+    try {
+      return hostKvList(prefix);
+    } catch {
+      return [];
+    }
+  }
+  putWithTtl(key, value, ttlSeconds) {
+    if (typeof hostKvPutWithTtl !== "function")
+      return;
+    hostKvPutWithTtl(key, encodeWitPayloadUtf8(value), BigInt(ttlSeconds));
+  }
+  getTtl(key) {
+    if (typeof hostKvGetTtl !== "function")
+      return 0;
+    try {
+      return Number(hostKvGetTtl(key));
+    } catch {
+      return 0;
+    }
+  }
+  cas(key, expected, newValue) {
+    if (typeof hostKvCas !== "function")
+      return false;
+    const expectedBytes = expected !== null ? encodeWitPayloadUtf8(expected) : new Uint8Array(0);
+    return hostKvCas(key, expectedBytes, encodeWitPayloadUtf8(newValue));
+  }
+  increment(key, delta) {
+    if (typeof hostKvIncrement !== "function")
+      return 0;
+    try {
+      return Number(hostKvIncrement(key, BigInt(delta)));
+    } catch {
+      return 0;
+    }
+  }
+  multiGet(keys) {
+    if (typeof hostKvMultiGet !== "function")
+      return keys.map(() => null);
+    try {
+      const keysJson = encodeWitPayloadUtf8(JSON.stringify(keys));
+      const resultBytes = hostKvMultiGet(keysJson);
+      const resultJson = decodeWitPayloadUtf8(resultBytes);
+      const items = JSON.parse(resultJson);
+      return items.map((v) => {
+        if (v === null)
+          return null;
+        const b = base64ToBytes(v);
+        return new TextDecoder().decode(b);
+      });
+    } catch {
+      return keys.map(() => null);
+    }
+  }
+  multiPut(entries) {
+    if (typeof hostKvMultiPut !== "function")
+      return;
+    const encoded = {};
+    for (const [k, v] of Object.entries(entries)) {
+      encoded[k] = bytesToBase64(new TextEncoder().encode(v));
+    }
+    const entriesJson = encodeWitPayloadUtf8(JSON.stringify(encoded));
+    hostKvMultiPut(entriesJson);
+  }
+  getJson(key) {
+    const raw = this.get(key);
+    if (!raw || raw.startsWith("ERROR:"))
+      return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  putJson(key, value) {
+    const serialized = JSON.stringify(value);
+    this.put(key, serialized);
+  }
+};
+var AlarmClient = class {
+  set(timestampMs) {
+    if (typeof hostAlarmSet !== "function")
+      return;
+    hostAlarmSet(BigInt(timestampMs));
+  }
+  setIn(delayMs) {
+    if (typeof hostNowMs !== "function")
+      return;
+    const now = Number(hostNowMs());
+    this.set(now + delayMs);
+  }
+  get() {
+    if (typeof hostAlarmGet !== "function")
+      return 0;
+    try {
+      return Number(hostAlarmGet());
+    } catch {
+      return 0;
+    }
+  }
+  delete() {
+    if (typeof hostAlarmDelete !== "function")
+      return;
+    hostAlarmDelete();
+  }
+};
+var LockClient = class {
+  acquire(holderId, lockName, leaseDurationSecs, timeoutMs) {
+    const result = hostLockAcquire(holderId, lockName, leaseDurationSecs, timeoutMs);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+  release(lockId, holderId, lockVersion) {
+    const result = hostLockRelease(lockId, holderId, lockVersion);
+    if (typeof result === "string")
+      throw new Error(result);
+  }
+  renew(lockId, holderId, lockVersion, leaseDurationSecs) {
+    const result = hostLockRenew(lockId, holderId, lockVersion, leaseDurationSecs);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+};
+var BlobClient = class {
+  upload(name, data, contentType) {
+    const result = hostBlobUpload(name, data, contentType);
+    if (typeof result !== "string" || result.startsWith("ERROR:"))
+      throw new Error(String(result));
+    return result;
+  }
+  download(blobId) {
+    const result = hostBlobDownload(blobId);
+    if (typeof result === "string")
+      throw new Error(result);
+    return result;
+  }
+  delete(blobId) {
+    const result = hostBlobDelete(blobId);
+    if (typeof result === "string")
+      throw new Error(result);
+  }
+  list(prefix) {
+    const result = hostBlobList(prefix);
+    if (Array.isArray(result))
+      return result;
+    return [];
+  }
+};
 var Host = class {
   constructor() {
     this.processGroups = new ProcessGroups();
     this.ts = new TupleSpace(this);
     this.registry = new Registry();
+    this.kv = new KVStore();
+    this.alarm = new AlarmClient();
+    this.locks = new LockClient();
+    this.blob = new BlobClient();
+  }
+  /**
+   * Create an ergonomic HTTP client for a named service link.
+   *
+   * The link must be pre-configured in RuntimeConfig.service_links.
+   * The host handles retries, circuit breaking, and auth injection.
+   *
+   * @param linkName - Service link name (e.g. "payments-api")
+   * @returns A {@link ServiceHttpClient} bound to that link
+   *
+   * @example
+   * ```typescript
+   * const http = host.httpClient("payments-api");
+   * const balance = http.get("/v1/balance?account=123");
+   * const result = http.post("/v1/transfer", { amount: 100 });
+   * ```
+   */
+  httpClient(linkName) {
+    return new ServiceHttpClient(linkName);
   }
   // ========================================================================
   // Messaging
@@ -1827,14 +2013,21 @@ var Host = class {
   // ========================================================================
   /**
    * Spawn a new actor through the framework-owned actor spawn path exposed by the host.
+   * Returns the canonical actor ID assigned by the framework — use this ID (not actorName)
+   * for all subsequent ask/send/stop calls.
+   *
    * @param moduleRef - Actor type/module reference (must be deployed)
-   * @param actorId - Unique ID for the new actor (empty = auto-generated ULID)
-   * @param initConfig - Optional config passed to the new actor's init()
-   * @returns Spawned actor ID string (may be auto-generated if actorId was empty)
+   * @param actorName - Requested name for the new actor. The framework forms the full canonical
+   *                    ID from this name, moduleRef, namespace and node. Pass empty string to
+   *                    let the framework auto-generate a ULID name.
+   * @param role - Disambiguation key used ONLY when multiple actors in the same supervisor share
+   *               the same actor_type (moduleRef). Pass empty string when moduleRef is unique.
+   * @param args - Key-value init arguments forwarded to the new actor's init()
+   * @returns Canonical actor ID string assigned by the framework
    */
-  spawn(moduleRef, actorId = "", initConfig) {
-    const configBytes = encodeWitPayloadUtf8(initConfig !== void 0 ? JSON.stringify(initConfig) : "{}");
-    const result = safeCall(hostSpawn, moduleRef, actorId, configBytes);
+  spawn(moduleRef, actorName = "", role = "", args = {}) {
+    const argsJson = Object.keys(args).length > 0 ? JSON.stringify(args) : "{}";
+    const result = safeCall(hostSpawn, moduleRef, actorName, role, argsJson);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
@@ -1931,66 +2124,6 @@ var Host = class {
     const result = safeCall(hostNowMs);
     return typeof result === "bigint" ? Number(result) : typeof result === "number" ? result : 0;
   }
-  // ========================================================================
-  // Key-Value Store
-  // ========================================================================
-  kvGet(key) {
-    if (typeof hostKvGet !== "function")
-      return "";
-    try {
-      return decodeWitPayloadUtf8(hostKvGet(key));
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvPut(key, value) {
-    if (typeof hostKvPut !== "function")
-      return "";
-    try {
-      hostKvPut(key, encodeWitPayloadUtf8(value));
-      return "";
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvDelete(key) {
-    if (typeof hostKvDelete !== "function")
-      return "";
-    try {
-      hostKvDelete(key);
-      return "";
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  kvList(prefix) {
-    if (typeof hostKvList !== "function")
-      return "[]";
-    try {
-      return JSON.stringify(hostKvList(prefix));
-    } catch (e) {
-      return `ERROR:${e}`;
-    }
-  }
-  /** Retrieve a JSON value by key. Returns parsed object or null if not found. */
-  kvGetJson(key) {
-    const raw = this.kvGet(key);
-    if (!raw || raw.startsWith("ERROR:"))
-      return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  /** Serialize value to JSON and store under key. Throws on write failure. */
-  kvPutJson(key, value) {
-    const serialized = JSON.stringify(value);
-    const result = this.kvPut(key, serialized);
-    if (typeof result === "string" && result.startsWith("ERROR:")) {
-      throw new Error(`kvPutJson(${key}): ${result}`);
-    }
-  }
   /** Increment a single named application metric counter by 1. Errors are swallowed. */
   incrCounter(applicationId, name) {
     this.incrCounters(applicationId, { [name]: 1 });
@@ -2025,33 +2158,6 @@ var Host = class {
   /** @internal */
   tsReadAllPayload(data) {
     return hostPayloadToBytes(safeCall(hostTsReadAll, data));
-  }
-  // ========================================================================
-  // Distributed Locks
-  // ========================================================================
-  lockAcquire(tenantId, namespace, holderId, lockName, leaseDurationSecs = 30, timeoutMs = 0) {
-    return safeCall(hostLockAcquire, tenantId, namespace, holderId, lockName, leaseDurationSecs, BigInt(timeoutMs));
-  }
-  lockRelease(lockId, tenantId, namespace, holderId, lockVersion) {
-    return safeCall(hostLockRelease, lockId, tenantId, namespace, holderId, lockVersion);
-  }
-  lockRenew(lockId, tenantId, namespace, holderId, lockVersion, leaseDurationSecs = 30) {
-    return safeCall(hostLockRenew, lockId, tenantId, namespace, holderId, lockVersion, leaseDurationSecs);
-  }
-  // ========================================================================
-  // Blob Storage
-  // ========================================================================
-  blobUpload(blobId, data, contentType = "application/octet-stream") {
-    return safeCall(hostBlobUpload, blobId, data, contentType);
-  }
-  blobDownload(blobId) {
-    return safeCall(hostBlobDownload, blobId);
-  }
-  blobDelete(blobId) {
-    return safeCall(hostBlobDelete, blobId);
-  }
-  blobList(prefix) {
-    return safeCall(hostBlobList, prefix);
   }
   // ========================================================================
   // Elastic pool (checkout/checkin)
@@ -2234,7 +2340,34 @@ var Host = class {
     }
   }
 };
+var ServiceHttpClient = class {
+  constructor(linkName) {
+    this.linkName = linkName;
+  }
+  /** GET request. Returns response object with status, headers, body. */
+  get(pathAndQuery, headers) {
+    return host.httpFetch(this.linkName, "GET", pathAndQuery, headers);
+  }
+  /** POST JSON request. body is serialized to JSON. */
+  post(pathAndQuery, body, headers) {
+    const bodyStr = body !== void 0 ? JSON.stringify(body) : "";
+    return host.httpFetch(this.linkName, "POST", pathAndQuery, headers, bodyStr);
+  }
+  /** PUT JSON request. */
+  put(pathAndQuery, body, headers) {
+    const bodyStr = body !== void 0 ? JSON.stringify(body) : "";
+    return host.httpFetch(this.linkName, "PUT", pathAndQuery, headers, bodyStr);
+  }
+  /** DELETE request. */
+  delete(pathAndQuery, headers) {
+    return host.httpFetch(this.linkName, "DELETE", pathAndQuery, headers);
+  }
+};
 var host = new Host();
+
+// ../../../../sdks/typescript/dist/wire/ws-frame-wire.js
+var textEnc = new TextEncoder();
+var textDec = new TextDecoder("utf-8", { fatal: false });
 
 // payment_actor.ts
 var VALIDATE_MS = 15;

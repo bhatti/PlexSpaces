@@ -14,7 +14,7 @@ mod grpc_tests {
     #[tokio::test]
     async fn test_health_check_config_default() {
         let config = HealthCheckConfig::default();
-        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.max_retries, 10);
         assert_eq!(config.initial_delay, Duration::from_millis(500));
         assert_eq!(config.max_delay, Duration::from_secs(10));
         assert!(config.check_liveness);
@@ -53,7 +53,7 @@ mod tests {
         // - Health check timeout should be reasonable (5s default)
         assert_eq!(config.initial_delay, Duration::from_millis(500));
         assert_eq!(config.max_delay, Duration::from_secs(10));
-        assert_eq!(config.health_check_timeout, Duration::from_secs(5));
+        assert_eq!(config.health_check_timeout, Duration::from_secs(10));
 
         // Verify jitter range: 0-25% of delay
         // For attempt 0: base = 500ms, max jitter = 125ms, so max delay = 625ms

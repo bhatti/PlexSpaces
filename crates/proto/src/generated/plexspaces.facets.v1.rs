@@ -105,63 +105,79 @@ pub struct FacetRegistryEntry {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterFacetRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub definition: ::core::option::Option<FacetDefinition>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterFacetResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub error_message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnregisterFacetRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub facet_type: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AttachFacetRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub facet_type: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub priority: i32,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub config: ::core::option::Option<::prost_types::Struct>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AttachFacetResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(string, tag="2")]
-    pub attachment_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub attachment_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub error_message: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DetachFacetRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub facet_type: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListActorFacetsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListActorFacetsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub facets: ::prost::alloc::vec::Vec<FacetAttachment>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -169,54 +185,68 @@ pub struct ListActorFacetsResponse {
 pub struct ListAvailableFacetsRequest {
     /// Optional filter
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub filter: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAvailableFacetsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub facets: ::prost::alloc::vec::Vec<FacetRegistryEntry>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetFacetDefinitionRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub facet_type: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetFacetDefinitionResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub definition: ::core::option::Option<FacetDefinition>,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub found: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateFacetConfigRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub attachment_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub config: ::core::option::Option<::prost_types::Struct>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EnsureFacetRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub facet_type: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub config: ::core::option::Option<::prost_types::Struct>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EnsureFacetResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub was_attached: bool,
-    #[prost(string, tag="2")]
-    pub attachment_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub attachment_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub error_message: ::prost::alloc::string::String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

@@ -104,40 +104,44 @@ pub struct BlobConfig {
 pub struct UploadBlobRequest {
     /// Tenant ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// Blob name
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub name: ::prost::alloc::string::String,
     /// Content type (optional, will be detected if not provided)
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub content_type: ::prost::alloc::string::String,
     /// Blob group (optional)
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub blob_group: ::prost::alloc::string::String,
     /// Blob kind (optional)
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub kind: ::prost::alloc::string::String,
     /// Custom metadata
-    #[prost(map="string, string", tag="7")]
+    #[prost(map="string, string", tag="8")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Custom tags
-    #[prost(map="string, string", tag="8")]
+    #[prost(map="string, string", tag="9")]
     pub tags: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Expiration duration (optional)
-    #[prost(message, optional, tag="9")]
+    #[prost(message, optional, tag="10")]
     pub expires_after: ::core::option::Option<::prost_types::Duration>,
     /// Blob data (for gRPC streaming or HTTP body)
-    #[prost(bytes="vec", tag="10")]
+    #[prost(bytes="vec", tag="11")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
 /// Upload blob response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UploadBlobResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub metadata: ::core::option::Option<BlobMetadata>,
 }
 /// Download blob request
@@ -146,12 +150,14 @@ pub struct UploadBlobResponse {
 pub struct DownloadBlobRequest {
     /// Blob ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub blob_id: ::prost::alloc::string::String,
     /// Tenant ID (for authorization)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace (for authorization)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Download blob response (streaming)
@@ -159,10 +165,12 @@ pub struct DownloadBlobRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DownloadBlobResponse {
     /// Blob metadata (sent first)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub metadata: ::core::option::Option<BlobMetadata>,
     /// Blob data chunks (streamed)
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
 /// Get blob metadata request
@@ -170,17 +178,21 @@ pub struct DownloadBlobResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetBlobMetadataRequest {
     #[prost(string, tag="1")]
-    pub blob_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
+    pub blob_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Get blob metadata response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetBlobMetadataResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub metadata: ::core::option::Option<BlobMetadata>,
 }
 /// List blobs request
@@ -188,32 +200,36 @@ pub struct GetBlobMetadataResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListBlobsRequest {
     #[prost(string, tag="1")]
-    pub tenant_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// Filter by name (prefix match)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub name_prefix: ::prost::alloc::string::String,
     /// Filter by blob_group
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub blob_group: ::prost::alloc::string::String,
     /// Filter by kind
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub kind: ::prost::alloc::string::String,
     /// Filter by SHA256
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub sha256: ::prost::alloc::string::String,
     /// Pagination
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="8")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 /// List blobs response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListBlobsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub blobs: ::prost::alloc::vec::Vec<BlobMetadata>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// Delete blob request
@@ -221,32 +237,38 @@ pub struct ListBlobsResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteBlobRequest {
     #[prost(string, tag="1")]
-    pub blob_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub tenant_id: ::prost::alloc::string::String,
+    pub blob_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Delete blob response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteBlobResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
 }
 /// Generate presigned URL request
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GeneratePresignedUrlRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub blob_id: ::prost::alloc::string::String,
     /// Operation: "GET" or "PUT"
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub operation: ::prost::alloc::string::String,
     /// Expiration duration (default: 1 hour)
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub expires_after: ::core::option::Option<::prost_types::Duration>,
-    #[prost(string, tag="4")]
-    pub tenant_id: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Generate presigned URL response
@@ -254,8 +276,10 @@ pub struct GeneratePresignedUrlRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GeneratePresignedUrlResponse {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub url: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Shared database configuration
@@ -499,6 +523,189 @@ impl StorageProvider {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

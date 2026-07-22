@@ -121,7 +121,7 @@ func (ag *ApprovalGateActor) requestApproval(p map[string]any) string {
 		"requested_at_ms": host.NowMs(),
 		"agent_id":        agentID,
 	})
-	host.KVPut("approval_request:"+ag.ActorID, string(reqJSON))
+	host.KV().Put("approval_request:"+ag.ActorID, string(reqJSON))
 
 	return marshal(map[string]any{
 		"status":  "pending",

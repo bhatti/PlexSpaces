@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! NodeRegistry - Robust Node Discovery with SWIM Protocol
@@ -56,6 +56,14 @@ use crate::node_address::canonical_node_address_key;
 
 /// Default cache TTL in seconds
 const DEFAULT_CACHE_TTL_SECONDS: u64 = 60;
+
+/// Metadata key written into `SwimMember.metadata` to mark a thin (WS-only) node.
+/// Thin nodes have no inbound gRPC so they must be excluded from SWIM indirect ping
+/// intermediary selection. The value is compared against `SWIM_NODE_TYPE_THIN`.
+pub(crate) const SWIM_NODE_TYPE_KEY: &str = "node_type";
+
+/// Value that identifies a thin (WS-only) node in `SwimMember.metadata`.
+pub(crate) const SWIM_NODE_TYPE_THIN: &str = "thin";
 
 /// Default gossip interval in milliseconds
 const DEFAULT_GOSSIP_INTERVAL_MS: u64 = 1000;
@@ -356,6 +364,7 @@ impl NodeRegistry {
         }
 
         NodeRegistration {
+            node_role: 0,
             node_id: obj_reg.object_id.clone(),
             node_address: obj_reg.grpc_address.clone(),
             capabilities,
@@ -365,6 +374,7 @@ impl NodeRegistry {
             message_count: 0,
             error_count: 0,
             registered_at: obj_reg.created_at,
+            resource_hints: None,
         }
     }
 
@@ -422,6 +432,7 @@ impl NodeRegistry {
         };
 
         NodeRegistration {
+            node_role: 0,
             node_id: member.node_id.clone(),
             node_address: member.address.clone(),
             capabilities: member.metadata.clone(),
@@ -441,6 +452,7 @@ impl NodeRegistry {
             message_count: 0,
             error_count: member.failed_probes as u64,
             registered_at: None,
+            resource_hints: None,
         }
     }
 
@@ -915,6 +927,7 @@ impl NodeRegistry {
             .unwrap_or_else(Self::now_timestamp);
 
         let registration = NodeRegistration {
+            node_role: 0,
             node_id: resolved_node_id.clone(),
             node_address: resolved_address.clone(),
             capabilities: capabilities.clone(),
@@ -924,6 +937,7 @@ impl NodeRegistry {
             message_count: 0,
             error_count: 0,
             registered_at: Some(heartbeat),
+            resource_hints: None,
         };
 
         let mut member = SwimMember::new(resolved_node_id.clone(), resolved_address);
@@ -1201,6 +1215,11 @@ impl NodeRegistry {
             let mut member =
                 SwimMember::new(obj_reg.object_id.clone(), obj_reg.grpc_address.clone());
             member.metadata = node_reg.capabilities.clone();
+            // Re-apply the thin-node marker so the SWIM intermediary filter survives
+            // a reap + re-sync cycle (the marker is not persisted in capabilities).
+            if node_reg.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32 {
+                member.metadata.insert(SWIM_NODE_TYPE_KEY.to_string(), SWIM_NODE_TYPE_THIN.to_string());
+            }
             self.swim.upsert_member(member).await;
         }
 
@@ -1370,8 +1389,6 @@ impl NodeRegistry {
         service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
         timeout: Duration,
     ) -> Result<PingResponse, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_actor::grpc_connection_manager::ServiceType;
-        use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
         use plexspaces_proto::node::v1::PingRequest;
 
         let sl_guard = service_locator.read().await;
@@ -1379,10 +1396,10 @@ impl NodeRegistry {
             .as_ref()
             .ok_or_else(|| "ServiceLocator not available".to_string())?;
 
-        let conn_manager = sl
-            .get_grpc_connection_manager()
+        let transport = sl
+            .get_node_transport_client()
             .await
-            .ok_or_else(|| "GrpcConnectionManager not available".to_string())?;
+            .ok_or_else(|| "NodeTransportClient not available".to_string())?;
 
         let source_node_id = sl
             .get_node_config()
@@ -1390,29 +1407,16 @@ impl NodeRegistry {
             .map(|cfg| cfg.id)
             .unwrap_or_default();
 
-        let channel = conn_manager
-            .get_connection(
-                ServiceType::ServiceNameNodeService,
-                &target.node_id,
-                &target.address,
-            )
-            .await
-            .map_err(|e| format!("Failed to get channel: {}", e))?;
-
-        let mut client = NodeServiceClient::new(channel);
-
-        let request = tonic::Request::new(PingRequest {
+        let request = PingRequest {
+            request_id: ulid::Ulid::new().to_string(),
             source_node_id,
             sequence_number: 0,
             updates: Vec::new(),
-        });
+        };
 
-        let response = tokio::time::timeout(timeout, client.ping(request))
+        transport
+            .ping(&target.node_id, &target.address, request, timeout)
             .await
-            .map_err(|_| "Ping timeout")?
-            .map_err(|e| format!("Ping failed: {}", e))?;
-
-        Ok(response.into_inner())
     }
 
     /// Indirect ping (ask intermediary to ping target)
@@ -1422,8 +1426,6 @@ impl NodeRegistry {
         service_locator: &Arc<RwLock<Option<Arc<dyn ServiceLocator>>>>,
         timeout: Duration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_actor::grpc_connection_manager::ServiceType;
-        use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
         use plexspaces_proto::node::v1::PingReqRequest;
 
         let sl_guard = service_locator.read().await;
@@ -1431,33 +1433,28 @@ impl NodeRegistry {
             .as_ref()
             .ok_or_else(|| "ServiceLocator not available".to_string())?;
 
-        let conn_manager = sl
-            .get_grpc_connection_manager()
+        let transport = sl
+            .get_node_transport_client()
             .await
-            .ok_or_else(|| "GrpcConnectionManager not available".to_string())?;
+            .ok_or_else(|| "NodeTransportClient not available".to_string())?;
 
-        let channel = conn_manager
-            .get_connection(
-                ServiceType::ServiceNameNodeService,
-                &intermediary.node_id,
-                &intermediary.address,
-            )
+        let source_node_id = sl
+            .get_node_config()
             .await
-            .map_err(|e| format!("Failed to get channel to intermediary: {}", e))?;
+            .map(|cfg| cfg.id)
+            .unwrap_or_default();
 
-        let mut client = NodeServiceClient::new(channel);
-
-        let request = tonic::Request::new(PingReqRequest {
-            source_node_id: String::new(),
+        let request = PingReqRequest {
+            request_id: ulid::Ulid::new().to_string(),
+            source_node_id,
             target_node_id: target.node_id.clone(),
             target_address: target.address.clone(),
             sequence_number: 0,
-        });
+        };
 
-        tokio::time::timeout(timeout * 2, client.ping_req(request)) // Double timeout for indirect
-            .await
-            .map_err(|_| "Indirect ping timeout")?
-            .map_err(|e| format!("Indirect ping failed: {}", e))?;
+        transport
+            .ping_req(&intermediary.node_id, &intermediary.address, request, timeout)
+            .await?;
 
         Ok(())
     }
@@ -1614,7 +1611,10 @@ impl NodeRegistryTrait for NodeRegistry {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let node_id = registration.node_id.clone();
 
-        if !self
+        // Thin nodes (WS-only) have no gRPC address; skip address-based deduplication
+        // since `canonical_node_address_key("")` would collide all addressless thin nodes.
+        let is_thin = registration.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32;
+        if !is_thin && !self
             .reconcile_local_registration_aliases(&registration)
             .await?
         {
@@ -1629,6 +1629,11 @@ impl NodeRegistryTrait for NodeRegistry {
         for (k, v) in &registration.capabilities {
             member.metadata.insert(k.clone(), v.clone());
         }
+        // Mirror node_role into metadata so SWIM intermediary selection can exclude thin nodes.
+        // Thin nodes have no inbound gRPC so they cannot relay indirect pings.
+        if registration.node_role == plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32 {
+            member.metadata.insert(SWIM_NODE_TYPE_KEY.to_string(), SWIM_NODE_TYPE_THIN.to_string());
+        }
         self.swim.upsert_member(member).await;
 
         // Update cache
@@ -1642,10 +1647,19 @@ impl NodeRegistryTrait for NodeRegistry {
                     .map(|value| value.as_str()),
             )
             .await;
+        // Thin nodes have no real gRPC address; synthesise one so ObjectRegistry's
+        // non-empty grpc_address requirement is satisfied.  The address is never dialed.
+        let reg_for_persist = if is_thin && registration.node_address.is_empty() {
+            let mut r = registration.clone();
+            r.node_address = format!("ws://{}", node_id);
+            r
+        } else {
+            registration.clone()
+        };
         if let Err(e) = Self::persist_node_registration_with_registry(
             &self.object_registry,
             &registry_ctx,
-            &registration,
+            &reg_for_persist,
         )
         .await
         {
@@ -1674,9 +1688,34 @@ impl NodeRegistryTrait for NodeRegistry {
         // Remove from cache
         self.remove_from_cache(node_id).await;
 
-        // Admin context: empty tenant_id so the cascade reaches objects across all tenants
-        // (nodes host objects belonging to many tenants).
-        let registry_ctx = self.system_registry_context(None).await;
+        // Resolve the namespace under which this node is stored in ObjectRegistry.
+        // register_node writes nodes via system_registry_context(cluster), so a clustered node
+        // is stored under namespace=<cluster_name> while unclustered/thin nodes use namespace="".
+        // The admin scan (empty tenant = cross-tenant) finds the stored namespace without knowing
+        // the cluster name at call time. This mirrors the logic in unregister_discovered_node.
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+        let stored_namespace = match self
+            .object_registry
+            .discover(
+                &admin_ctx,
+                DiscoverOptions {
+                    object_type: Some(ObjectType::ObjectTypeNode),
+                    limit: 1000,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(registrations) => registrations
+                .into_iter()
+                .find(|r| r.object_id == node_id)
+                .map(|r| r.namespace)
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        let registry_ctx =
+            RequestContext::new_without_auth(String::new(), stored_namespace).with_admin(true);
 
         // Cascade: mark all objects on the dead node as DEAD before removing the node itself.
         match self
@@ -1706,10 +1745,13 @@ impl NodeRegistryTrait for NodeRegistry {
             .unregister(&registry_ctx, ObjectType::ObjectTypeNode, node_id)
             .await
         {
-            warn!(
-                "Failed to unregister node {} from ObjectRegistry: {}",
-                node_id, e
-            );
+            let msg = e.to_string();
+            if !msg.contains("not found") && !msg.contains("NotFound") {
+                warn!(
+                    "Failed to unregister node {} from ObjectRegistry: {}",
+                    node_id, e
+                );
+            }
         }
 
         info!("Unregistered node: {}", node_id);
@@ -2450,6 +2492,8 @@ mod tests {
                 cluster_name: "cluster-a".to_string(),
                 node_address: "http://localhost:8122".to_string(),
                 last_heartbeat: None,
+                request_id: ulid::Ulid::new().to_string(),
+                resources: None,
             },
             "cluster-a",
         )
@@ -2507,6 +2551,8 @@ mod tests {
                 cluster_name: "cluster-a".to_string(),
                 node_address: "http://localhost:8124".to_string(),
                 last_heartbeat: Some(heartbeat.clone()),
+                request_id: ulid::Ulid::new().to_string(),
+                resources: None,
             },
             "cluster-a",
         )
@@ -2566,6 +2612,8 @@ mod tests {
                 cluster_name: "cluster-b".to_string(),
                 node_address: "http://localhost:8123".to_string(),
                 last_heartbeat: None,
+                request_id: ulid::Ulid::new().to_string(),
+                resources: None,
             },
             "cluster-a",
         )
@@ -2618,6 +2666,8 @@ mod tests {
                 cluster_name: String::new(),
                 node_address: "http://localhost:8125".to_string(),
                 last_heartbeat: None,
+                request_id: ulid::Ulid::new().to_string(),
+                resources: None,
             },
             "heat",
         )
@@ -3219,5 +3269,64 @@ mod tests {
         let reg = result.unwrap();
         assert_eq!(reg.node_id, "remote-node");
         assert_eq!(reg.node_address, "http://localhost:8001");
+    }
+
+    #[tokio::test]
+    async fn thin_node_registration_sets_swim_metadata() {
+        let registry = create_test_node_registry().await;
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "default".to_string());
+
+        let thin_reg = NodeRegistration {
+            node_id: "thin-node-1".to_string(),
+            node_address: "localhost:9001".to_string(),
+            node_role: plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32,
+            ..Default::default()
+        };
+
+        registry.register_node(&ctx, thin_reg).await.unwrap();
+
+        // SWIM member for the thin node must have node_type=thin in metadata
+        let member = registry.swim().get_member("thin-node-1").await;
+        assert!(member.is_some(), "thin node must be in SWIM after register_node");
+        let m = member.unwrap();
+        assert_eq!(
+            m.metadata.get(SWIM_NODE_TYPE_KEY).map(|s| s.as_str()),
+            Some(SWIM_NODE_TYPE_THIN),
+            "SWIM metadata must carry node_type=thin so intermediary selection can filter it"
+        );
+    }
+
+    #[tokio::test]
+    async fn thin_node_excluded_from_swim_indirect_targets() {
+        let registry = create_test_node_registry().await;
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "default".to_string());
+
+        // Register a full node and a thin node
+        let full_reg = NodeRegistration {
+            node_id: "full-node-1".to_string(),
+            node_address: "localhost:9002".to_string(),
+            node_role: plexspaces_proto::node::v1::NodeRole::NodeRoleFull as i32,
+            ..Default::default()
+        };
+        let thin_reg = NodeRegistration {
+            node_id: "thin-node-2".to_string(),
+            node_address: "localhost:9003".to_string(),
+            node_role: plexspaces_proto::node::v1::NodeRole::NodeRoleThin as i32,
+            ..Default::default()
+        };
+
+        registry.register_node(&ctx, full_reg).await.unwrap();
+        registry.register_node(&ctx, thin_reg).await.unwrap();
+
+        let targets = registry.swim().select_indirect_targets("some-other-node").await;
+
+        assert!(
+            !targets.iter().any(|m| m.node_id == "thin-node-2"),
+            "thin node must be excluded from SWIM indirect ping intermediaries"
+        );
+        assert!(
+            targets.iter().any(|m| m.node_id == "full-node-1"),
+            "full node must remain a SWIM indirect ping candidate"
+        );
     }
 }

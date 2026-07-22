@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! ActorRef - Type-safe reference to an actor for message passing
@@ -86,49 +86,22 @@
 //! - **Supervision**: Supervisors hold ActorRefs to children
 //! - **Mobility**: ActorRef updates when actor migrates
 //!
-//! ### Dependency Relationship: ActorRef vs ActorService
+//! ### Routing Architecture
 //!
-//! **Key Design Principle**: ActorRef does NOT call ActorService for remote messaging.
-//! ActorRef directly uses gRPC clients via ServiceLocator for remote tell() and ask() operations.
+//! ActorRef uses a single unified routing path for all message delivery:
 //!
-//! **Why This Design?**
-//! - **ActorRef is lightweight**: It's a handle to an actor, not a service gateway
-//! - **ActorService is the gRPC gateway**: It receives external gRPC requests and routes them
-//! - **Separation of concerns**: ActorRef handles internal messaging, ActorService handles external gateway
+//! - **Local tell()**: Direct mailbox delivery
+//!   - `ActorRefInner::Local` → `mailbox.send(message)`
 //!
-//! **When ActorRef Uses What:**
+//! - **Remote tell()**: Delegates to `ActorRegistry::tell()` (handles local/remote routing)
 //!
-//! 1. **Local tell()**: Direct mailbox delivery (no ActorService, no gRPC)
-//!    - `ActorRefInner::Local` → `mailbox.send(message)`
-//!
-//! 2. **Remote tell()**: Direct gRPC client call (no ActorService)
-//!    - `ActorRefInner::Remote` → `ServiceLocator.get_node_client()` → `client.send_message()`
-//!    - **Why not ActorService?** ActorRef already knows it's remote (has node_id)
-//!    - **Why direct gRPC?** Avoids unnecessary indirection through ActorService
-//!
-//! 3. **Remote ask()**: Direct request-reply routing through the node client
-//!    - `ActorRefInner::Remote` → `ServiceLocator.get_node_client()` → ask-style delivery
-//!    - **Why not ActorService?** Same reason as tell() - ActorRef already knows it's remote
-//!
-//! 4. **send_reply() helper**: Delegates to ActorService::send_reply() (ONLY exception)
-//!    - `ActorRef::send_reply()` → `ActorService::send_reply()`
-//!    - **Why ActorService here?** ActorService contains unified reply routing logic that handles:
-//!      - Temporary sender lookup (from ActorRegistry)
-//!      - Local vs remote reply routing
-//!      - gRPC forwarding for remote replies
-//!    - **Note**: This is a convenience method. Actors can call `ActorService::send_reply()` directly.
+//! - **ask()**: Delegates to `ActorRegistry::ask()` (creates temp sender + ReplyWaiter)
+//!   - Local: direct mailbox dispatch
+//!   - Remote: via ActorService.send() + ReplyWaiter
 //!
 //! **ActorService's Role:**
-//! - **gRPC Gateway**: Receives external gRPC requests (from other nodes or external clients)
-//! - **Reply Routing**: Handles unified reply routing via `send_reply()` method
-//! - **Local Routing**: Routes local messages via ActorRegistry lookup → ActorRef.tell()
-//! - **Remote Routing**: Forwards remote messages via gRPC to target node's ActorService
-//!
-//! **Summary:**
-//! - **ActorRef → gRPC client** (for remote tell/ask - direct calls)
-//! - **ActorRef → ActorService** (only for send_reply helper - delegates to unified routing)
-//! - **ActorService → ActorRef** (for local routing - looks up ActorRef and calls tell())
-//! - **ActorService → gRPC client** (for remote routing - forwards to remote ActorService)
+//! - **gRPC Gateway**: Receives external gRPC requests and routes them into the local node
+//! - **All Routing**: Routes messages via `ActorRegistry::tell()`/`ask()`
 //!
 //! ## Examples
 //!
@@ -150,17 +123,6 @@
 //! // Returns after actor processes and responds
 //! ```
 //!
-//! ### Non-Blocking Try-Tell
-//! ```rust,ignore
-//! // Try to send without blocking (fails if mailbox full)
-//! let message = create_test_message(b"data".to_vec());
-//! match actor_ref.try_tell(message) {
-//!     Ok(()) => println!("Sent"),
-//!     Err(ActorRefError::MailboxFull) => println!("Mailbox full, try later"),
-//!     Err(ActorRefError::ActorTerminated) => println!("Actor no longer alive"),
-//!     Err(e) => println!("Error: {}", e),
-//! }
-//! ```
 //!
 //! ### Location Transparency
 //! ```rust,ignore
@@ -223,7 +185,6 @@
 //!
 //! - **Clone**: O(1) - Just clones an Arc internally
 //! - **tell()**: O(1) - Enqueue to channel (bounded SPSC queue)
-//! - **try_tell()**: O(1) - Non-blocking enqueue attempt
 //! - **Memory**: ~48 bytes (ActorId + Sender + Location)
 //!
 //! ## Design Decisions
@@ -275,12 +236,8 @@ use tokio::sync::RwLock;
 
 use crate::core::ServiceLocator as ServiceLocatorTrait;
 
-// Import proto types for gRPC communication
-use plexspaces_proto::actor::v1::{
-    actor_service_client::ActorServiceClient, ActorVisibility, SendMessageRequest,
-};
+use plexspaces_proto::actor::v1::ActorVisibility;
 use prost_types;
-// Message alias removed - using Message directly
 
 /// Error types for ActorRef operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -983,57 +940,16 @@ impl ActorRef {
                     return Err(ActorRefError::VisibilityDenied(msg));
                 }
 
-                // REMOTE PATH: Use gRPC client directly (not ActorService)
-                // ActorRef uses gRPC directly because it already knows it's remote.
-                // ActorService is the gRPC gateway for external clients.
-                let result = async {
-                    // Get ActorServiceClient using ServiceLocator helper (handles ObjectRegistry lookup and connection pooling)
-                    let channel = service_locator
-                        .get_actor_service_client(node_id)
-                        .await
-                        .map_err(|e| {
-                            ActorRefError::SendFailed(format!(
-                                "Failed to get ActorServiceClient: {}",
-                                e
-                            ))
-                        })?;
-
-                    let mut client_ref = ActorServiceClient::new(channel);
-
-                    // Convert message to proto
-                    let proto_message = Self::to_proto_message(&message, &self.id)?;
-
-                    // Create request and attach caller identity for remote ActorService (JWT / tenant)
-                    let mut request = tonic::Request::new(SendMessageRequest {
-                        namespace: self.namespace().to_string(),
-                        actor_type: self.id.actor_type().to_string(),
-                        actor_name: self.id.name().to_string(),
-                        http_method: "POST".to_string(),
-                        payload: proto_message.payload,
-                        headers: proto_message.headers,
-                        query_params: Default::default(),
-                        path: proto_message.uri_path,
-                        subpath: String::new(),
-                        sender_id: proto_message.sender_id,
-                        message_type: proto_message.message_type,
-                        correlation_id: proto_message.correlation_id,
-                        reply_to: proto_message.reply_to,
-                        message_id: proto_message.id,
-                    });
-                    crate::core::apply_request_context_to_grpc_metadata(
-                        ctx,
-                        request.metadata_mut(),
-                    );
-
-                    // Send via gRPC
-                    client_ref.send_message(request).await.map_err(|e| {
-                        ActorRefError::SendFailed(format!("gRPC send failed: {}", e))
-                    })?;
-
-                    Ok::<(), ActorRefError>(())
-                }
-                .await;
-                result
+                let registry = service_locator
+                    .actor_registry()
+                    .await
+                    .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry unavailable".to_string()))?;
+                let target_id = crate::core::ActorId::from_canonical(&self.id.to_string())
+                    .map_err(|e| ActorRefError::InvalidActorId(format!("Invalid actor ID '{}': {}", self.id, e)))?;
+                registry
+                    .tell(ctx, &target_id, message)
+                    .await
+                    .map_err(|e| ActorRefError::SendFailed(e.to_string()))
             }
         };
 
@@ -1070,36 +986,6 @@ impl ActorRef {
         }
     }
 
-    /// Prepare message for sending by setting the receiver_id
-    fn to_proto_message(
-        message: &Message,
-        receiver_id: &ActorId,
-    ) -> Result<Message, ActorRefError> {
-        let mut msg = message.clone();
-        msg.receiver_id = receiver_id.to_string();
-        Ok(msg)
-    }
-
-    /// Try to send a message without blocking
-    ///
-    /// ## Note
-    /// Currently only supports local actors. Remote actors will return error.
-    /// Note: Mailbox doesn't have a non-blocking send, so this will always return an error
-    /// for now. Consider using `tell()` with ActorContext instead.
-    pub fn try_tell(&self, _message: Message) -> Result<(), ActorRefError> {
-        match &self.inner {
-            ActorRefInner::Local { mailbox: _, .. } => {
-                // Mailbox doesn't have try_send - would need to be added to Mailbox API
-                // For now, return error indicating async send should be used
-                Err(ActorRefError::SendFailed(
-                    "try_tell not supported with Mailbox abstraction - use tell() with ActorContext instead".to_string(),
-                ))
-            }
-            ActorRefInner::Remote { node_id, .. } => Err(ActorRefError::RemoteNotImplemented(
-                format!("try_tell for remote actor {} not yet implemented", node_id),
-            )),
-        }
-    }
 
     /// Send a message and wait for a reply (request-reply pattern)
     ///
@@ -1218,23 +1104,24 @@ impl ActorRef {
             )));
         }
 
-        // Use unified routing (returns Future for parallel operations)
-        let routing_result = crate::routing::route_message(
-            ctx.clone(),
-            self.service_locator().clone(),
-            target_actor_id.to_string(),
-            message,
-            true, // wait_for_response = true for ask()
-            Some(timeout),
-        )
-        .await;
-
-        // Extract message from routing result
-        let result = routing_result
-            .map(|(_message_id, reply_opt)| {
-                reply_opt.ok_or_else(|| ActorRefError::SendFailed("No reply received".to_string()))
-            })
-            .and_then(|r| r);
+        let registry = self
+            .service_locator()
+            .actor_registry()
+            .await
+            .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry unavailable".to_string()))?;
+        let result = registry
+            .ask(ctx, &target_actor_id, message, timeout)
+            .await
+            .map_err(|e| match e {
+                crate::actor_registry::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                crate::actor_registry::ActorRegistryError::ActorNotFound(id) => {
+                    ActorRefError::ActorNotFound(
+                        crate::core::ActorId::from_canonical(&id)
+                            .unwrap_or_else(|_| crate::core::ActorId::new(&id, "unknown", "default", "unknown").unwrap_or_else(|_| target_actor_id.clone()))
+                    )
+                }
+                other => ActorRefError::SendFailed(other.to_string()),
+            });
 
         // OBSERVABILITY: Track ask result and latency
         let duration = start.elapsed();
@@ -1278,66 +1165,6 @@ impl ActorRef {
         result
     }
 
-    /// Send a reply message to the sender of the original message
-    ///
-    /// ## Purpose
-    /// Provides a unified interface for sending replies, handling both local and remote cases transparently.
-    /// Supports both regular actor IDs and temporary sender IDs (from ask() called outside actor context).
-    ///
-    /// ## Arguments
-    /// * `correlation_id` - Correlation ID from the original message (optional)
-    /// * `sender_id` - ID of the actor that sent the original message (or temporary sender ID)
-    /// * `target_actor_id` - ID of the actor sending the reply (usually `msg.receiver_id`)
-    /// * `reply_message` - The reply message to send
-    /// * `service_locator` - ServiceLocator for accessing ActorService
-    ///
-    /// ## Returns
-    /// Ok(()) if reply was sent successfully
-    ///
-    /// ## Design: ActorRef → ActorService (ONLY exception)
-    ///
-    /// Send a reply message (helper method)
-    ///
-    /// ## Purpose
-    /// Convenience method for sending replies. Uses `ActorService::send()` method.
-    /// Temporary senders behave like normal actors, so no special method needed.
-    ///
-    /// ## Arguments
-    /// * `correlation_id` - Correlation ID from the original message
-    /// * `sender_id` - ID of the actor sending the reply (current actor)
-    /// * `target_actor_id` - ID of the actor receiving the reply (ask caller/temporary sender)
-    /// * `reply_message` - The reply message to send
-    /// * `service_locator` - ServiceLocator for accessing ActorService
-    pub async fn send_reply(
-        correlation_id: Option<&str>,
-        sender_id: &ActorId,
-        target_actor_id: ActorId,
-        reply_message: Message,
-        service_locator: Arc<dyn ServiceLocatorTrait>,
-    ) -> Result<(), ActorRefError> {
-        // Use send() method - temporary sender behaves like normal actor
-        // Set message fields: receiver=target_actor_id, sender=current_actor, correlation_id
-        let actor_service = service_locator.get_actor_service().await.ok_or_else(|| {
-            ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string())
-        })?;
-
-        let mut reply_msg = reply_message;
-        reply_msg.receiver_id = target_actor_id.to_string();
-        reply_msg.sender_id = sender_id.to_string();
-        if let Some(corr_id) = correlation_id {
-            reply_msg.correlation_id = corr_id.to_string();
-        }
-        // Build context from sender's canonical actor ID (namespace-aware)
-        use crate::core::RequestContext;
-        let ctx = crate::core::ActorId::from_canonical(sender_id)
-            .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
-            .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
-        actor_service
-            .send(&ctx, &target_actor_id, reply_msg)
-            .await
-            .map(|_| ()) // Ignore message_id return value
-            .map_err(|e| ActorRefError::SendFailed(format!("ActorService::send() failed: {}", e)))
-    }
 }
 
 impl std::fmt::Debug for ActorRef {
@@ -1756,50 +1583,7 @@ mod tests {
         )
     }
 
-    /// TEST 4: try_tell() - Note: Mailbox doesn't support try_send, so this test is skipped
-    /// The try_tell() method now returns an error indicating async send should be used
-    #[tokio::test]
-    async fn test_try_tell_not_supported() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "test-node"),
-            "",
-            "test",
-            mailbox,
-            service_locator,
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        let msg = create_test_message(b"data".to_vec());
-        let result = actor_ref.try_tell(msg);
-
-        // Should return error indicating try_tell is not supported with Mailbox
-        assert!(result.is_err());
-    }
-
-    /// TEST 5: try_tell() - Note: Mailbox doesn't support try_send, so this test is skipped
-    #[tokio::test]
-    async fn test_try_tell_not_supported_terminated() {
-        let mailbox = create_test_mailbox().await;
-        let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local(
-            test_actor_id("test-actor", "test-node"),
-            "",
-            "test",
-            mailbox,
-            service_locator,
-            ActorVisibility::ActorVisibilityPublic,
-        );
-
-        let message = create_test_message(b"hello".to_vec());
-        let result = actor_ref.try_tell(message);
-
-        // Should return error indicating try_tell is not supported with Mailbox
-        assert!(result.is_err());
-    }
-
-    /// TEST 6: ActorRef is cloneable
+    /// TEST 4: ActorRef is cloneable
     #[tokio::test]
     async fn test_actor_ref_is_cloneable() {
         let mailbox = create_test_mailbox().await;
@@ -1914,56 +1698,6 @@ mod tests {
         assert!(debug_str.contains("Local"));
     }
 
-    /// TEST 9: Proto message conversion
-    #[test]
-    fn test_to_proto_message() {
-        use plexspaces_mailbox::MessagePriority;
-
-        let mut message = create_test_message(b"test payload".to_vec());
-        message.sender_id = "sender-actor".to_string();
-        message.message_type = "call".to_string();
-        message.priority = MessagePriority::High.into();
-        message
-            .headers
-            .insert("key1".to_string(), "value1".to_string());
-        message
-            .headers
-            .insert("key2".to_string(), "value2".to_string());
-
-        let receiver_id = test_actor_id("receiver-actor", "node1");
-
-        let proto_msg = ActorRef::to_proto_message(&message, &receiver_id).unwrap();
-
-        // Verify all fields are correctly converted
-        assert_eq!(proto_msg.id, message.id);
-        assert_eq!(proto_msg.sender_id, "sender-actor");
-        assert_eq!(proto_msg.receiver_id, receiver_id.to_string());
-        assert_eq!(proto_msg.message_type, "call");
-        assert_eq!(proto_msg.payload, b"test payload");
-        // Priority is the proto enum value (High = 4)
-        assert_eq!(proto_msg.priority, MessagePriority::High as i32);
-        // Timestamp is preserved as-is (None if not set in source message)
-        assert_eq!(proto_msg.timestamp, message.timestamp);
-        assert_eq!(proto_msg.headers.get("key1").unwrap(), "value1");
-        assert_eq!(proto_msg.headers.get("key2").unwrap(), "value2");
-    }
-
-    /// TEST 10: Proto message conversion with minimal message
-    #[test]
-    fn test_to_proto_message_minimal() {
-        let message = create_test_message(b"minimal".to_vec());
-        let receiver_id = test_actor_id("receiver", "node1");
-
-        let proto_msg = ActorRef::to_proto_message(&message, &receiver_id).unwrap();
-
-        assert_eq!(proto_msg.id, message.id);
-        assert_eq!(proto_msg.sender_id, ""); // Empty by default
-        assert_eq!(proto_msg.receiver_id, receiver_id.to_string());
-        assert_eq!(proto_msg.payload, b"minimal");
-        // Timestamp and TTL are preserved as-is (None if not set)
-        assert_eq!(proto_msg.timestamp, message.timestamp);
-        assert_eq!(proto_msg.ttl, message.ttl);
-    }
 
     // ============================================================================
     // TESTS FOR NEW tell() AND ask() WITH ActorContext
@@ -2565,13 +2299,8 @@ mod tests {
         assert_eq!(actor1.name(), actor2.name());
         assert_ne!(actor1.node_id(), actor2.node_id());
 
-        // Test is_actor_local logic
-        let service_locator = create_test_service_locator().await;
-        let is_local1 = crate::routing::is_actor_local(&actor1, &service_locator).await;
-        let is_local2 = crate::routing::is_actor_local(&actor2, &service_locator).await;
-        // Both should be false if node1/node2 don't match local_node_id, or true if they exist locally
-        // This test just verifies the function doesn't panic
-        let _ = (is_local1, is_local2);
+        // Verify node_id comparison logic via actor_id
+        assert_ne!(actor1.node_id(), actor2.node_id());
     }
 
     // ============================================================================

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Core actor implementation for PlexSpaces
@@ -71,7 +71,7 @@ pub mod service_wrappers;
 pub mod service_locator_trait;
 pub use service_locator_trait::{
     ApplicationManager, BlobServiceTrait, InitializableServiceLocator, NodeRegistryTrait,
-    ServiceLocator, WasmRuntimeTrait,
+    ServiceLocator, WasmRuntimeTrait, WsRegistryTrait,
 };
 
 pub mod outbound_http_client;
@@ -96,6 +96,9 @@ pub use application_node_trait::ApplicationNode;
 
 pub mod grpc_connection_manager;
 pub use grpc_connection_manager::{GrpcConnectionManager, ServiceType};
+
+pub mod grpc_transport_client;
+pub use grpc_transport_client::{GrpcActorTransportClient, GrpcNodeTransportClient};
 
 pub mod elastic_pool_service;
 pub use elastic_pool_service::{ElasticPoolService, PoolServiceError};
@@ -271,10 +274,6 @@ pub use child_spec::{ChildSpec, ProtoRestartPolicy, ShutdownSpec, StartFn, Start
 
 // Stateless helpers for parallel / collective shard-group operations
 pub mod parallel;
-
-// Unified routing module
-pub mod routing;
-pub use routing::{ask_helper, is_actor_local, route_local, route_message, route_remote};
 
 // Re-export SupervisorStats from proto (for public API)
 pub use plexspaces_proto::supervision::v1::SupervisorStats;

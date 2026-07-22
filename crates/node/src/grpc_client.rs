@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! gRPC client for remote actor communication
@@ -154,6 +154,7 @@ impl RemoteActorClient {
     /// - Network errors
     pub async fn send_message(&mut self, message: ProtoMessage) -> Result<String, String> {
         let request = tonic::Request::new(SendMessageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             namespace: String::new(),
             actor_type: message.receiver_id.clone(),
             actor_name: String::new(),
@@ -259,6 +260,7 @@ impl RemoteActorClient {
             ..Default::default()
         };
         let request = Request::new(SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
             spec: Some(spec),
             namespace: String::new(),
             instances_count: 1,
@@ -288,6 +290,7 @@ impl RemoteActorClient {
         supervisor_callback: &str,
     ) -> Result<String, String> {
         let mut req = Request::new(MonitorActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             supervisor_id: supervisor_id.to_string(),
             supervisor_callback: supervisor_callback.to_string(),
@@ -311,6 +314,7 @@ impl RemoteActorClient {
         monitor_ref: &str,
     ) -> Result<(), String> {
         let mut req = Request::new(DemonitorActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             supervisor_id: supervisor_id.to_string(),
             monitor_ref: monitor_ref.to_string(),
@@ -331,6 +335,7 @@ impl RemoteActorClient {
         linked_actor_id: &str,
     ) -> Result<(), String> {
         let mut req = Request::new(LinkActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });
@@ -351,6 +356,7 @@ impl RemoteActorClient {
         linked_actor_id: &str,
     ) -> Result<(), String> {
         let mut req = Request::new(UnlinkActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });

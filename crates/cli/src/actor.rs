@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Actor deployment and management commands
@@ -32,6 +32,7 @@ use plexspaces_proto::wasm::v1::{
 };
 use std::fs;
 use tonic::transport::Channel;
+use ulid::Ulid;
 
 /// Deploy an actor (like AWS Lambda deploy)
 ///
@@ -77,6 +78,7 @@ pub async fn deploy(
         };
 
         let request = DeployWasmModuleRequest {
+            request_id: Ulid::new().to_string(),
             module: Some(module),
             pre_warm: 0, // NONE
             target_node_tags: vec![],
@@ -107,6 +109,7 @@ pub async fn deploy(
         .unwrap_or_default();
 
     let request = InstantiateActorRequest {
+        request_id: Ulid::new().to_string(),
         module_ref: module_ref.clone(),
         actor_id: name.to_string(),
         initial_state: initial_state_bytes,

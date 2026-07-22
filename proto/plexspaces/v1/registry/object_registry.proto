@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Unified Object Registry API
@@ -479,37 +479,40 @@ service ObjectRegistry {
 // Register object request
 message RegisterRequest {
   // Object registration to create/update
-  ObjectRegistration registration = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ObjectRegistration registration = 2 [(google.api.field_behavior) = REQUIRED];
 
   // TTL for auto-expiry (optional, default: no expiry)
   // If specified, object auto-unregisters after TTL expires
-  google.protobuf.Duration ttl = 2;
+  google.protobuf.Duration ttl = 3;
 
   // If true, enforce unique alias placement.
   // Returns existing grpc_address in response if another active registration holds the same alias.
-  bool enforce_unique_alias = 3;
+  bool enforce_unique_alias = 4;
 }
 
 message RegisterResponse {
   // Registered object (with generated timestamps)
-  ObjectRegistration registration = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ObjectRegistration registration = 2;
 
   // Whether this was a new registration (true) or update (false)
-  bool created = 2;
+  bool created = 3;
 
   // If enforce_unique_alias was true and an active registration with the same alias exists,
   // this contains the existing registration's grpc_address for forwarding.
-  string existing_grpc_address = 3;
+  string existing_grpc_address = 4;
 
   // If enforce_unique_alias was true and an active registration with the same alias exists,
   // this contains the existing object_id for diagnostics.
-  string existing_object_id = 4;
+  string existing_object_id = 5;
 }
 
 // Unregister object request
 message UnregisterRequest {
   // Object ID to unregister
-  string object_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string object_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -518,45 +521,48 @@ message UnregisterRequest {
   ];
 
   // Object type (for key construction)
-  ObjectType object_type = 2;
+  ObjectType object_type = 3;
 
   // Tenant ID (for multi-tenancy)
-  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Namespace (for logical grouping)
-  string namespace = 4 [(buf.validate.field).string.max_len = 255];
+  string namespace = 5 [(buf.validate.field).string.max_len = 255];
 }
 
 message UnregisterResponse {
   // Whether object was found and unregistered
-  bool unregistered = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool unregistered = 2;
 }
 
 // Lookup single object request
 message LookupRequest {
   // Object ID to lookup (mutually exclusive with alias)
-  string object_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string object_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Object type (optional - if not specified, searches all types)
-  ObjectType object_type = 2;
+  ObjectType object_type = 3;
 
   // Tenant ID (for multi-tenancy)
-  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Namespace (for logical grouping)
-  string namespace = 4 [(buf.validate.field).string.max_len = 255];
+  string namespace = 5 [(buf.validate.field).string.max_len = 255];
 
   // Lookup by alias (mutually exclusive with object_id).
   // Format: "{actor_type}:{name}:{namespace}:{tenant_id}"
-  string alias = 5 [(buf.validate.field).string.max_len = 512];
+  string alias = 6 [(buf.validate.field).string.max_len = 512];
 }
 
 message LookupResponse {
   // Object registration (null if not found)
-  ObjectRegistration registration = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ObjectRegistration registration = 2;
 
   // Whether object was found
-  bool found = 2;
+  bool found = 3;
 }
 
 // Discover objects request (with extensive filtering)
@@ -564,81 +570,84 @@ message DiscoverRequest {
   // ==================== TYPE FILTERING ====================
 
   // Filter by object type (optional - if not specified, returns ALL types)
-  ObjectType object_type = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ObjectType object_type = 2;
 
   // Filter by object category (exact match)
   // Examples: "GenServer", "redis", "order-service"
-  string object_category = 2 [(buf.validate.field).string.max_len = 255];
+  string object_category = 3 [(buf.validate.field).string.max_len = 255];
 
   // ==================== LOCATION FILTERING ====================
 
   // Filter by node ID
-  string node_id = 3 [(buf.validate.field).string.max_len = 255];
+  string node_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID
-  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 5 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace
-  string namespace = 5 [(buf.validate.field).string.max_len = 255];
+  string namespace = 6 [(buf.validate.field).string.max_len = 255];
 
   // ==================== CAPABILITY FILTERING ====================
 
   // Filter by capabilities (ALL must be present)
   // Example: ["persistent", "distributed"] → only objects with BOTH capabilities
-  repeated string capabilities = 6 [(buf.validate.field).repeated.max_items = 100];
+  repeated string capabilities = 7 [(buf.validate.field).repeated.max_items = 100];
 
   // Filter by labels (ANY can match)
   // Example: ["prod", "us-west-2"] → objects with "prod" OR "us-west-2"
-  repeated string labels = 7 [(buf.validate.field).repeated.max_items = 100];
+  repeated string labels = 8 [(buf.validate.field).repeated.max_items = 100];
 
   // ==================== HEALTH FILTERING ====================
 
   // Filter by health status
-  HealthStatus health_status = 8;
+  HealthStatus health_status = 9;
 
   // Filter by minimum health age (exclude stale objects)
   // Example: last_heartbeat < (now - max_age) → excluded
-  google.protobuf.Duration max_heartbeat_age = 9 [(buf.validate.field).duration.lte.seconds = 604800]; // Max 7 days
+  google.protobuf.Duration max_heartbeat_age = 10 [(buf.validate.field).duration.lte.seconds = 604800]; // Max 7 days
 
   // ==================== PAGINATION ====================
 
   // Maximum results per page (default: 100, max: 1000)
-  int32 page_size = 10 [(buf.validate.field).int32 = {
+  int32 page_size = 11 [(buf.validate.field).int32 = {
     gte: 0
     lte: 1000
   }];
 
   // Pagination token from previous response (opaque)
-  string page_token = 11 [(buf.validate.field).string.max_len = 512];
+  string page_token = 12 [(buf.validate.field).string.max_len = 512];
 
   // ==================== SORTING ====================
 
   // Sort field (default: "created_at")
   // Options: "object_id", "created_at", "updated_at", "last_heartbeat"
-  string sort_by = 12 [(buf.validate.field).string.max_len = 50];
+  string sort_by = 13 [(buf.validate.field).string.max_len = 50];
 
   // Sort order (default: ascending)
-  bool descending = 13;
+  bool descending = 14;
 }
 
 message DiscoverResponse {
   // Matching objects (paginated)
-  repeated ObjectRegistration registrations = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ObjectRegistration registrations = 2;
 
   // Total count of matching objects (before pagination)
-  int64 total_count = 2;
+  int64 total_count = 3;
 
   // Next page token (empty if no more results)
-  string next_page_token = 3;
+  string next_page_token = 4;
 
   // Whether there are more results
-  bool has_more = 4;
+  bool has_more = 5;
 }
 
 // Heartbeat request
 message HeartbeatRequest {
   // Object ID sending heartbeat
-  string object_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string object_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -647,53 +656,57 @@ message HeartbeatRequest {
   ];
 
   // Object type
-  ObjectType object_type = 2;
+  ObjectType object_type = 3;
 
   // Tenant ID
-  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Namespace
-  string namespace = 4 [(buf.validate.field).string.max_len = 255];
+  string namespace = 5 [(buf.validate.field).string.max_len = 255];
 
   // Updated health status (optional)
-  HealthStatus health_status = 5;
+  HealthStatus health_status = 6;
 
   // Updated metrics (optional)
-  map<string, double> metrics = 6;
+  map<string, double> metrics = 7;
 }
 
 message HeartbeatResponse {
   // Whether heartbeat was accepted
-  bool accepted = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool accepted = 2;
 
   // Updated registration
-  ObjectRegistration registration = 2;
+  ObjectRegistration registration = 3;
 }
 
 // Batch heartbeat request
 message BatchHeartbeatRequest {
   // Multiple heartbeats
-  repeated HeartbeatRequest heartbeats = 1 [(buf.validate.field).repeated.max_items = 1000];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated HeartbeatRequest heartbeats = 2 [(buf.validate.field).repeated.max_items = 1000];
 }
 
 message BatchHeartbeatResponse {
   // Results for each heartbeat (same order as request)
-  repeated HeartbeatResponse results = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated HeartbeatResponse results = 2;
 
   // Number of successful heartbeats
-  int32 success_count = 2;
+  int32 success_count = 3;
 
   // Number of failed heartbeats
-  int32 failure_count = 3;
+  int32 failure_count = 4;
 }
 
 // List object types request
 message ListObjectTypesRequest {
   // Filter by tenant (optional)
-  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 2 [(buf.validate.field).string.max_len = 255];
+  string namespace = 3 [(buf.validate.field).string.max_len = 255];
 }
 
 // Object type summary
@@ -710,8 +723,9 @@ message ObjectTypeSummary {
 
 message ListObjectTypesResponse {
   // Summary for each object type
-  repeated ObjectTypeSummary summaries = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ObjectTypeSummary summaries = 2;
 
   // Total registered objects across all types
-  int64 total_count = 2;
+  int64 total_count = 3;
 }

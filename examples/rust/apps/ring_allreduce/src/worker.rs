@@ -1,5 +1,7 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -102,7 +104,7 @@ pub(super) fn handle_worker_ring_step(payload: &[u8]) -> Vec<u8> {
         None => return super::json_bytes(serde_json::json!({ "error": "worker not initialized" })),
     };
 
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let mut checksum = 0_u64;
     for value_index in 0..shard.values_per_shard {
         let mut value = ((request.round as u64 + 1)
@@ -118,7 +120,7 @@ pub(super) fn handle_worker_ring_step(payload: &[u8]) -> Vec<u8> {
             checksum = checksum.wrapping_add(value & 0xFFFF);
         }
     }
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
 
     let coordination_time_ms = ((request.phase as u64 + 1) * 3)
         + ((shard.shard_id as u64 % 3) + 1)
@@ -172,9 +174,9 @@ pub(super) fn handle_worker_ring_step(payload: &[u8]) -> Vec<u8> {
 
     super::json_bytes(serde_json::json!({
         "status": "ok",
-        "actor_id": host::self_id(),
+        "actor_id": self_id(),
         "role": "worker",
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "round": request.round,
         "phase": request.phase,
         "values_reduced": shard.values_per_shard,
@@ -212,9 +214,9 @@ pub(super) fn handle_worker_finalize_round(payload: &[u8]) -> Vec<u8> {
 
     super::json_bytes(serde_json::json!({
         "status": "ok",
-        "actor_id": host::self_id(),
+        "actor_id": self_id(),
         "role": "worker",
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "round": request.round,
         "reduced_checksum": round_checksum,
         "errors": 0,

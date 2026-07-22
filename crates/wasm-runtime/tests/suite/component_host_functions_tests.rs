@@ -39,7 +39,7 @@ mod tests {
     #[tokio::test]
     async fn test_logging_impl() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut logging = LoggingImpl {
             actor_id: actor_id.clone(),
         };
@@ -65,7 +65,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_tell() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
@@ -87,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_self_id() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions);
 
@@ -101,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_now() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -118,7 +118,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_sleep() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -135,7 +135,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_ask_without_sender() {
         // ARRANGE: Test ask without message sender configured
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -257,7 +257,7 @@ mod tests {
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
             Arc::new(mock_sender),
         ));
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test ask with mock sender
@@ -371,7 +371,7 @@ mod tests {
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
             Arc::new(TimeoutMessageSender),
         ));
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test ask with short timeout
@@ -391,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_impl_placeholders() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut tuplespace = TuplespaceImpl::new(None, actor_id);
 
         // ACT & ASSERT: Without a tuplespace provider, operations return errors
@@ -475,7 +475,7 @@ mod tests {
     async fn test_durability_impl_placeholders() {
         // ARRANGE
         let host_functions = Arc::new(HostFunctions::new());
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut durability = DurabilityImpl::new(actor_id, host_functions);
 
         // ACT & ASSERT: Without journal storage, persist returns error
@@ -506,7 +506,7 @@ mod tests {
     #[tokio::test]
     async fn test_error_handling() {
         // ARRANGE
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -525,7 +525,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_spawn_without_sender() {
         // ARRANGE: Test spawn without message sender configured
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -638,7 +638,7 @@ mod tests {
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
             Arc::new(MockSpawnSender),
         ));
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test spawn with mock sender
@@ -672,7 +672,7 @@ mod tests {
     #[tokio::test]
     async fn test_messaging_impl_stop_without_sender() {
         // ARRANGE: Test stop without message sender configured
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = create_test_host_functions();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
@@ -775,7 +775,7 @@ mod tests {
         let host_functions = Arc::new(plexspaces_wasm_runtime::HostFunctions::with_message_sender(
             Arc::new(MockStopSender),
         ));
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test stop with mock sender

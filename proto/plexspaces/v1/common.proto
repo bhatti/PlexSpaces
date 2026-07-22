@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Common Types API
@@ -372,16 +372,17 @@ message PageRequest {
   };
 
   // Offset for pagination (0-based, default: 0)
-  int32 offset = 1 [(buf.validate.field).int32 = {gte: 0}];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int32 offset = 2 [(buf.validate.field).int32 = {gte: 0}];
   // Limit/Page size (default: 50, max: 1000)
-  int32 limit = 2 [(buf.validate.field).int32 = {
+  int32 limit = 3 [(buf.validate.field).int32 = {
     gte: 1
     lte: 1000
   }];
   // Filter string (optional)
-  string filter = 3 [(buf.validate.field).string.max_len = 2048];
+  string filter = 4 [(buf.validate.field).string.max_len = 2048];
   // Order by field (optional)
-  string order_by = 4 [(buf.validate.field).string.max_len = 256];
+  string order_by = 5 [(buf.validate.field).string.max_len = 256];
 }
 
 // Standard pagination response
@@ -394,13 +395,14 @@ message PageResponse {
   };
 
   // Total number of items (across all pages)
-  int32 total_size = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int32 total_size = 2;
   // Current offset
-  int32 offset = 2;
+  int32 offset = 3;
   // Current limit/page size
-  int32 limit = 3;
+  int32 limit = 4;
   // Whether there are more pages (has_next = offset + limit < total_size)
-  bool has_next = 4;
+  bool has_next = 5;
 }
 
 // ============================================================================
@@ -964,28 +966,30 @@ message HttpHeader {
 // Outbound HTTP request to an external service via a named service link.
 message OutboundHttpRequest {
   // HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD)
-  string method = 1 [(buf.validate.field).string.max_len = 16];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string method = 2 [(buf.validate.field).string.max_len = 16];
 
   // Path and optional query string relative to the link base URL (e.g. "/v1/items?a=1")
-  string path_and_query = 2 [(buf.validate.field).string.max_len = 4096];
+  string path_and_query = 3 [(buf.validate.field).string.max_len = 4096];
 
   // Extra headers merged with link defaults and auth headers
-  repeated HttpHeader headers = 3;
+  repeated HttpHeader headers = 4;
 
   // Request body bytes
-  bytes body = 4;
+  bytes body = 5;
 }
 
 // Outbound HTTP response from an external service call.
 message OutboundHttpResponse {
   // HTTP status code
-  uint32 status = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 status = 2;
 
   // Response headers
-  repeated HttpHeader headers = 2;
+  repeated HttpHeader headers = 3;
 
   // Response body bytes
-  bytes body = 3;
+  bytes body = 4;
 }
 
 // Error codes for outbound HTTP client operations.

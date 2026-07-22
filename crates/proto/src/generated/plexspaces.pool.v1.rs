@@ -266,7 +266,9 @@ pub struct ActorHandle {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreatePoolRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub config: ::core::option::Option<PoolConfig>,
 }
 /// CreatePool response
@@ -274,6 +276,8 @@ pub struct CreatePoolRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreatePoolResponse {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_id: ::prost::alloc::string::String,
 }
 /// Checkout request
@@ -281,18 +285,22 @@ pub struct CreatePoolResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckoutRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
     /// For tracking/correlation
-    #[prost(map="string, string", tag="3")]
+    #[prost(map="string, string", tag="4")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// Checkout response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckoutResponse {
-    #[prost(oneof="checkout_response::Result", tags="1, 2")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(oneof="checkout_response::Result", tags="2, 3")]
     pub result: ::core::option::Option<checkout_response::Result>,
 }
 /// Nested message and enum types in `CheckoutResponse`.
@@ -300,9 +308,9 @@ pub mod checkout_response {
     #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Result {
-        #[prost(message, tag="1")]
-        Actor(super::ActorHandle),
         #[prost(message, tag="2")]
+        Actor(super::ActorHandle),
+        #[prost(message, tag="3")]
         Error(super::CheckoutError),
     }
 }
@@ -358,20 +366,24 @@ pub mod checkout_error {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckinRequest {
     #[prost(string, tag="1")]
-    pub pool_name: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub pool_name: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub checkout_id: ::prost::alloc::string::String,
     /// Optional: actor health status
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub healthy: bool,
 }
 /// Checkin response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CheckinResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub checked_in: bool,
 }
 /// GetStats request
@@ -379,13 +391,17 @@ pub struct CheckinResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetStatsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
 }
 /// GetStats response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetStatsResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub metrics: ::core::option::Option<PoolMetrics>,
 }
 /// Scale request (manual scaling)
@@ -393,8 +409,10 @@ pub struct GetStatsResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScaleRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
-    #[prost(oneof="scale_request::ScaleType", tags="2, 3")]
+    #[prost(oneof="scale_request::ScaleType", tags="3, 4")]
     pub scale_type: ::core::option::Option<scale_request::ScaleType>,
 }
 /// Nested message and enum types in `ScaleRequest`.
@@ -403,10 +421,10 @@ pub mod scale_request {
 #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum ScaleType {
         /// Set to exact size
-        #[prost(uint32, tag="2")]
+        #[prost(uint32, tag="3")]
         AbsoluteSize(u32),
         /// Add/remove N actors
-        #[prost(int32, tag="3")]
+        #[prost(int32, tag="4")]
         RelativeSize(i32),
     }
 }
@@ -414,11 +432,13 @@ pub mod scale_request {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScaleResponse {
-    #[prost(uint32, tag="1")]
-    pub new_size: u32,
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
     #[prost(uint32, tag="2")]
-    pub actors_added: u32,
+    pub new_size: u32,
     #[prost(uint32, tag="3")]
+    pub actors_added: u32,
+    #[prost(uint32, tag="4")]
     pub actors_removed: u32,
 }
 /// PauseScaling request
@@ -426,13 +446,17 @@ pub struct ScaleResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseScalingRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
 }
 /// PauseScaling response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseScalingResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub paused: bool,
 }
 /// ResumeScaling request
@@ -440,13 +464,17 @@ pub struct PauseScalingResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResumeScalingRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
 }
 /// ResumeScaling response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResumeScalingResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub resumed: bool,
 }
 /// Drain request
@@ -454,18 +482,22 @@ pub struct ResumeScalingResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DrainRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
     /// Wait for actors to finish
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 /// Drain response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DrainResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub drained: bool,
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag="3")]
     pub actors_drained: u32,
 }
 /// DeletePool request
@@ -473,16 +505,20 @@ pub struct DrainResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeletePoolRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
     /// Force delete even with busy actors
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub force: bool,
 }
 /// DeletePool response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeletePoolResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub deleted: bool,
 }
 /// StreamMetrics request
@@ -490,9 +526,11 @@ pub struct DeletePoolResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StreamMetricsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub pool_name: ::prost::alloc::string::String,
     /// Update frequency
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub interval: ::core::option::Option<::prost_types::Duration>,
 }
 /// Pool scaling state
@@ -620,6 +658,189 @@ impl ElasticPoolError {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

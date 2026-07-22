@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! DynamoDB-based KeyValue store for facet.
@@ -618,5 +618,36 @@ impl KeyValueStore for DynamoDBStore {
         let new_val = current + delta;
         self.put(ctx, key, new_val.to_string().into_bytes()).await?;
         Ok(new_val)
+    }
+
+    async fn get_ttl(
+        &self,
+        _ctx: &RequestContext,
+        _key: &str,
+    ) -> KeyValueStoreResult<Option<std::time::Duration>> {
+        Ok(None)
+    }
+
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KeyValueStoreResult<Vec<Option<Vec<u8>>>> {
+        let mut results = Vec::with_capacity(keys.len());
+        for k in keys {
+            results.push(self.get(ctx, k).await?);
+        }
+        Ok(results)
+    }
+
+    async fn multi_put(
+        &self,
+        ctx: &RequestContext,
+        pairs: &[(&str, Vec<u8>)],
+    ) -> KeyValueStoreResult<()> {
+        for (k, v) in pairs {
+            self.put(ctx, k, v.clone()).await?;
+        }
+        Ok(())
     }
 }

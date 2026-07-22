@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Node management and distribution for PlexSpaces
@@ -111,6 +111,14 @@ pub use health::helpers::{create_and_register_health_service, create_default_hea
 
 // Object registry helper functions
 pub mod object_registry_helpers;
+
+// WebSocket session registry (tracks active WS connections by node_id)
+pub mod ws_registry;
+pub use ws_registry::WsRegistry;
+
+// WebSocket-first transport clients (WS + gRPC fallback)
+pub mod ws_transport_client;
+pub use ws_transport_client::{PendingAsks, WsActorTransportClient, WsNodeTransportClient};
 
 // Re-export for convenience
 pub use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};

@@ -76,6 +76,7 @@ fn create_proto_message(
 
 fn create_send_message_request(message: ProtoMessageCommon) -> SendMessageRequest {
     SendMessageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: String::new(),
         actor_type: message.receiver_id.clone(),
         actor_name: String::new(),
@@ -365,6 +366,7 @@ async fn test_send_message_missing_message() {
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let request = Request::new(SendMessageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         namespace: String::new(),
         actor_type: String::new(),
         actor_name: String::new(),
@@ -450,6 +452,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let result = ActorServiceTrait::spawn_actor(
         &service,
         Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
             spec: Some(plexspaces_proto::actor::v1::ActorSpawnSpec {
                 identity: Some(plexspaces_proto::common::v1::ActorIdentity {
                     name: String::new(),
@@ -473,6 +476,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let result = ActorServiceTrait::list_actors(
         &service,
         Request::new(plexspaces_proto::actor::v1::ListActorsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             page_request: None,
             actor_type: String::new(),
             state: 0,
@@ -492,6 +496,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let result = ActorServiceTrait::delete_actor(
         &service,
         Request::new(plexspaces_proto::actor::v1::DeleteActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: "test".to_string(),
             force: false,
             namespace: String::new(),

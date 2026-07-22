@@ -167,7 +167,7 @@ func (s *ScenarioStoreActor) getScenario(p map[string]any) string {
 	if scenarioID == "" {
 		return marshal(map[string]any{"error": "scenario_id is required"})
 	}
-	raw := host.KVGet("scenario:" + scenarioID)
+	raw, _ := host.KV().Get("scenario:" + scenarioID)
 	if raw == "" {
 		return marshal(map[string]any{"error": fmt.Sprintf("scenario %s not found", scenarioID)})
 	}
@@ -209,7 +209,7 @@ func (s *ScenarioStoreActor) listScenarios(p map[string]any) string {
 			}
 		}
 		scID := sc["scenario_id"].(string)
-		raw := host.KVGet("scenario:" + scID)
+		raw, _ := host.KV().Get("scenario:" + scID)
 		if raw != "" {
 			var loaded map[string]any
 			if err := json.Unmarshal([]byte(raw), &loaded); err == nil {
@@ -236,7 +236,7 @@ func (s *ScenarioStoreActor) putScenario(p map[string]any) string {
 		scenario["scenario_id"] = scenarioID
 	}
 	scJSON, _ := json.Marshal(scenario)
-	host.KVPut("scenario:"+scenarioID, string(scJSON))
+	host.KV().Put("scenario:"+scenarioID, string(scJSON))
 	s.ScenarioCount++
 	s.IncrCounter(host, "scenarios_stored_total")
 	return marshal(map[string]any{"status": "ok", "scenario_id": scenarioID})
@@ -265,7 +265,7 @@ func (s *ScenarioStoreActor) getSuite(p map[string]any) string {
 		}
 	default:
 		// Try stored suite definition
-		raw := host.KVGet("suite:" + suiteName)
+		raw, _ := host.KV().Get("suite:" + suiteName)
 		if raw == "" {
 			return marshal(map[string]any{"error": fmt.Sprintf("unknown suite: %s", suiteName)})
 		}
@@ -284,7 +284,7 @@ func (s *ScenarioStoreActor) getSuite(p map[string]any) string {
 func (s *ScenarioStoreActor) loadScenariosByIDs(ids []string) []any {
 	scenarios := make([]any, 0, len(ids))
 	for _, id := range ids {
-		raw := host.KVGet("scenario:" + id)
+		raw, _ := host.KV().Get("scenario:" + id)
 		if raw != "" {
 			var sc map[string]any
 			if err := json.Unmarshal([]byte(raw), &sc); err == nil {
@@ -311,7 +311,7 @@ func (s *ScenarioStoreActor) putSuite(p map[string]any) string {
 	}
 	ids := extractStringSliceFromAny(scenarioIDsRaw)
 	suiteJSON, _ := json.Marshal(map[string]any{"scenario_ids": ids})
-	host.KVPut("suite:"+suiteName, string(suiteJSON))
+	host.KV().Put("suite:"+suiteName, string(suiteJSON))
 	return marshal(map[string]any{"status": "ok", "suite_name": suiteName, "count": len(ids)})
 }
 
@@ -319,9 +319,9 @@ func (s *ScenarioStoreActor) seedBuiltinScenarios() {
 	seeded := 0
 	for _, sc := range builtinScenarios {
 		id := sc["scenario_id"].(string)
-		if existing := host.KVGet("scenario:" + id); existing == "" {
+		if existing, _ := host.KV().Get("scenario:" + id); existing == "" {
 			scJSON, _ := json.Marshal(sc)
-			host.KVPut("scenario:"+id, string(scJSON))
+			host.KV().Put("scenario:"+id, string(scJSON))
 			seeded++
 		}
 	}

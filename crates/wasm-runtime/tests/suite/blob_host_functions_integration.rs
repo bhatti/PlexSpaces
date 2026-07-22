@@ -91,7 +91,7 @@ mod tests {
 
     fn create_test_blob_impl(host_functions: Arc<HostFunctions>) -> BlobImpl {
         BlobImpl {
-            actor_id: ActorId::from("test-actor".to_string()),
+            actor_id: ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap(),
             host_functions,
         }
     }

@@ -80,6 +80,37 @@ impl ComponentState {
     }
 }
 
+/// Add all simple actor (actor-world) host interfaces to the given component linker.
+/// Centralises the 9 `add_to_linker` calls that were previously duplicated across
+/// three call-sites in this file.
+#[cfg(feature = "component-model")]
+fn add_simple_actor_interfaces_to_linker(
+    component_linker: &mut wasmtime::component::Linker<ComponentContext>,
+) -> Result<(), WasmError> {
+    use crate::simple_component_host::plexspaces::actor;
+    macro_rules! link_iface {
+        ($mod:ident, $label:literal) => {
+            actor::$mod::add_to_linker(
+                component_linker,
+                |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
+            )
+            .map_err(|e| WasmError::InstantiationError(format!(
+                concat!("Failed to add ", $label, " bindings: {}"), e
+            )))?;
+        };
+    }
+    link_iface!(host_logging, "host-logging");
+    link_iface!(host_actor, "host-actor");
+    link_iface!(host_kv, "host-kv");
+    link_iface!(host_ts, "host-ts");
+    link_iface!(host_locks, "host-locks");
+    link_iface!(host_blob, "host-blob");
+    link_iface!(host_pool, "host-pool");
+    link_iface!(host_shard, "host-shard");
+    link_iface!(host_http, "host-http");
+    Ok(())
+}
+
 /// WASM actor instance with state and execution context
 pub struct WasmInstance {
     /// Actor ID
@@ -462,16 +493,7 @@ impl WasmInstance {
                             })?;
 
                         // Add actor-world host function bindings (for Python-compatible components)
-                        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
-                            &mut component_linker,
-                            |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
-                        )
-                        .map_err(|e| {
-                            WasmError::InstantiationError(format!(
-                                "Failed to add actor-world host bindings: {}",
-                                e
-                            ))
-                        })?;
+                        add_simple_actor_interfaces_to_linker(&mut component_linker)?;
 
                         let is_simple_actor =
                             crate::simple_component_host::is_simple_actor_component(c);
@@ -1658,13 +1680,7 @@ impl WasmInstance {
                 ))
             },
         )?;
-        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
-            &mut component_linker,
-            |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
-        )
-        .map_err(|e| {
-            WasmError::InstantiationError(format!("Failed to add actor-world host bindings: {}", e))
-        })?;
+        add_simple_actor_interfaces_to_linker(&mut component_linker)?;
         let simple_bindings = crate::simple_component_host::ActorWorld::instantiate_async(
             &mut component_store,
             &c,
@@ -1843,13 +1859,7 @@ impl WasmInstance {
                 ))
             },
         )?;
-        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
-            &mut component_linker,
-            |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
-        )
-        .map_err(|e| {
-            WasmError::InstantiationError(format!("Failed to add actor-world host bindings: {}", e))
-        })?;
+        add_simple_actor_interfaces_to_linker(&mut component_linker)?;
         let plexspaces_bindings = crate::component_host::PlexspacesActor::instantiate_async(
             &mut component_store,
             &c,

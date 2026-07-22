@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! SWIM Protocol Implementation
@@ -995,7 +995,14 @@ impl SwimProtocol {
         let members = self.members.read().await;
         let active: Vec<_> = members
             .values()
-            .filter(|m| m.state.is_active() && m.node_id != self.local_node_id)
+            .filter(|m| {
+                m.state.is_active()
+                    && m.node_id != self.local_node_id
+                    // Thin nodes (WS-only) have no inbound gRPC; skip direct SWIM probes.
+                    // Their liveness is tracked via WS heartbeats → NodeRegistry::send_heartbeat.
+                    && m.metadata.get(super::SWIM_NODE_TYPE_KEY).map(|t| t.as_str())
+                        != Some(super::SWIM_NODE_TYPE_THIN)
+            })
             .collect();
 
         if active.is_empty() {
@@ -1020,6 +1027,8 @@ impl SwimProtocol {
                 m.state == NodeState::Alive
                     && m.node_id != self.local_node_id
                     && m.node_id != exclude_node_id
+                    // Thin nodes have no inbound gRPC so they cannot relay SWIM indirect pings.
+                    && m.metadata.get(super::SWIM_NODE_TYPE_KEY).map(|t| t.as_str()) != Some(super::SWIM_NODE_TYPE_THIN)
             })
             .cloned()
             .collect();
@@ -2248,5 +2257,52 @@ mod tests {
         // Should be reaped now
         protocol.reap_dead_nodes().await;
         assert!(protocol.get_member("node-1").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn thin_nodes_excluded_from_indirect_targets() {
+        let config = SwimConfig {
+            indirect_ping_nodes: 3,
+            ..Default::default()
+        };
+        let protocol = SwimProtocol::new("local".to_string(), "localhost:8000".to_string(), config);
+
+        // Add two full nodes and one thin node
+        let full1 = SwimMember::new("full-1".to_string(), "localhost:8001".to_string());
+        let full2 = SwimMember::new("full-2".to_string(), "localhost:8002".to_string());
+        let mut thin = SwimMember::new("thin-1".to_string(), "localhost:8003".to_string());
+        thin.metadata.insert(super::super::SWIM_NODE_TYPE_KEY.to_string(), super::super::SWIM_NODE_TYPE_THIN.to_string());
+
+        protocol.upsert_member(full1).await;
+        protocol.upsert_member(full2).await;
+        protocol.upsert_member(thin).await;
+
+        let targets = protocol.select_indirect_targets("other-node").await;
+
+        // Thin node must not appear as an intermediary
+        assert!(!targets.iter().any(|m| m.node_id == "thin-1"),
+            "thin node should be excluded from indirect ping intermediaries");
+        // Full nodes must be available
+        assert!(targets.iter().any(|m| m.node_id == "full-1" || m.node_id == "full-2"));
+    }
+
+    #[tokio::test]
+    async fn full_nodes_included_in_indirect_targets() {
+        let config = SwimConfig {
+            indirect_ping_nodes: 5,
+            ..Default::default()
+        };
+        let protocol = SwimProtocol::new("local".to_string(), "localhost:8000".to_string(), config);
+
+        let full1 = SwimMember::new("full-1".to_string(), "localhost:8001".to_string());
+        let full2 = SwimMember::new("full-2".to_string(), "localhost:8002".to_string());
+        protocol.upsert_member(full1).await;
+        protocol.upsert_member(full2).await;
+
+        let targets = protocol.select_indirect_targets("full-1").await;
+
+        // full-1 is excluded (it's the target), full-2 must be a candidate
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].node_id, "full-2");
     }
 }

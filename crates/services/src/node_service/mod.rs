@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! NodeService - gRPC service for node management
@@ -375,6 +375,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         );
 
         Ok(Response::new(GetReleaseSpecResponse {
+            request_id: req.request_id.clone(),
             release_spec: masked_spec,
         }))
     }
@@ -385,6 +386,7 @@ impl NodeServiceTrait for NodeServiceImpl {
     ) -> Result<Response<RegisterNodesResponse>, Status> {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
 
         let node_registry = self
             .service_locator
@@ -414,6 +416,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         );
 
         Ok(Response::new(RegisterNodesResponse {
+            request_id,
             registered_node_ids: registered_ids,
             errors,
         }))
@@ -439,7 +442,10 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         info!("Unregistered node: {}", req.node_id);
 
-        Ok(Response::new(UnregisterNodeResponse { success: true }))
+        Ok(Response::new(UnregisterNodeResponse {
+            request_id: req.request_id.clone(),
+            success: true,
+        }))
     }
 
     async fn list_connected_nodes(
@@ -473,6 +479,7 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         let total_count = nodes.len() as i32;
         Ok(Response::new(ListConnectedNodesResponse {
+            request_id: req.request_id.clone(),
             nodes,
             next_page_token: next_token,
             total_count,
@@ -616,6 +623,7 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         let total_count = applications.len() as i32;
         Ok(Response::new(ListNodeApplicationsResponse {
+            request_id: req.request_id.clone(),
             applications,
             next_page_token: String::new(),
             total_count,
@@ -657,6 +665,7 @@ impl NodeServiceTrait for NodeServiceImpl {
             .unwrap_or_default();
 
         Ok(Response::new(GetHealthResponse {
+            request_id: req.request_id.clone(),
             status,
             message,
             last_checked: Some(Timestamp {
@@ -673,6 +682,7 @@ impl NodeServiceTrait for NodeServiceImpl {
     ) -> Result<Response<SendHeartbeatResponse>, Status> {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
 
         let node_registry = self
             .service_locator
@@ -690,6 +700,7 @@ impl NodeServiceTrait for NodeServiceImpl {
             .unwrap_or_default();
 
         Ok(Response::new(SendHeartbeatResponse {
+            request_id,
             acknowledged: true,
             server_time: Some(Timestamp {
                 seconds: now.as_secs() as i64,
@@ -707,6 +718,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         request: Request<plexspaces_proto::node::v1::PingRequest>,
     ) -> Result<Response<plexspaces_proto::node::v1::PingResponse>, Status> {
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("Received ping from node: {}", req.source_node_id);
@@ -759,7 +771,24 @@ impl NodeServiceTrait for NodeServiceImpl {
         // Get piggyback updates to include in response
         let updates = Vec::new(); // Would get from SWIM protocol in full impl
 
+        // Populate resource hints for work-aware scheduling (thin-node clients use these).
+        let resources = {
+            let available_cores = std::thread::available_parallelism()
+                .map(|n| n.get() as u32)
+                .unwrap_or(0);
+            let mut sys = sysinfo::System::new_all();
+            sys.refresh_all();
+            let cpu_percent = sys.global_cpu_info().cpu_usage();
+            let memory_available_mb = sys.available_memory() / (1024 * 1024);
+            Some(plexspaces_proto::node::v1::NodeResourceHints {
+                cpu_percent,
+                memory_available_mb,
+                available_cores,
+            })
+        };
+
         Ok(Response::new(plexspaces_proto::node::v1::PingResponse {
+            request_id,
             node_id: self.local_node_id.clone(),
             sequence_number: req.sequence_number,
             incarnation,
@@ -767,6 +796,7 @@ impl NodeServiceTrait for NodeServiceImpl {
             cluster_name,
             node_address,
             last_heartbeat,
+            resources,
         }))
     }
 
@@ -792,6 +822,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         };
 
         Ok(Response::new(plexspaces_proto::node::v1::PingReqResponse {
+            request_id: req.request_id.clone(),
             target_alive,
             target_incarnation: 0,
             updates: Vec::new(),
@@ -822,6 +853,7 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         Ok(Response::new(
             plexspaces_proto::node::v1::SyncMembershipResponse {
+                request_id: req.request_id.clone(),
                 members,
                 updates_applied,
             },
@@ -898,6 +930,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         );
 
         Ok(Response::new(ConnectNodesResponse {
+            request_id: req.request_id.clone(),
             connected: result.connected,
             failed: result.failed,
             total_time: Some(prost_types::Duration {
@@ -1013,6 +1046,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         );
 
         Ok(Response::new(DisconnectNodesResponse {
+            request_id: req.request_id.clone(),
             disconnected,
             failed,
         }))
@@ -1059,6 +1093,7 @@ impl NodeServiceImpl {
         }
 
         NodeRegistration {
+            node_role: 0,
             node_id: Self::unknown_node_id(),
             node_address: dialable_node_address(address),
             capabilities,
@@ -1074,6 +1109,7 @@ impl NodeServiceImpl {
                 seconds: now.as_secs() as i64,
                 nanos: now.subsec_nanos() as i32,
             }),
+            resource_hints: None,
         }
     }
 
@@ -1098,6 +1134,7 @@ impl NodeServiceImpl {
         // Send disconnect notification via a ping with special marker
         // In a full implementation, we might have a dedicated "leave" RPC
         let ping_request = PingRequest {
+            request_id: ulid::Ulid::new().to_string(),
             source_node_id: local_node_id.to_string(),
             sequence_number: 0, // Special sequence number indicating disconnect
             updates: Vec::new(),
@@ -1569,6 +1606,7 @@ mod tests {
             node_addresses: vec![],
             cluster: String::new(),
             timeout: None,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.connect_nodes(request).await;
@@ -1595,6 +1633,7 @@ mod tests {
                 seconds: 0,
                 nanos: 100_000_000,
             }), // 100ms
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.connect_nodes(request).await;
@@ -1663,6 +1702,7 @@ mod tests {
                 seconds: 0,
                 nanos: 200_000_000,
             }), // 200ms
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.connect_nodes(request).await;
@@ -1691,6 +1731,7 @@ mod tests {
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec![],
             notify_remote: false,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.disconnect_nodes(request).await;
@@ -1712,6 +1753,7 @@ mod tests {
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["node-1".to_string()],
             notify_remote: false,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.disconnect_nodes(request).await;
@@ -1737,6 +1779,7 @@ mod tests {
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["nonexistent-node".to_string()],
             notify_remote: false,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.disconnect_nodes(request).await;
@@ -1781,6 +1824,8 @@ mod tests {
             message_count: 0,
             error_count: 0,
             registered_at: None,
+            node_role: 0,
+            resource_hints: None,
         };
         let _ = node_registry.register_node(&ctx, registration).await;
 
@@ -1790,6 +1835,7 @@ mod tests {
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["remote-node-1".to_string()],
             notify_remote: false,
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.disconnect_nodes(request).await;
@@ -1826,6 +1872,7 @@ mod tests {
                 seconds: 0,
                 nanos: 50_000_000,
             }), // 50ms
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = service.connect_nodes(request).await;
@@ -1850,6 +1897,7 @@ mod tests {
                 seconds: 10,
                 nanos: 0,
             }),
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         assert_eq!(request.node_addresses.len(), 2);
@@ -1863,6 +1911,7 @@ mod tests {
         let request = DisconnectNodesRequest {
             node_ids: vec!["node-1".to_string(), "node-2".to_string()],
             notify_remote: true,
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         assert_eq!(request.node_ids.len(), 2);
@@ -1885,6 +1934,7 @@ mod tests {
                 seconds: 1,
                 nanos: 500_000_000,
             }),
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         assert_eq!(response.connected.len(), 1);
@@ -1901,6 +1951,7 @@ mod tests {
         let response = DisconnectNodesResponse {
             disconnected: vec!["node-1".to_string(), "node-2".to_string()],
             failed,
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         assert_eq!(response.disconnected.len(), 2);
@@ -1952,6 +2003,8 @@ mod tests {
             message_count: 0,
             error_count: 0,
             registered_at: None,
+            node_role: 0,
+            resource_hints: None,
         };
         node_registry.register_node(&ctx, reg).await.unwrap();
 
@@ -2010,6 +2063,8 @@ mod tests {
             message_count: 0,
             error_count: 0,
             registered_at: None,
+            node_role: 0,
+            resource_hints: None,
         };
         node_registry.register_node(&ctx, reg).await.unwrap();
 

@@ -80,8 +80,8 @@ func TestAbstractionsHostContract(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
 
-	if result := h.KVPut("abstractions/config", "ready"); result != "" {
-		t.Fatalf("KVPut() = %q", result)
+	if err := h.KV().Put("abstractions/config", "ready"); err != nil {
+		t.Fatalf("KV().Put() = %v", err)
 	}
 	if tupleResult := h.TS().Write([]any{"abstractions", "task", "t-1"}); tupleResult != "" {
 		t.Fatalf("TS().Write() = %q", tupleResult)
@@ -89,8 +89,8 @@ func TestAbstractionsHostContract(t *testing.T) {
 	if tupleValue, ok := h.TS().Read([]any{"abstractions", "task", nil}); !ok || len(tupleValue) != 3 {
 		t.Fatalf("TS().Read() = %#v, %v", tupleValue, ok)
 	}
-	if result := h.BlobUpload("abstractions/blob-1", "aGVsbG8=", "text/plain"); result != "" {
-		t.Fatalf("BlobUpload() = %q", result)
+	if _, err := h.Blob().Upload("abstractions/blob-1", []byte("aGVsbG8="), "text/plain"); err != nil {
+		t.Fatalf("Blob().Upload() = %v", err)
 	}
 	if err := h.PG().Join("abstractions-group"); err != nil {
 		t.Fatalf("PG().Join() error = %v", err)
@@ -101,11 +101,14 @@ func TestAbstractionsHostContract(t *testing.T) {
 	if err := h.PG().Broadcast("abstractions-group", "notify", map[string]any{"ok": true}); err != nil {
 		t.Fatalf("PG().Broadcast() error = %v", err)
 	}
-	timerID := h.SendAfter(100, "tick", map[string]any{"kind": "timer"})
+	timerID, err := h.Actor().SendAfter(100, "tick", map[string]any{"kind": "timer"})
+	if err != nil {
+		t.Fatalf("SendAfter() error = %v", err)
+	}
 	if timerID == "" {
 		t.Fatal("SendAfter() returned empty timer ID")
 	}
-	spawnedID, err := h.Spawn("abstractions", "abstractions-actor", map[string]any{"count": 1})
+	spawnedID, err := h.Spawn("abstractions", "abstractions-actor", "", map[string]string{"count": "1"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
@@ -113,11 +116,11 @@ func TestAbstractionsHostContract(t *testing.T) {
 		t.Fatalf("Stop() error = %v", err)
 	}
 
-	if got := h.KVGet("abstractions/config"); got != "ready" {
-		t.Fatalf("KVGet() = %q", got)
+	if got, err := h.KV().Get("abstractions/config"); err != nil || got != "ready" {
+		t.Fatalf("KV().Get() = %q, %v", got, err)
 	}
-	if got := h.BlobDownload("abstractions/blob-1"); got != "aGVsbG8=" {
-		t.Fatalf("BlobDownload() = %q", got)
+	if got, err := h.Blob().Download("abstractions/blob-1"); err != nil || string(got) != "aGVsbG8=" {
+		t.Fatalf("Blob().Download() = %q, %v", got, err)
 	}
 	if members, err := h.PG().Members("abstractions-group"); err != nil || len(members) != 1 {
 		t.Fatalf("PG().Members() = %#v, %v", members, err)

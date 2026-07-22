@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces System Management API
@@ -195,20 +195,24 @@ enum BackupStatus {
 // Requests and responses
 
 message GetSystemInfoRequest {
-  bool include_details = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool include_details = 2;
 }
 
 message GetSystemInfoResponse {
-  SystemInfo system_info = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  SystemInfo system_info = 2;
 }
 
 message GetHealthRequest {
-  repeated string components = 1; // If empty, check all components
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string components = 2; // If empty, check all components
 }
 
 message GetHealthResponse {
-  HealthStatus overall_status = 1;
-  repeated HealthCheck checks = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  HealthStatus overall_status = 2;
+  repeated HealthCheck checks = 3;
 }
 
 // Node Health State for Kubernetes-style probes
@@ -547,15 +551,17 @@ message DetailedHealthCheck {
 // - Initial actors spawned
 message MarkStartupCompleteRequest {
   // Optional message explaining what was initialized
-  string message = 1 [(buf.validate.field).string.max_len = 1024];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string message = 2 [(buf.validate.field).string.max_len = 1024];
 }
 
 message MarkStartupCompleteResponse {
   // New serving status (should be SERVING)
-  ServingStatus status = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ServingStatus status = 2;
 
   // Time taken for startup
-  google.protobuf.Duration startup_duration = 2;
+  google.protobuf.Duration startup_duration = 3;
 }
 
 // Begin shutdown request
@@ -572,21 +578,23 @@ message MarkStartupCompleteResponse {
 // - Pod has terminationGracePeriodSeconds (default 30s) before SIGKILL
 message BeginShutdownRequest {
   // Reason for shutdown (for logging)
-  string reason = 1 [(buf.validate.field).string.max_len = 1024];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string reason = 2 [(buf.validate.field).string.max_len = 1024];
 
   // Override default drain timeout
-  google.protobuf.Duration drain_timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  google.protobuf.Duration drain_timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 message BeginShutdownResponse {
   // Number of requests drained
-  uint64 requests_drained = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 requests_drained = 2;
 
   // Time taken to drain
-  google.protobuf.Duration drain_duration = 2;
+  google.protobuf.Duration drain_duration = 3;
 
   // Whether drain completed or timed out
-  bool drain_completed = 3;
+  bool drain_completed = 4;
 }
 
 // Get node readiness request (custom health check)
@@ -594,90 +602,104 @@ message BeginShutdownResponse {
 // ## Purpose
 // Get detailed readiness status for debugging (beyond simple SERVING/NOT_SERVING)
 message GetNodeReadinessRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // No parameters needed
 }
 
 message GetNodeReadinessResponse {
-  NodeReadinessStatus readiness = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  NodeReadinessStatus readiness = 2;
 }
 
 // Get detailed health request
 message GetDetailedHealthRequest {
   // If true, include non-critical dependency checks
-  bool include_non_critical = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool include_non_critical = 2;
 }
 
 // Get detailed health response
 message GetDetailedHealthResponse {
-  DetailedHealthCheck health = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  DetailedHealthCheck health = 2;
 }
 
 // Liveness probe request
 message LivenessProbeRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // No parameters needed
 }
 
 // Liveness probe response
 message LivenessProbeResponse {
   // Whether node is alive
-  bool is_alive = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool is_alive = 2;
 
   // Status code for HTTP (200 if alive, 503 if not)
-  int32 http_status_code = 2;
+  int32 http_status_code = 3;
 }
 
 // Readiness probe request
 message ReadinessProbeRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // No parameters needed
 }
 
 // Readiness probe response
 message ReadinessProbeResponse {
   // Whether node is ready
-  bool is_ready = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool is_ready = 2;
 
   // Status code for HTTP (200 if ready, 503 if not)
-  int32 http_status_code = 2;
+  int32 http_status_code = 3;
 
   // Reason if not ready (for debugging)
-  string not_ready_reason = 3;
+  string not_ready_reason = 4;
 }
 
 // Startup probe request
 message StartupProbeRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // No parameters needed
 }
 
 // Startup probe response
 message StartupProbeResponse {
   // Whether startup is complete
-  bool startup_complete = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool startup_complete = 2;
 
   // Status code for HTTP (200 if complete, 503 if not)
-  int32 http_status_code = 2;
+  int32 http_status_code = 3;
 
   // Reason if not complete (for debugging)
-  string not_complete_reason = 3;
+  string not_complete_reason = 4;
 }
 
 message GetMetricsRequest {
-  google.protobuf.Timestamp start_time = 1;
-  google.protobuf.Timestamp end_time = 2;
-  google.protobuf.Duration interval = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  google.protobuf.Duration interval = 4;
 }
 
 message GetMetricsResponse {
   // System metrics from observability core (metrics.proto)
-  repeated plexspaces.metrics.v1.SystemMetrics metrics = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.metrics.v1.SystemMetrics metrics = 2;
 }
 
 message GetConfigRequest {
-  string key_pattern = 1 [(buf.validate.field).string.max_len = 512]; // Glob pattern for keys
-  bool include_secrets = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key_pattern = 2 [(buf.validate.field).string.max_len = 512]; // Glob pattern for keys
+  bool include_secrets = 3;
 }
 
 message GetConfigResponse {
-  repeated ConfigSetting settings = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ConfigSetting settings = 2;
 }
 
 message SetConfigRequest {
@@ -689,13 +711,15 @@ message SetConfigRequest {
     }
   };
 
-  repeated ConfigSetting settings = 1 [(google.api.field_behavior) = REQUIRED];
-  bool validate_only = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ConfigSetting settings = 2 [(google.api.field_behavior) = REQUIRED];
+  bool validate_only = 3;
 }
 
 message SetConfigResponse {
-  repeated ConfigValidationError errors = 1;
-  bool requires_restart = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ConfigValidationError errors = 2;
+  bool requires_restart = 3;
 }
 
 message ConfigValidationError {
@@ -711,17 +735,19 @@ message GetLogsRequest {
     }
   };
 
-  google.protobuf.Timestamp start_time = 1;
-  google.protobuf.Timestamp end_time = 2;
-  LogLevel min_level = 3;
-  repeated string components = 4;
-  string query = 5; // Search query
-  plexspaces.common.v1.PageRequest page_request = 6;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  LogLevel min_level = 4;
+  repeated string components = 5;
+  string query = 6; // Search query
+  plexspaces.common.v1.PageRequest page_request = 7;
 }
 
 message GetLogsResponse {
-  repeated LogEntry entries = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated LogEntry entries = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 message CreateBackupRequest {
@@ -732,26 +758,30 @@ message CreateBackupRequest {
     }
   };
 
-  BackupType type = 1;
-  repeated string components = 2; // If empty, backup all
-  string destination = 3;
-  bool compress = 4;
-  bool encrypt = 5;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  BackupType type = 2;
+  repeated string components = 3; // If empty, backup all
+  string destination = 4;
+  bool compress = 5;
+  bool encrypt = 6;
 }
 
 message CreateBackupResponse {
-  BackupInfo backup = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  BackupInfo backup = 2;
 }
 
 message ListBackupsRequest {
-  plexspaces.common.v1.PageRequest page_request = 1;
-  BackupType type = 2;
-  BackupStatus status = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page_request = 2;
+  BackupType type = 3;
+  BackupStatus status = 4;
 }
 
 message ListBackupsResponse {
-  repeated BackupInfo backups = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated BackupInfo backups = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 message RestoreBackupRequest {
@@ -763,16 +793,18 @@ message RestoreBackupRequest {
     }
   };
 
-  string backup_id = 1 [(google.api.field_behavior) = REQUIRED];
-  repeated string components = 2; // If empty, restore all
-  bool verify_checksum = 3;
-  bool force = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string backup_id = 2 [(google.api.field_behavior) = REQUIRED];
+  repeated string components = 3; // If empty, restore all
+  bool verify_checksum = 4;
+  bool force = 5;
 }
 
 message RestoreBackupResponse {
-  bool success = 1;
-  string error = 2;
-  repeated string restored_components = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string error = 3;
+  repeated string restored_components = 4;
 }
 
 message ShutdownRequest {
@@ -783,14 +815,16 @@ message ShutdownRequest {
     }
   };
 
-  bool graceful = 1;
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
-  string reason = 3 [(buf.validate.field).string.max_len = 1024];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool graceful = 2;
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  string reason = 4 [(buf.validate.field).string.max_len = 1024];
 }
 
 message ShutdownResponse {
-  bool success = 1;
-  string message = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string message = 3;
 }
 
 // Graceful shutdown coordination (VictoriaMetrics-style)
@@ -927,12 +961,14 @@ message ShutdownPhaseStatus {
 
 // Get shutdown status request
 message GetShutdownStatusRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // No parameters needed
 }
 
 // Get shutdown status response
 message GetShutdownStatusResponse {
-  ShutdownStatus status = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ShutdownStatus status = 2;
 }
 
 // System Management service

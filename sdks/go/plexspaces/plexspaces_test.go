@@ -513,7 +513,7 @@ func TestHostSelfID(t *testing.T) {
 
 func TestHostSpawn(t *testing.T) {
 	h := NewHost()
-	id, err := h.Spawn("counter-module", "counter-1", nil)
+	id, err := h.Spawn("counter-module", "counter-1", "", nil)
 	if err != nil {
 		t.Fatalf("Spawn should not return error: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestHostSpawn(t *testing.T) {
 
 func TestHostSpawnAutoID(t *testing.T) {
 	h := NewHost()
-	id, err := h.Spawn("counter-module", "", nil)
+	id, err := h.Spawn("counter-module", "", "", nil)
 	if err != nil {
 		t.Fatalf("Spawn should not return error: %v", err)
 	}
@@ -569,14 +569,24 @@ func TestHostKV(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
 
-	h.KVPut("key1", "value1")
-	got := h.KVGet("key1")
+	if err := h.KV().Put("key1", "value1"); err != nil {
+		t.Fatalf("KV().Put() error = %v", err)
+	}
+	got, err := h.KV().Get("key1")
+	if err != nil {
+		t.Fatalf("KV().Get() error = %v", err)
+	}
 	if got != "value1" {
 		t.Errorf("expected value1, got %q", got)
 	}
 
-	h.KVDelete("key1")
-	got = h.KVGet("key1")
+	if err := h.KV().Delete("key1"); err != nil {
+		t.Fatalf("KV().Delete() error = %v", err)
+	}
+	got, err = h.KV().Get("key1")
+	if err != nil {
+		t.Fatalf("KV().Get() error = %v", err)
+	}
 	if got != "" {
 		t.Errorf("expected empty after delete, got %q", got)
 	}
@@ -610,7 +620,10 @@ func TestHostMonitor(t *testing.T) {
 
 func TestHostSendAfter(t *testing.T) {
 	h := NewHost()
-	timerID := h.SendAfter(1000, "tick", nil)
+	timerID, err := h.Actor().SendAfter(1000, "tick", nil)
+	if err != nil {
+		t.Fatalf("SendAfter() error = %v", err)
+	}
 	if timerID == "" {
 		t.Error("SendAfter should return non-empty timer ID")
 	}
@@ -972,38 +985,42 @@ func TestHostTupleSpaceHelper(t *testing.T) {
 
 func TestHostLocks(t *testing.T) {
 	h := NewHost()
-	result := h.LockAcquire("tenant", "ns", "holder", "lock-1", 30, 5000)
-	if isHostError(result) {
-		t.Errorf("LockAcquire should succeed, got %q", result)
+	result, err := h.Locks().Acquire("holder", "lock-1", 30, 5000)
+	if err != nil {
+		t.Errorf("Acquire should succeed, got error %v", err)
 	}
-	if !strings.Contains(result, "lock_key") {
-		t.Errorf("LockAcquire should return lock details, got %q", result)
-	}
-
-	releaseResult := h.LockRelease("test-lock", "tenant", "ns", "holder", "v1")
-	if isHostError(releaseResult) {
-		t.Errorf("LockRelease should succeed, got %q", releaseResult)
+	if !strings.Contains(string(result), "lock_key") {
+		t.Errorf("Acquire should return lock details, got %q", string(result))
 	}
 
-	renewResult := h.LockRenew("test-lock", "tenant", "ns", "holder", "v1", 30)
-	if isHostError(renewResult) {
-		t.Errorf("LockRenew should succeed, got %q", renewResult)
+	if err := h.Locks().Release("test-lock", "holder", "v1"); err != nil {
+		t.Errorf("Release should succeed, got error %v", err)
 	}
+
+	renewResult, err := h.Locks().Renew("test-lock", "holder", "v1", 30)
+	if err != nil {
+		t.Errorf("Renew should succeed, got error %v", err)
+	}
+	_ = renewResult
 }
 
 func TestHostBlobs(t *testing.T) {
+	ResetStubs()
 	h := NewHost()
-	result := h.BlobUpload("blob-1", "aGVsbG8=", "text/plain")
-	if isHostError(result) {
-		t.Errorf("BlobUpload should succeed, got %q", result)
+	_, err := h.Blob().Upload("blob-1", []byte("aGVsbG8="), "text/plain")
+	if err != nil {
+		t.Errorf("Blob().Upload should succeed, got error %v", err)
 	}
 
-	h.BlobDownload("blob-1")
-	h.BlobDelete("blob-1")
+	_, _ = h.Blob().Download("blob-1")
+	_ = h.Blob().Delete("blob-1")
 
-	list := h.BlobList("blob")
-	if list != "[]" {
-		t.Errorf("BlobList stub should return [], got %q", list)
+	list, err := h.Blob().List("blob")
+	if err != nil {
+		t.Errorf("Blob().List error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("Blob().List stub should return empty slice after delete, got %v", list)
 	}
 }
 
@@ -1030,15 +1047,16 @@ func TestHostPGBroadcast(t *testing.T) {
 func TestHostKVList(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	h.KVPut("user:1", "alice")
-	h.KVPut("user:2", "bob")
-	h.KVPut("order:1", "item")
+	_ = h.KV().Put("user:1", "alice")
+	_ = h.KV().Put("user:2", "bob")
+	_ = h.KV().Put("order:1", "item")
 
-	result := h.KVList("user:")
-	var keys []string
-	json.Unmarshal([]byte(result), &keys)
+	keys, err := h.KV().List("user:")
+	if err != nil {
+		t.Fatalf("KV().List() error = %v", err)
+	}
 	if len(keys) != 2 {
-		t.Errorf("expected 2 keys with prefix 'user:', got %d from %q", len(keys), result)
+		t.Errorf("expected 2 keys with prefix 'user:', got %d", len(keys))
 	}
 }
 
@@ -1523,12 +1541,12 @@ func TestKVPutAndGetJSONRoundTrip(t *testing.T) {
 		Type string `json:"task_type"`
 	}
 	original := task{Seq: 42, Type: "summarize"}
-	if err := h.KVPutJSON("test:task:42", original); err != nil {
+	if err := h.KV().PutJSON("test:task:42", original); err != nil {
 		t.Fatalf("KVPutJSON: %v", err)
 	}
 
 	var restored task
-	found, err := h.KVGetJSON("test:task:42", &restored)
+	found, err := h.KV().GetJSON("test:task:42", &restored)
 	if err != nil {
 		t.Fatalf("KVGetJSON: %v", err)
 	}
@@ -1544,7 +1562,7 @@ func TestKVGetJSONMissingKey(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
 	var dest map[string]any
-	found, err := h.KVGetJSON("nonexistent:key", &dest)
+	found, err := h.KV().GetJSON("nonexistent:key", &dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1556,9 +1574,9 @@ func TestKVGetJSONMissingKey(t *testing.T) {
 func TestKVGetJSONBadJSON(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
-	_ = h.KVPut("bad:json", "not-json{")
+	_ = h.KV().Put("bad:json", "not-json{")
 	var dest map[string]any
-	found, err := h.KVGetJSON("bad:json", &dest)
+	found, err := h.KV().GetJSON("bad:json", &dest)
 	if err == nil {
 		t.Fatal("expected unmarshal error for bad JSON")
 	}
@@ -1571,7 +1589,7 @@ func TestKVPutJSONMarshalError(t *testing.T) {
 	ResetStubs()
 	h := NewHost()
 	ch := make(chan int)
-	err := h.KVPutJSON("bad:val", ch)
+	err := h.KV().PutJSON("bad:val", ch)
 	if err == nil {
 		t.Fatal("expected marshal error for un-marshalable value")
 	}
@@ -1615,12 +1633,12 @@ func TestComposedPGFirstAndKVJSON(t *testing.T) {
 	}
 
 	entry := map[string]any{"router_id": routerID, "model": "miniclaw-v1"}
-	if err := h.KVPutJSON("routers:first", entry); err != nil {
+	if err := h.KV().PutJSON("routers:first", entry); err != nil {
 		t.Fatalf("KVPutJSON: %v", err)
 	}
 
 	var restored map[string]any
-	found, err := h.KVGetJSON("routers:first", &restored)
+	found, err := h.KV().GetJSON("routers:first", &restored)
 	if err != nil || !found {
 		t.Fatalf("KVGetJSON after compose: found=%v err=%v", found, err)
 	}

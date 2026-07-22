@@ -1,5 +1,7 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -101,7 +103,7 @@ pub(super) fn handle_worker_classify(payload: &[u8]) -> Vec<u8> {
     let images_for_round = shard.images_for_shard / shard.batches
         + usize::from(request.round < (shard.images_for_shard % shard.batches));
 
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let mut predictions: HashMap<String, u64> = shard
         .class_labels
         .iter()
@@ -128,7 +130,7 @@ pub(super) fn handle_worker_classify(payload: &[u8]) -> Vec<u8> {
         *predictions.entry(label).or_insert(0) += 1;
     }
 
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms = 0_u64;
     let latency_ms = compute_time_ms + coordination_time_ms;
     let classification_operations =
@@ -172,9 +174,9 @@ pub(super) fn handle_worker_classify(payload: &[u8]) -> Vec<u8> {
 
     super::json_bytes(serde_json::json!({
         "status": "ok",
-        "actor_id": host::self_id(),
+        "actor_id": self_id(),
         "role": "worker",
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "predictions": predictions,
         "images_processed": images_for_round,
         "classification_operations": classification_operations,

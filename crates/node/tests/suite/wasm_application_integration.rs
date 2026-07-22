@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Integration tests for WASM application deployment
@@ -287,6 +287,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let wasm_module = WasmModule {
@@ -336,6 +337,7 @@ async fn test_deploy_wasm_application_success() {
 
     // Deploy application
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "test-app-001".to_string(),
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -381,6 +383,7 @@ async fn test_deploy_wasm_application_invalid_module() {
 
     // Deploy application
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "test-app-002".to_string(),
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -416,6 +419,7 @@ async fn test_deploy_wasm_application_missing_fields() {
 
     // Test missing application_id
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: String::new(), // Invalid: empty
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -471,6 +475,7 @@ async fn test_get_wasm_application_status() {
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "test-app-003".to_string(),
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -484,12 +489,10 @@ async fn test_get_wasm_application_status() {
         .await
         .expect("Deploy should succeed");
 
-    // Wait a bit for application to start
-    sleep(Duration::from_millis(200)).await;
-
     // Get application status - ApplicationManager stores by application_id
     let status_service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
     let status_request = GetApplicationStatusRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "test-app-003".to_string(),
     };
 
@@ -532,6 +535,7 @@ async fn test_list_wasm_applications() {
         };
 
         let deploy_request = DeployApplicationRequest {
+            request_id: ulid::Ulid::new().to_string(),
             application_id: format!("test-app-{:03}", i),
             name: format!("test-app-{}", i),
             version: "1.0.0".to_string(),
@@ -551,6 +555,7 @@ async fn test_list_wasm_applications() {
 
     // List applications
     let list_request = ListApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         status_filter: None,
     };
     let response = service
@@ -576,6 +581,7 @@ async fn test_get_nonexistent_wasm_application_status() {
 
     // Get status for non-existent application
     let status_request = GetApplicationStatusRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "nonexistent-app".to_string(),
     };
 
@@ -608,6 +614,7 @@ async fn test_deploy_wasm_application_with_supervisor_tree() {
 
     // Deploy application with supervisor tree
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "supervisor-app-001".to_string(),
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -653,6 +660,7 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
     // Deploy application with supervisor tree
     let (wasm_module, app_spec) = create_wasm_module_with_supervisor_spec();
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "shutdown-app-001".to_string(),
         name: "shutdown-app".to_string(),
         version: "1.0.0".to_string(),
@@ -671,6 +679,7 @@ async fn test_undeploy_wasm_application_with_supervisor_tree() {
 
     // Undeploy application (ApplicationManager stores by application_id)
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "shutdown-app-001".to_string(),
         timeout: None,
     };
@@ -726,6 +735,7 @@ async fn test_wasm_undeploy_cleanup_instances_and_module() {
     let (wasm_module, app_spec) = create_wasm_module_with_supervisor_spec();
     let wasm_bytes = wasm_module.module_bytes.clone();
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.clone(),
         name: app_name.to_string(),
         version: "1.0.0".to_string(),
@@ -762,6 +772,7 @@ async fn test_wasm_undeploy_cleanup_instances_and_module() {
 
     // Undeploy (use application_id = app_id, same as deploy)
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.clone(),
         timeout: None,
     };
@@ -967,6 +978,7 @@ async fn actor_ask_json(
     payload: serde_json::Value,
 ) -> serde_json::Value {
     let request = AskReplyRequest {
+        request_id: ulid::Ulid::new().to_string(),
         actor_type: actor_type.to_string(),
         actor_name: String::new(),
         namespace: namespace.to_string(),
@@ -1060,6 +1072,7 @@ fn create_wasm_module_from_fixture_with_supervisor(
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     (wasm_module, app_spec)
@@ -1076,6 +1089,7 @@ async fn test_deploy_real_wasm_with_supervisor_tree() {
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", "calculator");
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "calculator-supervisor-test".to_string(),
         name: "calculator".to_string(),
         version: "1.0.0".to_string(),
@@ -1110,6 +1124,7 @@ async fn test_deploy_real_wasm_with_supervisor_tree() {
 
     // Cleanup
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "calculator-supervisor-test".to_string(),
         timeout: None,
     };
@@ -1194,9 +1209,11 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "multi-worker-test".to_string(),
         name: "multi-worker-app".to_string(),
         version: "1.0.0".to_string(),
@@ -1224,6 +1241,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
 
     // Cleanup
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "multi-worker-app".to_string(),
         timeout: None,
     };
@@ -1244,6 +1262,7 @@ async fn test_supervisor_created_with_correct_strategy() {
     );
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "strategy-test".to_string(),
         name: "strategy-test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -1261,6 +1280,7 @@ async fn test_supervisor_created_with_correct_strategy() {
 
     // Verify application status includes supervisor info
     let status_request = GetApplicationStatusRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "strategy-test-app".to_string(),
     };
 
@@ -1271,6 +1291,7 @@ async fn test_supervisor_created_with_correct_strategy() {
 
     // Cleanup
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "strategy-test-app".to_string(),
         timeout: None,
     };
@@ -1330,6 +1351,7 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
                     actor_type: actor_type.to_string(),
                 }),
                 tenant_id: String::new(),
+                namespace: namespace.to_string(),
                 ..Default::default()
             },
         )
@@ -1357,6 +1379,7 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
         .expect("checkpoint should be saved");
 
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: namespace.to_string(),
         timeout: None,
     };
@@ -1404,6 +1427,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -1458,6 +1482,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
                     actor_type: actor_type.to_string(),
                 }),
                 tenant_id: tenant_id.to_string(),
+                namespace: app_id.to_string(),
                 ..Default::default()
             },
         )
@@ -1485,6 +1510,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
         .expect("checkpoint should be saved");
 
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         timeout: None,
     };
@@ -1520,6 +1546,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
     redeploy_app_spec.name = app_id.to_string();
     let redeploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -1562,6 +1589,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -1616,6 +1644,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
                     actor_type: actor_type.to_string(),
                 }),
                 tenant_id: tenant_id.to_string(),
+                namespace: app_id.to_string(),
                 ..Default::default()
             },
         )
@@ -1675,6 +1704,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     );
 
     let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         timeout: None,
     };
@@ -1804,9 +1834,11 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -1924,9 +1956,11 @@ async fn test_go_wasm_role_dispatch_virtual_actor_reactivation() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2091,9 +2125,11 @@ async fn test_go_wasm_web_crawl_reactivation() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2294,9 +2330,11 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2355,8 +2393,6 @@ async fn test_go_wasm_nondurable_virtual_actor_reactivation() {
         .stop_actor(&stop_ctx, &session_actor_id)
         .await
         .expect("stop_actor must succeed");
-    sleep(Duration::from_millis(200)).await;
-
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let reactivated = actor_ask_json(
@@ -2457,9 +2493,11 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2518,8 +2556,6 @@ async fn test_python_wasm_nondurable_virtual_actor_reactivation() {
         .stop_actor(&stop_ctx, &session_actor_id)
         .await
         .expect("stop_actor must succeed");
-    sleep(Duration::from_millis(200)).await;
-
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let reactivated = actor_ask_json(
@@ -2574,7 +2610,7 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
                 actor_type: "abstractions_wasm".to_string(),
             }),
 
-            role: "worker".to_string(),
+            role: "ephemeral".to_string(),
             args: HashMap::from([
                 ("role".to_string(), "ephemeral".to_string()),
                 ("initial_count".to_string(), "5".to_string()),
@@ -2619,9 +2655,11 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2680,8 +2718,6 @@ async fn test_typescript_wasm_nondurable_virtual_actor_reactivation() {
         .stop_actor(&stop_ctx, &session_actor_id)
         .await
         .expect("stop_actor must succeed");
-    sleep(Duration::from_millis(200)).await;
-
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let reactivated = actor_ask_json(
@@ -2727,6 +2763,7 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2827,8 +2864,6 @@ async fn test_typescript_abstractions_app_config_preserves_distinct_reactivation
         .stop_actor(&stop_ctx, &ephemeral_actor_id)
         .await
         .expect("stop ephemeral actor must succeed");
-    sleep(Duration::from_millis(200)).await;
-
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let ephemeral_reactivated = actor_ask_json(
@@ -2881,6 +2916,7 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -2946,7 +2982,6 @@ async fn test_typescript_abstractions_step8_nondurable_reactivation() {
         .stop_actor(&stop_ctx, &session_actor_id)
         .await
         .expect("stop_actor must succeed");
-    sleep(Duration::from_millis(200)).await;
 
     // Step 4: poll ephemeral:session-1 — must reactivate with count=5 from definition args
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -3096,11 +3131,13 @@ async fn test_multi_actor_dispatch_by_actor_type() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
 
     service
         .deploy_application(app_request_in_scope(
             DeployApplicationRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 application_id: app_id.to_string(),
                 name: app_id.to_string(),
                 version: "1.0.0".to_string(),
@@ -3188,6 +3225,7 @@ async fn test_typescript_wasm_sequential_send_after_no_reentrance_trap() {
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),
@@ -3295,6 +3333,7 @@ async fn test_typescript_wasm_send_after_works_after_journal_replay() {
     app_spec.name = app_id.to_string();
 
     let deploy_request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: app_id.to_string(),
         name: app_id.to_string(),
         version: "1.0.0".to_string(),

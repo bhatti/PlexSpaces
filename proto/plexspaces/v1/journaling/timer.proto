@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Timer and Reminder API
@@ -288,6 +288,7 @@ syntax = "proto3";
 
 package plexspaces.timer.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
@@ -397,47 +398,57 @@ service TimerService {
 }
 
 message RegisterTimerRequest {
-  TimerRegistration registration = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  TimerRegistration registration = 2;
 }
 
 message RegisterTimerResponse {
-  bool success = 1;
-  string timer_id = 2;
-  string error_message = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string timer_id = 3;
+  string error_message = 4;
 }
 
 message UnregisterTimerRequest {
-  string actor_id = 1;
-  string timer_name = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  string timer_name = 3;
 }
 
 message RegisterReminderRequest {
-  ReminderRegistration registration = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ReminderRegistration registration = 2;
 }
 
 message RegisterReminderResponse {
-  bool success = 1;
-  string reminder_id = 2;
-  string error_message = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string reminder_id = 3;
+  string error_message = 4;
 }
 
 message UnregisterReminderRequest {
-  string actor_id = 1;
-  string reminder_name = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  string reminder_name = 3;
 }
 
 message ListTimersRequest {
-  string actor_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
 }
 
 message ListTimersResponse {
-  repeated TimerRegistration timers = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated TimerRegistration timers = 2;
 }
 
 message ListRemindersRequest {
-  string actor_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
 }
 
 message ListRemindersResponse {
-  repeated ReminderState reminders = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ReminderState reminders = 2;
 }

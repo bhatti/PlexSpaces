@@ -306,6 +306,112 @@ let seq = state.log.append("audit:", &entry)?;
 let (events, new_cursor) = state.log.poll::<serde_json::Value>("audit:", "consumer-1", 20)?;
 ```
 
+---
+
+## Host Namespace APIs
+
+The host API is organized into namespaces matching the WIT interfaces. Use the namespace accessor
+objects as the primary API. The old flat methods (`host.kvGet`, `host.kv_get`, `host.alarmSet`,
+etc.) remain available for backward compatibility but are **deprecated**.
+
+### host.kv / host.KV() — Key-Value Storage
+
+Equivalent to Cloudflare Durable Objects `this.state.storage` API.
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.kv.get(key)` | `host.KV().Get(key)` | `host.kv.get(key)` | Get value by key |
+| `host.kv.put(key, val)` | `host.KV().Put(key, val)` | `host.kv.put(key, val)` | Put value |
+| `host.kv.delete(key)` | `host.KV().Delete(key)` | `host.kv.delete(key)` | Delete key |
+| `host.kv.list(prefix)` | `host.KV().List(prefix)` | `host.kv.list(prefix)` | List keys |
+| `host.kv.put_with_ttl(k,v,ttl)` | `host.KV().PutWithTTL(k,v,ttl)` | `host.kv.putWithTtl(k,v,ttl)` | Put with TTL |
+| `host.kv.get_ttl(key)` | `host.KV().GetTTL(key)` | `host.kv.getTtl(key)` | Get remaining TTL |
+| `host.kv.cas(key,exp,new)` | `host.KV().CAS(key,exp,new)` | `host.kv.cas(key,exp,new)` | Compare-and-swap |
+| `host.kv.increment(key,n)` | `host.KV().Increment(key,n)` | `host.kv.increment(key,n)` | Atomic increment |
+| `host.kv.multi_get(keys)` | `host.KV().MultiGet(keys)` | `host.kv.multiGet(keys)` | Batch read |
+| `host.kv.multi_put(entries)` | `host.KV().MultiPut(entries)` | `host.kv.multiPut(entries)` | Batch write |
+
+### host.alarm / host.Alarm() — Durable Alarms
+
+Equivalent to Cloudflare Durable Objects `this.state.storage.setAlarm()` API.
+
+| Python | Go | TypeScript | Cloudflare equivalent |
+|---|---|---|---|
+| `host.alarm.set(ts_ms)` | `host.Alarm().Set(ts_ms)` | `host.alarm.set(ts_ms)` | `this.state.storage.setAlarm(ts)` |
+| `host.alarm.set_in(delay_ms)` | `host.Alarm().SetIn(delay_ms)` | `host.alarm.setIn(delay_ms)` | `this.state.storage.setAlarm(Date.now()+delay)` |
+| `host.alarm.get()` | `host.Alarm().Get()` | `host.alarm.get()` | `this.state.storage.getAlarm()` |
+| `host.alarm.delete()` | `host.Alarm().Delete()` | `host.alarm.delete()` | `this.state.storage.deleteAlarm()` |
+
+When the alarm fires, the runtime delivers a `"__alarm__"` message to the actor's `handle()` function.
+
+### host.ts / host.TS() — TupleSpace (Linda model)
+
+No Cloudflare equivalent. Unique PlexSpaces feature for Linda-model coordination.
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.ts.write(tuple)` | `host.TS().Write(tuple)` | `host.ts.write(tuple)` | Write a tuple |
+| `host.ts.take(pattern)` | `host.TS().Take(pattern)` | `host.ts.take(pattern)` | Take one match (destructive) |
+| `host.ts.read(pattern)` | `host.TS().Read(pattern)` | `host.ts.read(pattern)` | Read one match (non-destructive) |
+| `host.ts.read_all(pattern)` | `host.TS().ReadAll(pattern)` | `host.ts.readAll(pattern)` | Read all matches |
+
+### host.locks / host.Locks() — Distributed Locks
+
+No Cloudflare equivalent.
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.locks.acquire(holder_id, lock_name, lease_duration_secs, timeout_ms)` (new `LockClient`) | `host.Locks().Acquire(...)` | `host.locks.acquire(holderId, lockName, leaseSecs, timeoutMs)` (new `LockClient` class) | Acquire a distributed lock |
+| `host.locks.release(lock_id, holder_id, lock_version)` | `host.Locks().Release(...)` | `host.locks.release(lockId, holderId, lockVersion)` | Release a lock |
+| `host.locks.renew(lock_id,tenant,ns,holder,version,lease)` | `host.Locks().Renew(...)` | `host.locks.renew(...)` | Renew lock lease |
+
+### host.blob / host.Blob() — Blob/Object Storage
+
+No direct Cloudflare equivalent (D1 is different).
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.blob.upload(name, data, content_type)` (new `BlobClient`) | `host.Blob().Upload(path,data,ct)` | `host.blob.upload(name, data, contentType)` (new `BlobClient` class) | Upload blob bytes |
+| `host.blob.download(path)` | `host.Blob().Download(path)` | `host.blob.download(path)` | Download blob bytes |
+| `host.blob.delete(path)` | `host.Blob().Delete(path)` | `host.blob.delete(path)` | Delete blob |
+| `host.blob.list(prefix)` | `host.Blob().List(prefix)` | `host.blob.list(prefix)` | List blobs by prefix |
+
+### host.http / host.HTTP() — Outbound HTTP
+
+Equivalent to Cloudflare `env.AI.run(...)` or any env binding fetch.
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.http.fetch(link_name, method, path, body)` (new `ServiceHttpClient` property `host.http`) | `host.HTTP().Fetch(request)` | `host.http.fetch(linkName, method, path, body)` (new `ServiceHttpClient` property) | Outbound HTTP request |
+
+### host.process_groups / host.PG() — Process Groups
+
+| Python | Go | TypeScript | Description |
+|---|---|---|---|
+| `host.process_groups.join(group)` | `host.PG().Join(group)` | `host.processGroups.join(group)` | Join a process group |
+| `host.process_groups.leave(group)` | `host.PG().Leave(group)` | `host.processGroups.leave(group)` | Leave a process group |
+| `host.process_groups.broadcast(group,type,payload)` | `host.PG().Broadcast(group,type,payload)` | `host.processGroups.broadcast(group,type,payload)` | Broadcast to all members |
+| `host.process_groups.members(group)` | `host.PG().Members(group)` | `host.processGroups.members(group)` | Get member IDs |
+| `host.process_groups.first(group)` | `host.PG().First(group)` | `host.processGroups.first(group)` | First member or None/null |
+
+**Note:** `host-pool` and `host-shard` operations are currently accessible via flat methods on `Host` (e.g., `host.PoolCheckout(...)` in Go). Namespace accessor objects (`host.pool`, `host.shard`) will be added in a future release.
+
+### Still available (deprecated)
+
+The old flat methods remain for backward compatibility but are deprecated. Prefer namespace accessors for new code.
+
+| Deprecated (Python) | Deprecated (Go) | Deprecated (TypeScript) | Use instead |
+|---|---|---|---|
+| `host.kv_get(key)` | `host.KVGet(key)` | `host.kvGet(key)` | `host.kv.get` / `host.KV().Get` / `host.kv.get` |
+| `host.kv_put(key,val)` | `host.KVPut(key,val)` | `host.kvPut(key,val)` | `host.kv.put` / `host.KV().Put` / `host.kv.put` |
+| `host.alarm_set(ts_ms)` | `host.AlarmSet(ts_ms)` | `host.alarmSet(ts_ms)` | `host.alarm.set` / `host.Alarm().Set` / `host.alarm.set` |
+| `host.alarm_get()` | `host.AlarmGet()` | `host.alarmGet()` | `host.alarm.get` / `host.Alarm().Get` / `host.alarm.get` |
+| `host.alarm_delete()` | `host.AlarmDelete()` | `host.alarmDelete()` | `host.alarm.delete` / `host.Alarm().Delete` / `host.alarm.delete` |
+| `host.lock_acquire(...)` | `host.LockAcquire(...)` | `host.lockAcquire(...)` | `host.locks.acquire` / `host.Locks().Acquire` / `host.locks.acquire` |
+| `host.blob_upload(...)` | `host.BlobUpload(...)` | `host.blobUpload(...)` | `host.blob.upload` / `host.Blob().Upload` / `host.blob.upload` |
+
+---
+
 ## Python SDK
 
 ### Installation
@@ -587,24 +693,35 @@ class ChatRoom:
 | `host.error(message)` | Log error message |
 | `host.now_ms()` | Get current timestamp (ms) |
 | **Key-Value Storage** | |
-| `host.kv_get(key)` | Get value bytes by key. SDKs decode protobuf or app-owned payloads from the returned bytes. |
-| `host.kv_put(key, value)` | Store key-value bytes. SDKs typically encode/decode protobuf messages for shared models. |
-| `host.kv_delete(key)` | Delete key. Returns success/error from the actor-world result. |
-| `host.kv_list(prefix)` | List keys with prefix. Returns string keys. |
+| `host.kv.get(key)` | Get value bytes by key. SDKs decode protobuf or app-owned payloads from the returned bytes. |
+| `host.kv.put(key, value)` | Store key-value bytes. SDKs typically encode/decode protobuf messages for shared models. |
+| `host.kv.delete(key)` | Delete key. Returns success/error from the actor-world result. |
+| `host.kv.list(prefix)` | List keys with prefix. Returns string keys. |
+| `host.kv.put_with_ttl(key, value, ttl_seconds)` | Store key-value bytes with a TTL. Key expires after `ttl_seconds`. |
+| `host.kv.get_ttl(key)` | Get remaining TTL in seconds. Returns 0 if no TTL or key not found. |
+| `host.kv.cas(key, expected, new_value)` | Compare-and-swap: sets value only if current matches `expected`. Pass `None`/empty for `expected` when key must not exist. Returns bool. |
+| `host.kv.increment(key, delta)` | Atomic increment by `delta`; creates key at `delta` if absent. Returns new value. |
+| `host.kv.multi_get(keys)` | Fetch multiple keys in one call. Returns list of values (or `None` for missing). |
+| `host.kv.multi_put(entries)` | Store multiple key-value pairs in one call. |
+| **Durable Alarms** | |
+| `host.alarm.set(timestamp_ms)` | Schedule a durable alarm at `timestamp_ms` (Unix ms). Replaces any existing alarm for this actor. When fired, delivers `"__alarm__"` message to `handle()`. |
+| `host.alarm.set_in(delay_ms)` | Schedule alarm relative to now. Equivalent to `alarm.set(now_ms() + delay_ms)`. |
+| `host.alarm.get()` | Returns the scheduled alarm timestamp (ms), or 0 if none. |
+| `host.alarm.delete()` | Cancels the pending alarm (idempotent). |
 | **TupleSpace** | |
 | `host.ts.write(tuple)` | Write a tuple using protobuf `WriteRequest` / SDK tuple helpers. |
 | `host.ts.read(pattern)` | Read one match (non-destructive) using protobuf `ReadRequest`. |
 | `host.ts.take(pattern)` | Take one match (destructive) using protobuf `ReadRequest`. |
 | `host.ts.read_all(pattern)` | Read all matches using protobuf tuple/pattern models. |
 | **Distributed Locks** | |
-| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns the shared lock protobuf model. |
-| `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
-| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns the shared lock protobuf model. |
+| `host.locks.acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns the shared lock protobuf model. |
+| `host.locks.release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
+| `host.locks.renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns the shared lock protobuf model. |
 | **Blob Storage** | |
-| `host.blob_upload(path, data, content_type)` | Upload blob bytes. Returns the stored blob id. |
-| `host.blob_download(path)` | Download blob bytes. |
-| `host.blob_delete(path)` | Delete blob. Returns success/error from the actor-world result. |
-| `host.blob_list(prefix)` | List blob ids by prefix. |
+| `host.blob.upload(path, data, content_type)` | Upload blob bytes. Returns the stored blob id. |
+| `host.blob.download(path)` | Download blob bytes. |
+| `host.blob.delete(path)` | Delete blob. Returns success/error from the actor-world result. |
+| `host.blob.list(prefix)` | List blob ids by prefix. |
 | **Key-Value JSON helpers** | |
 | `host.kv_get_json(key)` | Deserialize a JSON value from KV. Returns `None` if missing or corrupt. |
 | `host.kv_put_json(key, value)` | Serialize a value to JSON and store it. Raises on write failure. |
@@ -686,7 +803,7 @@ class TrainingWorker:
 
 #### Key-Value Storage (WASM)
 
-WASM actors can persist data via **`host.kv_get`** and **`host.kv_put`**. Keys are scoped per actor. The node provides an in-memory keyvalue store for WASM by default. Use this for sensor buffers, caches, or any key-value state without relying on in-actor state serialization. Full keyvalue API (TTL, list-keys, etc.) will be added to the SDKs later. See [WASM Deployment: Key-Value Storage](wasm-deployment.md#key-value-storage-wasm).
+WASM actors can persist data via the full keyvalue API including TTL, CAS, atomic increment, and batch reads/writes. Keys are scoped per actor. The node provides an in-memory keyvalue store for WASM by default. See [WASM Deployment: Key-Value Storage](wasm-deployment.md#key-value-storage-wasm) and [Durable Alarms](wasm-deployment.md#durable-alarms-wasm).
 
 #### TupleSpace (WASM)
 
@@ -725,14 +842,14 @@ from plexspaces import actor, handler, host
 class CdnCache:
     @handler("upload")
     def upload(self, path: str, data: str, content_type: str) -> dict:
-        result = host.blob_upload(path, data, content_type)
-        if result and result.startswith("ERROR"):
-            return {"error": result}
+        blob_id = host.blob.upload(path, data, content_type)
+        if blob_id and blob_id.startswith("ERROR"):
+            return {"error": blob_id}
         return {"status": "uploaded", "path": path}
     
     @handler("download")
     def download(self, path: str) -> dict:
-        data = host.blob_download(path)
+        data = host.blob.download(path)
         if not data:
             return {"error": "not_found"}
         return {"data": data}  # base64-encoded
@@ -749,19 +866,19 @@ from plexspaces import gen_server_actor, handler, host
 class PaymentHandler:
     @handler("refund")
     def process_refund(self, tx_id: str, amount: int) -> dict:
-        lock_version = host.lock_acquire(f"refund:{tx_id}", 5000)
-        if not lock_version or lock_version.startswith("ERROR"):
+        lock_data = host.locks.acquire(self.actor_id, f"refund:{tx_id}", lease_duration_secs=30, timeout_ms=5000)
+        if not lock_data or str(lock_data).startswith("ERROR"):
             return {"error": "lock_failed"}
         try:
             # Critical section - only one refund at a time
             return {"status": "refunded", "amount": amount}
         finally:
-            host.lock_release(f"refund:{tx_id}", lock_version)
+            host.locks.release(lock_data.lock_id, self.actor_id, lock_data.version)
 ```
 
 ### Local Blob Storage
 
-The checked-in `release.yaml` used by [`scripts/server.sh`](/Users/shahzadbhatti/workspace/myspaces/scripts/server.sh) now uses the built-in local blob backend, so SDK examples can exercise blob APIs without extra services:
+The checked-in `release.yaml` used by [`scripts/server.sh`](scripts/server.sh) now uses the built-in local blob backend, so SDK examples can exercise blob APIs without extra services:
 
 ```yaml
 runtime:
@@ -2028,15 +2145,23 @@ Access PlexSpaces capabilities via the `Host` singleton:
 | `host.Log(level, msg)` / `host.Info(msg)` / `host.Warn(msg)` / `host.Error(msg)` | Structured logging |
 | `host.NowMs()` | Current timestamp (ms) |
 | **Key-Value Storage** | |
-| `host.KVGet(key)` / `host.KVPut(key, value)` / `host.KVDelete(key)` / `host.KVList(prefix)` | Key-value operations |
+| `host.KV().Get(key)` / `host.KV().Put(key, value)` / `host.KV().Delete(key)` / `host.KV().List(prefix)` | Key-value operations (namespace accessor) |
+| `host.KV().PutWithTTL(key, value, ttl)` / `host.KV().GetTTL(key)` | TTL operations |
+| `host.KV().CAS(key, expected, new)` / `host.KV().Increment(key, n)` | Atomic operations |
+| `host.KV().MultiGet(keys)` / `host.KV().MultiPut(entries)` | Batch operations |
 | `host.KVGetJSON(key, &dest)` | Deserialize a JSON value from KV. Returns `(bool, error)` — false when missing. |
 | `host.KVPutJSON(key, value)` | Serialize a value to JSON and store it. Returns `error`. |
+| **Durable Alarms** | |
+| `host.Alarm().Set(ts_ms)` / `host.Alarm().SetIn(delay_ms)` | Schedule alarm (absolute / relative) |
+| `host.Alarm().Get()` / `host.Alarm().Delete()` | Read or cancel pending alarm |
 | **TupleSpace** | |
-| `host.TSWrite(tupleJSON)` / `host.TSRead(patternJSON)` / `host.TSTake(patternJSON)` / `host.TSReadAll(patternJSON)` | Linda-style coordination |
+| `host.TS().Write(tuple)` / `host.TS().Read(pattern)` / `host.TS().Take(pattern)` / `host.TS().ReadAll(pattern)` | Linda-style coordination (namespace accessor) |
 | **Distributed Locks** | |
-| `host.LockAcquire(...)` / `host.LockRelease(...)` / `host.LockRenew(...)` | Distributed locks with leases |
+| `host.Locks().Acquire(...)` / `host.Locks().Release(...)` / `host.Locks().Renew(...)` | Distributed locks with leases (namespace accessor) |
 | **Blob Storage** | |
-| `host.BlobUpload(id, data, contentType)` / `host.BlobDownload(id)` / `host.BlobDelete(id)` / `host.BlobList(prefix)` | S3-compatible storage |
+| `host.Blob().Upload(id, data, contentType)` / `host.Blob().Download(id)` / `host.Blob().Delete(id)` / `host.Blob().List(prefix)` | S3-compatible storage (namespace accessor) |
+| **Outbound HTTP** | |
+| `host.HTTP().Fetch(request)` | Outbound HTTP request (namespace accessor) |
 | **Process Groups** | |
 | `host.PG().Join(group)` / `host.PG().Leave(group)` / `host.PG().Members(group)` / `host.PG().Broadcast(group, msgType, payload)` | Distributed pub/sub |
 | `host.PG().First(group)` | Return the first member of the group, or error if empty. |

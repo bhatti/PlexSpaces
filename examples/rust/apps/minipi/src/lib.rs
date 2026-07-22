@@ -21,7 +21,10 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::pg_join;
+use plexspaces::actor::host_http::http_fetch;
+use plexspaces::actor::host_kv::{kv_get, kv_list, kv_put};
+use plexspaces::actor::host_logging::{log, now_ms};
 
 // ============================================================================
 // Helpers
@@ -66,7 +69,7 @@ fn next_id(prefix: &str) -> String {
         .expect("id counter lock");
     *ctr += 1;
     #[cfg(not(test))]
-    let ts = host::now_ms();
+    let ts = now_ms();
     #[cfg(test)]
     let ts = *ctr * 1000;
     format!("{}-{}-{}", prefix, ts, *ctr)
@@ -218,19 +221,19 @@ fn init_llm_gateway(args: &Value) -> Result<(), String> {
         s.llm_base_url = base_url;
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:llm_gateway");
+    let _ = pg_join("svc:llm_gateway");
     Ok(())
 }
 
 fn init_tool_registry() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:tool_registry");
+    let _ = pg_join("svc:tool_registry");
     Ok(())
 }
 
 fn init_agent_runner() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:agent");
+    let _ = pg_join("svc:agent");
     Ok(())
 }
 
@@ -239,19 +242,19 @@ fn init_eval_runner() -> Result<(), String> {
         s.eval_status = "idle".to_string();
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:eval_runner");
+    let _ = pg_join("svc:eval_runner");
     Ok(())
 }
 
 fn init_scorer() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:scorer");
+    let _ = pg_join("svc:scorer");
     Ok(())
 }
 
 fn init_scenario_store() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:scenario_store");
+    let _ = pg_join("svc:scenario_store");
     // Seed default scenarios
     with_state(|s| {
         let defaults = vec![
@@ -374,7 +377,7 @@ fn init_scenario_store() -> Result<(), String> {
 
 fn init_trajectory_store() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:trajectory_store");
+    let _ = pg_join("svc:trajectory_store");
     Ok(())
 }
 
@@ -388,7 +391,7 @@ fn init_regression_detector(args: &Value) -> Result<(), String> {
         s.reg_baseline_eval_run = baseline_run;
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:regression_detector");
+    let _ = pg_join("svc:regression_detector");
     Ok(())
 }
 
@@ -406,7 +409,7 @@ fn init_advisor(args: &Value) -> Result<(), String> {
         s.advisor_confidence_threshold = threshold;
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:advisor");
+    let _ = pg_join("svc:advisor");
     Ok(())
 }
 
@@ -415,7 +418,7 @@ fn init_benchmark() -> Result<(), String> {
         s.bench_status = "idle".to_string();
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:benchmark");
+    let _ = pg_join("svc:benchmark");
     Ok(())
 }
 
@@ -424,13 +427,13 @@ fn init_approval_gate() -> Result<(), String> {
         s.gate_fsm_state = "idle".to_string();
     });
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:approval_gate");
+    let _ = pg_join("svc:approval_gate");
     Ok(())
 }
 
 fn init_dashboard() -> Result<(), String> {
     #[cfg(not(test))]
-    let _ = host::pg_join("svc:dashboard");
+    let _ = pg_join("svc:dashboard");
     Ok(())
 }
 
@@ -502,7 +505,7 @@ fn handle_llm_gateway(op: &str, v: &Value) -> Vec<u8> {
                 });
                 let body_bytes = body.to_string().into_bytes();
                 #[cfg(not(test))]
-                let fetch_result = host::http_fetch("ollama", "POST", "/api/chat", &body_bytes);
+                let fetch_result = http_fetch("ollama", "POST", "/api/chat", &body_bytes);
                 #[cfg(test)]
                 let fetch_result: Result<Vec<u8>, _> = Err("test mode".to_string());
                 match fetch_result {
@@ -514,14 +517,14 @@ fn handle_llm_gateway(op: &str, v: &Value) -> Vec<u8> {
                             (content, in_tok, out_tok, false)
                         } else {
                             #[cfg(not(test))]
-                            host::log("warn", "Ollama response parse failed, using mock");
+                            log("warn", "Ollama response parse failed, using mock");
                             let in_tok = (prompt.len() / 4 + 1) as u64;
                             (mock_llm_response(&prompt), in_tok, 20 + (in_tok % 30), true)
                         }
                     }
                     Err(_) => {
                         #[cfg(not(test))]
-                        host::log("warn", "Ollama unavailable, using mock LLM response");
+                        log("warn", "Ollama unavailable, using mock LLM response");
                         let in_tok = (prompt.len() / 4 + 1) as u64;
                         (mock_llm_response(&prompt), in_tok, 20 + (in_tok % 30), true)
                     }
@@ -675,7 +678,7 @@ fn handle_tool_registry(op: &str, v: &Value) -> Vec<u8> {
                 "kv_read" => {
                     let key = input.get("key").and_then(|x| x.as_str()).unwrap_or("");
                     #[cfg(not(test))]
-                    let value = match host::kv_get(key) {
+                    let value = match kv_get(key) {
                         Ok(bytes) => String::from_utf8(bytes).unwrap_or_default(),
                         Err(_) => String::new(),
                     };
@@ -687,7 +690,7 @@ fn handle_tool_registry(op: &str, v: &Value) -> Vec<u8> {
                     let key = input.get("key").and_then(|x| x.as_str()).unwrap_or("");
                     let value = input.get("value").and_then(|x| x.as_str()).unwrap_or("");
                     #[cfg(not(test))]
-                    let _ = host::kv_put(key, value.as_bytes());
+                    let _ = kv_put(key, value.as_bytes());
                     json!({ "status": "ok", "key": key })
                 }
                 _ => json!({ "error": format!("unknown tool: {tool_name}") }),
@@ -798,7 +801,7 @@ fn handle_agent_runner(op: &str, v: &Value) -> Vec<u8> {
 
             // Store trajectory in local state and shared KV for cross-actor access
             #[cfg(not(test))]
-            let _ = host::kv_put(
+            let _ = kv_put(
                 &format!("trajectory:{trajectory_id}"),
                 trajectory.to_string().as_bytes(),
             );
@@ -901,7 +904,7 @@ fn handle_eval_runner(op: &str, v: &Value) -> Vec<u8> {
 
                 // Write trajectory to shared KV so trajectory_store can read it
                 #[cfg(not(test))]
-                let _ = host::kv_put(
+                let _ = kv_put(
                     &format!("trajectory:{traj_id}"),
                     trajectory.to_string().as_bytes(),
                 );
@@ -941,7 +944,7 @@ fn handle_eval_runner(op: &str, v: &Value) -> Vec<u8> {
 
             // Write report to shared KV so dashboard can read it across actor boundaries
             #[cfg(not(test))]
-            let _ = host::kv_put(
+            let _ = kv_put(
                 &format!("eval_run:{eval_run_id}"),
                 report.to_string().as_bytes(),
             );
@@ -1248,7 +1251,7 @@ fn handle_trajectory_store(op: &str, v: &Value) -> Vec<u8> {
             } else {
                 #[cfg(not(test))]
                 {
-                    match host::kv_get(&format!("trajectory:{traj_id}")) {
+                    match kv_get(&format!("trajectory:{traj_id}")) {
                         Ok(bytes) => {
                             let traj: Value = serde_json::from_slice(&bytes)
                                 .unwrap_or_else(|_| json!({}));
@@ -1673,7 +1676,7 @@ fn handle_benchmark(op: &str, v: &Value) -> Vec<u8> {
 
             // Write to shared KV so dashboard can find it
             #[cfg(not(test))]
-            let _ = host::kv_put(
+            let _ = kv_put(
                 &format!("eval_run:bench:{benchmark_id}"),
                 bench_report.to_string().as_bytes(),
             );
@@ -1741,7 +1744,7 @@ fn handle_approval_gate(op: &str, v: &Value) -> Vec<u8> {
             let agent_id = v.get("agent_id").and_then(|x| x.as_str()).unwrap_or("");
             let action = v.get("action").and_then(|x| x.as_str()).unwrap_or("");
             #[cfg(not(test))]
-            let now_ms = host::now_ms();
+            let now_ms = now_ms();
             #[cfg(test)]
             let now_ms = 0u64;
             let request = json!({
@@ -1774,7 +1777,7 @@ fn handle_approval_gate(op: &str, v: &Value) -> Vec<u8> {
             let _decision = with_state(|s| {
                 let req = s.gate_pending_request.clone().unwrap_or_else(|| json!({}));
                 #[cfg(not(test))]
-                let decided_ms = host::now_ms();
+                let decided_ms = now_ms();
                 #[cfg(test)]
                 let decided_ms = 0u64;
                 let d = json!({
@@ -1810,7 +1813,7 @@ fn handle_approval_gate(op: &str, v: &Value) -> Vec<u8> {
             with_state(|s| {
                 let req = s.gate_pending_request.clone().unwrap_or_else(|| json!({}));
                 #[cfg(not(test))]
-                let decided_ms = host::now_ms();
+                let decided_ms = now_ms();
                 #[cfg(test)]
                 let decided_ms = 0u64;
                 let d = json!({
@@ -1873,12 +1876,12 @@ fn handle_dashboard(op: &str, v: &Value) -> Vec<u8> {
         "summary" | "get_summary" => {
             // Refresh from KV before summarizing
             #[cfg(not(test))]
-            if let Ok(keys) = host::kv_list("eval_run:") {
+            if let Ok(keys) = kv_list("eval_run:") {
                 for key in &keys {
                     let run_id = key.trim_start_matches("eval_run:");
                     let already_cached = with_state(|s| s.dash_eval_reports.contains_key(run_id));
                     if !already_cached {
-                        if let Ok(bytes) = host::kv_get(key) {
+                        if let Ok(bytes) = kv_get(key) {
                             if let Ok(report) = serde_json::from_slice::<Value>(&bytes) {
                                 with_state(|s| {
                                     s.dash_eval_reports.insert(run_id.to_string(), report);
@@ -1931,9 +1934,9 @@ fn handle_dashboard(op: &str, v: &Value) -> Vec<u8> {
             // Also scan KV for eval_run: keys written by eval_runner actor
             #[cfg(not(test))]
             if runs.len() < limit {
-                if let Ok(keys) = host::kv_list("eval_run:") {
+                if let Ok(keys) = kv_list("eval_run:") {
                     for key in keys.iter().take(limit.saturating_sub(runs.len())) {
-                        if let Ok(bytes) = host::kv_get(key) {
+                        if let Ok(bytes) = kv_get(key) {
                             if let Ok(report) = serde_json::from_slice::<Value>(&bytes) {
                                 let run_id = key.trim_start_matches("eval_run:");
                                 // Cache locally and add to results

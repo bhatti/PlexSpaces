@@ -96,10 +96,10 @@ func (a *abstractionsActor) Handle(_ string, msgType, payloadJSON string) string
 	case "status":
 		return a.status()
 	case "schedule_timer":
-		timerID := host.SendAfter(uint64(payloadInt(payload, "delay_ms", 100)), "tick", map[string]any{"kind": "timer"})
+		timerID, _ := host.Actor().SendAfter(uint64(payloadInt(payload, "delay_ms", 100)), "tick", map[string]any{"kind": "timer"})
 		return marshal(map[string]any{"timer_id": timerID})
 	case "schedule_reminder":
-		timerID := host.SendAfter(uint64(payloadInt(payload, "delay_ms", 150)), "reminder", map[string]any{"kind": "reminder"})
+		timerID, _ := host.Actor().SendAfter(uint64(payloadInt(payload, "delay_ms", 150)), "reminder", map[string]any{"kind": "reminder"})
 		return marshal(map[string]any{"reminder_id": timerID})
 	case "tick":
 		a.TimerTicks++
@@ -110,12 +110,13 @@ func (a *abstractionsActor) Handle(_ string, msgType, payloadJSON string) string
 	case "kv_put":
 		key := payloadString(payload, "key")
 		value := payloadString(payload, "value")
-		if result := host.KVPut(key, value); result != "" {
-			return hostError("kv_put", result)
+		if err := host.KV().Put(key, value); err != nil {
+			return hostError("kv_put", err.Error())
 		}
 		return marshal(map[string]any{"ok": true, "key": key, "value": value})
 	case "kv_get":
-		return marshal(map[string]any{"key": payloadString(payload, "key"), "value": host.KVGet(payloadString(payload, "key"))})
+		val, _ := host.KV().Get(payloadString(payload, "key"))
+		return marshal(map[string]any{"key": payloadString(payload, "key"), "value": val})
 	case "ts_write":
 		tuple := payloadArray(payload, "tuple")
 		if result := host.TS().Write(tuple); result != "" {
@@ -129,18 +130,19 @@ func (a *abstractionsActor) Handle(_ string, msgType, payloadJSON string) string
 		}
 		return marshal(map[string]any{"tuple": nil})
 	case "blob_upload":
-		storedID := host.BlobUpload(
+		storedID, uploadErr := host.Blob().Upload(
 			payloadString(payload, "blob_id"),
-			payloadString(payload, "data"),
+			[]byte(payloadString(payload, "data")),
 			payloadString(payload, "content_type"),
 		)
-		if plexspaces.IsHostError(storedID) {
-			return hostError("blob_upload", storedID)
+		if uploadErr != nil {
+			return hostError("blob_upload", uploadErr.Error())
 		}
 		// Match Rust guest: blob_id in JSON is the internal id returned by the host (ULID on WASM).
 		return marshal(map[string]any{"ok": true, "blob_id": storedID})
 	case "blob_download":
-		return marshal(map[string]any{"blob_id": payloadString(payload, "blob_id"), "data": host.BlobDownload(payloadString(payload, "blob_id"))})
+		blobData, _ := host.Blob().Download(payloadString(payload, "blob_id"))
+		return marshal(map[string]any{"blob_id": payloadString(payload, "blob_id"), "data": blobData})
 	case "group_members":
 		members, err := host.PG().Members(payloadString(payload, "group"))
 		if err != nil {

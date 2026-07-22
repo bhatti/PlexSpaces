@@ -35,36 +35,36 @@ pub struct SchedulingRequest {
     #[prost(string, tag="1")]
     pub request_id: ::prost::alloc::string::String,
     /// Request details (imported from actor_runtime.proto)
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub requirements: ::core::option::Option<super::super::actor::v1::ActorResourceRequirements>,
     /// Status
-    #[prost(enumeration="SchedulingStatus", tag="5")]
+    #[prost(enumeration="SchedulingStatus", tag="6")]
     pub status: i32,
     /// Result (if scheduled)
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub selected_node_id: ::prost::alloc::string::String,
     /// Created actor ID
-    #[prost(string, tag="7")]
+    #[prost(string, tag="8")]
     pub actor_id: ::prost::alloc::string::String,
     /// Error (if failed)
-    #[prost(string, tag="8")]
+    #[prost(string, tag="9")]
     pub error_message: ::prost::alloc::string::String,
     /// Timestamps
-    #[prost(message, optional, tag="9")]
-    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="10")]
-    pub scheduled_at: ::core::option::Option<::prost_types::Timestamp>,
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="11")]
+    pub scheduled_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="12")]
     pub completed_at: ::core::option::Option<::prost_types::Timestamp>,
     /// Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)
     /// NOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).
     /// Stored here for tracking, isolation, and state store operations.
-    #[prost(string, tag="12")]
+    #[prost(string, tag="13")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Namespace for storage isolation (set from gRPC metadata when request is created)
     /// NOTE: This is NOT an API input field - namespace comes from request metadata.
     /// Stored here for tracking, isolation, and state store operations.
-    #[prost(string, tag="13")]
+    #[prost(string, tag="14")]
     pub namespace: ::prost::alloc::string::String,
 }
 /// Request to schedule an actor
@@ -72,12 +72,10 @@ pub struct SchedulingRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScheduleActorRequest {
     /// Actor resource requirements (imported from actor_runtime.proto)
-    #[prost(message, optional, tag="1")]
-    pub requirements: ::core::option::Option<super::super::actor::v1::ActorResourceRequirements>,
-    /// Optional: Client-provided request ID (for idempotency)
-    /// If not provided, server generates one
-    #[prost(string, tag="4")]
+    #[prost(string, tag="1")]
     pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub requirements: ::core::option::Option<super::super::actor::v1::ActorResourceRequirements>,
 }
 /// Response for schedule actor request
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -87,19 +85,19 @@ pub struct ScheduleActorResponse {
     #[prost(string, tag="1")]
     pub request_id: ::prost::alloc::string::String,
     /// Immediate status (PENDING, SCHEDULED, or FAILED)
-    #[prost(enumeration="SchedulingStatus", tag="2")]
+    #[prost(enumeration="SchedulingStatus", tag="3")]
     pub status: i32,
     /// If SCHEDULED: selected node ID
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub node_id: ::prost::alloc::string::String,
     /// If SCHEDULED: node gRPC address
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub node_address: ::prost::alloc::string::String,
     /// If FAILED: error message
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub error_message: ::prost::alloc::string::String,
     /// Timestamp
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag="7")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Request to get scheduling status
@@ -115,7 +113,9 @@ pub struct GetSchedulingStatusRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSchedulingStatusResponse {
     /// Scheduling request
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub request: ::core::option::Option<SchedulingRequest>,
 }
 /// Request to get node capacity
@@ -124,6 +124,8 @@ pub struct GetSchedulingStatusResponse {
 pub struct GetNodeCapacityRequest {
     /// Node ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 /// Response for get node capacity
@@ -131,7 +133,9 @@ pub struct GetNodeCapacityRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetNodeCapacityResponse {
     /// Node capacity (imported from node.proto)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub capacity: ::core::option::Option<super::super::node::v1::NodeCapacity>,
 }
 /// Request to list all node capacities
@@ -139,10 +143,12 @@ pub struct GetNodeCapacityResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodeCapacitiesRequest {
     /// Optional: Filter by labels
-    #[prost(map="string, string", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
     pub label_filters: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Optional: Pagination
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 /// Response for list node capacities
@@ -150,10 +156,12 @@ pub struct ListNodeCapacitiesRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodeCapacitiesResponse {
     /// Node capacities
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub capacities: ::prost::alloc::vec::Vec<NodeCapacityEntry>,
     /// Pagination
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// Node capacity entry (node ID + capacity)
@@ -203,6 +211,189 @@ impl SchedulingStatus {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

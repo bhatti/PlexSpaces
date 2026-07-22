@@ -1,8 +1,9 @@
 # Cloudflare Workers Guild Chat Application Configuration
 #
-# Deploys a Discord-style chat server with two Durable Object actors:
-# - ChatRoomActor: per-room state, members, message history, fan-out
-# - RateLimiterActor: per-user token bucket spam prevention
+# Deploys a Discord-style chat server with three Durable Object actors:
+# - ChatRoomActor: per-room state, members, message history, real fan-out
+# - RateLimiterActor: per-user token bucket spam prevention (distributed KV increment)
+# - AlarmDemoActor: durable alarm / batch processing (DO alarm() equivalent)
 #
 # Equivalent to a Cloudflare Workers wrangler.toml with:
 #   [[durable_objects.bindings]]
@@ -12,6 +13,10 @@
 #   [[durable_objects.bindings]]
 #   name = "RATE_LIMITER"
 #   class_name = "RateLimiter"
+#
+#   [[durable_objects.bindings]]
+#   name = "ALARM_DEMO"
+#   class_name = "AlarmDemo"
 
 tenant_id = "default"
 
@@ -49,4 +54,19 @@ facets = [
 [supervisor.children.args]
 max_tokens = "5"
 refill_rate_ms = "1000"
+tenant_id = "default"
+
+# AlarmDemo actor (Durable Object alarm() API — batch/deferred processing)
+[[supervisor.children]]
+name = "AlarmDemoActor"
+actor_type = "AlarmDemoActor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "1h", activation_strategy = "lazy" } },
+  { type = "reminder", priority = 90, config = {} }
+]
+
+[supervisor.children.args]
 tenant_id = "default"

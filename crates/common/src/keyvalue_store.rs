@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Unified KeyValueStore trait for actor/facet/WASM host integration.
@@ -79,7 +79,8 @@ pub type KeyValueStoreResult<T> = Result<T, KeyValueStoreError>;
 ///
 /// ## Design
 /// - All operations are tenant-scoped via `RequestContext`
-/// - Provides CRUD, TTL, and atomic operations
+/// - Provides CRUD, TTL, CAS, increment, and batch read/write operations
+/// - `multi_put` is best-effort (non-atomic); implementations may differ
 /// - Implementations: in-memory (facets), SQL/Redis adapters (services layer)
 ///
 /// ## Relationship to plexspaces-keyvalue::KeyValueStore
@@ -138,4 +139,26 @@ pub trait KeyValueStore: Send + Sync {
         key: &str,
         delta: i64,
     ) -> KeyValueStoreResult<i64>;
+
+    /// Get remaining TTL for a key. Returns `None` if key has no TTL or does not exist.
+    async fn get_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> KeyValueStoreResult<Option<Duration>>;
+
+    /// Get multiple keys in one call. Returns values in the same order as `keys`.
+    /// Missing keys produce `None` at the corresponding index.
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KeyValueStoreResult<Vec<Option<Vec<u8>>>>;
+
+    /// Put multiple key-value pairs. Order of writes is implementation-defined.
+    async fn multi_put(
+        &self,
+        ctx: &RequestContext,
+        pairs: &[(&str, Vec<u8>)],
+    ) -> KeyValueStoreResult<()>;
 }

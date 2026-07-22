@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Alarms API (Rust WASM)
+
+[workspace]
+
+[package]
+name = "alarms-api-wasm"
+version = "1.0.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Cloudflare DO alarm() pattern → PlexSpaces: RequestQueue actor with durable alarm batch processing"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.51.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

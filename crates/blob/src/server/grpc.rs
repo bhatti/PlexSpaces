@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! gRPC Blob Service Implementation
@@ -142,6 +142,7 @@ impl BlobServiceTrait for BlobServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to upload blob: {}", e)))?;
 
         Ok(Response::new(UploadBlobResponse {
+            request_id: req.request_id.clone(),
             metadata: Some(metadata),
         }))
     }
@@ -179,10 +180,12 @@ impl BlobServiceTrait for BlobServiceImpl {
 
         // Spawn task to send data
         let metadata_clone = metadata.clone();
+        let request_id_clone = req.request_id.clone();
         tokio::spawn(async move {
             // Send metadata first
             if tx
                 .send(Ok(DownloadBlobResponse {
+                    request_id: request_id_clone.clone(),
                     metadata: Some(metadata_clone),
                     data: vec![],
                 }))
@@ -197,6 +200,7 @@ impl BlobServiceTrait for BlobServiceImpl {
             for chunk in data.chunks(CHUNK_SIZE) {
                 if tx
                     .send(Ok(DownloadBlobResponse {
+                        request_id: request_id_clone.clone(),
                         metadata: None,
                         data: chunk.to_vec(),
                     }))
@@ -234,6 +238,7 @@ impl BlobServiceTrait for BlobServiceImpl {
             .map_err(|e| Status::not_found(format!("Blob not found: {}", e)))?;
 
         Ok(Response::new(GetBlobMetadataResponse {
+            request_id: req.request_id.clone(),
             metadata: Some(metadata),
         }))
     }
@@ -291,6 +296,7 @@ impl BlobServiceTrait for BlobServiceImpl {
         use plexspaces_proto::common::v1::PageResponse;
         let has_next = (offset + limit) < total_count;
         let page_response = PageResponse {
+            request_id: ulid::Ulid::new().to_string(),
             total_size: total_count as i32,
             offset: offset as i32,
             limit: limit as i32,
@@ -298,6 +304,7 @@ impl BlobServiceTrait for BlobServiceImpl {
         };
 
         Ok(Response::new(ListBlobsResponse {
+            request_id: req.request_id.clone(),
             blobs,
             page: Some(page_response),
         }))
@@ -322,7 +329,9 @@ impl BlobServiceTrait for BlobServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to delete blob: {}", e)))?;
 
-        Ok(Response::new(DeleteBlobResponse {}))
+        Ok(Response::new(DeleteBlobResponse {
+            request_id: req.request_id.clone(),
+        }))
     }
 
     /// Generate presigned URL
@@ -359,6 +368,7 @@ impl BlobServiceTrait for BlobServiceImpl {
         ));
 
         Ok(Response::new(GeneratePresignedUrlResponse {
+            request_id: req.request_id.clone(),
             url,
             expires_at,
         }))

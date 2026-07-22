@@ -69,47 +69,61 @@ pub struct ServiceLinkConfig {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AddServiceLinkRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub link: ::core::option::Option<ServiceLinkConfig>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AddServiceLinkResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub link: ::core::option::Option<ServiceLinkConfig>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RemoveServiceLinkRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetServiceLinkRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetServiceLinkResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub link: ::core::option::Option<ServiceLinkConfig>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListServiceLinksRequest {
-    #[prost(int32, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
     pub page_size: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub page_token: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListServiceLinksResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub links: ::prost::alloc::vec::Vec<ServiceLinkConfig>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
 }
 /// Wire transport for an external service link (HTTP implemented first; GRPC/CHANNEL reserved).
@@ -566,6 +580,20 @@ pub struct RuntimeConfig {
     /// Named policy templates referenced by ServiceLinkConfig.policy_template or application requirements.
     #[prost(map="string, message", tag="16")]
     pub outbound_policy_templates: ::std::collections::HashMap<::prost::alloc::string::String, ClientTransportPolicy>,
+    /// Static file directories to serve over HTTP.
+    #[prost(message, repeated, tag="17")]
+    pub static_dirs: ::prost::alloc::vec::Vec<StaticDirMount>,
+}
+/// A single static file directory mount.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StaticDirMount {
+    /// URL path prefix (e.g., "/apps/chat" or "apps/chat")
+    #[prost(string, tag="1")]
+    pub mount_path: ::prost::alloc::string::String,
+    /// Local filesystem directory to serve (must exist at startup)
+    #[prost(string, tag="2")]
+    pub fs_path: ::prost::alloc::string::String,
 }
 /// gRPC server configuration
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -929,6 +957,24 @@ pub struct NodeCapabilities {
     #[prost(string, repeated, tag="6")]
     pub supported_runtimes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+/// Real-time resource snapshot shared by PingResponse (live) and
+/// NodeRegistration.resource_hints (startup estimate from thin nodes).
+/// 0 means unavailable on the reporting host.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeResourceHints {
+    /// Current CPU utilisation, 0–100. Populated from sysinfo on full nodes;
+    /// set to 0 by thin nodes (browsers cannot read CPU usage).
+    #[prost(float, tag="1")]
+    pub cpu_percent: f32,
+    /// Available RAM in MiB. Populated from sysinfo; 0 means unavailable.
+    #[prost(uint64, tag="2")]
+    pub memory_available_mb: u64,
+    /// Logical CPU count (hardware_concurrency). Populated from
+    /// std::thread::available_parallelism (Rust) / navigator.hardwareConcurrency (JS).
+    #[prost(uint32, tag="3")]
+    pub available_cores: u32,
+}
 /// Node metrics (combined resource usage and operational metrics)
 ///
 /// ## Purpose
@@ -1005,7 +1051,9 @@ pub struct NodeMetrics {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterNodeRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub node: ::core::option::Option<Node>,
 }
 /// Response for node registration
@@ -1013,8 +1061,10 @@ pub struct RegisterNodeRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterNodeResponse {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub registered_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Request to unregister a node
@@ -1022,8 +1072,10 @@ pub struct RegisterNodeResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnregisterNodeRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub force: bool,
 }
 /// Request to get node status
@@ -1031,30 +1083,36 @@ pub struct UnregisterNodeRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetNodeRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 /// Request to list nodes
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodesRequest {
-    #[prost(enumeration="NodeType", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(enumeration="NodeType", tag="2")]
     pub node_type: i32,
-    #[prost(enumeration="NodeStatus", tag="2")]
+    #[prost(enumeration="NodeStatus", tag="3")]
     pub status: i32,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub page_size: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub page_token: ::prost::alloc::string::String,
 }
 /// Response for list nodes
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub nodes: ::prost::alloc::vec::Vec<Node>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub total_count: i32,
 }
 /// Request to assign an actor to a node
@@ -1062,10 +1120,12 @@ pub struct ListNodesResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AssignActorRequest {
     #[prost(string, tag="1")]
-    pub node_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub config: ::core::option::Option<super::super::actor::v1::ActorConfig>,
 }
 /// Response for actor assignment
@@ -1073,10 +1133,12 @@ pub struct AssignActorRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AssignActorResponse {
     #[prost(string, tag="1")]
-    pub node_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub assigned_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Request to remove an actor from a node
@@ -1084,10 +1146,12 @@ pub struct AssignActorResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RemoveActorRequest {
     #[prost(string, tag="1")]
-    pub node_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub actor_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub graceful: bool,
 }
 // ============================================================================
@@ -1116,29 +1180,35 @@ pub struct ActorLock {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AcquireActorLockRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub requesting_node_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub lease_duration: ::core::option::Option<::prost_types::Duration>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AcquireActorLockResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub lock: ::core::option::Option<ActorLock>,
     /// If failed, who has it
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub conflict_node_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseActorLockRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub lock_token: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -1198,6 +1268,14 @@ pub struct NodeRegistration {
     pub error_count: u64,
     #[prost(message, optional, tag="9")]
     pub registered_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Connectivity role; defaults to FULL for all gRPC-registered nodes.
+    /// Thin nodes set this to NODE_ROLE_THIN in the WS handshake.
+    #[prost(enumeration="NodeRole", tag="10")]
+    pub node_role: i32,
+    /// Startup resource estimate from thin nodes (browser hardwareConcurrency etc.).
+    /// For full nodes this is populated from sysinfo at registration time.
+    #[prost(message, optional, tag="11")]
+    pub resource_hints: ::core::option::Option<NodeResourceHints>,
 }
 /// Node capacity for resource-aware scheduling
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1245,33 +1323,43 @@ pub struct Heartbeat {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JoinLatticeRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub node: ::core::option::Option<NodeDiscovery>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JoinLatticeResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag="3")]
     pub existing_nodes: ::prost::alloc::vec::Vec<NodeDiscovery>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LeaveLatticeRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DiscoverNodesRequest {
-    #[prost(map="string, string", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
     pub capability_filters: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DiscoverNodesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub nodes: ::prost::alloc::vec::Vec<NodeDiscovery>,
 }
 /// GetReleaseSpec request
@@ -1279,13 +1367,17 @@ pub struct DiscoverNodesResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetReleaseSpecRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 /// GetReleaseSpec response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetReleaseSpecResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub release_spec: ::core::option::Option<ReleaseSpec>,
 }
 /// RegisterNodes request - supports multiple nodes
@@ -1293,13 +1385,15 @@ pub struct GetReleaseSpecResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterNodesRequest {
     /// Nodes to register
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub nodes: ::prost::alloc::vec::Vec<NodeRegistration>,
     /// Cluster name for grouping
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub cluster: ::prost::alloc::string::String,
     /// Labels for categorization
-    #[prost(map="string, string", tag="3")]
+    #[prost(map="string, string", tag="4")]
     pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// RegisterNodes response
@@ -1307,17 +1401,21 @@ pub struct RegisterNodesRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterNodesResponse {
     /// IDs of successfully registered nodes
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub registered_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Errors for nodes that failed to register
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub errors: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// UnregisterNode response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UnregisterNodeResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
 }
 /// ListConnectedNodes request (paginated)
@@ -1326,15 +1424,17 @@ pub struct UnregisterNodeResponse {
 pub struct ListConnectedNodesRequest {
     /// Filter by cluster name
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub cluster: ::prost::alloc::string::String,
     /// Page size (default: 100, max: 1000)
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub page_size: i32,
     /// Page token for pagination
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub page_token: ::prost::alloc::string::String,
     /// Include health status in response
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub include_health: bool,
 }
 /// ListConnectedNodes response
@@ -1342,13 +1442,15 @@ pub struct ListConnectedNodesRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListConnectedNodesResponse {
     /// List of node registrations
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub nodes: ::prost::alloc::vec::Vec<NodeRegistration>,
     /// Token for next page
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
     /// Total count (if available)
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub total_count: i32,
 }
 /// StreamConnectedNodes request
@@ -1357,9 +1459,11 @@ pub struct ListConnectedNodesResponse {
 pub struct StreamConnectedNodesRequest {
     /// Filter by cluster name
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub cluster: ::prost::alloc::string::String,
     /// Include health status
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub include_health: bool,
 }
 /// GetMetrics request
@@ -1367,9 +1471,11 @@ pub struct StreamConnectedNodesRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetMetricsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
     /// Include extended metrics (actor details, etc.)
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub include_extended: bool,
 }
 /// CalculateCapacity request
@@ -1377,6 +1483,8 @@ pub struct GetMetricsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CalculateCapacityRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 /// ListNodeApplications request
@@ -1384,26 +1492,30 @@ pub struct CalculateCapacityRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodeApplicationsRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
     /// Page size
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub page_size: i32,
     /// Page token
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub page_token: ::prost::alloc::string::String,
     /// Filter by status
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub status_filter: ::prost::alloc::string::String,
 }
 /// ListNodeApplications response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNodeApplicationsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub applications: ::prost::alloc::vec::Vec<NodeApplicationInfo>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag="4")]
     pub total_count: i32,
 }
 /// NodeApplicationInfo - Information about an application on a node
@@ -1428,19 +1540,23 @@ pub struct NodeApplicationInfo {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetHealthRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 /// GetHealth response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetHealthResponse {
-    #[prost(enumeration="NodeHealthStatus", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(enumeration="NodeHealthStatus", tag="2")]
     pub status: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub message: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub last_checked: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(map="string, string", tag="4")]
+    #[prost(map="string, string", tag="5")]
     pub details: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// SendHeartbeat request
@@ -1448,19 +1564,23 @@ pub struct GetHealthResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendHeartbeatRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub capacity: ::core::option::Option<NodeCapacity>,
-    #[prost(map="string, double", tag="3")]
+    #[prost(map="string, double", tag="4")]
     pub metrics: ::std::collections::HashMap<::prost::alloc::string::String, f64>,
 }
 /// SendHeartbeat response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendHeartbeatResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub acknowledged: bool,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub server_time: ::core::option::Option<::prost_types::Timestamp>,
 }
 // ============================================================================
@@ -1473,12 +1593,14 @@ pub struct SendHeartbeatResponse {
 pub struct PingRequest {
     /// Source node sending the ping
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub source_node_id: ::prost::alloc::string::String,
     /// Sequence number for correlation
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub sequence_number: u64,
     /// Piggybacked membership updates (for efficient dissemination)
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag="4")]
     pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
 }
 /// Ping response
@@ -1487,25 +1609,31 @@ pub struct PingRequest {
 pub struct PingResponse {
     /// Responding node's ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
     /// Echo back sequence number
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub sequence_number: u64,
     /// Current incarnation number (for conflict resolution)
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag="4")]
     pub incarnation: u64,
     /// Piggybacked membership updates
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag="5")]
     pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
     /// Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub cluster_name: ::prost::alloc::string::String,
     /// Responding node's gRPC address
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub node_address: ::prost::alloc::string::String,
     /// Last heartbeat observed by the responding node for itself
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="8")]
     pub last_heartbeat: ::core::option::Option<::prost_types::Timestamp>,
+    /// Live resource snapshot from the responding node.
+    /// Used by thin-node clients for work-aware task scheduling.
+    #[prost(message, optional, tag="9")]
+    pub resources: ::core::option::Option<NodeResourceHints>,
 }
 /// Indirect ping request - Ask intermediary to ping target
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1513,15 +1641,17 @@ pub struct PingResponse {
 pub struct PingReqRequest {
     /// Node requesting the indirect ping
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub source_node_id: ::prost::alloc::string::String,
     /// Target node to ping
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub target_node_id: ::prost::alloc::string::String,
     /// Target's address (in case intermediary doesn't know it)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub target_address: ::prost::alloc::string::String,
     /// Sequence number for correlation
-    #[prost(uint64, tag="4")]
+    #[prost(uint64, tag="5")]
     pub sequence_number: u64,
 }
 /// Indirect ping response
@@ -1529,13 +1659,15 @@ pub struct PingReqRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PingReqResponse {
     /// Whether the target responded to indirect ping
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub target_alive: bool,
     /// Target's incarnation (if alive)
-    #[prost(uint64, tag="2")]
+    #[prost(uint64, tag="3")]
     pub target_incarnation: u64,
     /// Piggybacked membership updates
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag="4")]
     pub updates: ::prost::alloc::vec::Vec<MembershipUpdate>,
 }
 /// Membership update - Piggybacked on protocol messages
@@ -1564,12 +1696,14 @@ pub struct MembershipUpdate {
 pub struct SyncMembershipRequest {
     /// Requesting node's ID
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub source_node_id: ::prost::alloc::string::String,
     /// Requesting node's full membership state
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag="3")]
     pub members: ::prost::alloc::vec::Vec<MembershipUpdate>,
     /// Whether this is a push (true) or pull (false) sync
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub is_push: bool,
 }
 /// Sync membership response
@@ -1577,10 +1711,12 @@ pub struct SyncMembershipRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SyncMembershipResponse {
     /// Responding node's full membership state
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub members: ::prost::alloc::vec::Vec<MembershipUpdate>,
     /// Number of updates received that were new/updated
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag="3")]
     pub updates_applied: i32,
 }
 // ============================================================================
@@ -1611,18 +1747,20 @@ pub struct ConnectNodesRequest {
     /// Node addresses to connect to (e.g., "node2:8000", "192.168.1.10:8000")
     /// Each address will be pinged to verify connectivity.
     /// At least one address is required, maximum 100 addresses per request.
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub node_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Optional: cluster name for grouping connected nodes.
     /// If specified, nodes are tagged with this cluster for filtering.
     /// Must be alphanumeric with hyphens, max 63 characters (DNS label format).
     ///
     /// Optional: timeout for each connection attempt.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub cluster: ::prost::alloc::string::String,
     /// Default: 5 seconds if not specified.
     /// Range: 1 second to 60 seconds.
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 /// ConnectNodes response
@@ -1635,14 +1773,16 @@ pub struct ConnectNodesRequest {
 pub struct ConnectNodesResponse {
     /// Successfully connected nodes: node_id -> address.
     /// The node_id is retrieved from the remote node via Ping RPC.
-    #[prost(map="string, string", tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
     pub connected: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Failed connections: address -> error message.
     /// Contains addresses that could not be connected with error details.
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub failed: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Total time taken for all connection attempts (parallel execution).
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub total_time: ::core::option::Option<::prost_types::Duration>,
 }
 /// DisconnectNodes request - Erlang-style erlang:disconnect_node
@@ -1664,12 +1804,14 @@ pub struct DisconnectNodesRequest {
     /// Node IDs to disconnect from.
     /// Use ListConnectedNodes to get current node IDs.
     /// At least one node_id is required, maximum 100 per request.
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Optional: graceful disconnect with notification.
     /// If true, attempts to notify remote node before disconnecting.
     /// Default: false (silent disconnect, remote detects via SWIM timeout).
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub notify_remote: bool,
 }
 /// DisconnectNodes response
@@ -1677,10 +1819,12 @@ pub struct DisconnectNodesRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DisconnectNodesResponse {
     /// Successfully disconnected node IDs.
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
     pub disconnected: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Failed disconnections: node_id -> error message.
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub failed: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// Node type enumeration
@@ -1694,6 +1838,8 @@ pub enum NodeType {
     NodeTypeKubernetes = 2,
     /// Firecracker microVM
     NodeTypeFirecracker = 3,
+    /// WebSocket-only thin client node (no inbound gRPC)
+    NodeTypeThin = 4,
 }
 impl NodeType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1706,6 +1852,7 @@ impl NodeType {
             NodeType::NodeTypeProcess => "NODE_TYPE_PROCESS",
             NodeType::NodeTypeKubernetes => "NODE_TYPE_KUBERNETES",
             NodeType::NodeTypeFirecracker => "NODE_TYPE_FIRECRACKER",
+            NodeType::NodeTypeThin => "NODE_TYPE_THIN",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1715,6 +1862,41 @@ impl NodeType {
             "NODE_TYPE_PROCESS" => Some(Self::NodeTypeProcess),
             "NODE_TYPE_KUBERNETES" => Some(Self::NodeTypeKubernetes),
             "NODE_TYPE_FIRECRACKER" => Some(Self::NodeTypeFirecracker),
+            "NODE_TYPE_THIN" => Some(Self::NodeTypeThin),
+            _ => None,
+        }
+    }
+}
+/// Node connectivity role.
+/// gRPC-connected nodes are always FULL. WebSocket-connected nodes declare
+/// their role in the WS handshake frame; thin nodes cannot accept inbound gRPC.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NodeRole {
+    NodeRoleUnspecified = 0,
+    /// accepts inbound gRPC (bidirectional)
+    NodeRoleFull = 1,
+    /// outbound-only WS connection (behind VPN/firewall)
+    NodeRoleThin = 2,
+}
+impl NodeRole {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            NodeRole::NodeRoleUnspecified => "NODE_ROLE_UNSPECIFIED",
+            NodeRole::NodeRoleFull => "NODE_ROLE_FULL",
+            NodeRole::NodeRoleThin => "NODE_ROLE_THIN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NODE_ROLE_UNSPECIFIED" => Some(Self::NodeRoleUnspecified),
+            "NODE_ROLE_FULL" => Some(Self::NodeRoleFull),
+            "NODE_ROLE_THIN" => Some(Self::NodeRoleThin),
             _ => None,
         }
     }
@@ -2050,6 +2232,189 @@ impl TaskRouterErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

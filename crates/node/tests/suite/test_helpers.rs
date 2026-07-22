@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Test helper functions to replace deprecated Node methods
@@ -158,7 +158,7 @@ pub async fn registry_tell(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
     let ctx =
-        RequestContext::new_without_auth("test-tenant".into(), actor_id.namespace().to_string());
+        RequestContext::new_without_auth("default".into(), actor_id.namespace().to_string());
     actor_registry
         .tell(&ctx, actor_id, message)
         .await

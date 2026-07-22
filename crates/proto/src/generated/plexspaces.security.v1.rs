@@ -219,23 +219,27 @@ pub struct AuditLogEntry {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AuthenticateServiceRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub service_id: ::prost::alloc::string::String,
     /// Client certificate
-    #[prost(bytes="vec", tag="2")]
+    #[prost(bytes="vec", tag="3")]
     pub certificate: ::prost::alloc::vec::Vec<u8>,
     /// Signature of challenge
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub signature: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AuthenticateServiceResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub identity: ::core::option::Option<ServiceIdentity>,
     /// Short-lived token for subsequent requests
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub token: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// API authentication (JWT)
@@ -243,18 +247,22 @@ pub struct AuthenticateServiceResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AuthenticateApiRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub jwt_token: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AuthenticateApiResponse {
-    /// Service ID from JWT claims
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    /// Service ID from JWT claims
+    #[prost(string, tag="2")]
     pub service_id: ::prost::alloc::string::String,
     /// Scopes from JWT claims
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag="3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// API key management
@@ -262,71 +270,87 @@ pub struct AuthenticateApiResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateApiKeyRequest {
     #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag="4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub expires_in: ::core::option::Option<::prost_types::Duration>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateApiKeyResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub api_key: ::core::option::Option<ApiKey>,
     /// Only returned on creation
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub key: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RevokeApiKeyRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub key_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RevokeApiKeyResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApiKeysRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub page_request: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApiKeysResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub api_keys: ::prost::alloc::vec::Vec<ApiKey>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page_response: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// Audit logs
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAuditLogsRequest {
-    #[prost(message, optional, tag="1")]
-    pub start_time: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
     #[prost(message, optional, tag="2")]
+    pub start_time: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="3")]
     pub end_time: ::core::option::Option<::prost_types::Timestamp>,
     /// Changed from user_id to service_id
-    #[prost(string, tag="3")]
-    pub service_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
-    pub action: ::prost::alloc::string::String,
+    pub service_id: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
+    pub action: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
     pub resource: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag="7")]
     pub page_request: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAuditLogsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub entries: ::prost::alloc::vec::Vec<AuditLogEntry>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page_response: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// User record for OAuth/OIDC authentication flow.
@@ -380,37 +404,41 @@ pub struct User {
 pub struct GetOrCreateByEmailRequest {
     /// Email from OIDC id_token
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub email: ::prost::alloc::string::String,
     /// Tenant ID (from OIDC org claim or config mapping)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub tenant_id: ::prost::alloc::string::String,
     /// Display name from OIDC profile
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub display_name: ::prost::alloc::string::String,
     /// Avatar URL from OIDC profile
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub avatar_url: ::prost::alloc::string::String,
     /// OIDC provider name
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub provider: ::prost::alloc::string::String,
     /// OIDC subject ID
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub provider_sub: ::prost::alloc::string::String,
     /// Roles from OIDC claims
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag="8")]
     pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Groups from OIDC claims
-    #[prost(string, repeated, tag="8")]
+    #[prost(string, repeated, tag="9")]
     pub groups: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetOrCreateByEmailResponse {
     /// The user (existing or newly created)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub user: ::core::option::Option<User>,
     /// Whether this was a new user creation
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub created: bool,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -418,23 +446,27 @@ pub struct GetOrCreateByEmailResponse {
 pub struct UpdateUserRequest {
     /// User ID to update
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub user_id: ::prost::alloc::string::String,
     /// Fields to update (only non-empty/set fields are applied)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub display_name: ::prost::alloc::string::String,
-    #[prost(bool, optional, tag="3")]
+    #[prost(bool, optional, tag="4")]
     pub admin: ::core::option::Option<bool>,
-    #[prost(string, repeated, tag="4")]
-    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="5")]
+    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="6")]
     pub groups: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, tag="6")]
+    #[prost(string, tag="7")]
     pub avatar_url: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateUserResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub user: ::core::option::Option<User>,
 }
 /// First-class tenant entity. Created automatically on first OIDC login for a tenant slug.
@@ -497,33 +529,41 @@ pub struct ApiToken {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListUsersRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
     /// Admin-only: filter to a specific tenant. Empty = caller's own tenant for non-admins.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub tenant_id_filter: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListUsersResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub users: ::prost::alloc::vec::Vec<User>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 /// Paginated tenant listing request. Non-admins see only their own tenant.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListTenantsRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListTenantsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub tenants: ::prost::alloc::vec::Vec<Tenant>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -531,48 +571,243 @@ pub struct ListTenantsResponse {
 pub struct CreateApiTokenRequest {
     /// User-assigned label for this token
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
     /// Scopes to grant. Defaults to \["read", "write"\] if empty.
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag="3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// TTL for the token. Defaults to 100× the session JWT TTL if unset.
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub ttl: ::core::option::Option<::prost_types::Duration>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateApiTokenResponse {
     /// Token metadata (without the secret)
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub token: ::core::option::Option<ApiToken>,
     /// The plaintext token (psx_<secret>). Shown ONCE — store it now.
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub plaintext: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteApiTokenRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub token_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteApiTokenResponse {
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApiTokensRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListApiTokensResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub tokens: ::prost::alloc::vec::Vec<ApiToken>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub page: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

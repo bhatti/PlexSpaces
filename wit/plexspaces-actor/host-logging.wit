@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Logging and time utilities for deployable WASM actors.
+
+interface host-logging {
+    log: func(level: string, message: string);
+    now-ms: func() -> u64;
+}

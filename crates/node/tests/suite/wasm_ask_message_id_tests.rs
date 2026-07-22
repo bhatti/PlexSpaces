@@ -55,7 +55,7 @@ fn get_calculator_wasm_path() -> PathBuf {
 async fn test_wasm_ask_single_message_id_flow() {
     // ── tracing (visible with --nocapture) ──────────────────────────
     let _ = tracing_subscriber::fmt()
-        .with_env_filter("info,plexspaces_application=debug,plexspaces_actor::routing=debug,plexspaces_services::actor_service=debug")
+        .with_env_filter("info,plexspaces_application=debug,plexspaces_actor::actor_registry=debug,plexspaces_services::actor_service=debug")
         .with_test_writer()
         .try_init();
 
@@ -127,6 +127,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         seed_nodes: vec![],
         required_service_links: vec![],
         metadata: None,
+        static_mount: String::new(),
     };
     let wasm_module = WasmModule {
         name: "calc-ask-test".to_string(),
@@ -150,6 +151,7 @@ async fn test_wasm_ask_single_message_id_flow() {
 
     let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
     let deploy_req = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: "calc-ask-test".to_string(),
         name: "calc-ask-test".to_string(),
         version: "1.0.0".to_string(),

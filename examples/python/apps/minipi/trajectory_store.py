@@ -36,7 +36,7 @@ class TrajectoryStoreActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:trajectory_store", host.self_id())
+            host.kv.put("svc:trajectory_store", host.self_id())
         except Exception:
             pass
         try:
@@ -63,7 +63,7 @@ class TrajectoryStoreActor:
 
         # Store full trajectory in KV
         try:
-            host.kv_put(f"trajectory:{traj_id}", json.dumps(trajectory))
+            host.kv.put(f"trajectory:{traj_id}", json.dumps(trajectory))
         except Exception as e:
             self.failed_count += 1
             host.warn(f"Failed to store trajectory {traj_id}: {e}")
@@ -82,7 +82,7 @@ class TrajectoryStoreActor:
             "stored_at_ms": host.now_ms(),
         }
         try:
-            host.kv_put(f"traj_meta:{traj_id}", json.dumps(meta))
+            host.kv.put(f"traj_meta:{traj_id}", json.dumps(meta))
         except Exception as e:
             host.warn(f"Failed to store trajectory metadata {traj_id}: {e}")
 
@@ -90,11 +90,11 @@ class TrajectoryStoreActor:
         if eval_run_id:
             try:
                 index_key = f"traj_index:{eval_run_id}"
-                existing_raw = host.kv_get(index_key)
+                existing_raw = host.kv.get(index_key)
                 index = json.loads(existing_raw) if existing_raw else []
                 if traj_id not in index:
                     index.append(traj_id)
-                    host.kv_put(index_key, json.dumps(index))
+                    host.kv.put(index_key, json.dumps(index))
             except Exception as e:
                 host.warn(f"Failed to update trajectory index for {eval_run_id}: {e}")
 
@@ -109,7 +109,7 @@ class TrajectoryStoreActor:
         """Get a full trajectory by ID."""
         if not trajectory_id:
             return {"error": "trajectory_id is required"}
-        raw = host.kv_get(f"trajectory:{trajectory_id}")
+        raw = host.kv.get(f"trajectory:{trajectory_id}")
         if not raw:
             return {"error": f"trajectory {trajectory_id} not found"}
         try:
@@ -137,7 +137,7 @@ class TrajectoryStoreActor:
 
         # Fall back to KV index
         try:
-            index_raw = host.kv_get(f"traj_index:{eval_run_id}")
+            index_raw = host.kv.get(f"traj_index:{eval_run_id}")
             traj_ids_from_kv = json.loads(index_raw) if index_raw else []
         except Exception:
             traj_ids_from_kv = []
@@ -148,14 +148,14 @@ class TrajectoryStoreActor:
         trajectories = []
         for traj_id in all_ids:
             if include_full:
-                raw = host.kv_get(f"trajectory:{traj_id}")
+                raw = host.kv.get(f"trajectory:{traj_id}")
                 if raw:
                     try:
                         trajectories.append(json.loads(raw))
                     except Exception:
                         pass
             else:
-                raw = host.kv_get(f"traj_meta:{traj_id}")
+                raw = host.kv.get(f"traj_meta:{traj_id}")
                 if raw:
                     try:
                         trajectories.append(json.loads(raw))
@@ -175,8 +175,8 @@ class TrajectoryStoreActor:
         if not trajectory_id:
             return {"error": "trajectory_id is required"}
         try:
-            host.kv_delete(f"trajectory:{trajectory_id}")
-            host.kv_delete(f"traj_meta:{trajectory_id}")
+            host.kv.delete(f"trajectory:{trajectory_id}")
+            host.kv.delete(f"traj_meta:{trajectory_id}")
             host.incr_counter("trajectories_deleted_total", 1)
             return {"status": "ok", "trajectory_id": trajectory_id}
         except Exception as e:
@@ -188,14 +188,14 @@ class TrajectoryStoreActor:
         if not eval_run_id:
             return {"error": "eval_run_id is required"}
         try:
-            index_raw = host.kv_get(f"traj_index:{eval_run_id}")
+            index_raw = host.kv.get(f"traj_index:{eval_run_id}")
             traj_ids = json.loads(index_raw) if index_raw else []
             deleted = 0
             for traj_id in traj_ids:
-                host.kv_delete(f"trajectory:{traj_id}")
-                host.kv_delete(f"traj_meta:{traj_id}")
+                host.kv.delete(f"trajectory:{traj_id}")
+                host.kv.delete(f"traj_meta:{traj_id}")
                 deleted += 1
-            host.kv_delete(f"traj_index:{eval_run_id}")
+            host.kv.delete(f"traj_index:{eval_run_id}")
             return {"status": "ok", "eval_run_id": eval_run_id, "deleted": deleted}
         except Exception as e:
             return {"error": str(e)}

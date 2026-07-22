@@ -31,6 +31,7 @@ fn create_shard_group_request(
     placement: Option<NodePlacement>,
 ) -> CreateShardGroupRequest {
     CreateShardGroupRequest {
+        request_id: ulid::Ulid::new().to_string(),
         config: Some(DataParallelConfig {
             group_id,
             shard_count,
@@ -318,6 +319,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         }
 
         let req = BulkUpdateShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             updates: proto_updates,
             consistency_level: consistency_level as i32,
@@ -347,6 +349,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = MapShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id: group_id.clone(),
             map_function: Some(message),
             timeout: default_timeout(),
@@ -431,6 +434,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ScatterGatherRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             query: Some(message),
             aggregation: aggregation as i32,
@@ -459,6 +463,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         let msg = make_call_message(serde_json::to_vec(&message)?);
 
         let req = BroadcastShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             message: Some(msg),
             timeout: default_timeout(),
@@ -488,6 +493,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ReduceShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             map_function: Some(msg),
             timeout: default_timeout(),
@@ -519,6 +525,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
         let req = AllReduceShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             map_function: Some(msg),
             timeout: default_timeout(),
@@ -547,6 +554,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .await;
 
         let req = BarrierShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             barrier_id,
             round,
@@ -570,7 +578,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        let req = SpawnActorsRequest { requests };
+        let req = SpawnActorsRequest { request_id: ulid::Ulid::new().to_string(), requests };
 
         let actor_service = self.actor_service.clone();
         actor_service
@@ -647,6 +655,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         }
 
         let req = BulkUpdateShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             updates: proto_updates,
             consistency_level: consistency_level as i32,
@@ -672,6 +681,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = MapShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             map_function: Some(message),
             timeout: Some(Duration {
@@ -701,6 +711,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ScatterGatherRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             query: Some(message),
             aggregation: aggregation as i32,
@@ -727,6 +738,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         let msg = make_call_message(serde_json::to_vec(&message)?);
 
         let req = BroadcastShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             message: Some(msg),
             timeout: default_timeout(),
@@ -754,6 +766,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ReduceShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             map_function: Some(msg),
             timeout: default_timeout(),
@@ -783,6 +796,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         let msg = make_call_message(serde_json::to_vec(&query)?);
 
         let req = AllReduceShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             map_function: Some(msg),
             timeout: default_timeout(),
@@ -809,6 +823,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         min_acks: u32,
     ) -> Result<BarrierShardGroupResponse> {
         let req = BarrierShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id,
             barrier_id,
             round,
@@ -830,7 +845,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         &mut self,
         requests: Vec<SpawnActorRequest>,
     ) -> Result<SpawnActorsResponse> {
-        let req = SpawnActorsRequest { requests };
+        let req = SpawnActorsRequest { request_id: ulid::Ulid::new().to_string(), requests };
 
         let resp = self
             .client

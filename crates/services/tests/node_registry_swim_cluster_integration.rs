@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plexspaces_actor::{
-    GrpcConnectionManager, InitializableServiceLocator, NodeRegistryTrait,
+    GrpcConnectionManager, GrpcNodeTransportClient, InitializableServiceLocator, NodeRegistryTrait,
     ObjectRegistry as CoreObjectRegistry, ServiceLocator,
 };
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
@@ -79,6 +79,12 @@ async fn spawn_gossip_node(
         .register_node_registry(node_registry.clone())
         .await;
 
+    let sl_trait: Arc<dyn ServiceLocator> = service_locator.clone();
+    let grpc_node = Arc::new(GrpcNodeTransportClient::new(sl_trait));
+    service_locator
+        .register_node_transport_client(grpc_node)
+        .await;
+
     let node_config = NodeConfig {
         id: node_id.to_string(),
         listen_addr: format!("127.0.0.1:{}", grpc_addr.port()),
@@ -143,6 +149,7 @@ async fn swim_reconcile_stamps_local_cluster_when_peer_ping_omits_cluster_name(
 
     client
         .connect_nodes(Request::new(ConnectNodesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_addresses: vec![format!("127.0.0.1:{}", peer.grpc_addr.port())],
             cluster: "heat".into(),
             timeout: Some(prost_types::Duration {
@@ -159,6 +166,7 @@ async fn swim_reconcile_stamps_local_cluster_when_peer_ping_omits_cluster_name(
     while Instant::now() < deadline {
         let list = client
             .list_connected_nodes(Request::new(ListConnectedNodesRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 cluster: "heat".into(),
                 page_size: 100,
                 page_token: String::new(),

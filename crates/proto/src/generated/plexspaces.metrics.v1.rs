@@ -102,16 +102,20 @@ pub mod summary_value {
 // REQUEST/RESPONSE MESSAGES
 // ============================================================================
 
-/// Empty - exports all metrics
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExportPrometheusRequest {
+    /// Empty - exports all metrics
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExportPrometheusResponse {
     /// Prometheus text format
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub content: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -119,15 +123,19 @@ pub struct ExportPrometheusResponse {
 pub struct GetMetricsRequest {
     /// Filter by metric name pattern (e.g., "plexspaces_actor_*")
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub name_pattern: ::prost::alloc::string::String,
     /// Filter by labels
-    #[prost(map="string, string", tag="2")]
+    #[prost(map="string, string", tag="3")]
     pub label_filter: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetMetricsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub metrics: ::prost::alloc::vec::Vec<Metric>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -135,19 +143,25 @@ pub struct GetMetricsResponse {
 pub struct ListMetricDefinitionsRequest {
     /// Filter by name pattern
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub name_pattern: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListMetricDefinitionsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub definitions: ::prost::alloc::vec::Vec<MetricDefinition>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecordMetricRequest {
     /// Metric to record
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub metric: ::core::option::Option<Metric>,
 }
 /// R.E.D. metrics for message routing
@@ -155,16 +169,18 @@ pub struct RecordMetricRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecordMessageRoutingRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub actor_id: ::prost::alloc::string::String,
     /// App / namespace dimension (e.g. tenant app-id)
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub success: bool,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub duration: ::core::option::Option<::prost_types::Duration>,
     /// Empty when success is true
-    #[prost(string, tag="5")]
+    #[prost(string, tag="6")]
     pub error_type: ::prost::alloc::string::String,
 }
 /// R.E.D. metrics for actor activation
@@ -172,15 +188,17 @@ pub struct RecordMessageRoutingRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecordActorActivationRequest {
     #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// e.g. "lazy", "eager", "virtual"
-    #[prost(string, tag="3")]
+    #[prost(string, tag="4")]
     pub activation_type: ::prost::alloc::string::String,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag="5")]
     pub success: bool,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag="6")]
     pub duration: ::core::option::Option<::prost_types::Duration>,
 }
 /// R.E.D. metrics for channel operations
@@ -188,29 +206,32 @@ pub struct RecordActorActivationRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RecordChannelMetricsRequest {
     #[prost(string, tag="1")]
-    pub channel_name: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub channel_name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub namespace: ::prost::alloc::string::String,
     /// e.g. "ack", "nack", "dlq", "send", "receive"
-    #[prost(string, tag="3")]
-    pub operation: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
     pub backend: ::prost::alloc::string::String,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag="6")]
     pub success: bool,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag="7")]
     pub duration: ::core::option::Option<::prost_types::Duration>,
-    #[prost(uint32, tag="7")]
+    #[prost(uint32, tag="8")]
     pub delivery_count: u32,
-    #[prost(string, tag="8")]
+    #[prost(string, tag="9")]
     pub reason: ::prost::alloc::string::String,
 }
 /// Request to get actor metrics
-///
-/// Empty - returns metrics for the local ActorService
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetActorMetricsRequest {
+    /// Empty - returns metrics for the local ActorService
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
 }
 /// Request to get node metrics
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -218,6 +239,8 @@ pub struct GetActorMetricsRequest {
 pub struct GetNodeMetricsRequest {
     /// Node ID (empty = local node)
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub node_id: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -683,6 +706,189 @@ impl MetricType {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

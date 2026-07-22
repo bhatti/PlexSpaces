@@ -50,6 +50,7 @@ pub mod node_connectivity;
 pub mod object_registry;
 pub mod outbound_http;
 pub mod service_locator_base;
+pub mod transport_client;
 pub mod tuplespace_provider;
 pub mod wasm_runtime;
 
@@ -78,6 +79,7 @@ pub use outbound_http::{
     OutboundHttpResponse,
 };
 pub use service_locator_base::{ActorFactory, ActorService, ServiceLocatorBase};
+pub use transport_client::{ActorTransportClient, NodeTransportClient};
 pub use tuplespace_provider::TupleSpaceProvider;
 pub use wasm_runtime::WasmRuntimeTrait;
 

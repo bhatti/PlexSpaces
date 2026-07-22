@@ -17,7 +17,10 @@ mod wasm_app {
     });
 
     use exports::plexspaces::actor::actor::Guest;
-    use plexspaces::actor::host;
+    use plexspaces::actor::host_actor::{pg_broadcast, pg_join, pg_members, self_id, send, send_after, spawn, stop};
+use plexspaces::actor::host_blob::{blob_delete, blob_download, blob_list, blob_upload};
+use plexspaces::actor::host_kv::{kv_delete, kv_get, kv_list, kv_put};
+use plexspaces::actor::host_ts::{ts_read, ts_read_all, ts_take, ts_write};
     use plexspaces_sdk::simple_actor::ActorWorldHandlers;
     use plexspaces_sdk::{gen_server_actor, json, plexspaces_handlers};
 
@@ -186,6 +189,7 @@ mod wasm_app {
             .as_array()
             .ok_or_else(|| "tuple must be a JSON array".to_string())?;
         let request = WriteRequest {
+            request_id: String::new(),
             tuples: vec![json_array_to_proto_tuple(values, false)?],
             transaction_id: String::new(),
         };
@@ -197,6 +201,7 @@ mod wasm_app {
             .as_array()
             .ok_or_else(|| "pattern must be a JSON array".to_string())?;
         let request = ReadRequest {
+            request_id: String::new(),
             template: Some(json_array_to_proto_tuple(values, true)?),
             timeout: None,
             blocking: false,
@@ -247,7 +252,7 @@ mod wasm_app {
                     .and_then(|item| item.parse::<i64>().ok())
             })
             .unwrap_or(0);
-        let self_id = host::self_id();
+        let self_id = self_id();
         with_state(|state| {
             // Reset the guest-local state for every activation. Durable state, when present,
             // is restored afterward through the framework checkpoint path.
@@ -261,7 +266,7 @@ mod wasm_app {
             }
         });
         if role == "channel" {
-            host_result(host::pg_join(&group), "join group")?;
+            host_result(pg_join(&group), "join group")?;
         }
         Ok(())
     }
@@ -280,7 +285,7 @@ mod wasm_app {
                 "reminder_ticks": state.reminder_ticks,
                 "joined_group": state.joined_group,
                 "last_spawned_id": state.last_spawned_id,
-                "self_id": host::self_id(),
+                "self_id": self_id(),
             }))
         })
     }
@@ -302,7 +307,7 @@ mod wasm_app {
     fn schedule_self_message(delay_ms: u64, msg_type: &str, payload: Value) -> Vec<u8> {
         let payload_bytes = payload.to_string().into_bytes();
         match host_result(
-            host::send_after(delay_ms, msg_type, &payload_bytes),
+            send_after(delay_ms, msg_type, &payload_bytes),
             msg_type,
         ) {
             Ok(timer_id) => timer_id,
@@ -320,7 +325,7 @@ mod wasm_app {
             .get("value")
             .and_then(|item| item.as_str())
             .unwrap_or("");
-        match host_result(host::kv_put(key, value.as_bytes()), "kv_put") {
+        match host_result(kv_put(key, value.as_bytes()), "kv_put") {
             Ok(_) => json_bytes(json!({ "ok": true, "key": key, "value": value })),
             Err(err) => json_error(err),
         }
@@ -331,7 +336,7 @@ mod wasm_app {
             .get("key")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::kv_get(key), "kv_get") {
+        match host_result(kv_get(key), "kv_get") {
             Ok(value) => json_bytes(json!({ "key": key, "value": json_string(value) })),
             Err(err) => json_error(err),
         }
@@ -342,7 +347,7 @@ mod wasm_app {
             .get("prefix")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::kv_list(prefix), "kv_list") {
+        match host_result(kv_list(prefix), "kv_list") {
             Ok(keys) => json_bytes(json!({ "keys": keys })),
             Err(err) => json_error(err),
         }
@@ -353,7 +358,7 @@ mod wasm_app {
             .get("key")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::kv_delete(key), "kv_delete") {
+        match host_result(kv_delete(key), "kv_delete") {
             Ok(_) => json_bytes(json!({ "ok": true, "key": key })),
             Err(err) => json_error(err),
         }
@@ -365,7 +370,7 @@ mod wasm_app {
             Ok(bytes) => bytes,
             Err(err) => return json_error(format!("ts_write: {}", err)),
         };
-        match host_result(host::ts_write(&tuple_bytes), "ts_write") {
+        match host_result(ts_write(&tuple_bytes), "ts_write") {
             Ok(_) => json_bytes(json!({ "ok": true, "tuple": tuple })),
             Err(err) => json_error(err),
         }
@@ -405,7 +410,7 @@ mod wasm_app {
             .and_then(|value| value.as_str())
             .unwrap_or("text/plain");
         match host_result(
-            host::blob_upload(blob_id, data.as_bytes(), content_type),
+            blob_upload(blob_id, data.as_bytes(), content_type),
             "blob_upload",
         ) {
             Ok(stored_blob_id) => json_bytes(json!({ "ok": true, "blob_id": stored_blob_id })),
@@ -418,7 +423,7 @@ mod wasm_app {
             .get("blob_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::blob_download(blob_id), "blob_download") {
+        match host_result(blob_download(blob_id), "blob_download") {
             Ok(data) => json_bytes(json!({ "blob_id": blob_id, "data": json_string(data) })),
             Err(err) => json_error(err),
         }
@@ -429,7 +434,7 @@ mod wasm_app {
             .get("prefix")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::blob_list(prefix), "blob_list") {
+        match host_result(blob_list(prefix), "blob_list") {
             Ok(ids) => json_bytes(json!({ "blob_ids": ids })),
             Err(err) => json_error(err),
         }
@@ -440,7 +445,7 @@ mod wasm_app {
             .get("blob_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::blob_delete(blob_id), "blob_delete") {
+        match host_result(blob_delete(blob_id), "blob_delete") {
             Ok(_) => json_bytes(json!({ "ok": true, "blob_id": blob_id })),
             Err(err) => json_error(err),
         }
@@ -466,7 +471,7 @@ mod wasm_app {
             "body": body,
         });
         let event_bytes = event.to_string().into_bytes();
-        match host_result(host::send(&resolved_target, "cast", &event_bytes), "send") {
+        match host_result(send(&resolved_target, "cast", &event_bytes), "send") {
             Ok(_) => json_bytes(json!({ "ok": true, "target": resolved_target })),
             Err(err) => json_error(err),
         }
@@ -492,7 +497,7 @@ mod wasm_app {
         });
         let event_bytes = event.to_string().into_bytes();
         match host_result(
-            host::pg_broadcast(group, "cast", &event_bytes),
+            pg_broadcast(group, "cast", &event_bytes),
             "pg_broadcast",
         ) {
             Ok(_) => json_bytes(json!({ "ok": true, "group": group })),
@@ -505,7 +510,7 @@ mod wasm_app {
             .get("group")
             .and_then(|value| value.as_str())
             .unwrap_or(DEFAULT_GROUP);
-        match host_result(host::pg_join(group), "pg_join") {
+        match host_result(pg_join(group), "pg_join") {
             Ok(_) => {
                 with_state(|state| {
                     state.joined_group = group.to_string();
@@ -521,7 +526,7 @@ mod wasm_app {
             .get("group")
             .and_then(|value| value.as_str())
             .unwrap_or(DEFAULT_GROUP);
-        match host_result(host::pg_members(group), "pg_members") {
+        match host_result(pg_members(group), "pg_members") {
             Ok(members) => json_bytes(json!({ "members": members })),
             Err(err) => json_error(err),
         }
@@ -580,7 +585,7 @@ mod wasm_app {
             .get("actor_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_result(host::stop(actor_id), "stop") {
+        match host_result(stop(actor_id), "stop") {
             Ok(_) => json_bytes(json!({ "ok": true, "actor_id": actor_id })),
             Err(err) => json_error(err),
         }
@@ -599,8 +604,8 @@ mod wasm_app {
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let init_config = payload.get("config").cloned().unwrap_or_else(|| json!({}));
-        let init_bytes = init_config.to_string().into_bytes();
-        match host_result(host::spawn(&module_ref, actor_id, &init_bytes), "spawn") {
+        let init_json = init_config.to_string();
+        match host_result(spawn(&module_ref, actor_id, "", &init_json), "spawn") {
             Ok(spawned_id) => {
                 with_state(|state| {
                     state.last_spawned_id = spawned_id.clone();
@@ -729,7 +734,7 @@ mod wasm_app {
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
             let pattern_bytes = encode_read_request(&pattern, false, 1)?;
             Ok(tuplespace_result(
-                host::ts_read(&pattern_bytes),
+                ts_read(&pattern_bytes),
                 "tuple",
                 "ts_read",
             ))
@@ -741,7 +746,7 @@ mod wasm_app {
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
             let pattern_bytes = encode_read_request(&pattern, true, 1)?;
             Ok(tuplespace_result(
-                host::ts_take(&pattern_bytes),
+                ts_take(&pattern_bytes),
                 "tuple",
                 "ts_take",
             ))
@@ -753,7 +758,7 @@ mod wasm_app {
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
             let pattern_bytes = encode_read_request(&pattern, false, 1024)?;
             Ok(tuplespace_result(
-                host::ts_read_all(&pattern_bytes),
+                ts_read_all(&pattern_bytes),
                 "tuples",
                 "ts_read_all",
             ))

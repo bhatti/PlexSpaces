@@ -369,8 +369,8 @@ curl -X POST http://localhost:8000/api/v1/applications/deploy \
 
 **Undeploy**:
 ```bash
-# Use application name (not application_id)
-curl -X DELETE http://localhost:8000/api/v1/applications/calculator
+# Use application_id (not name) for undeployment
+curl -X DELETE http://localhost:8000/api/v1/applications/calculator-app
 ```
 
 ### Rust Actor
@@ -429,7 +429,7 @@ curl -X POST http://localhost:8000/api/v1/applications/deploy \
 
 ### Go Actor
 
-**Location**: Use tinygo with `wasip2` target; example layout TBD.
+**Location**: Use tinygo with `wasip2` target. See `examples/go/apps/` for Go WASM examples (e.g., `examples/go/apps/migrating_gosiris/`).
 
 **Build**:
 ```bash
@@ -750,7 +750,7 @@ cargo run --release --bin plexspaces -- application deploy \
 ```
 
 **⚠️ Critical Notes**:
-- **Application Name vs Application ID**: The `name` field is used by `ApplicationManager` for storage and lookup. Use the `name` (not `application_id`) when undeploying.
+- **Application Name vs Application ID**: The `name` field is used by `ApplicationManager` for storage and lookup. Use the `application_id` (not `name`) when undeploying — it is the unique key used by the HTTP DELETE endpoint and `ApplicationManager`.
 - **WASM Components (Python, TypeScript)**: ✅ **Fully Supported** - Components built with `componentize-py` (Python) or `jco componentize` (TypeScript) use the `actor-world` WIT interface from `wit/plexspaces-actor`
   - Uses protobuf bytes plus typed WIT results for actor-world payloads and errors
   - TypeScript: build with `jco componentize ... --disable all` so the component only imports `plexspaces:actor/host` (no WASI)
@@ -1062,29 +1062,73 @@ interface actor {
     set-state: func(state: payload) -> result<_, actor-error>;
 }
 
-interface host {
+// The host API is organized into 9 namespaced interfaces.
+// Key interfaces shown here; see wit/plexspaces-actor/ for the complete surface.
+
+interface host-actor {
     send: func(to: string, msg-type: string, payload: payload) -> result<_, actor-error>;
     ask: func(to: string, msg-type: string, payload: payload, timeout-ms: u64) -> result<payload, actor-error>;
     self-id: func() -> string;
     spawn: func(module-ref: string, actor-id: string, init-config: payload) -> result<string, actor-error>;
     stop: func(actor-id: string) -> result<_, actor-error>;
     send-after: func(delay-ms: u64, msg-type: string, payload: payload) -> result<string, actor-error>;
-    log: func(level: string, message: string);
-    now-ms: func() -> u64;
-    // see wit/plexspaces-actor/host.wit for the complete proto-first host surface
+    // + link, unlink, monitor, demonitor, pg-join, pg-leave, pg-members, pg-broadcast
 }
 
+interface host-logging {
+    log: func(level: string, message: string);
+    now-ms: func() -> u64;
+}
+
+interface host-kv {
+    kv-get: func(key: string) -> result<payload, actor-error>;
+    kv-put: func(key: string, value: payload) -> result<_, actor-error>;
+    kv-delete: func(key: string) -> result<_, actor-error>;
+    kv-list: func(prefix: string) -> result<list<string>, actor-error>;
+    kv-put-with-ttl: func(key: string, value: payload, ttl-seconds: u64) -> result<_, actor-error>;
+    kv-get-ttl: func(key: string) -> result<u64, actor-error>;
+    kv-cas: func(key: string, expected: payload, new-value: payload) -> result<bool, actor-error>;
+    kv-increment: func(key: string, delta: s64) -> result<s64, actor-error>;
+    kv-multi-get: func(keys-json: payload) -> result<payload, actor-error>;
+    kv-multi-put: func(entries-json: payload) -> result<_, actor-error>;
+    // Alarm functions are co-located in host-kv for implementation convenience.
+    // Use host.alarm / host.Alarm() in SDK code for the clean alarm namespace API.
+    alarm-set: func(timestamp-ms: u64) -> result<_, actor-error>;
+    alarm-get: func() -> result<u64, actor-error>;
+    alarm-delete: func() -> result<_, actor-error>;
+}
+
+interface host-ts {
+    ts-write: func(request: payload) -> result<_, actor-error>;
+    ts-read: func(request: payload) -> result<payload, actor-error>;
+    ts-take: func(request: payload) -> result<payload, actor-error>;
+    ts-read-all: func(request: payload) -> result<payload, actor-error>;
+}
+
+// Additional namespaced interfaces: host-locks, host-blob, host-pool, host-shard, host-http
+// See wit/plexspaces-actor/ for complete definitions.
+
 world actor-world {
-    import host;
+    import host-actor;
+    import host-logging;
+    import host-kv;
+    import host-ts;
+    import host-locks;
+    import host-blob;
+    import host-pool;
+    import host-shard;
+    import host-http;
     export actor;
 }
 ```
 
-### TupleSpace (ts_write) for WASM
+### TupleSpace (host.ts / host-ts interface) for WASM
 
-WASM actors using the actor-world WIT call **`host.ts_write`** with protobuf `WriteRequest` bytes and read/take using protobuf `ReadRequest` bytes. The runtime decodes those bytes once and delegates to the same TupleSpace backend as native code. Use this for event streams, audit logs, or coordination without keyvalue.
+WASM actors using the actor-world WIT call **`host.ts.write`** (Python/TypeScript) or **`host.TS().Write`** (Go) with protobuf `WriteRequest` bytes and read/take using protobuf `ReadRequest` bytes. The runtime decodes those bytes once and delegates to the same TupleSpace backend as native code. Use this for event streams, audit logs, or coordination without keyvalue.
 
-**When to use ts_write**: Prefer `ts_write` for fire-and-forget event or audit streams when WASM integration is stable; it avoids reentrancy and readonly issues that can occur when WASM calls into the keyvalue backend during message handling.
+**When to use `host.ts.write`**: Prefer tuplespace writes for fire-and-forget event or audit streams when WASM integration is stable; it avoids reentrancy and readonly issues that can occur when WASM calls into the keyvalue backend during message handling.
+
+**Deprecated flat name**: `host.ts_write` is the old flat API name; use `host.ts.write` / `host.TS().Write` instead.
 
 ### Elastic pool (WASM host)
 
@@ -1171,12 +1215,26 @@ in-actor state serialization issues and provides reliable storage across the WAS
 
 **Choosing storage**: For event streams or audit logs, prefer tuplespace writes with protobuf `WriteRequest` payloads. Key-value values are actor-world bytes, so SDKs typically persist protobuf messages or application-owned binary payloads without JSON adapters.
 
-| Host function | Description |
-|---------------|-------------|
-| `kv-get(key)` | Returns raw value bytes on success, or a typed actor error. |
-| `kv-put(key, value)` | Stores raw value bytes. Returns success/error as a WIT result. |
+SDK namespace accessors: Python `host.kv.*`, Go `host.KV().*`, TypeScript `host.kv.*`.
+
+| WIT function (host-kv interface) | SDK — Python | SDK — Go | SDK — TypeScript | Description |
+|---|---|---|---|---|
+| `kv-get(key)` | `host.kv.get(key)` | `host.KV().Get(key)` | `host.kv.get(key)` | Returns raw value bytes on success, or a typed actor error. |
+| `kv-put(key, value)` | `host.kv.put(key, value)` | `host.KV().Put(key, value)` | `host.kv.put(key, value)` | Stores raw value bytes. Returns success/error as a WIT result. |
+| `kv-put-with-ttl(key, value, ttl_seconds)` | `host.kv.put_with_ttl(k,v,ttl)` | `host.KV().PutWithTTL(k,v,ttl)` | `host.kv.putWithTtl(k,v,ttl)` | Like `kv-put` but the key expires after `ttl_seconds`. |
+| `kv-get-ttl(key)` | `host.kv.get_ttl(key)` | `host.KV().GetTTL(key)` | `host.kv.getTtl(key)` | Returns remaining TTL in seconds, or 0 if no TTL / key not found. |
+| `kv-delete(key)` | `host.kv.delete(key)` | `host.KV().Delete(key)` | `host.kv.delete(key)` | Removes a key (idempotent). |
+| `kv-list(prefix)` | `host.kv.list(prefix)` | `host.KV().List(prefix)` | `host.kv.list(prefix)` | Returns all keys matching `prefix`. |
+| `kv-cas(key, expected, new_value)` | `host.kv.cas(key,exp,new)` | `host.KV().CAS(key,exp,new)` | `host.kv.cas(key,exp,new)` | Compare-and-swap: sets value only if current matches `expected`. Returns bool. Pass empty bytes for `expected` when key must not exist. |
+| `kv-increment(key, delta)` | `host.kv.increment(key,n)` | `host.KV().Increment(key,n)` | `host.kv.increment(key,n)` | Atomically increments a numeric key by `delta` (creates key at `delta` if absent). Returns new value. |
+| `kv-multi-get(keys_json)` | `host.kv.multi_get(keys)` | `host.KV().MultiGet(keys)` | `host.kv.multiGet(keys)` | Fetches multiple keys. Accepts JSON-encoded `[string]` array; returns JSON array of base64-encoded values or `null` for missing keys. |
+| `kv-multi-put(entries_json)` | `host.kv.multi_put(entries)` | `host.KV().MultiPut(entries)` | `host.kv.multiPut(entries)` | Stores multiple key-value pairs. Accepts JSON object mapping key → base64-encoded value string. |
 
 **Scope**: Keys are scoped per actor (namespace derived from actor ID). The node provides an in-memory keyvalue store for WASM actors by default.
+
+**`kv-multi-get` / `kv-multi-put` encoding note**: Because TinyGo cannot pass WIT `list<string>` as host-import inputs, both batch functions use `payload` (list<u8>) at the WIT boundary. The caller JSON-encodes the key list / entry map, and binary values are base64-encoded within the JSON.
+
+**Deprecated flat API**: The old flat names (`host.kv_get`, `host.kv_put`, `host.KVGet`, `host.KVPut`, `host.kvGet`, etc.) remain for backward compatibility but are deprecated. Use the `host.kv` / `host.KV()` namespace accessor instead.
 
 **Example (Python SDK)**:
 
@@ -1187,20 +1245,64 @@ from plexspaces import actor, handler, host
 class SensorStream:
     @handler("ingest")
     def ingest(self, sensor_id: str = "", value: str = "0") -> dict:
-        raw = host.kv_get("readings")
+        raw = host.kv.get("readings")
         data = ReadingList().from_bytes(raw) if raw else ReadingList()
         data.items.append(Reading(sensor_id=sensor_id, value=value))
-        host.kv_put("readings", data.to_bytes())
+        host.kv.put("readings", data.to_bytes())
         return {"reading_count": len(data.items)}
 
     @handler("count")
     def count(self) -> dict:
-        raw = host.kv_get("readings")
+        raw = host.kv.get("readings")
         data = ReadingList().from_bytes(raw) if raw else ReadingList()
         return {"reading_count": len(data.items)}
 ```
 
 **Best practice**: Have handlers return protobuf-backed models or SDK-native values and let the SDK decorator own actor-world serialization. Keep business logic in handlers and keep the WIT boundary thin.
+
+### Durable Alarms (WASM)
+
+WASM actors can schedule a single durable alarm per actor instance — equivalent to Cloudflare Durable Objects `state.storage.setAlarm(timestamp)`. The alarm is backed by `ReminderFacet` and survives actor deactivation.
+
+| Operation | WIT Function | Go | Python | TypeScript |
+|---|---|---|---|---|
+| Set alarm | `alarm-set` | `host.Alarm().Set(tsMs)` | `host.alarm.set(ts_ms)` | `host.alarm.set(tsMs)` |
+| Get alarm | `alarm-get` | `host.Alarm().Get()` | `host.alarm.get()` | `host.alarm.get()` |
+| Delete alarm | `alarm-delete` | `host.Alarm().Delete()` | `host.alarm.delete()` | `host.alarm.delete()` |
+
+**Descriptions:**
+- `alarm-set(timestamp_ms)`: Schedule the alarm to fire at `timestamp_ms` (Unix milliseconds). Replaces any existing alarm for this actor.
+- `alarm-get()`: Returns the scheduled alarm timestamp in ms, or 0 if no alarm is set.
+- `alarm-delete()`: Cancels the pending alarm (idempotent).
+
+When the alarm fires, the runtime delivers a `"__alarm__"` message to the actor's `handle()` function. Actors handle it like any other message type:
+
+```python
+# Python SDK
+@handler("__alarm__")
+def on_alarm(self) -> dict:
+    # process batch, flush buffer, etc.
+    return {}
+```
+
+```typescript
+// TypeScript SDK
+@handler("__alarm__")
+async onAlarm(payload: any) {
+    // process batch
+    return {};
+}
+```
+
+```go
+// Go SDK — switch on message type in your handler
+case "__alarm__":
+    // process batch
+```
+
+**Replacing an alarm**: Calling `alarm-set` while an alarm is already pending atomically replaces it with the new timestamp. The old pending delivery is cancelled.
+
+**Cloudflare equivalence**: `alarm-set(Date.now() + 10_000)` + `case "__alarm__"` maps directly to Cloudflare DO `state.storage.setAlarm(Date.now() + 10_000)` + `async alarm() { ... }`.
 
 ### Building Python Actors
 
@@ -1339,15 +1441,15 @@ class Worker:
 
 **Debugging ask flow:** Enable debug logging to trace the full message flow:
 ```
-RUST_LOG=plexspaces_application=debug,plexspaces_actor::routing=debug
+RUST_LOG=plexspaces_application=debug,plexspaces_actor::actor_registry=debug
 ```
 
 This will show:
 ```
 WASM ask: sending request via ActorRef  message_id=req-01JMX...  sender_id=coordinator//worker::app@node  recipient_id=worker-0//worker::app@node
-ask_helper: routing request to target  message_id=req-01JMX...  sender_id=ask_CORR//temp_sender::app@node  correlation_id=CORR
+registry ask: routing request to target  message_id=req-01JMX...  sender_id=ask_CORR//temp_sender::app@node  correlation_id=CORR
 WasmActor handle_message: sending reply  request_id=req-01JMX...  reply_id=res-01JMX...  reply_to=ask_CORR//temp_sender::app@node
-ask_helper: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
+registry ask: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
 WASM ask: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
 ```
 

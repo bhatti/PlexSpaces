@@ -73,7 +73,7 @@ class ToolRegistryActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:tool_registry", host.self_id())
+            host.kv.put("svc:tool_registry", host.self_id())
         except Exception:
             pass
         try:
@@ -85,7 +85,7 @@ class ToolRegistryActor:
         for tool_name, tool_def in _BUILTIN_TOOLS.items():
             try:
                 key = f"tool_schema:{tool_name}"
-                host.kv_put(key, json.dumps(tool_def["schema"]))
+                host.kv.put(key, json.dumps(tool_def["schema"]))
             except Exception:
                 pass
         host.info(f"ToolRegistryActor init actor_id={self.actor_id} tools={list(_BUILTIN_TOOLS.keys())}")
@@ -112,7 +112,7 @@ class ToolRegistryActor:
             return self._kv_write(input.get("key", ""), input.get("value", ""))
         else:
             # Check custom registered tools
-            schema_raw = host.kv_get(f"tool_schema:{name}")
+            schema_raw = host.kv.get(f"tool_schema:{name}")
             if schema_raw:
                 return {"error": f"Tool '{name}' is registered but has no executor"}
             return {"error": f"Unknown tool: {name}"}
@@ -123,8 +123,8 @@ class ToolRegistryActor:
         if not name:
             return {"error": "tool name is required"}
         if schema:
-            host.kv_put(f"tool_schema:{name}", json.dumps(schema))
-        host.kv_put(f"tool_desc:{name}", description or "")
+            host.kv.put(f"tool_schema:{name}", json.dumps(schema))
+        host.kv.put(f"tool_desc:{name}", description or "")
         return {"status": "ok", "tool": name}
 
     @handler("list_tools")
@@ -175,14 +175,14 @@ class ToolRegistryActor:
 
     def _kv_read(self, key: str) -> dict:
         try:
-            value = host.kv_get(f"tool_kv:{key}")
+            value = host.kv.get(f"tool_kv:{key}")
             return {"status": "ok", "key": key, "value": value}
         except Exception as e:
             return {"error": str(e)}
 
     def _kv_write(self, key: str, value: str) -> dict:
         try:
-            host.kv_put(f"tool_kv:{key}", value)
+            host.kv.put(f"tool_kv:{key}", value)
             return {"status": "ok", "key": key}
         except Exception as e:
             return {"error": str(e)}

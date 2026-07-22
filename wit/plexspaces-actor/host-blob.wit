@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Blob/object storage for deployable WASM actors.
+
+interface host-blob {
+    use types.{payload, actor-error};
+
+    blob-upload: func(blob-id: string, data: payload, content-type: string) -> result<string, actor-error>;
+    blob-download: func(blob-id: string) -> result<payload, actor-error>;
+    blob-delete: func(blob-id: string) -> result<_, actor-error>;
+    blob-list: func(prefix: string) -> result<list<string>, actor-error>;
+}

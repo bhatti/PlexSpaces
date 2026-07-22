@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces WebAssembly Runtime API
@@ -104,13 +104,14 @@ message HttpFetchRequest {
   };
 
   // Request headers to merge with service-link defaults and auth headers.
-  map<string, string> headers = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  map<string, string> headers = 2 [
     (google.api.field_behavior) = REQUIRED,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Additional request headers merged with the configured service link."}
   ];
 
   // Raw request body bytes.
-  bytes body = 2 [
+  bytes body = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).bytes = {max_len: 10485760},
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Raw request body bytes encoded at the actor-world boundary."}
@@ -132,7 +133,8 @@ message HttpFetchResponse {
   };
 
   // HTTP status code.
-  uint32 status = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 status = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).uint32 = {
       gte: 100
@@ -142,13 +144,13 @@ message HttpFetchResponse {
   ];
 
   // Response headers.
-  map<string, string> headers = 2 [
+  map<string, string> headers = 3 [
     (google.api.field_behavior) = REQUIRED,
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Response headers returned by the named service link."}
   ];
 
   // Raw response body bytes.
-  bytes body = 3 [
+  bytes body = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).bytes = {max_len: 10485760},
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Raw response body bytes returned by the named service link."}
@@ -445,28 +447,30 @@ message WasmConfig {
 // - Idempotent: Re-deploying same module (same hash) is no-op
 message DeployWasmModuleRequest {
   // WASM module to deploy
-  WasmModule module = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  WasmModule module = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Pre-warm strategy
   enum PreWarmStrategy {
+    PRE_WARM_STRATEGY_UNSPECIFIED = 0;
     // No pre-warming - nodes fetch on-demand (lazy)
-    NONE = 0;
+    NONE = 1;
 
     // Announce to all nodes - they decide whether to pre-fetch
-    ANNOUNCE = 1;
+    ANNOUNCE = 2;
 
     // Push to all nodes immediately (eager)
-    PUSH_ALL = 2;
+    PUSH_ALL = 3;
 
     // Push to subset of nodes (e.g., based on tags)
-    PUSH_TAGGED = 3;
+    PUSH_TAGGED = 4;
   }
 
   // How to distribute module to nodes
-  PreWarmStrategy pre_warm = 2;
+  PreWarmStrategy pre_warm = 3;
 
   // Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
-  repeated string target_node_tags = 3 [(buf.validate.field).repeated = {
+  repeated string target_node_tags = 4 [(buf.validate.field).repeated = {
     max_items: 100
     items: {
       string: {max_len: 128}
@@ -477,19 +481,20 @@ message DeployWasmModuleRequest {
 // Deploy WASM module response
 message DeployWasmModuleResponse {
   // Was deployment successful?
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Module hash (for cache lookup)
-  string module_hash = 2;
+  string module_hash = 3;
 
   // Number of nodes that received the module (for pre-warming)
-  uint32 nodes_pre_warmed = 3;
+  uint32 nodes_pre_warmed = 4;
 
   // Error details if deployment failed (replaces error_message)
   //
   // If deployment succeeded, this field is not set (code = OK).
   // If deployment failed, code indicates failure reason.
-  WasmError error = 4;
+  WasmError error = 5;
 }
 
 // Instantiate WASM actor request
@@ -513,7 +518,8 @@ message InstantiateActorRequest {
   // Supports both:
   // - Name: "counter-actor@1.2.3" (fetches from registry)
   // - Hash: "a1b2c3d4..." (direct cache lookup)
-  string module_ref = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string module_ref = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -524,7 +530,7 @@ message InstantiateActorRequest {
   // Actor ID to assign to this instance
   //
   // Format: ULID for sortability (see CLAUDE.md Core Principle 0)
-  string actor_id = 2 [
+  string actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -539,38 +545,39 @@ message InstantiateActorRequest {
   // - Empty (new actor with default state)
   // - Snapshot (restoring actor from checkpoint)
   // - Migration state (actor moving to new node)
-  bytes initial_state = 3;
+  bytes initial_state = 4;
 
   // Configuration overrides (optional)
   //
   // If not provided, uses module's default config or system defaults.
-  WasmConfig config = 4;
+  WasmConfig config = 5;
 
   // Node ID to instantiate on (optional)
   //
   // If not provided, scheduler chooses node based on load balancing.
-  string target_node_id = 5 [(buf.validate.field).string.max_len = 255];
+  string target_node_id = 6 [(buf.validate.field).string.max_len = 255];
 }
 
 // Instantiate WASM actor response
 message InstantiateActorResponse {
   // Was instantiation successful?
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Actor ID of instantiated actor
-  string actor_id = 2;
+  string actor_id = 3;
 
   // Node ID where actor is running
-  string node_id = 3;
+  string node_id = 4;
 
   // Instance creation time
-  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp created_at = 5;
 
   // Error details if instantiation failed (replaces error_message)
   //
   // If instantiation succeeded, this field is not set (code = OK).
   // If instantiation failed, code indicates failure reason.
-  WasmError error = 5;
+  WasmError error = 6;
 }
 
 // Migrate WASM actor request
@@ -590,7 +597,8 @@ message InstantiateActorResponse {
 // - Atomic migration: Source actor paused until destination ready
 message MigrateActorRequest {
   // Actor ID to migrate
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -599,7 +607,7 @@ message MigrateActorRequest {
   ];
 
   // Source node ID (current location)
-  string source_node_id = 2 [
+  string source_node_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -608,7 +616,7 @@ message MigrateActorRequest {
   ];
 
   // Destination node ID (target location)
-  string target_node_id = 3 [
+  string target_node_id = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -619,22 +627,23 @@ message MigrateActorRequest {
   // Include journal entries (for durable actors)
   //
   // If true, migrate journal for replay on destination.
-  bool include_journal = 4;
+  bool include_journal = 5;
 }
 
 // Migrate WASM actor response
 message MigrateActorResponse {
   // Was migration successful?
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Migration duration (should be < 10ms for state-only)
-  google.protobuf.Duration migration_time = 2;
+  google.protobuf.Duration migration_time = 3;
 
   // Size of state transferred (bytes)
-  uint64 state_size_bytes = 3;
+  uint64 state_size_bytes = 4;
 
   // Error details if migration failed
-  WasmError error = 4;
+  WasmError error = 5;
 }
 
 // WASM runtime error codes

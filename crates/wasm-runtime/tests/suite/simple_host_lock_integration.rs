@@ -19,7 +19,7 @@ mod tests {
 
     async fn create_simple_host_with_lock_manager() -> SimpleHostImpl {
         let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = Arc::new(HostFunctions::new());
         SimpleHostImpl::with_services(actor_id, host_functions, None, Some(lock_manager), None)
     }
@@ -202,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_host_lock_no_manager_returns_error() {
-        let actor_id = ActorId::from("test-actor".to_string());
+        let actor_id = ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap();
         let host_functions = Arc::new(HostFunctions::new());
         let mut host = SimpleHostImpl::with_services(actor_id, host_functions, None, None, None);
 

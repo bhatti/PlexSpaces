@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Mailbox API
@@ -142,6 +142,7 @@ syntax = "proto3";
 
 package plexspaces.mailbox.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/channel/channel.proto";
@@ -325,25 +326,30 @@ message MailboxStats {
 }
 
 message UpdateMailboxConfigRequest {
-  string actor_id = 1;
-  MailboxConfig config = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
+  MailboxConfig config = 3;
 }
 
 message PurgeMailboxRequest {
-  string actor_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2;
 }
 
 message PurgeMailboxResponse {
-  uint32 messages_purged = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 messages_purged = 2;
 }
 
 message ListMailboxesRequest {
   // Optional filter
-  string namespace = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 2;
 }
 
 message ListMailboxesResponse {
-  repeated MailboxInfo mailboxes = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated MailboxInfo mailboxes = 2;
 }
 
 message MailboxInfo {

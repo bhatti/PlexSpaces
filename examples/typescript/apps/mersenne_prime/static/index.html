@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PlexSpaces — Mersenne Prime Finder</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+
+    #header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+    #header h1 { font-size: 17px; color: #58a6ff; }
+    #header p { font-size: 11px; color: #8b949e; }
+
+    #connect-panel { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; color: #8b949e; }
+    .field input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px; color: #c9d1d9; font-size: 13px; min-width: 180px; }
+    .field input:focus { outline: none; border-color: #58a6ff; }
+    button { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; cursor: pointer; height: 34px; }
+    button:hover { background: #2ea043; }
+    button.danger { background: #da3633; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    /* ── metrics strip ── */
+    #metrics-strip { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid #30363d; }
+    .metric-box { flex: 1; min-width: 120px; padding: 10px 16px; border-right: 1px solid #30363d; }
+    .metric-box:last-child { border-right: none; }
+    .metric-label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: .5px; }
+    .metric-value { font-size: 22px; font-weight: 700; color: #58a6ff; margin-top: 2px; }
+    .metric-sub { font-size: 10px; color: #8b949e; margin-top: 1px; }
+
+    /* ── main layout ── */
+    #main { display: flex; gap: 0; height: calc(100vh - 160px); min-height: 400px; }
+
+    /* ── left: progress + candidates ── */
+    #left-col { flex: 3; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid #30363d; overflow: hidden; }
+    #progress-section { padding: 14px 18px; border-bottom: 1px solid #30363d; }
+    #progress-label { font-size: 11px; color: #8b949e; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    #progress-bar-outer { background: #21262d; border-radius: 6px; height: 12px; overflow: hidden; }
+    #progress-bar-inner { background: linear-gradient(90deg,#238636,#3fb950); height: 100%; transition: width 0.4s; width: 0%; }
+    #candidates { padding: 12px 18px; flex: 1; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 7px; align-content: flex-start; }
+    .candidate { border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px; font-size: 11px; min-width: 110px; text-align: center; }
+    .candidate .cand-p { font-size: 13px; font-weight: 600; }
+    .candidate .cand-dur { font-size: 10px; color: #8b949e; margin-top: 2px; }
+    .candidate .cand-worker { font-size: 9px; color: #8b949e; margin-top: 1px; }
+    .candidate.pending { color: #8b949e; }
+    .candidate.assigned { border-color: #d29922; color: #d29922; background: #1a160a; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+    .candidate.done-prime { border-color: #238636; color: #3fb950; background: #0f2919; }
+    .candidate.done-composite { border-color: #30363d; color: #484f58; }
+
+    /* ── right: workers + log ── */
+    #right-col { flex: 2; min-width: 240px; display: flex; flex-direction: column; overflow: hidden; }
+    #workers-section { padding: 12px 16px; border-bottom: 1px solid #30363d; flex: 1; overflow-y: auto; }
+    #workers-section h3 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .worker-card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+    .worker-name { font-size: 11px; color: #58a6ff; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+    .worker-name .badge { font-size: 9px; background: #238636; color: #fff; border-radius: 10px; padding: 1px 6px; }
+    .worker-name .badge.idle { background: #30363d; color: #8b949e; }
+    .worker-stats { display: flex; gap: 14px; margin-top: 5px; flex-wrap: wrap; }
+    .wstat { font-size: 10px; color: #8b949e; }
+    .wstat span { color: #c9d1d9; }
+    #workers-empty { font-size: 12px; color: #484f58; padding: 8px 0; }
+    .worker-summary { font-size: 11px; color: #8b949e; margin-bottom: 8px; display: flex; justify-content: space-between; }
+    .worker-card.mine { border-color: #58a6ff; }
+
+    #log-section { padding: 10px 16px; border-top: 1px solid #30363d; }
+    #log-section h3 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+    #log { font-size: 11px; max-height: 180px; overflow-y: auto; font-family: monospace; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #1a1f27; color: #8b949e; }
+    .log-entry.prime { color: #3fb950; }
+    .log-entry.assign { color: #d29922; }
+    .log-entry.error { color: #f85149; }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>⚛ PlexSpaces Mersenne Prime Finder</h1>
+    <p>Distributed Lucas-Lehmer via WebSocket thin-node workers — open multiple tabs to add compute power</p>
+  </div>
+</div>
+
+<div id="connect-panel">
+  <div class="field">
+    <label>Node URL</label>
+    <input id="ws-url" type="text" value="ws://localhost:8091/ws" />
+  </div>
+  <div class="field">
+    <label>JWT Token (optional)</label>
+    <input id="jwt-token" type="password" placeholder="leave empty if auth disabled" />
+  </div>
+  <div class="field">
+    <label>Coordinator Node ID</label>
+    <input id="leader-node-id" type="text" value="test-node-8091" />
+  </div>
+  <div class="field">
+    <label>Candidates</label>
+    <input id="candidate-count" type="number" value="20" min="1" max="20" style="min-width:70px" />
+  </div>
+  <button id="connect-btn">Connect</button>
+  <button id="start-run-btn" disabled>Start New Run</button>
+  <button id="disconnect-btn" class="danger" disabled>Disconnect</button>
+</div>
+
+<!-- metrics strip -->
+<div id="metrics-strip">
+  <div class="metric-box">
+    <div class="metric-label">Status</div>
+    <div class="metric-value" id="m-status">Idle</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Progress</div>
+    <div class="metric-value" id="m-progress">0/0</div>
+    <div class="metric-sub" id="m-pct">0%</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Primes Found</div>
+    <div class="metric-value" id="m-primes">0</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Workers Connected</div>
+    <div class="metric-value" id="m-workers">0</div>
+    <div class="metric-sub" id="m-cores">—</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Throughput</div>
+    <div class="metric-value" id="m-throughput">—</div>
+    <div class="metric-sub">candidates/s</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Elapsed</div>
+    <div class="metric-value" id="m-elapsed">—</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Speedup</div>
+    <div class="metric-value" id="m-speedup">—</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">My Node</div>
+    <div class="metric-value" id="m-node" style="font-size:13px">—</div>
+    <div class="metric-sub" id="m-my-cores">—</div>
+  </div>
+</div>
+
+<div id="main">
+  <!-- left: progress bar + candidate tiles -->
+  <div id="left-col">
+    <div id="progress-section">
+      <div id="progress-label">
+        <span>Computation progress</span>
+        <span id="prog-detail">—</span>
+      </div>
+      <div id="progress-bar-outer"><div id="progress-bar-inner"></div></div>
+    </div>
+    <div id="candidates"></div>
+  </div>
+
+  <!-- right: worker cards + event log -->
+  <div id="right-col">
+    <div id="workers-section">
+      <h3>Connected Workers</h3>
+      <div id="workers-list"><div id="workers-empty">No workers yet — open a tab and connect</div></div>
+    </div>
+    <div id="log-section">
+      <h3>Event Log</h3>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./client.js"></script>
+</body>
+</html>

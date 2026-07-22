@@ -63,7 +63,7 @@ class CronSchedulerActor:
             "created_at": host.now_ms(),
             "last_run_at": 0,
         }
-        host.kv_put(f"cron_job:{job_id}", json.dumps(job))
+        host.kv.put(f"cron_job:{job_id}", json.dumps(job))
         if job_id not in self.job_ids:
             self.job_ids.append(job_id)
             self.job_count += 1
@@ -74,7 +74,7 @@ class CronSchedulerActor:
     def list_jobs(self) -> dict:
         jobs = []
         for jid in self.job_ids:
-            raw = host.kv_get(f"cron_job:{jid}")
+            raw = host.kv.get(f"cron_job:{jid}")
             if raw:
                 try:
                     jobs.append(json.loads(raw))
@@ -86,7 +86,7 @@ class CronSchedulerActor:
     def delete_job(self, job_id: str = "") -> dict:
         if not job_id:
             return {"error": "job_id is required"}
-        host.kv_delete(f"cron_job:{job_id}")
+        host.kv.delete(f"cron_job:{job_id}")
         if job_id in self.job_ids:
             self.job_ids.remove(job_id)
             self.job_count = max(0, self.job_count - 1)
@@ -118,7 +118,7 @@ class CronSchedulerActor:
 
         if acquired:
             for job_id in list(self.job_ids):
-                raw = host.kv_get(f"cron_job:{job_id}")
+                raw = host.kv.get(f"cron_job:{job_id}")
                 if not raw:
                     continue
                 try:
@@ -132,7 +132,7 @@ class CronSchedulerActor:
                                 "prompt": job.get("prompt", ""),
                             })
                             job["last_run_at"] = now
-                            host.kv_put(f"cron_job:{job_id}", json.dumps(job))
+                            host.kv.put(f"cron_job:{job_id}", json.dumps(job))
                             dispatched.append(job_id)
                             self.dispatched_count += 1
                         except Exception:

@@ -207,7 +207,7 @@ func (a *AgentActor) run(p map[string]any) string {
 func (a *AgentActor) doObserve(loop *plexspaces.AgentLoop, task string) any {
 	memoryKey := "agent_memory:" + a.ActorID
 	priorContext := map[string]any{}
-	if raw := host.KVGet(memoryKey); raw != "" {
+	if raw, _ := host.KV().Get(memoryKey); raw != "" {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(raw), &m); err == nil {
 			priorContext = m
@@ -324,14 +324,14 @@ func (a *AgentActor) exportTrajectory(traj plexspaces.AgentTrajectory) {
 		host.Warn(fmt.Sprintf("AgentActor: failed to marshal trajectory: %v", err))
 		return
 	}
-	host.KVPut(key, string(trajJSON))
+	host.KV().Put(key, string(trajJSON))
 
 	// Update per-agent index
 	indexKey := "agent_trajectory_index:" + a.ActorID
-	existing := parseStringSlice(host.KVGet(indexKey))
+	existing := func() []string { v, _ := host.KV().Get(indexKey); return parseStringSlice(v) }()
 	existing = append(existing, traj.TrajectoryID)
 	indexJSON, _ := json.Marshal(existing)
-	host.KVPut(indexKey, string(indexJSON))
+	host.KV().Put(indexKey, string(indexJSON))
 
 	// Write trajectory tuple to TupleSpace for eval collection
 	_ = host.TS().Write([]any{"trajectory", traj.EvalRunID, traj.TrajectoryID, traj.Outcome})
@@ -351,11 +351,11 @@ func (a *AgentActor) exportTrajectory(traj plexspaces.AgentTrajectory) {
 
 func (a *AgentActor) queryExecutionTrace() string {
 	indexKey := "trace_index:" + a.ActorID
-	indexRaw := host.KVGet(indexKey)
+	indexRaw, _ := host.KV().Get(indexKey)
 	if indexRaw != "" {
 		var traceIDs []string
 		if err := json.Unmarshal([]byte(indexRaw), &traceIDs); err == nil && len(traceIDs) > 0 {
-			raw := host.KVGet("trace:" + traceIDs[len(traceIDs)-1])
+			raw, _ := host.KV().Get("trace:" + traceIDs[len(traceIDs)-1])
 			if raw != "" {
 				var trace map[string]any
 				if err2 := json.Unmarshal([]byte(raw), &trace); err2 == nil {

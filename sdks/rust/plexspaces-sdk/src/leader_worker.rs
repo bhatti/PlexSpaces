@@ -93,6 +93,7 @@ pub async fn spawn_actor_on_node(
     };
 
     let req = SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         spec: Some(spec),
         namespace: String::new(),
         instances_count: 1,

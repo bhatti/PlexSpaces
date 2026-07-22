@@ -545,6 +545,7 @@ impl HostFunctions {
 
         use plexspaces_actor::HttpHeader;
         let outbound_request = OutboundHttpRequest {
+            request_id: ulid::Ulid::new().to_string(),
             method: method.to_string(),
             path_and_query: path_and_query.to_string(),
             headers: request
@@ -654,6 +655,186 @@ impl HostFunctions {
         } else {
             Err("KeyValue store not configured".to_string())
         }
+    }
+
+    /// Put with TTL operation helper
+    pub async fn put_keyvalue_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl_secs: u64,
+    ) -> Result<(), String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.put_with_ttl(ctx, key, value, std::time::Duration::from_secs(ttl_secs))
+                .await
+                .map_err(|e| format!("KeyValue put_with_ttl failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Get TTL for a key (returns remaining seconds, or 0 if no TTL / key not found)
+    pub async fn get_keyvalue_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+    ) -> Result<u64, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.get_ttl(ctx, key)
+                .await
+                .map(|opt| opt.map(|d| d.as_secs()).unwrap_or(0))
+                .map_err(|e| format!("KeyValue get_ttl failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Compare-and-swap operation helper (returns true if swap was applied)
+    pub async fn cas_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        new_value: Vec<u8>,
+    ) -> Result<bool, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.cas(ctx, key, expected, new_value)
+                .await
+                .map_err(|e| format!("KeyValue CAS failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Atomic increment operation helper (returns new value)
+    pub async fn increment_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        delta: i64,
+    ) -> Result<i64, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.increment(ctx, key, delta)
+                .await
+                .map_err(|e| format!("KeyValue increment failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Multi-get: fetch multiple keys in one call (returns values in same order as keys)
+    pub async fn multi_get_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> Result<Vec<Option<Vec<u8>>>, String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.multi_get(ctx, keys)
+                .await
+                .map_err(|e| format!("KeyValue multi_get failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Multi-put: store multiple key-value pairs atomically
+    pub async fn multi_put_keyvalue(
+        &self,
+        ctx: &RequestContext,
+        pairs: &[(&str, Vec<u8>)],
+    ) -> Result<(), String> {
+        if let Some(kv) = &self.keyvalue_store {
+            kv.multi_put(ctx, pairs)
+                .await
+                .map_err(|e| format!("KeyValue multi_put failed: {}", e))
+        } else {
+            Err("KeyValue store not configured".to_string())
+        }
+    }
+
+    /// Set a durable alarm for this actor at an absolute timestamp.
+    /// Uses the journal storage reminder system. The alarm fires `__alarm__` at the actor.
+    pub async fn alarm_set(
+        &self,
+        actor_id: &str,
+        timestamp_ms: u64,
+    ) -> Result<(), String> {
+        use plexspaces_proto::prost_types::Timestamp;
+        let storage = match &self.journal_storage {
+            Some(s) => s,
+            None => return Err("Journal storage not configured for alarm".to_string()),
+        };
+        let secs = (timestamp_ms / 1000) as i64;
+        let nanos = ((timestamp_ms % 1000) * 1_000_000) as i32;
+        let ts = Timestamp { seconds: secs, nanos };
+        let registration = plexspaces_proto::timer::v1::ReminderRegistration {
+            actor_id: actor_id.to_string(),
+            reminder_name: "__alarm__".to_string(),
+            interval: None,
+            first_fire_time: Some(ts.clone()),
+            callback_data: Vec::new(),
+            persist_across_activations: true,
+            max_occurrences: 1,
+        };
+        let state = plexspaces_proto::timer::v1::ReminderState {
+            registration: Some(registration),
+            last_fired: None,
+            next_fire_time: Some(ts),
+            fire_count: 0,
+            is_active: true,
+        };
+        storage
+            .register_reminder(&state)
+            .await
+            .map_err(|e| format!("alarm_set failed: {}", e))
+    }
+
+    /// Get the scheduled alarm timestamp in milliseconds (0 if none)
+    pub async fn alarm_get(&self, actor_id: &str) -> Result<u64, String> {
+        let storage = match &self.journal_storage {
+            Some(s) => s,
+            None => return Ok(0),
+        };
+        let reminders = storage
+            .load_reminders(actor_id)
+            .await
+            .map_err(|e| format!("alarm_get failed: {}", e))?;
+        let alarm = reminders.iter().find(|r| {
+            r.registration
+                .as_ref()
+                .map(|reg| reg.reminder_name == "__alarm__")
+                .unwrap_or(false)
+        });
+        Ok(alarm
+            .and_then(|r| r.next_fire_time.as_ref())
+            .map(|ts| (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000)
+            .unwrap_or(0))
+    }
+
+    /// Delete the durable alarm for this actor
+    pub async fn alarm_delete(&self, actor_id: &str) -> Result<(), String> {
+        let storage = match &self.journal_storage {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        storage
+            .unregister_reminder(actor_id, "__alarm__")
+            .await
+            .map_err(|e| format!("alarm_delete failed: {}", e))
+    }
+
+    /// CAS-style alarm delete: removes the alarm only if its timestamp matches expected_ms.
+    /// Returns Ok(true) if deleted, Ok(false) if not found or timestamp mismatch.
+    pub async fn alarm_delete_if_matches(&self, actor_id: &str, expected_ms: u64) -> Result<bool, String> {
+        let storage = match &self.journal_storage {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+        storage
+            .unregister_reminder_if_matches(actor_id, "__alarm__", expected_ms)
+            .await
+            .map_err(|e| format!("alarm_delete_if_matches failed: {}", e))
     }
 
     /// Send message and wait for reply via message sender if available

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Application Service gRPC implementation
@@ -113,6 +113,7 @@ pub fn create_default_application_spec(
         metadata: None,
         seed_nodes: vec![],
         required_service_links: vec![],
+        static_mount: String::new(),
     }
 }
 
@@ -607,6 +608,7 @@ impl ApplicationService for ApplicationServiceImpl {
             );
 
             return Ok(Response::new(DeployApplicationResponse {
+                request_id: req.request_id.clone(),
                 success: true,
                 application_id: req.application_id,
                 status: ApplicationStatus::ApplicationStatusRunning.into(),
@@ -713,6 +715,7 @@ impl ApplicationService for ApplicationServiceImpl {
         }
 
         Ok(Response::new(DeployApplicationResponse {
+            request_id: req.request_id.clone(),
             success: true,
             application_id: req.application_id,
             status: ApplicationStatus::ApplicationStatusRunning.into(),
@@ -796,6 +799,7 @@ impl ApplicationService for ApplicationServiceImpl {
                 );
 
                 return Ok(Response::new(UndeployApplicationResponse {
+                    request_id: req.request_id.clone(),
                     success: true,
                     error: None,
                 }));
@@ -844,6 +848,7 @@ impl ApplicationService for ApplicationServiceImpl {
         );
 
         Ok(Response::new(UndeployApplicationResponse {
+            request_id: req.request_id.clone(),
             success: true,
             error: None,
         }))
@@ -873,7 +878,10 @@ impl ApplicationService for ApplicationServiceImpl {
             }
         }
 
-        Ok(Response::new(ListApplicationsResponse { applications }))
+        Ok(Response::new(ListApplicationsResponse {
+            request_id: ulid::Ulid::new().to_string(),
+            applications,
+        }))
     }
 
     async fn get_application_status(
@@ -949,6 +957,7 @@ impl ApplicationService for ApplicationServiceImpl {
                 let (node_id, node_address) = self.local_status_endpoint().await?;
 
                 Ok(Response::new(GetApplicationStatusResponse {
+                    request_id: req.request_id.clone(),
                     application,
                     state,
                     error: None,
@@ -961,6 +970,7 @@ impl ApplicationService for ApplicationServiceImpl {
             None => {
                 let (node_id, node_address) = self.local_status_endpoint().await?;
                 Ok(Response::new(GetApplicationStatusResponse {
+                    request_id: req.request_id.clone(),
                     application: None,
                     state: None,
                     error: Some("Application not found".to_string()),
@@ -1073,6 +1083,7 @@ mod tests {
             wasm_module: None,
             config: Some(spec),
             initial_state: vec![],
+            request_id: ulid::Ulid::new().to_string(),
         });
         request
             .metadata_mut()

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! gRPC Service Implementation for WASM Runtime
@@ -208,6 +208,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
                 );
 
                 let response = DeployWasmModuleResponse {
+                    request_id: req.request_id.clone(),
                     success: true,
                     module_hash,
                     nodes_pre_warmed: 1,
@@ -218,6 +219,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
             }
             Err(err) => {
                 let response = DeployWasmModuleResponse {
+                    request_id: req.request_id.clone(),
                     success: false,
                     module_hash: String::new(),
                     nodes_pre_warmed: 0,
@@ -257,6 +259,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
                 );
 
                 let response = InstantiateActorResponse {
+                    request_id: req.request_id.clone(),
                     success: true,
                     actor_id,
                     node_id: "local".to_string(),
@@ -271,6 +274,7 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
             }
             Err(err) => {
                 let response = InstantiateActorResponse {
+                    request_id: req.request_id.clone(),
                     success: false,
                     actor_id: req.actor_id,
                     node_id: String::new(),
@@ -334,6 +338,7 @@ mod tests {
         };
 
         let req = Request::new(DeployWasmModuleRequest {
+            request_id: ulid::Ulid::new().to_string(),
             module: Some(module),
             pre_warm: 0,
             target_node_tags: vec![],

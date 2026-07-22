@@ -38,10 +38,10 @@ class JobRunnerActor:
             "total_steps": self.total_steps,
             "timestamp_ms": host.now_ms(),
         }
-        host.kv_put(self._checkpoint_key(), json.dumps(data))
+        host.kv.put(self._checkpoint_key(), json.dumps(data))
 
     def _load_checkpoint(self) -> bool:
-        raw = host.kv_get(self._checkpoint_key())
+        raw = host.kv.get(self._checkpoint_key())
         if not raw or raw.startswith("ERROR"):
             return False
         try:
@@ -95,7 +95,7 @@ class JobRunnerActor:
                 return self._finish(t0, compute_ms, "cancelled")
 
         self.status = "completed"
-        host.kv_delete(self._checkpoint_key())
+        host.kv.delete(self._checkpoint_key())
         return self._finish(t0, compute_ms, "completed")
 
     def _finish(self, t0: float, compute_ms: float, status: str, at_step: int = 0) -> dict:

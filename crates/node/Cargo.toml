@@ -78,6 +78,7 @@ reqwest = { version = "0.12", features = ["json", "multipart"] }
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
 jsonwebtoken = "9.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [features]
 default = ["dashboard", "firecracker"]
@@ -87,6 +88,8 @@ dashboard = ["plexspaces-dashboard"]
 [dev-dependencies]
 tokio-test = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+prost = { workspace = true }
 plexspaces-persistence = { workspace = true }
 plexspaces-common = { path = "../common", features = ["test-helpers"] }
 futures = { workspace = true }

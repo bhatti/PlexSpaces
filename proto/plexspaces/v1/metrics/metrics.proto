@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Metrics API (Observability Core)
@@ -276,12 +276,14 @@ message SummaryValue {
 // ============================================================================
 
 message ExportPrometheusRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // Empty - exports all metrics
 }
 
 message ExportPrometheusResponse {
   // Prometheus text format
-  string content = 1 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string content = 2 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
     description: "Metrics in Prometheus text format"
     example: "\"# HELP plexspaces_actor_spawn_total Actors created\\n# TYPE plexspaces_actor_spawn_total counter\\nplexspaces_actor_spawn_total{node_id=\\\"node1\\\"} 42\\n\""
   }];
@@ -289,73 +291,83 @@ message ExportPrometheusResponse {
 
 message GetMetricsRequest {
   // Filter by metric name pattern (e.g., "plexspaces_actor_*")
-  string name_pattern = 1 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name_pattern = 2 [(buf.validate.field).string.max_len = 512];
 
   // Filter by labels
-  map<string, string> label_filter = 2;
+  map<string, string> label_filter = 3;
 }
 
 message GetMetricsResponse {
-  repeated Metric metrics = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Metric metrics = 2;
 }
 
 message ListMetricDefinitionsRequest {
   // Filter by name pattern
-  string name_pattern = 1 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name_pattern = 2 [(buf.validate.field).string.max_len = 512];
 }
 
 message ListMetricDefinitionsResponse {
-  repeated MetricDefinition definitions = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated MetricDefinition definitions = 2;
 }
 
 message RecordMetricRequest {
   // Metric to record
-  Metric metric = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Metric metric = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // R.E.D. metrics for message routing
 message RecordMessageRoutingRequest {
-  string actor_id = 1 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [(buf.validate.field).string.max_len = 512];
   // App / namespace dimension (e.g. tenant app-id)
-  string namespace = 2 [(buf.validate.field).string.max_len = 512];
-  bool success = 3;
-  google.protobuf.Duration duration = 4;
+  string namespace = 3 [(buf.validate.field).string.max_len = 512];
+  bool success = 4;
+  google.protobuf.Duration duration = 5;
   // Empty when success is true
-  string error_type = 5 [(buf.validate.field).string.max_len = 256];
+  string error_type = 6 [(buf.validate.field).string.max_len = 256];
 }
 
 // R.E.D. metrics for actor activation
 message RecordActorActivationRequest {
-  string actor_id = 1 [(buf.validate.field).string.max_len = 512];
-  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [(buf.validate.field).string.max_len = 512];
+  string namespace = 3 [(buf.validate.field).string.max_len = 512];
   // e.g. "lazy", "eager", "virtual"
-  string activation_type = 3 [(buf.validate.field).string.max_len = 64];
-  bool success = 4;
-  google.protobuf.Duration duration = 5;
+  string activation_type = 4 [(buf.validate.field).string.max_len = 64];
+  bool success = 5;
+  google.protobuf.Duration duration = 6;
 }
 
 // R.E.D. metrics for channel operations
 message RecordChannelMetricsRequest {
-  string channel_name = 1 [(buf.validate.field).string.max_len = 512];
-  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string channel_name = 2 [(buf.validate.field).string.max_len = 512];
+  string namespace = 3 [(buf.validate.field).string.max_len = 512];
   // e.g. "ack", "nack", "dlq", "send", "receive"
-  string operation = 3 [(buf.validate.field).string.max_len = 64];
-  string backend = 4 [(buf.validate.field).string.max_len = 64];
-  bool success = 5;
-  google.protobuf.Duration duration = 6;
-  uint32 delivery_count = 7;
-  string reason = 8 [(buf.validate.field).string.max_len = 512];
+  string operation = 4 [(buf.validate.field).string.max_len = 64];
+  string backend = 5 [(buf.validate.field).string.max_len = 64];
+  bool success = 6;
+  google.protobuf.Duration duration = 7;
+  uint32 delivery_count = 8;
+  string reason = 9 [(buf.validate.field).string.max_len = 512];
 }
 
 // Request to get actor metrics
 message GetActorMetricsRequest {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   // Empty - returns metrics for the local ActorService
 }
 
 // Request to get node metrics
 message GetNodeMetricsRequest {
   // Node ID (empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 }
 
 // ============================================================================

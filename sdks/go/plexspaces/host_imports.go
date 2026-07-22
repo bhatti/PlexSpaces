@@ -129,7 +129,7 @@ func readResultListStringJSON(retptr unsafe.Pointer) string {
 // Messaging
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 send
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 send
 func rawHostSend(to, msgType, payloadJSON string, retptr unsafe.Pointer)
 
 func hostSend(to, msgType, payloadJSON string) string {
@@ -137,7 +137,7 @@ func hostSend(to, msgType, payloadJSON string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 ask
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 ask
 func rawHostAsk(to, msgType, payloadJSON string, timeoutMs uint64, retptr unsafe.Pointer)
 
 func hostAsk(to, msgType, payloadJSON string, timeoutMs uint64) string {
@@ -149,7 +149,7 @@ func hostAsk(to, msgType, payloadJSON string, timeoutMs uint64) string {
 // Actor Identity
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 self-id
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 self-id
 func rawHostSelfID(retptr unsafe.Pointer)
 
 func hostSelfID() string {
@@ -161,7 +161,7 @@ func hostSelfID() string {
 // Actor Lifecycle
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 spawn
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 spawn
 func rawHostSpawn(moduleRef, actorName, role, argsJSON string, retptr unsafe.Pointer)
 
 func hostSpawn(moduleRef, actorName, role, argsJSON string) string {
@@ -169,7 +169,7 @@ func hostSpawn(moduleRef, actorName, role, argsJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 stop
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 stop
 func rawHostStop(actorID string, retptr unsafe.Pointer)
 
 func hostStop(actorID string) string {
@@ -181,7 +181,7 @@ func hostStop(actorID string) string {
 // Actor Linking & Monitoring
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 link
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 link
 func rawHostLink(actorID string, retptr unsafe.Pointer)
 
 func hostLink(actorID string) string {
@@ -189,7 +189,7 @@ func hostLink(actorID string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 unlink
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 unlink
 func rawHostUnlink(actorID string, retptr unsafe.Pointer)
 
 func hostUnlink(actorID string) string {
@@ -197,7 +197,7 @@ func hostUnlink(actorID string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 monitor
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 monitor
 func rawHostMonitor(actorID string, retptr unsafe.Pointer)
 
 func hostMonitor(actorID string) string {
@@ -205,7 +205,7 @@ func hostMonitor(actorID string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 demonitor
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 demonitor
 func rawHostDemonitor(monitorRef string, retptr unsafe.Pointer)
 
 func hostDemonitor(monitorRef string) string {
@@ -217,7 +217,7 @@ func hostDemonitor(monitorRef string) string {
 // Timers
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 send-after
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 send-after
 func rawHostSendAfter(delayMs uint64, msgType, payloadJSON string, retptr unsafe.Pointer)
 
 func hostSendAfter(delayMs uint64, msgType, payloadJSON string) string {
@@ -229,17 +229,17 @@ func hostSendAfter(delayMs uint64, msgType, payloadJSON string) string {
 // Logging & Time
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 log
+//go:wasmimport plexspaces:actor/host-logging@0.1.0 log
 func hostLog(level, message string)
 
-//go:wasmimport plexspaces:actor/host@0.1.0 now-ms
+//go:wasmimport plexspaces:actor/host-logging@0.1.0 now-ms
 func hostNowMs() uint64
 
 // ========================================================================
 // Key-Value Store
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 kv-get
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-get
 func rawHostKVGet(key string, retptr unsafe.Pointer)
 
 func hostKVGet(key string) string {
@@ -247,7 +247,7 @@ func hostKVGet(key string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 kv-put
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-put
 func rawHostKVPut(key, value string, retptr unsafe.Pointer)
 
 func hostKVPut(key, value string) string {
@@ -255,7 +255,7 @@ func hostKVPut(key, value string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 kv-delete
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-delete
 func rawHostKVDelete(key string, retptr unsafe.Pointer)
 
 func hostKVDelete(key string) string {
@@ -263,7 +263,7 @@ func hostKVDelete(key string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 kv-list
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-list
 func rawHostKVList(prefix string, retptr unsafe.Pointer)
 
 func hostKVList(prefix string) string {
@@ -271,11 +271,103 @@ func hostKVList(prefix string) string {
 	return readResultListStringJSON(unsafe.Pointer(&retArea))
 }
 
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-put-with-ttl
+func rawHostKVPutWithTTL(key, value string, ttlSeconds uint64, retptr unsafe.Pointer)
+
+func hostKVPutWithTTL(key, value string, ttlSeconds uint64) string {
+	rawHostKVPutWithTTL(key, value, ttlSeconds, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-get-ttl
+func rawHostKVGetTTL(key string, retptr unsafe.Pointer)
+
+func hostKVGetTTL(key string) uint64 {
+	rawHostKVGetTTL(key, unsafe.Pointer(&retArea))
+	// Returns result<u64, actor-error>; read u64 from success case
+	ptr := unsafe.Pointer(&retArea)
+	if *(*uint8)(ptr) != 0 {
+		return 0 // error case
+	}
+	return *(*uint64)(unsafe.Pointer(uintptr(ptr) + 8))
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-cas
+func rawHostKVCAS(key, expected, newValue string, retptr unsafe.Pointer)
+
+func hostKVCAS(key, expected, newValue string) bool {
+	rawHostKVCAS(key, expected, newValue, unsafe.Pointer(&retArea))
+	ptr := unsafe.Pointer(&retArea)
+	if *(*uint8)(ptr) != 0 {
+		return false // error case
+	}
+	return *(*uint8)(unsafe.Pointer(uintptr(ptr) + 4)) != 0
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-increment
+func rawHostKVIncrement(key string, delta int64, retptr unsafe.Pointer)
+
+func hostKVIncrement(key string, delta int64) int64 {
+	rawHostKVIncrement(key, delta, unsafe.Pointer(&retArea))
+	ptr := unsafe.Pointer(&retArea)
+	if *(*uint8)(ptr) != 0 {
+		return 0
+	}
+	return *(*int64)(unsafe.Pointer(uintptr(ptr) + 8))
+}
+
+// kv-multi-get takes keys-json: payload (list<u8>) and returns payload (list<u8>).
+// In TinyGo, payload (list<u8>) is passed/received as a string at the WIT ABI boundary.
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-multi-get
+func rawHostKVMultiGet(keysJSON string, retptr unsafe.Pointer)
+
+func hostKVMultiGet(keysJSON string) string {
+	rawHostKVMultiGet(keysJSON, unsafe.Pointer(&retArea))
+	return readResultString(unsafe.Pointer(&retArea))
+}
+
+// kv-multi-put takes entries-json: payload (list<u8>).
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 kv-multi-put
+func rawHostKVMultiPut(entriesJSON string, retptr unsafe.Pointer)
+
+func hostKVMultiPut(entriesJSON string) string {
+	rawHostKVMultiPut(entriesJSON, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 alarm-set
+func rawHostAlarmSet(timestampMs uint64, retptr unsafe.Pointer)
+
+func hostAlarmSet(timestampMs uint64) string {
+	rawHostAlarmSet(timestampMs, unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 alarm-get
+func rawHostAlarmGet(retptr unsafe.Pointer)
+
+func hostAlarmGet() uint64 {
+	rawHostAlarmGet(unsafe.Pointer(&retArea))
+	ptr := unsafe.Pointer(&retArea)
+	if *(*uint8)(ptr) != 0 {
+		return 0
+	}
+	return *(*uint64)(unsafe.Pointer(uintptr(ptr) + 8))
+}
+
+//go:wasmimport plexspaces:actor/host-kv@0.1.0 alarm-delete
+func rawHostAlarmDelete(retptr unsafe.Pointer)
+
+func hostAlarmDelete() string {
+	rawHostAlarmDelete(unsafe.Pointer(&retArea))
+	return readResultUnit(unsafe.Pointer(&retArea))
+}
+
 // ========================================================================
 // TupleSpace
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 ts-write
+//go:wasmimport plexspaces:actor/host-ts@0.1.0 ts-write
 func rawHostTSWrite(tupleJSON string, retptr unsafe.Pointer)
 
 func hostTSWrite(tupleJSON string) string {
@@ -283,7 +375,7 @@ func hostTSWrite(tupleJSON string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 ts-read
+//go:wasmimport plexspaces:actor/host-ts@0.1.0 ts-read
 func rawHostTSRead(patternJSON string, retptr unsafe.Pointer)
 
 func hostTSRead(patternJSON string) string {
@@ -291,7 +383,7 @@ func hostTSRead(patternJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 ts-take
+//go:wasmimport plexspaces:actor/host-ts@0.1.0 ts-take
 func rawHostTSTake(patternJSON string, retptr unsafe.Pointer)
 
 func hostTSTake(patternJSON string) string {
@@ -299,7 +391,7 @@ func hostTSTake(patternJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 ts-read-all
+//go:wasmimport plexspaces:actor/host-ts@0.1.0 ts-read-all
 func rawHostTSReadAll(patternJSON string, retptr unsafe.Pointer)
 
 func hostTSReadAll(patternJSON string) string {
@@ -311,27 +403,27 @@ func hostTSReadAll(patternJSON string) string {
 // Distributed Locks
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 lock-acquire
-func rawHostLockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64, retptr unsafe.Pointer)
+//go:wasmimport plexspaces:actor/host-locks@0.1.0 lock-acquire
+func rawHostLockAcquire(holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64, retptr unsafe.Pointer)
 
-func hostLockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
-	rawHostLockAcquire(tenantID, namespace, holderID, lockName, leaseDurationSecs, timeoutMs, unsafe.Pointer(&retArea))
+func hostLockAcquire(holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
+	rawHostLockAcquire(holderID, lockName, leaseDurationSecs, timeoutMs, unsafe.Pointer(&retArea))
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 lock-release
-func rawHostLockRelease(lockID, tenantID, namespace, holderID, lockVersion string, retptr unsafe.Pointer)
+//go:wasmimport plexspaces:actor/host-locks@0.1.0 lock-release
+func rawHostLockRelease(lockID, holderID, lockVersion string, retptr unsafe.Pointer)
 
-func hostLockRelease(lockID, tenantID, namespace, holderID, lockVersion string) string {
-	rawHostLockRelease(lockID, tenantID, namespace, holderID, lockVersion, unsafe.Pointer(&retArea))
+func hostLockRelease(lockID, holderID, lockVersion string) string {
+	rawHostLockRelease(lockID, holderID, lockVersion, unsafe.Pointer(&retArea))
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 lock-renew
-func rawHostLockRenew(lockID, tenantID, namespace, holderID, lockVersion string, leaseDurationSecs uint32, retptr unsafe.Pointer)
+//go:wasmimport plexspaces:actor/host-locks@0.1.0 lock-renew
+func rawHostLockRenew(lockID, holderID, lockVersion string, leaseDurationSecs uint32, retptr unsafe.Pointer)
 
-func hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion string, leaseDurationSecs uint32) string {
-	rawHostLockRenew(lockID, tenantID, namespace, holderID, lockVersion, leaseDurationSecs, unsafe.Pointer(&retArea))
+func hostLockRenew(lockID, holderID, lockVersion string, leaseDurationSecs uint32) string {
+	rawHostLockRenew(lockID, holderID, lockVersion, leaseDurationSecs, unsafe.Pointer(&retArea))
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
@@ -339,7 +431,7 @@ func hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion string, le
 // Blob Storage
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 blob-upload
+//go:wasmimport plexspaces:actor/host-blob@0.1.0 blob-upload
 func rawHostBlobUpload(blobID, data, contentType string, retptr unsafe.Pointer)
 
 func hostBlobUpload(blobID, data, contentType string) string {
@@ -347,7 +439,7 @@ func hostBlobUpload(blobID, data, contentType string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 blob-download
+//go:wasmimport plexspaces:actor/host-blob@0.1.0 blob-download
 func rawHostBlobDownload(blobID string, retptr unsafe.Pointer)
 
 func hostBlobDownload(blobID string) string {
@@ -355,7 +447,7 @@ func hostBlobDownload(blobID string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 blob-delete
+//go:wasmimport plexspaces:actor/host-blob@0.1.0 blob-delete
 func rawHostBlobDelete(blobID string, retptr unsafe.Pointer)
 
 func hostBlobDelete(blobID string) string {
@@ -363,7 +455,7 @@ func hostBlobDelete(blobID string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 blob-list
+//go:wasmimport plexspaces:actor/host-blob@0.1.0 blob-list
 func rawHostBlobList(prefix string, retptr unsafe.Pointer)
 
 func hostBlobList(prefix string) string {
@@ -375,7 +467,7 @@ func hostBlobList(prefix string) string {
 // Process Groups
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pg-join
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 pg-join
 func rawHostPGJoin(groupName string, retptr unsafe.Pointer)
 
 func hostPGJoin(groupName string) string {
@@ -383,7 +475,7 @@ func hostPGJoin(groupName string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pg-leave
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 pg-leave
 func rawHostPGLeave(groupName string, retptr unsafe.Pointer)
 
 func hostPGLeave(groupName string) string {
@@ -391,7 +483,7 @@ func hostPGLeave(groupName string) string {
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pg-members
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 pg-members
 func rawHostPGMembers(groupName string, retptr unsafe.Pointer)
 
 func hostPGMembers(groupName string) string {
@@ -399,7 +491,7 @@ func hostPGMembers(groupName string) string {
 	return readResultListStringJSON(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pg-broadcast
+//go:wasmimport plexspaces:actor/host-actor@0.1.0 pg-broadcast
 func rawHostPGBroadcast(groupName, msgType, payloadJSON string, retptr unsafe.Pointer)
 
 func hostPGBroadcast(groupName, msgType, payloadJSON string) string {
@@ -411,7 +503,7 @@ func hostPGBroadcast(groupName, msgType, payloadJSON string) string {
 // Elastic pool (checkout/checkin)
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pool-checkout
+//go:wasmimport plexspaces:actor/host-pool@0.1.0 pool-checkout
 func rawHostPoolCheckout(poolName string, timeoutMs uint64, retptr unsafe.Pointer)
 
 func hostPoolCheckout(poolName string, timeoutMs uint64) string {
@@ -419,7 +511,7 @@ func hostPoolCheckout(poolName string, timeoutMs uint64) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pool-checkin
+//go:wasmimport plexspaces:actor/host-pool@0.1.0 pool-checkin
 func rawHostPoolCheckin(poolName, actorID, checkoutID string, healthy bool, retptr unsafe.Pointer)
 
 func hostPoolCheckin(poolName, actorID, checkoutID string, healthy bool) string {
@@ -427,7 +519,7 @@ func hostPoolCheckin(poolName, actorID, checkoutID string, healthy bool) string 
 	return readResultUnit(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 pool-get-metrics
+//go:wasmimport plexspaces:actor/host-pool@0.1.0 pool-get-metrics
 func rawHostPoolGetMetrics(poolName string, retptr unsafe.Pointer)
 
 func hostPoolGetMetrics(poolName string) string {
@@ -439,7 +531,7 @@ func hostPoolGetMetrics(poolName string) string {
 // ShardGroup / Application Metrics
 // ============================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 create-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 create-shard-group
 func rawHostCreateShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostCreateShardGroup(requestJSON string) string {
@@ -447,7 +539,7 @@ func hostCreateShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 bulk-update-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 bulk-update-shard-group
 func rawHostBulkUpdateShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostBulkUpdateShardGroup(requestJSON string) string {
@@ -455,7 +547,7 @@ func hostBulkUpdateShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 map-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 map-shard-group
 func rawHostMapShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostMapShardGroup(requestJSON string) string {
@@ -463,7 +555,7 @@ func hostMapShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 scatter-gather
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 scatter-gather
 func rawHostScatterGather(requestJSON string, retptr unsafe.Pointer)
 
 func hostScatterGather(requestJSON string) string {
@@ -471,7 +563,7 @@ func hostScatterGather(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 broadcast-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 broadcast-shard-group
 func rawHostBroadcastShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostBroadcastShardGroup(requestJSON string) string {
@@ -479,7 +571,7 @@ func hostBroadcastShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 reduce-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 reduce-shard-group
 func rawHostReduceShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostReduceShardGroup(requestJSON string) string {
@@ -487,7 +579,7 @@ func hostReduceShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 all-reduce-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 all-reduce-shard-group
 func rawHostAllReduceShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostAllReduceShardGroup(requestJSON string) string {
@@ -495,7 +587,7 @@ func hostAllReduceShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 barrier-shard-group
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 barrier-shard-group
 func rawHostBarrierShardGroup(requestJSON string, retptr unsafe.Pointer)
 
 func hostBarrierShardGroup(requestJSON string) string {
@@ -503,7 +595,7 @@ func hostBarrierShardGroup(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 spawn-actors
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 spawn-actors
 func rawHostSpawnActors(requestJSON string, retptr unsafe.Pointer)
 
 func hostSpawnActors(requestJSON string) string {
@@ -511,7 +603,7 @@ func hostSpawnActors(requestJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 application-metrics-add
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 application-metrics-add
 func rawHostApplicationMetricsAdd(applicationID, metricsJSON string, retptr unsafe.Pointer)
 
 func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
@@ -519,7 +611,7 @@ func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 application-get-metrics
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 application-get-metrics
 func rawHostApplicationGetMetrics(applicationID, nodeID string, retptr unsafe.Pointer)
 
 func hostApplicationGetMetrics(applicationID, nodeID string) string {
@@ -527,7 +619,7 @@ func hostApplicationGetMetrics(applicationID, nodeID string) string {
 	return readResultString(unsafe.Pointer(&retArea))
 }
 
-//go:wasmimport plexspaces:actor/host@0.1.0 application-get-status
+//go:wasmimport plexspaces:actor/host-shard@0.1.0 application-get-status
 func rawHostApplicationGetStatus(applicationID, nodeID string, retptr unsafe.Pointer)
 
 func hostApplicationGetStatus(applicationID, nodeID string) string {
@@ -539,7 +631,7 @@ func hostApplicationGetStatus(applicationID, nodeID string) string {
 // Outbound HTTP (service links)
 // ========================================================================
 
-//go:wasmimport plexspaces:actor/host@0.1.0 http-fetch
+//go:wasmimport plexspaces:actor/host-http@0.1.0 http-fetch
 // WIT: (link-name, method, path-and-query, request: list<u8>) -> result<payload, actor-error>
 func rawHostHTTPFetch(linkName, method, pathAndQuery string, requestPtr uintptr, requestLen uint32, retptr unsafe.Pointer)
 

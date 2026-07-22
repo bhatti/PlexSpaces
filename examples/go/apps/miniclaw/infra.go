@@ -197,7 +197,7 @@ func (h *HealthMonitorActor) Init(configJSON string) string {
 	if err := host.PG().Join("svc:health_monitor"); err != nil {
 		host.Warn(fmt.Sprintf("HealthMonitorActor: failed to join svc:health_monitor: %v", err))
 	}
-	_ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+	_, _ = host.Actor().SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
 	host.Info(fmt.Sprintf("HealthMonitorActor Init actor_id=%s interval_ms=%d", config.ActorID, h.PollInterval))
 	return ""
 }
@@ -264,7 +264,7 @@ func (h *HealthMonitorActor) doPoll() string {
 	} else {
 		_ = host.TS().Write([]any{"health_snapshot", h.LastPollMs, string(snapJSON)})
 	}
-	_ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+	_, _ = host.Actor().SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
 	return marshal(map[string]any{"status": "ok", "poll_count": h.PollCount})
 }
 

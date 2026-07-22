@@ -4,6 +4,20 @@ pub mod application_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /** Application deployment service
+
+ ## Purpose
+ gRPC service for deploying, undeploying, and managing applications on a node.
+ Enables AWS Lambda-like deployment model where applications (not individual actors)
+ are the unit of deployment.
+
+ ## Design Philosophy
+ - Application as unit: Deploy entire applications (supervisors + actors + config)
+ - Multi-tenant: Multiple applications per node
+ - Graceful shutdown: Undeploy performs graceful shutdown
+ - WASM support: Applications can be deployed as WASM modules
+ - Release config support: Can pass release-level configuration
+*/
     #[derive(Debug, Clone)]
     pub struct ApplicationServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -84,6 +98,22 @@ pub mod application_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Deploy an application (like AWS Lambda deploy)
+
+ ## Purpose
+ Deploy an entire application to the node. Handles:
+ - WASM module deployment (if WASM application)
+ - Application configuration parsing
+ - Supervisor tree initialization
+ - Application registration and startup
+
+ ## Workflow
+ 1. Load WASM module (if provided)
+ 2. Parse application config
+ 3. Initialize supervisor tree
+ 4. Start root supervisor
+ 5. Register application with ApplicationManager
+*/
         pub async fn deploy_application(
             &mut self,
             request: impl tonic::IntoRequest<super::DeployApplicationRequest>,
@@ -114,6 +144,20 @@ pub mod application_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Undeploy an application (graceful shutdown)
+
+ ## Purpose
+ Gracefully shutdown an application:
+ - Stop accepting new work
+ - Drain in-flight messages
+ - Shutdown supervisor tree (top-down)
+ - Cleanup resources
+ - Unregister application
+
+ ## Timeout
+ Uses graceful shutdown timeout from application config (default: 30s).
+ If exceeded, may force kill the application.
+*/
         pub async fn undeploy_application(
             &mut self,
             request: impl tonic::IntoRequest<super::UndeployApplicationRequest>,
@@ -213,6 +257,22 @@ pub mod application_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ApplicationServiceServer.
     #[async_trait]
     pub trait ApplicationService: Send + Sync + 'static {
+        /** Deploy an application (like AWS Lambda deploy)
+
+ ## Purpose
+ Deploy an entire application to the node. Handles:
+ - WASM module deployment (if WASM application)
+ - Application configuration parsing
+ - Supervisor tree initialization
+ - Application registration and startup
+
+ ## Workflow
+ 1. Load WASM module (if provided)
+ 2. Parse application config
+ 3. Initialize supervisor tree
+ 4. Start root supervisor
+ 5. Register application with ApplicationManager
+*/
         async fn deploy_application(
             &self,
             request: tonic::Request<super::DeployApplicationRequest>,
@@ -220,6 +280,20 @@ pub mod application_service_server {
             tonic::Response<super::DeployApplicationResponse>,
             tonic::Status,
         >;
+        /** Undeploy an application (graceful shutdown)
+
+ ## Purpose
+ Gracefully shutdown an application:
+ - Stop accepting new work
+ - Drain in-flight messages
+ - Shutdown supervisor tree (top-down)
+ - Cleanup resources
+ - Unregister application
+
+ ## Timeout
+ Uses graceful shutdown timeout from application config (default: 30s).
+ If exceeded, may force kill the application.
+*/
         async fn undeploy_application(
             &self,
             request: tonic::Request<super::UndeployApplicationRequest>,
@@ -242,6 +316,20 @@ pub mod application_service_server {
             tonic::Status,
         >;
     }
+    /** Application deployment service
+
+ ## Purpose
+ gRPC service for deploying, undeploying, and managing applications on a node.
+ Enables AWS Lambda-like deployment model where applications (not individual actors)
+ are the unit of deployment.
+
+ ## Design Philosophy
+ - Application as unit: Deploy entire applications (supervisors + actors + config)
+ - Multi-tenant: Multiple applications per node
+ - Graceful shutdown: Undeploy performs graceful shutdown
+ - WASM support: Applications can be deployed as WASM modules
+ - Release config support: Can pass release-level configuration
+*/
     #[derive(Debug)]
     pub struct ApplicationServiceServer<T: ApplicationService> {
         inner: _Inner<T>,

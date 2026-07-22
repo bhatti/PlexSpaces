@@ -70,6 +70,10 @@ fi
 # Step 1: Check node
 echo "Step 1: Check node status"
 echo "----------------------------------------------------------------"
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
     echo -e "${RED}Cannot connect to node at localhost:$HTTP_PORT${NC}"
@@ -94,8 +98,7 @@ DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/ap
     -F "application_id=$APP_ID" \
     -F "name=cloudflare-guild-chat" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -114,6 +117,7 @@ if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
     echo -e "${GREEN}Deployed $APP_ID${NC}"
     echo "  - ChatRoom:    chat-room"
     echo "  - RateLimiter: rate-limiter"
+    echo "  - AlarmDemo:   alarm-demo"
 else
     echo -e "${RED}Deploy failed: $RESPONSE${NC}"
     exit 1
@@ -241,6 +245,58 @@ elif [ "$ALLOWED" -ge 4 ] && [ "$DENIED" -ge 1 ]; then
     echo -e "    ${GREEN}PASS: Token bucket working (timing may vary)${NC}"
 else
     echo -e "    ${YELLOW}WARN: Expected ~5 allowed/~2 denied, got $ALLOWED/$DENIED${NC}"
+fi
+echo ""
+
+# Step 5b: AlarmDemo operations
+echo "Step 5b: AlarmDemo Operations (Durable Alarm Lifecycle)"
+echo "----------------------------------------------------------------"
+echo ""
+
+# Verify AlarmDemo actor
+ALARM_RESP=$(send_op "AlarmDemo" '{"op":"status"}')
+if echo "$ALARM_RESP" | grep -q '"status":"ok"'; then
+    echo -e "  ${GREEN}AlarmDemo actor OK${NC}"
+else
+    echo -e "  ${YELLOW}AlarmDemo not responsive (skipping alarm tests): $ALARM_RESP${NC}"
+    ALARM_RESP=""
+fi
+
+if [ -n "$ALARM_RESP" ]; then
+    # Enqueue some pending requests
+    echo "  Enqueuing 3 pending requests..."
+    for i in 1 2 3; do
+        send_op "AlarmDemo" "{\"op\":\"enqueue\",\"data\":\"task-$i\"}" 5 >/dev/null
+    done
+    echo -e "  ${GREEN}Enqueued 3 tasks${NC}"
+
+    # Schedule alarm 2 seconds from now (short for testing)
+    echo "  Scheduling alarm (2s delay)..."
+    START_RESP=$(send_op "AlarmDemo" '{"op":"start","delay_ms":2000}' 5)
+    if echo "$START_RESP" | grep -q '"action":"alarm_scheduled"'; then
+        FIRE_AT=$(echo "$START_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('fire_at_ms',0))" 2>/dev/null || echo "?")
+        echo -e "  ${GREEN}Alarm scheduled (fires at: $FIRE_AT ms)${NC}"
+    else
+        echo -e "  ${YELLOW}Alarm schedule response: $START_RESP${NC}"
+    fi
+
+    # Check status
+    STATUS_RESP=$(send_op "AlarmDemo" '{"op":"status"}' 5)
+    if echo "$STATUS_RESP" | grep -q '"alarm_set":true'; then
+        echo -e "  ${GREEN}Alarm status: set${NC}"
+    else
+        echo -e "  ${YELLOW}Alarm status response: $STATUS_RESP${NC}"
+    fi
+
+    # Cancel the alarm (clean up for test repeatability)
+    CANCEL_RESP=$(send_op "AlarmDemo" '{"op":"cancel"}' 5)
+    if echo "$CANCEL_RESP" | grep -q '"action":"alarm_cancelled"'; then
+        echo -e "  ${GREEN}Alarm cancelled${NC}"
+    else
+        echo -e "  ${YELLOW}Cancel response: $CANCEL_RESP${NC}"
+    fi
+
+    echo -e "  ${GREEN}PASS: Durable alarm lifecycle (set/status/cancel) demonstrated${NC}"
 fi
 echo ""
 

@@ -186,8 +186,8 @@ func (r *ModelRegistryActor) Init(configJSON string) string {
 
 	for _, m := range models {
 		specJSON, _ := json.Marshal(m)
-		if result := host.KVPut("model:"+m.Name, string(specJSON)); result != "" {
-			return "ERROR: failed to seed model " + m.Name + ": " + result
+		if err := host.KV().Put("model:"+m.Name, string(specJSON)); err != nil {
+			return "ERROR: failed to seed model " + m.Name + ": " + err.Error()
 		}
 	}
 	r.ModelCount = len(models)
@@ -220,8 +220,8 @@ func (r *ModelRegistryActor) registerModel(p map[string]any) string {
 		return marshal(map[string]any{"error": "name is required"})
 	}
 	specJSON, _ := json.Marshal(p)
-	if result := host.KVPut("model:"+name, string(specJSON)); result != "" {
-		return marshal(map[string]any{"error": "kv_put failed: " + result})
+	if err := host.KV().Put("model:"+name, string(specJSON)); err != nil {
+		return marshal(map[string]any{"error": "kv_put failed: " + err.Error()})
 	}
 	r.ModelCount++
 	return marshal(map[string]any{"status": "ok", "name": name})
@@ -295,7 +295,7 @@ func tierToDefaultModel(tier string) string {
 // specForTier loads the ModelSpec for a given tier from KV.
 func (r *ModelRegistryActor) specForTier(tier string) *ModelSpec {
 	name := tierToDefaultModel(tier)
-	raw := host.KVGet("model:" + name)
+	raw, _ := host.KV().Get("model:" + name)
 	if raw == "" {
 		return nil
 	}
@@ -307,13 +307,11 @@ func (r *ModelRegistryActor) specForTier(tier string) *ModelSpec {
 }
 
 func (r *ModelRegistryActor) listModels() string {
-	keysJSON := host.KVList("model:")
-	var keys []string
-	_ = json.Unmarshal([]byte(keysJSON), &keys)
+	keys, _ := host.KV().List("model:")
 
 	models := make([]any, 0, len(keys))
 	for _, key := range keys {
-		raw := host.KVGet(key)
+		raw, _ := host.KV().Get(key)
 		if raw == "" {
 			continue
 		}
@@ -330,7 +328,7 @@ func (r *ModelRegistryActor) getModel(p map[string]any) string {
 	if name == "" {
 		return marshal(map[string]any{"error": "name is required"})
 	}
-	raw := host.KVGet("model:" + name)
+	raw, _ := host.KV().Get("model:" + name)
 	if raw == "" {
 		return marshal(map[string]any{"error": "model not found", "name": name})
 	}
@@ -441,16 +439,16 @@ func (w *InferenceActor) infer(p map[string]any) string {
 	usageCostKey := fmt.Sprintf("usage:%s:cost", tenantID)
 
 	existingTokens := 0
-	if raw := host.KVGet(usageTokensKey); raw != "" {
+	if raw, _ := host.KV().Get(usageTokensKey); raw != "" {
 		fmt.Sscanf(raw, "%d", &existingTokens)
 	}
 	existingCost := 0.0
-	if raw := host.KVGet(usageCostKey); raw != "" {
+	if raw, _ := host.KV().Get(usageCostKey); raw != "" {
 		fmt.Sscanf(raw, "%f", &existingCost)
 	}
 
-	host.KVPut(usageTokensKey, fmt.Sprintf("%d", existingTokens+tokenCount))
-	host.KVPut(usageCostKey, fmt.Sprintf("%f", existingCost+cost))
+	_ = host.KV().Put(usageTokensKey, fmt.Sprintf("%d", existingTokens+tokenCount))
+	_ = host.KV().Put(usageCostKey, fmt.Sprintf("%f", existingCost+cost))
 
 	// Report metrics
 	_, _ = host.ApplicationMetricsAdd(w.ApplicationID(), map[string]any{

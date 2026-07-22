@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Chat Agent Application Configuration
+#
+# Equivalent to a Cloudflare wrangler.toml with AI binding + Durable Object:
+#
+# [[durable_objects.bindings]]
+# name = "CHAT_AGENT"
+# class_name = "ChatAgent"
+#
+# [[ai.bindings]]
+# name = "AI"
+# (provided via service_links.llm-link below)
+
+name = "ts-chat-agent"
+version = "1.0.0"
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 5
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "ChatAgentActor"
+actor_type = "ChatAgentActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+tenant_id = "default"
+facets = [
+  # virtual_actor: keeps the actor alive across calls (like a Durable Object instance)
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  # reminder: provides durable alarm scheduling (equivalent to DO setAlarm / alarm())
+  { type = "reminder", priority = 90, config = {} }
+]
+
+# Service links — equivalent to Cloudflare AI binding (env.AI).
+# The LLM provider URL and auth headers are injected here; the actor uses
+# host.httpClient("llm-link").fetch() without knowing credentials.
+#
+# Supports Anthropic, OpenAI, Ollama, or any OpenAI-compatible endpoint.
+# Requires ANTHROPIC_API_KEY (or equivalent) to be set in the environment.
+[service_links]
+[service_links.llm-link]
+url = "https://api.anthropic.com"
+
+[service_links.llm-link.headers]
+"x-api-key" = "${ANTHROPIC_API_KEY}"
+"anthropic-version" = "2023-06-01"
+"content-type" = "application/json"

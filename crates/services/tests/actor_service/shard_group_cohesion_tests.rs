@@ -249,6 +249,7 @@ async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
         RebalancePolicy,
     };
     let req = test_request(CreateShardGroupRequest {
+        request_id: ulid::Ulid::new().to_string(),
         config: Some(DataParallelConfig {
             group_id: "labeled-group".to_string(),
             shard_count: 2,
@@ -459,11 +460,14 @@ async fn test_capabilities_to_labels_mapping() {
     // Give it a moment for async DB write
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Verify that ObjectRegistration has metadata.labels from capabilities
-    // We need to query ObjectRegistry directly since lookup_node returns NodeRegistration
+    // NodeRegistry stores nodes using its internal system context which has empty tenant_id
+    // and uses the cluster label as the namespace (here "prod" from capabilities).
+    // We must use the same (tenant="", namespace="prod") context to look up the record.
     use plexspaces_proto::object_registry::v1::ObjectType;
+    let system_ctx =
+        RequestContext::new_without_auth(String::new(), "prod".to_string());
     let obj_reg = object_registry_impl
-        .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node")
+        .lookup_full(&system_ctx, ObjectType::ObjectTypeNode, "test-node")
         .await
         .expect("Failed to lookup node")
         .expect("Node should be found");
@@ -496,6 +500,7 @@ async fn test_shard_group_cohesion_end_to_end() {
         RebalancePolicy,
     };
     let req = test_request(CreateShardGroupRequest {
+        request_id: ulid::Ulid::new().to_string(),
         config: Some(DataParallelConfig {
             group_id: "cohesion-test-group".to_string(),
             shard_count: 2,

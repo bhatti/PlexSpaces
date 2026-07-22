@@ -101,7 +101,7 @@ func (t *ToolRegistryActor) Init(configJSON string) string {
 	// Store built-in tool schemas in KV for SchemaValidationFacet to discover
 	for toolName, def := range builtinTools {
 		schemaJSON, _ := json.Marshal(def.Schema)
-		host.KVPut("tool_schema:"+toolName, string(schemaJSON))
+		host.KV().Put("tool_schema:"+toolName, string(schemaJSON))
 	}
 	toolNames := make([]string, 0, len(builtinTools))
 	for k := range builtinTools {
@@ -166,7 +166,7 @@ func (t *ToolRegistryActor) execute(p map[string]any) string {
 		value := fmt.Sprintf("%v", input["value"])
 		return t.kvWrite(key, value)
 	default:
-		if host.KVGet("tool_schema:"+name) != "" {
+		if schemaVal, _ := host.KV().Get("tool_schema:" + name); schemaVal != "" {
 			return marshal(map[string]any{"error": fmt.Sprintf("tool '%s' is registered but has no executor", name)})
 		}
 		return marshal(map[string]any{"error": fmt.Sprintf("unknown tool: %s", name)})
@@ -182,9 +182,9 @@ func (t *ToolRegistryActor) registerTool(p map[string]any) string {
 	schema, _ := p["schema"].(map[string]any)
 	if schema != nil {
 		schemaJSON, _ := json.Marshal(schema)
-		host.KVPut("tool_schema:"+name, string(schemaJSON))
+		host.KV().Put("tool_schema:"+name, string(schemaJSON))
 	}
-	host.KVPut("tool_desc:"+name, description)
+	host.KV().Put("tool_desc:"+name, description)
 	return marshal(map[string]any{"status": "ok", "tool": name})
 }
 
@@ -331,7 +331,7 @@ func (t *ToolRegistryActor) kvRead(key string) string {
 	if key == "" {
 		return marshal(map[string]any{"error": "key is required"})
 	}
-	value := host.KVGet("tool_kv:" + key)
+	value, _ := host.KV().Get("tool_kv:" + key)
 	return marshal(map[string]any{"status": "ok", "key": key, "value": value})
 }
 
@@ -339,6 +339,6 @@ func (t *ToolRegistryActor) kvWrite(key, value string) string {
 	if key == "" {
 		return marshal(map[string]any{"error": "key is required"})
 	}
-	host.KVPut("tool_kv:"+key, value)
+	host.KV().Put("tool_kv:"+key, value)
 	return marshal(map[string]any{"status": "ok", "key": key})
 }

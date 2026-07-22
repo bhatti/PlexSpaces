@@ -42,7 +42,7 @@ class AgentActor:
         self.eval_run_id = args.get("eval_run_id", "")
         self.scenario_id = args.get("scenario_id", "")
         try:
-            host.kv_put("svc:agent_runner", host.self_id())
+            host.kv.put("svc:agent_runner", host.self_id())
         except Exception:
             pass
         try:
@@ -130,11 +130,11 @@ class AgentActor:
     def on_query_execution_trace(self) -> dict:
         """Live execution trace inspection mid-run (returns most recent KV trace)."""
         try:
-            index_raw = host.kv_get(f"trace_index:{self.actor_id}")
+            index_raw = host.kv.get(f"trace_index:{self.actor_id}")
             if index_raw:
                 trace_ids = json.loads(index_raw)
                 if trace_ids:
-                    raw = host.kv_get(f"trace:{trace_ids[-1]}")
+                    raw = host.kv.get(f"trace:{trace_ids[-1]}")
                     if raw:
                         return json.loads(raw)
         except Exception:
@@ -158,7 +158,7 @@ class AgentActor:
         memory_key = f"agent_memory:{self.actor_id}"
         prior_context = {}
         try:
-            raw = host.kv_get(memory_key)
+            raw = host.kv.get(memory_key)
             if raw:
                 prior_context = json.loads(raw)
         except Exception:
@@ -236,16 +236,16 @@ class AgentActor:
         """Store completed trajectory in KV (ExecutionTraceFacet also exports its own trace)."""
         try:
             key = f"agent_trajectory:{traj.get('trajectory_id', '')}"
-            host.kv_put(key, json.dumps(traj))
+            host.kv.put(key, json.dumps(traj))
 
             # Update per-agent index for easy retrieval by eval runner
             index_key = f"agent_trajectory_index:{self.actor_id}"
             try:
-                existing = json.loads(host.kv_get(index_key) or "[]")
+                existing = json.loads(host.kv.get(index_key) or "[]")
             except Exception:
                 existing = []
             existing.append(traj.get("trajectory_id", ""))
-            host.kv_put(index_key, json.dumps(existing))
+            host.kv.put(index_key, json.dumps(existing))
         except Exception as e:
             host.warn(f"Failed to export trajectory: {e}")
 

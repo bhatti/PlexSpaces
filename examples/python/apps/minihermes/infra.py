@@ -41,7 +41,7 @@ class SessionManagerActor:
         session_id = f"sess-{channel}-{user_id}-{host.now_ms()}"
         meta = {"session_id": session_id, "channel": channel, "user_id": user_id,
                 "created_at": host.now_ms(), "status": "active"}
-        host.kv_put(f"session:{session_id}", json.dumps(meta))
+        host.kv.put(f"session:{session_id}", json.dumps(meta))
         try:
             host.ts.write(["session_active", session_id, channel, user_id])
         except Exception:
@@ -57,7 +57,7 @@ class SessionManagerActor:
     def get_session(self, session_id: str = "") -> dict:
         if not session_id:
             return {"error": "session_id is required"}
-        raw = host.kv_get(f"session:{session_id}")
+        raw = host.kv.get(f"session:{session_id}")
         if not raw:
             return {"error": "session not found", "session_id": session_id}
         meta = json.loads(raw)
@@ -69,7 +69,7 @@ class SessionManagerActor:
     def end_session(self, session_id: str = "") -> dict:
         if not session_id:
             return {"error": "session_id is required"}
-        host.kv_delete(f"session:{session_id}")
+        host.kv.delete(f"session:{session_id}")
         if session_id in self.session_ids:
             self.session_ids.remove(session_id)
             self.active_sessions = max(0, self.active_sessions - 1)

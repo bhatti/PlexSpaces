@@ -4,6 +4,7 @@ pub mod workflow_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    ///
     #[derive(Debug, Clone)]
     pub struct WorkflowServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -114,6 +115,8 @@ pub mod workflow_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Get workflow definition
+*/
         pub async fn get_definition(
             &mut self,
             request: impl tonic::IntoRequest<super::GetDefinitionRequest>,
@@ -144,6 +147,8 @@ pub mod workflow_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** List workflow definitions
+*/
         pub async fn list_definitions(
             &mut self,
             request: impl tonic::IntoRequest<super::ListDefinitionsRequest>,
@@ -460,6 +465,8 @@ pub mod workflow_service_server {
             tonic::Response<super::CreateDefinitionResponse>,
             tonic::Status,
         >;
+        /** Get workflow definition
+*/
         async fn get_definition(
             &self,
             request: tonic::Request<super::GetDefinitionRequest>,
@@ -467,6 +474,8 @@ pub mod workflow_service_server {
             tonic::Response<super::GetDefinitionResponse>,
             tonic::Status,
         >;
+        /** List workflow definitions
+*/
         async fn list_definitions(
             &self,
             request: tonic::Request<super::ListDefinitionsRequest>,
@@ -538,6 +547,7 @@ pub mod workflow_service_server {
             tonic::Status,
         >;
     }
+    ///
     #[derive(Debug)]
     pub struct WorkflowServiceServer<T: WorkflowService> {
         inner: _Inner<T>,

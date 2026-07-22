@@ -85,15 +85,12 @@ class AbstractionsActor extends PlexSpacesActor {
     onKv_put(payload) {
         const key = String(payload.key ?? "");
         const value = String(payload.value ?? "");
-        const result = host.kvPut(key, value);
-        if (result.startsWith("ERROR:")) {
-            return { error: `kv_put: ${result}` };
-        }
+        host.kv.put(key, value);
         return { ok: true, key, value };
     }
     onKv_get(payload) {
         const key = String(payload.key ?? "");
-        return { key, value: host.kvGet(key) };
+        return { key, value: host.kv.get(key) };
     }
     onTs_write(payload) {
         const tuple = Array.isArray(payload.tuple) ? payload.tuple : [];
@@ -109,15 +106,18 @@ class AbstractionsActor extends PlexSpacesActor {
     }
     onBlob_upload(payload) {
         const blobId = String(payload.blob_id ?? "");
-        const result = host.blobUpload(blobId, String(payload.data ?? ""), String(payload.content_type ?? "text/plain"));
-        if (result.startsWith("ERROR:")) {
-            return { error: `blob_upload: ${result}` };
+        try {
+            const storedId = host.blob.upload(blobId, new TextEncoder().encode(String(payload.data ?? "")), String(payload.content_type ?? "text/plain"));
+            return { ok: true, blob_id: storedId };
         }
-        return { ok: true, blob_id: blobId };
+        catch (err) {
+            return { error: `blob_upload: ${String(err)}` };
+        }
     }
     onBlob_download(payload) {
         const blobId = String(payload.blob_id ?? "");
-        return { blob_id: blobId, data: host.blobDownload(blobId) };
+        const data = host.blob.download(blobId);
+        return { blob_id: blobId, data: new TextDecoder().decode(data) };
     }
     onGroup_members(payload) {
         try {

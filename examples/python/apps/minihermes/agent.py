@@ -63,7 +63,7 @@ class AgentActor:
 
         # Restore history from KV if session_id provided
         if session_id:
-            raw = host.kv_get(f"session_history:{session_id}")
+            raw = host.kv.get(f"session_history:{session_id}")
             if raw:
                 try:
                     self.messages = json.loads(raw)
@@ -152,7 +152,7 @@ class AgentActor:
         # Persist history
         if session_id and self.messages:
             try:
-                host.kv_put(f"session_history:{session_id}", json.dumps(self.messages[-self.max_history:]))
+                host.kv.put(f"session_history:{session_id}", json.dumps(self.messages[-self.max_history:]))
             except Exception:
                 pass
 
@@ -200,7 +200,7 @@ class AgentActor:
     def clear_history(self, session_id: str = "") -> dict:
         self.messages = []
         if session_id:
-            host.kv_delete(f"session_history:{session_id}")
+            host.kv.delete(f"session_history:{session_id}")
         return {"status": "ok"}
 
     @handler("get_stats")

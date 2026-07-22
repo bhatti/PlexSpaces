@@ -20,7 +20,7 @@ export {
   query_handler,
   getActorDefinition,
 } from "./decorators.js";
-export { Host, ProcessGroups, TupleSpace, host, pgFirst, pgFirstOrThrow, ServiceHttpClient } from "./host.js";
+export { Host, ProcessGroups, TupleSpace, host, pgFirst, pgFirstOrThrow, ServiceHttpClient, ActorRef, getActorRef } from "./host.js";
 export { ActorRouter } from "./router.js";
 export {
   defaultRetryConfig,
@@ -32,6 +32,11 @@ export {
   listWorkerNodeIds,
 } from "./leader_worker.js";
 export { ActorID } from "./actor_id.js";
+export {
+  WsThinClient,
+  type ThinClientOptions,
+  type ThinNodePingResult,
+} from "./ws_thin_client.js";
 export {
   AgentLoop,
   agentActor,

@@ -47,6 +47,10 @@ if [ ! -f "$WASM_FILE" ]; then
   echo ""
 fi
 
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
   echo -e "${RED}Start node: ./scripts/server.sh (from repo root)${NC}"
@@ -63,8 +67,7 @@ for _attempt in 1 2 3; do
     -F "application_id=$APP_ID" \
     -F "name=migrating-zeebe-claim-py" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')

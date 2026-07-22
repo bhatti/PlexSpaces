@@ -152,7 +152,7 @@ mod tests {
             None, // No shared timer pool
         ));
         SimpleHostImpl::new(
-            ActorId::from("test-actor".to_string()),
+            ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap(),
             host_functions,
             None,
         )
@@ -214,7 +214,7 @@ mod tests {
     async fn test_simple_host_pool_not_configured_returns_error() {
         let host_functions = Arc::new(HostFunctions::new());
         let mut host = SimpleHostImpl::new(
-            ActorId::from("test-actor".to_string()),
+            ActorId::new("test-actor", "test-type", "test-ns", "test-node").unwrap(),
             host_functions,
             None,
         );

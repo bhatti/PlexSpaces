@@ -339,6 +339,7 @@ impl OutboundHttpClient for ResilientOutboundHttpClient {
                         }
 
                         return Ok(OutboundHttpResponse {
+                            request_id: request.request_id.clone(),
                             status: status as u32,
                             headers,
                             body: body.to_vec(),

@@ -59,7 +59,7 @@ def main() -> None:
     assert channel.received == ["alerts:hello"]
 
     mock_host = _get_host()
-    host.kv_put("abstractions/config", "ready")
+    host.kv.put("abstractions/config", "ready")
     host.ts.write(["abstractions", "task", "t-1"])
     host.blob_upload("abstractions/blob-1", "aGVsbG8=", "text/plain")
     host.process_groups.join("abstractions-group")
@@ -67,7 +67,7 @@ def main() -> None:
     host.process_groups.broadcast("abstractions-group", "notify", {"ok": True})
     timer_id = host.send_after(250, "tick", {"kind": "timer"})
     spawned_id = host.spawn("abstractions", "abstractions-actor", "", {"count": "1"})
-    assert json.loads(host.kv_list("abstractions/")) == ["abstractions/config"]
+    assert json.loads(host.kv.list("abstractions/")) == ["abstractions/config"]
     assert host.ts.read(["abstractions", "task", None]) == ["abstractions", "task", "t-1"]
     assert json.loads(host.blob_list("abstractions/")) == ["abstractions/blob-1"]
     assert host.process_groups.members("abstractions-group") == ["mock-actor"]

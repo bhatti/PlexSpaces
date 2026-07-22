@@ -1,5 +1,8 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::{ask, self_id};
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::{create_shard_group, scatter_gather};
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -27,7 +30,7 @@ fn ensure_worker_initialization(
         })
         .to_string()
         .into_bytes();
-        let response = host::ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
+        let response = ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
             format!(
                 "worker init failed for shard {} ({}): {}",
                 region_id, shard_actor_id, err
@@ -66,10 +69,10 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             )
         }
     };
-    let group_id = format!("heat-diffusion-{}", host::now_ms());
+    let group_id = format!("heat-diffusion-{}", now_ms());
     let create_request_bytes =
         shard_group_create_request_bytes(&group_id, "worker", request.num_regions);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
@@ -77,7 +80,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         Ok(actor_ids) => actor_ids,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
-    let leader_node_id = actor_node_id(&host::self_id());
+    let leader_node_id = actor_node_id(&self_id());
     let mut per_node_metrics: HashMap<String, NodeMetrics> = HashMap::new();
     let mut per_role_metrics: HashMap<String, RoleMetrics> = HashMap::new();
 
@@ -85,13 +88,13 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     let mut leader_compute_ms = 0_u64;
     let mut leader_coordination_ms = 0_u64;
 
-    let init_start = host::now_ms();
+    let init_start = now_ms();
     if let Err(err) =
         ensure_worker_initialization(&shard_actor_ids, request.width, request.num_regions)
     {
         return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    leader_coordination_ms += host::now_ms().saturating_sub(init_start);
+    leader_coordination_ms += now_ms().saturating_sub(init_start);
     leader_message_count += shard_actor_ids.len() as u64;
 
     let participant_node_ids: std::collections::BTreeSet<String> =
@@ -116,7 +119,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         }
     }
 
-    let wall_start = host::now_ms();
+    let wall_start = now_ms();
     let mut final_iteration = 0_usize;
     let mut max_diff = 0.0_f64;
     let mut converged = false;
@@ -132,7 +135,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             "iteration": iteration,
             "tolerance": request.tolerance,
         });
-        let scatter_start = host::now_ms();
+        let scatter_start = now_ms();
         let scatter_request_bytes = scatter_gather_request_bytes(
             &group_id,
             plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
@@ -140,11 +143,11 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             request.num_regions,
             30_000,
         );
-        let response = match host::scatter_gather(&scatter_request_bytes) {
+        let response = match scatter_gather(&scatter_request_bytes) {
             Ok(response) => response,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        leader_coordination_ms += host::now_ms().saturating_sub(scatter_start);
+        leader_coordination_ms += now_ms().saturating_sub(scatter_start);
         let shard_responses = match decode_scatter_gather_response(&response) {
             Ok(shard_responses) => shard_responses,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
@@ -155,7 +158,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         let mut iteration_max_latency_ms = 0_u64;
         let mut iteration_successes = 0_u64;
         max_diff = 0.0;
-        let iteration_compute_start = host::now_ms();
+        let iteration_compute_start = now_ms();
 
         for shard in shard_responses {
             let success = shard
@@ -245,7 +248,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 remote_nodes_with_work.insert(node_id.clone());
             }
         }
-        leader_compute_ms += host::now_ms().saturating_sub(iteration_compute_start);
+        leader_compute_ms += now_ms().saturating_sub(iteration_compute_start);
 
         final_iteration = iteration;
         converged = max_diff < request.tolerance;
@@ -266,7 +269,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         }
     }
 
-    let wall_time_ms = host::now_ms().saturating_sub(wall_start);
+    let wall_time_ms = now_ms().saturating_sub(wall_start);
     if let Err(err) = require_application_metrics_merge(
         serde_json::json!({
             "message_count": 1,

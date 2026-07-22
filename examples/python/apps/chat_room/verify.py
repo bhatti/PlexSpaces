@@ -175,7 +175,7 @@ def main() -> None:
     assert get_state_dict(restored) == state_snapshot
 
     mock_host = _get_host()
-    host.kv_put("chat:test", "ok")
+    host.kv.put("chat:test", "ok")
     host.ts.write(["chat", "guild-acme", "general"])
     host.process_groups.join("channel:guild-acme__general")
     host.process_groups.broadcast("channel:guild-acme__general", "deliver_channel_event", {"ok": True})

@@ -426,7 +426,7 @@ mod wasm_app {
     });
 
     use exports::plexspaces::actor::actor::Guest;
-    use plexspaces::actor::host;
+    use plexspaces::actor::host_actor::{ask, demonitor, link, monitor, self_id, unlink};
 
     // ── Unified actor state enum ─────────────────────────────────────────────
 
@@ -475,19 +475,19 @@ mod wasm_app {
             let state = match actor_type.as_str() {
                 "inference_worker" => {
                     let mut s = InferenceWorkerState::default();
-                    s.actor_id = host::self_id();
+                    s.actor_id = self_id();
                     s.worker_id = get_str(&args, "worker_id", "default-worker").to_string();
                     s.mode = "normal".to_string();
                     ActorState::InferenceWorker(s)
                 }
                 "validator_agent" => {
                     let mut s = ValidatorState::default();
-                    s.actor_id = host::self_id();
+                    s.actor_id = self_id();
                     ActorState::Validator(s)
                 }
                 "pipeline_supervisor" => {
                     let mut s = SupervisorState::default();
-                    s.actor_id = host::self_id();
+                    s.actor_id = self_id();
                     ActorState::Supervisor(s)
                 }
                 "audit_log" => ActorState::AuditLog(AuditLogState::default()),
@@ -515,7 +515,7 @@ mod wasm_app {
                         if peer_id.is_empty() {
                             return Ok(json!({ "error": "peer_id required" }).to_string().into_bytes());
                         }
-                        host::link(&peer_id).ok();
+                        link(&peer_id).ok();
                         if !state.linked_peers.contains(&peer_id) {
                             state.linked_peers.push(peer_id.clone());
                         }
@@ -525,7 +525,7 @@ mod wasm_app {
                         let bare = get_str(&v, "peer_id",
                             state.linked_peers.first().map(|s| s.as_str()).unwrap_or("")).to_string();
                         let peer_id = sibling_id(&bare, &state.actor_id);
-                        host::unlink(&peer_id).ok();
+                        unlink(&peer_id).ok();
                         state.linked_peers.retain(|p| p != &peer_id);
                         Ok(json!({ "status": "ok", "peer_id": peer_id }).to_string().into_bytes())
                     }
@@ -538,7 +538,7 @@ mod wasm_app {
                         if canonical.is_empty() {
                             return Ok(json!({ "error": "worker_id required" }).to_string().into_bytes());
                         }
-                        let monitor_ref = host::monitor(&canonical).unwrap_or_default();
+                        let monitor_ref = monitor(&canonical).unwrap_or_default();
                         state.monitor_refs.push(MonitorEntry {
                             worker_id: canonical.clone(),
                             monitor_ref: monitor_ref.clone(),
@@ -552,7 +552,7 @@ mod wasm_app {
                         let canonical = sibling_id(&bare, &state.actor_id);
                         if let Some(idx) = state.monitor_refs.iter().position(|m| m.worker_id == canonical) {
                             let entry = state.monitor_refs.remove(idx);
-                            host::demonitor(&entry.monitor_ref).ok();
+                            demonitor(&entry.monitor_ref).ok();
                             Ok(json!({ "status": "ok", "worker_id": canonical }).to_string().into_bytes())
                         } else {
                             Ok(json!({ "status": "not_found", "worker_id": canonical }).to_string().into_bytes())
@@ -567,7 +567,7 @@ mod wasm_app {
                         if canonical.is_empty() {
                             return Ok(json!({ "error": "worker_id required" }).to_string().into_bytes());
                         }
-                        let monitor_ref = host::monitor(&canonical).unwrap_or_default();
+                        let monitor_ref = monitor(&canonical).unwrap_or_default();
                         state.monitor_refs.push(MonitorEntry {
                             worker_id: canonical.clone(),
                             monitor_ref: monitor_ref.clone(),
@@ -584,7 +584,7 @@ mod wasm_app {
                         let canonical = sibling_id(&bare, &state.actor_id);
                         if let Some(idx) = state.monitor_refs.iter().position(|m| m.worker_id == canonical) {
                             let entry = state.monitor_refs.remove(idx);
-                            host::demonitor(&entry.monitor_ref).ok();
+                            demonitor(&entry.monitor_ref).ok();
                         }
                         state.worker_pool.retain(|w| w != &canonical);
                         Ok(json!({ "status": "ok", "worker_id": canonical }).to_string().into_bytes())
@@ -603,7 +603,7 @@ mod wasm_app {
                         let request_id = get_str(&v, "request_id", "").to_string();
                         drop(guard); // release lock before ask
                         let ask_payload = json!({ "op": "infer", "prompt": prompt, "request_id": request_id });
-                        let result_bytes = host::ask(&worker_id, "infer", &ask_payload.to_string().into_bytes(), 30_000)
+                        let result_bytes = ask(&worker_id, "infer", &ask_payload.to_string().into_bytes(), 30_000)
                             .unwrap_or_else(|e| json!({ "error": e }).to_string().into_bytes());
                         let result = parse_json(&result_bytes);
                         let byzantine = result.get("mode").and_then(|m| m.as_str()) == Some("byzantine");

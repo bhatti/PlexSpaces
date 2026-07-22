@@ -70,6 +70,7 @@ async fn list_connected_nodes(
 
     let node_service = NodeServiceImpl::new(s.service_locator, local_node_id);
     let mut grpc_request = tonic::Request::new(ListConnectedNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         cluster,
         page_size,
         page_token,

@@ -113,6 +113,8 @@ pub mod pool_service_client {
                 .insert(GrpcMethod::new("plexspaces.pool.v1.PoolService", "CreatePool"));
             self.inner.unary(req, path, codec).await
         }
+        /** Checkout an actor from pool
+*/
         pub async fn checkout(
             &mut self,
             request: impl tonic::IntoRequest<super::CheckoutRequest>,
@@ -138,6 +140,8 @@ pub mod pool_service_client {
                 .insert(GrpcMethod::new("plexspaces.pool.v1.PoolService", "Checkout"));
             self.inner.unary(req, path, codec).await
         }
+        /** Checkin an actor to pool
+*/
         pub async fn checkin(
             &mut self,
             request: impl tonic::IntoRequest<super::CheckinRequest>,
@@ -163,6 +167,8 @@ pub mod pool_service_client {
                 .insert(GrpcMethod::new("plexspaces.pool.v1.PoolService", "Checkin"));
             self.inner.unary(req, path, codec).await
         }
+        /** Get pool statistics
+*/
         pub async fn get_stats(
             &mut self,
             request: impl tonic::IntoRequest<super::GetStatsRequest>,
@@ -188,6 +194,8 @@ pub mod pool_service_client {
                 .insert(GrpcMethod::new("plexspaces.pool.v1.PoolService", "GetStats"));
             self.inner.unary(req, path, codec).await
         }
+        /** Scale pool manually
+*/
         pub async fn scale(
             &mut self,
             request: impl tonic::IntoRequest<super::ScaleRequest>,
@@ -210,6 +218,8 @@ pub mod pool_service_client {
                 .insert(GrpcMethod::new("plexspaces.pool.v1.PoolService", "Scale"));
             self.inner.unary(req, path, codec).await
         }
+        /** Pause auto-scaling
+*/
         pub async fn pause_scaling(
             &mut self,
             request: impl tonic::IntoRequest<super::PauseScalingRequest>,
@@ -237,6 +247,8 @@ pub mod pool_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Resume auto-scaling
+*/
         pub async fn resume_scaling(
             &mut self,
             request: impl tonic::IntoRequest<super::ResumeScalingRequest>,
@@ -264,6 +276,8 @@ pub mod pool_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Drain pool (stop accepting new checkouts)
+*/
         pub async fn drain(
             &mut self,
             request: impl tonic::IntoRequest<super::DrainRequest>,
@@ -356,6 +370,8 @@ pub mod pool_service_server {
             tonic::Response<super::CreatePoolResponse>,
             tonic::Status,
         >;
+        /** Checkout an actor from pool
+*/
         async fn checkout(
             &self,
             request: tonic::Request<super::CheckoutRequest>,
@@ -363,10 +379,14 @@ pub mod pool_service_server {
             tonic::Response<super::CheckoutResponse>,
             tonic::Status,
         >;
+        /** Checkin an actor to pool
+*/
         async fn checkin(
             &self,
             request: tonic::Request<super::CheckinRequest>,
         ) -> std::result::Result<tonic::Response<super::CheckinResponse>, tonic::Status>;
+        /** Get pool statistics
+*/
         async fn get_stats(
             &self,
             request: tonic::Request<super::GetStatsRequest>,
@@ -374,10 +394,14 @@ pub mod pool_service_server {
             tonic::Response<super::GetStatsResponse>,
             tonic::Status,
         >;
+        /** Scale pool manually
+*/
         async fn scale(
             &self,
             request: tonic::Request<super::ScaleRequest>,
         ) -> std::result::Result<tonic::Response<super::ScaleResponse>, tonic::Status>;
+        /** Pause auto-scaling
+*/
         async fn pause_scaling(
             &self,
             request: tonic::Request<super::PauseScalingRequest>,
@@ -385,6 +409,8 @@ pub mod pool_service_server {
             tonic::Response<super::PauseScalingResponse>,
             tonic::Status,
         >;
+        /** Resume auto-scaling
+*/
         async fn resume_scaling(
             &self,
             request: tonic::Request<super::ResumeScalingRequest>,
@@ -392,6 +418,8 @@ pub mod pool_service_server {
             tonic::Response<super::ResumeScalingResponse>,
             tonic::Status,
         >;
+        /** Drain pool (stop accepting new checkouts)
+*/
         async fn drain(
             &self,
             request: tonic::Request<super::DrainRequest>,

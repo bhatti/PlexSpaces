@@ -313,7 +313,7 @@ func (ra *ResearchAgent) Init(configJSON string) string {
 		"shard":       "Shard groups partition data across multiple actors for parallel processing",
 	}
 	for key, value := range facts {
-		host.KVPut("knowledge:"+key, value)
+		host.KV().Put("knowledge:"+key, value)
 	}
 
 	// Write agent info directly to TupleSpace — no cross-actor routing needed.
@@ -354,7 +354,7 @@ func (ra *ResearchAgent) research(p map[string]any) string {
 	for _, key := range knownKeys {
 		for _, word := range topicWords {
 			if strings.Contains(key, word) || strings.Contains(word, key) {
-				fact := host.KVGet("knowledge:" + key)
+				fact, _ := host.KV().Get("knowledge:" + key)
 				if fact != "" {
 					findings = append(findings, fact)
 				}
@@ -363,9 +363,7 @@ func (ra *ResearchAgent) research(p map[string]any) string {
 		}
 	}
 
-	keysJSON := host.KVList("knowledge:")
-	var keys []string
-	_ = json.Unmarshal([]byte(keysJSON), &keys)
+	keys, _ := host.KV().List("knowledge:")
 	for _, key := range keys {
 		shortKey := strings.TrimPrefix(key, "knowledge:")
 		alreadyFound := false
@@ -380,7 +378,7 @@ func (ra *ResearchAgent) research(p map[string]any) string {
 		}
 		for _, word := range topicWords {
 			if strings.Contains(shortKey, word) || strings.Contains(word, shortKey) {
-				fact := host.KVGet(key)
+				fact, _ := host.KV().Get(key)
 				if fact != "" {
 					findings = append(findings, fact)
 				}

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Release Configuration
@@ -612,6 +612,31 @@ message RuntimeConfig {
     },
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Reusable ClientTransportPolicy fragments merged by template name."}
   ];
+
+  // Static file directories to serve over HTTP.
+  //
+  // Each entry maps a URL mount path to a local filesystem directory.
+  // Example: mount_path="/apps/chat", fs_path="/opt/plexspaces/static/chat"
+  // → files under fs_path are served at http://<node>/apps/chat/
+  //
+  // Environment variable override: PLEXSPACES_STATIC_DIRS
+  // Format: "<mount>:<path>[:<mount2>:<path2>...]"
+  repeated StaticDirMount static_dirs = 17 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Static file directories to serve over HTTP."}
+  ];
+}
+
+// A single static file directory mount.
+//
+// ## Purpose
+// Maps a URL mount path to a local filesystem directory for static file serving.
+message StaticDirMount {
+  // URL path prefix (e.g., "/apps/chat" or "apps/chat")
+  string mount_path = 1;
+
+  // Local filesystem directory to serve (must exist at startup)
+  string fs_path = 2;
 }
 
 // gRPC server configuration

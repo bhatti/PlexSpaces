@@ -296,20 +296,24 @@ pub struct ResourceUsage {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateVmRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
     pub config: ::core::option::Option<VmConfig>,
 }
 /// CreateVm response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateVmResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(string, tag="2")]
-    pub vm_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub socket_path: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// BootVm request
@@ -317,17 +321,21 @@ pub struct CreateVmResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BootVmRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
 }
 /// BootVm response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BootVmResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(enumeration="VmState", tag="2")]
+    #[prost(enumeration="VmState", tag="3")]
     pub state: i32,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// PauseVm request
@@ -335,17 +343,21 @@ pub struct BootVmResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseVmRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
 }
 /// PauseVm response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PauseVmResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(enumeration="VmState", tag="2")]
+    #[prost(enumeration="VmState", tag="3")]
     pub state: i32,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// ResumeVm request
@@ -353,17 +365,21 @@ pub struct PauseVmResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResumeVmRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
 }
 /// ResumeVm response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResumeVmResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(enumeration="VmState", tag="2")]
+    #[prost(enumeration="VmState", tag="3")]
     pub state: i32,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag="4")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// StopVm request
@@ -371,18 +387,22 @@ pub struct ResumeVmResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StopVmRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
     /// Force kill if graceful shutdown fails
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag="3")]
     pub force: bool,
 }
 /// StopVm response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StopVmResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// GetVmState request
@@ -390,17 +410,21 @@ pub struct StopVmResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetVmStateRequest {
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
 }
 /// GetVmState response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetVmStateResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(message, optional, tag="2")]
-    pub vm: ::core::option::Option<VmInstance>,
     #[prost(message, optional, tag="3")]
+    pub vm: ::core::option::Option<VmInstance>,
+    #[prost(message, optional, tag="4")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// ListVms request
@@ -408,26 +432,30 @@ pub struct GetVmStateResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListVmsRequest {
     /// Filter by state (empty = all)
-    #[prost(enumeration="VmState", repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(enumeration="VmState", repeated, tag="2")]
     pub states: ::prost::alloc::vec::Vec<i32>,
     /// Filter by node
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub node_id: ::prost::alloc::string::String,
     /// Pagination
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub page_size: u32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub page_token: ::prost::alloc::string::String,
 }
 /// ListVms response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListVmsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
     pub vms: ::prost::alloc::vec::Vec<VmInstance>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub next_page_token: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag="4")]
     pub total_count: u32,
 }
 /// DeployApplication request
@@ -440,9 +468,11 @@ pub struct ListVmsResponse {
 pub struct DeployApplicationRequest {
     /// VM identifier
     #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub vm_id: ::prost::alloc::string::String,
     /// Application identifier
-    #[prost(string, tag="2")]
+    #[prost(string, tag="3")]
     pub application_id: ::prost::alloc::string::String,
     /// Application bundle (framework + actors + config)
     ///
@@ -451,25 +481,27 @@ pub struct DeployApplicationRequest {
     /// - WASM modules (actor implementations)
     /// - Application configuration
     /// - Dependencies
-    #[prost(bytes="vec", tag="3")]
+    #[prost(bytes="vec", tag="4")]
     pub application_bundle: ::prost::alloc::vec::Vec<u8>,
     /// Application configuration (optional, can be in bundle)
     ///
     /// Max 1MB
-    #[prost(string, tag="4")]
+    #[prost(string, tag="5")]
     pub application_config_json: ::prost::alloc::string::String,
 }
 /// DeployApplication response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeployApplicationResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(string, tag="2")]
-    pub application_id: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
+    pub application_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
     pub vm_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag="5")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 /// UndeployApplication request
@@ -477,20 +509,24 @@ pub struct DeployApplicationResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UndeployApplicationRequest {
     #[prost(string, tag="1")]
-    pub vm_id: ::prost::alloc::string::String,
+    pub request_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
+    pub vm_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
     pub application_id: ::prost::alloc::string::String,
     /// Force undeploy even if actors are running
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag="4")]
     pub force: bool,
 }
 /// UndeployApplication response
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UndeployApplicationResponse {
-    #[prost(bool, tag="1")]
+    #[prost(string, tag="1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
     pub success: bool,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag="3")]
     pub error: ::core::option::Option<FirecrackerError>,
 }
 // ============================================================================
@@ -635,6 +671,189 @@ impl FirecrackerErrorCode {
         }
     }
 }
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
+#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

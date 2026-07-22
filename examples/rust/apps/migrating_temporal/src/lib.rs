@@ -18,7 +18,9 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::application_metrics_add;
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
@@ -88,7 +90,7 @@ fn resolve_application_id() -> String {
     if !id.is_empty() {
         return id;
     }
-    actor_application_id(&host::self_id())
+    actor_application_id(&self_id())
 }
 
 fn merge_application_metrics_for(
@@ -107,7 +109,7 @@ fn merge_application_metrics_for(
         latency_max_ms: metrics.get("latency_max_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
         latency_samples: metrics.get("latency_samples").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
     }.encode_to_vec();
-    host::application_metrics_add(application_id, &metrics_bytes)
+    application_metrics_add(application_id, &metrics_bytes)
         .map(|_| ())
         .map_err(|err| format!("{context}: {err}"))
 }
@@ -149,7 +151,7 @@ fn has_step(steps: &[OrderStep], name: &str) -> bool {
 /// Build cancelled response JSON and metrics delta — no host calls; caller merges metrics **after** dropping state lock.
 fn compensate_body(state: &mut OrderState, reason: &str) -> (String, serde_json::Value) {
     state.status = "cancelled".to_string();
-    state.updated_at_ms = host::now_ms();
+    state.updated_at_ms = now_ms();
     let body = serde_json::json!({
         "status": "cancelled",
         "order_id": state.order_id,
@@ -176,7 +178,7 @@ enum RunWorkflowPhase {
 fn run_workflow(payload: &serde_json::Value) -> String {
     let application_id = resolve_application_id();
     let phase = with_state(|state| {
-        let t0 = host::now_ms();
+        let t0 = now_ms();
         if state.created_at_ms == 0 {
             state.created_at_ms = t0;
         }
@@ -190,7 +192,7 @@ fn run_workflow(payload: &serde_json::Value) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or(&state.customer_id)
             .to_string();
-        state.updated_at_ms = host::now_ms();
+        state.updated_at_ms = now_ms();
 
         if state.status != "pending" && state.status != "validated" {
             return RunWorkflowPhase::Early(
@@ -209,10 +211,10 @@ fn run_workflow(payload: &serde_json::Value) -> String {
             compute_ms += 8.0;
             state.steps.push(OrderStep {
                 name: "validate".to_string(),
-                completed_at_ms: host::now_ms(),
+                completed_at_ms: now_ms(),
             });
             state.status = "validated".to_string();
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         }
         if state.cancel_requested {
             let (body, metrics) = compensate_body(state, "cancel_requested");
@@ -227,10 +229,10 @@ fn run_workflow(payload: &serde_json::Value) -> String {
             compute_ms += 12.0;
             state.steps.push(OrderStep {
                 name: "reserve_inventory".to_string(),
-                completed_at_ms: host::now_ms(),
+                completed_at_ms: now_ms(),
             });
             state.status = "inventory_reserved".to_string();
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         }
         if state.cancel_requested {
             let (body, metrics) = compensate_body(state, "cancel_requested");
@@ -245,10 +247,10 @@ fn run_workflow(payload: &serde_json::Value) -> String {
             compute_ms += 10.0;
             state.steps.push(OrderStep {
                 name: "charge_payment".to_string(),
-                completed_at_ms: host::now_ms(),
+                completed_at_ms: now_ms(),
             });
             state.status = "payment_charged".to_string();
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         }
         if state.cancel_requested {
             let (body, metrics) = compensate_body(state, "cancel_requested");
@@ -263,13 +265,13 @@ fn run_workflow(payload: &serde_json::Value) -> String {
             compute_ms += 15.0;
             state.steps.push(OrderStep {
                 name: "ship".to_string(),
-                completed_at_ms: host::now_ms(),
+                completed_at_ms: now_ms(),
             });
             state.status = "shipped".to_string();
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         }
 
-        let total_elapsed = (host::now_ms().saturating_sub(t0)) as f64;
+        let total_elapsed = (now_ms().saturating_sub(t0)) as f64;
         let compute_reported = compute_ms.min(total_elapsed);
         let coord_reported = (total_elapsed - compute_reported).max(0.0);
         state.total_compute_ms += compute_reported;
@@ -366,7 +368,7 @@ impl OrderFulfillmentActor {
         with_state(|state| {
             let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
             state.application_id = if actor_id.is_empty() {
-                actor_application_id(&host::self_id())
+                actor_application_id(&self_id())
             } else {
                 actor_application_id(actor_id)
             };
@@ -376,7 +378,7 @@ impl OrderFulfillmentActor {
             if let Some(id) = v.get("customer_id").and_then(|x| x.as_str()) {
                 state.customer_id = id.to_string();
             }
-            let now = host::now_ms();
+            let now = now_ms();
             state.created_at_ms = now;
             state.updated_at_ms = now;
         });
@@ -402,7 +404,7 @@ impl OrderFulfillmentActor {
         let application_id = resolve_application_id();
         with_state(|state| {
             state.cancel_requested = true;
-            state.updated_at_ms = host::now_ms();
+            state.updated_at_ms = now_ms();
         });
         merge_application_metrics_for(
             &application_id,

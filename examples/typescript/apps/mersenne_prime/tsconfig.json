@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "outDir": "dist",
+    "declaration": true,
+    "esModuleInterop": true
+  },
+  "include": ["mersenne_actor.ts"],
+  "exclude": ["static", "node_modules", "dist"]
+}

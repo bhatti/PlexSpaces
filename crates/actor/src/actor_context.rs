@@ -4,37 +4,38 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Enhanced ActorContext with service access
 //!
 //! ## Purpose
 //! Provides actors with access to all system services they need:
-//! - ActorService: Spawn and communicate with actors (local and remote)
-//! - ObjectRegistry: Service discovery
-//! - TupleSpaceProvider: Coordination
-//! - Node: Node-level operations
+//! - `ActorRegistry`: dispatch messages (local + virtual activation + remote via ActorService gRPC)
+//! - `ObjectRegistry`: service discovery
+//! - `TupleSpaceProvider`: coordination
 //!
-//! ## Design (Option C: Actor as Container)
-//! Actors receive this context in all their methods, giving them full access
-//! to the system without needing to pass services around manually.
+//! ## send_reply routing
+//! `ActorContext::send_reply` routes through `ActorRegistry::tell`, which handles:
+//! - Local delivery (mailbox) and temporary-sender reply routing (ReplyWaiterRegistry)
+//! - Remote delivery (delegates to ActorService gRPC)
+//! - Virtual actor activation on first message
 
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{ActorId, RequestContext, RequestContextExt, ServiceLocator};
-// self_ref and parent_ref use the lightweight service-traits ActorRef (no mailbox required).
+// self_ref uses the lightweight service-traits ActorRef (no mailbox required).
 use plexspaces_proto::common::v1::Message;
 use plexspaces_service_traits::ActorRef;
 
@@ -243,16 +244,6 @@ pub struct ActorContext {
     /// - Linking/monitoring other actors
     /// - Getting actor ID
     pub self_ref: Option<ActorRef>,
-
-    /// Parent reference (set by supervisor)
-    ///
-    /// ## Purpose
-    /// Reference to the supervisor that manages this actor.
-    /// Used for:
-    /// - Understanding supervision hierarchy
-    /// - Reporting to parent supervisor
-    pub parent_ref: Option<ActorRef>,
-
 }
 
 impl ActorContext {
@@ -288,7 +279,6 @@ impl ActorContext {
             service_locator,
             trap_exit: false, // Default: linked actor death causes this actor to die
             self_ref: None,   // Set after actor is spawned
-            parent_ref: None, // Set by supervisor when starting child
         }
     }
 
@@ -340,40 +330,18 @@ impl ActorContext {
             .id()
     }
 
-    /// Get parent ActorRef (supervisor)
-    pub fn parent_ref(&self) -> Option<&ActorRef> {
-        self.parent_ref.as_ref()
-    }
 
-    /// Send a reply message to the sender of the original message
+    /// Send a reply message to the sender of the original message.
     ///
-    /// ## Purpose
-    /// Convenience method for sending replies from actors. This is a simplified wrapper
-    /// around `ActorRef::send_reply()` that uses the context's service_locator and
-    /// the target actor ID (the actor sending the reply).
+    /// Routes through `ActorRegistry::tell()` so virtual actor activation and uniform
+    /// routing apply. The registry dispatches locally (mailbox + ReplyWaiter routing)
+    /// or remotely (via ActorService gRPC) as needed.
     ///
     /// ## Arguments
     /// * `correlation_id` - Correlation ID from the original message (optional)
-    /// * `sender_id` - ID of the actor that sent the original message (or temporary sender ID)
-    /// * `target_actor_id` - Typed ID of the actor sending the reply (usually `ctx.actor_id().clone()`)
+    /// * `sender_id` - ID of the actor that sent the original message (reply destination)
+    /// * `target_actor_id` - Typed ID of the actor sending the reply (usually `ctx.actor_id()`)
     /// * `reply_message` - The reply message to send
-    ///
-    /// ## Returns
-    /// Ok(()) if reply was sent successfully
-    ///
-    /// ## Example
-    /// ```rust,ignore
-    /// // In actor's handle_message or handle_request:
-    /// if !msg.sender_id.is_empty() {
-    ///     let reply = Message { payload: b"response".to_vec(), ..Default::default() };
-    ///     ctx.send_reply(
-    ///         Some(&msg.correlation_id),
-    ///         &msg.sender_id,
-    ///         ctx.actor_id().clone(),
-    ///         reply,
-    ///     ).await?;
-    /// }
-    /// ```
     pub async fn send_reply(
         &self,
         correlation_id: Option<&str>,
@@ -381,53 +349,33 @@ impl ActorContext {
         target_actor_id: ActorId,
         mut reply_message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let target_actor_id_clone = target_actor_id.clone();
-        let reply_message_id = reply_message.id.clone();
-
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}",
-                sender_id, target_actor_id_clone, correlation_id, reply_message_id);
-        }
-
-        // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
-        // Set message fields: receiver_id=sender_id (where reply goes TO), sender_id=target_actor_id (where reply comes FROM), correlation_id
-        reply_message.receiver_id = sender_id.to_string(); // Reply goes TO the sender (temporary sender for ask pattern)
-        reply_message.sender_id = target_actor_id.to_string(); // Reply comes FROM the current actor
+        // Set routing fields
+        reply_message.receiver_id = sender_id.to_string();
+        reply_message.sender_id = target_actor_id.to_string();
         if let Some(corr_id) = correlation_id {
             reply_message.correlation_id = corr_id.to_string();
         }
-
-        // Ensure reply message has an ID with "res-" prefix for tracking
         if reply_message.id.is_empty() {
             use ulid::Ulid;
-            reply_message.id = format!("res-{}", Ulid::new().to_string());
+            reply_message.id = format!("res-{}", Ulid::new());
         } else if !reply_message.id.starts_with("res-") && !reply_message.id.starts_with("req-") {
-            // If ID exists but doesn't have prefix, add res- prefix for replies
             reply_message.id = format!("res-{}", reply_message.id);
         }
 
-        // Use send() method - it will route to temporary sender just like any other actor
-        // ActorRef::tell() will detect temporary sender and route to ReplyWaiter automatically
-        let actor_service = self
-            .get_actor_service()
+        let registry = self
+            .service_locator
+            .actor_registry()
             .await
-            .ok_or_else(|| "ActorService not available in ServiceLocator".to_string())?;
+            .ok_or_else(|| "ActorRegistry not available in ServiceLocator".to_string())?;
 
+        let target = ActorId::from_canonical(sender_id)
+            .map_err(|e| format!("Invalid sender_id '{}': {}", sender_id, e))?;
         let ctx = RequestContext::new_without_auth(self.tenant_id.clone(), self.namespace.clone());
-        let result = actor_service
-            .send(&ctx, sender_id, reply_message)
-            .await
-            .map(|_| ()); // Ignore message_id return value
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "[ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}",
-                sender_id,
-                target_actor_id_clone,
-                result.is_ok()
-            );
-        }
-        result
+        registry
+            .tell(&ctx, &target, reply_message)
+            .await
+            .map_err(|e| format!("ActorRegistry::tell() failed in send_reply: {}", e).into())
     }
 
     /// Get ActorService from ServiceLocator

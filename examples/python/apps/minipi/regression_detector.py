@@ -32,7 +32,7 @@ class RegressionDetectorActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:regression_detector", host.self_id())
+            host.kv.put("svc:regression_detector", host.self_id())
         except Exception:
             pass
         try:
@@ -179,7 +179,7 @@ class RegressionDetectorActor:
 
     def _load_baseline(self) -> dict:
         try:
-            raw = host.kv_get("regression_baseline")
+            raw = host.kv.get("regression_baseline")
             return json.loads(raw) if raw else {}
         except Exception:
             return {}
@@ -190,14 +190,14 @@ class RegressionDetectorActor:
             traj_id = s.get("trajectory_id", "")
             baseline[traj_id] = {"score": s.get("score", 0.0), "eval_run_id": eval_run_id}
         try:
-            host.kv_put("regression_baseline", json.dumps(baseline))
-            host.kv_put("regression_baseline_eval_run", eval_run_id)
+            host.kv.put("regression_baseline", json.dumps(baseline))
+            host.kv.put("regression_baseline_eval_run", eval_run_id)
         except Exception as e:
             host.warn(f"Failed to store baseline: {e}")
 
     def _load_trajectory(self, traj_id: str) -> dict:
         try:
-            raw = host.kv_get(f"trajectory:{traj_id}")
+            raw = host.kv.get(f"trajectory:{traj_id}")
             return json.loads(raw) if raw else {}
         except Exception:
             return {}

@@ -151,6 +151,7 @@ async fn test_jwt_grpc_auth() {
     // Create gRPC request with JWT token in metadata
     let mut client = node.client.clone();
     let mut request = Request::new(SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         spec: Some(ActorSpawnSpec {
             identity: Some(ActorIdentity {
                 name: "test-actor@jwt-test-node".to_string(),
@@ -265,10 +266,9 @@ async fn test_jwt_http_auth() {
 /// Test: when auth is disabled, HTTP request without JWT succeeds with tenant provided out of band.
 #[tokio::test]
 async fn test_http_auth_disabled_no_jwt_succeeds() {
-    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
     std::env::remove_var("PLEXSPACES_JWT_SECRET");
 
-    let mut harness = TestHarness::new();
+    let mut harness = TestHarness::new_with_auth_disabled();
     let node = harness
         .spawn_node("auth-disabled-http-node")
         .await

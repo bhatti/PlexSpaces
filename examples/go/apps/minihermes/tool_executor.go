@@ -132,7 +132,7 @@ var builtinToolDefs = []map[string]any{
 }
 
 func (t *ToolExecutorActor) seedBuiltinTools() {
-	existing := host.KVGet("tool_names")
+	existing, _ := host.KV().Get("tool_names")
 	if existing != "" {
 		t.ToolNames = strings.Split(existing, ",")
 		return
@@ -140,10 +140,10 @@ func (t *ToolExecutorActor) seedBuiltinTools() {
 	for _, def := range builtinToolDefs {
 		name := def["name"].(string)
 		defJSON, _ := json.Marshal(def)
-		host.KVPut("tool:"+name, string(defJSON))
+		host.KV().Put("tool:"+name, string(defJSON))
 		t.ToolNames = append(t.ToolNames, name)
 	}
-	host.KVPut("tool_names", strings.Join(t.ToolNames, ","))
+	host.KV().Put("tool_names", strings.Join(t.ToolNames, ","))
 }
 
 func (t *ToolExecutorActor) Handle(fromActor, msgType, payloadJSON string) string {
@@ -185,7 +185,7 @@ func (t *ToolExecutorActor) registerTool(p map[string]any) string {
 		def["input_schema"] = map[string]any{"type": "object", "properties": map[string]any{}}
 	}
 	defJSON, _ := json.Marshal(def)
-	host.KVPut("tool:"+name, string(defJSON))
+	host.KV().Put("tool:"+name, string(defJSON))
 
 	found := false
 	for _, n := range t.ToolNames {
@@ -196,7 +196,7 @@ func (t *ToolExecutorActor) registerTool(p map[string]any) string {
 	}
 	if !found {
 		t.ToolNames = append(t.ToolNames, name)
-		host.KVPut("tool_names", strings.Join(t.ToolNames, ","))
+		host.KV().Put("tool_names", strings.Join(t.ToolNames, ","))
 	}
 	fireAudit("tool_registered", fmt.Sprintf("name=%s", name))
 	host.Info(fmt.Sprintf("ToolExecutorActor: registered tool=%s", name))
@@ -206,7 +206,7 @@ func (t *ToolExecutorActor) registerTool(p map[string]any) string {
 func (t *ToolExecutorActor) listTools() string {
 	tools := make([]any, 0, len(t.ToolNames))
 	for _, name := range t.ToolNames {
-		raw := host.KVGet("tool:" + name)
+		raw, _ := host.KV().Get("tool:" + name)
 		if raw == "" {
 			continue
 		}
@@ -225,7 +225,7 @@ func (t *ToolExecutorActor) execute(p map[string]any) string {
 		input = map[string]any{}
 	}
 
-	raw := host.KVGet("tool:" + name)
+	raw, _ := host.KV().Get("tool:" + name)
 	if raw == "" {
 		return marshal(map[string]any{"error": fmt.Sprintf("unknown tool: %s", name)})
 	}

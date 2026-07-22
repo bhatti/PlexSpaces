@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Dashboard API
@@ -233,16 +233,17 @@ service DashboardService {
 // Dashboard summary request
 message GetSummaryRequest {
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by node ID (optional)
-  string node_id = 2 [(buf.validate.field).string.max_len = 255];
+  string node_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by cluster ID (optional)
-  string cluster_id = 3 [(buf.validate.field).string.max_len = 255];
+  string cluster_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Show data since this timestamp (default: now - 24 hours)
-  google.protobuf.Timestamp since = 4;
+  google.protobuf.Timestamp since = 5;
 }
 
 // Dashboard summary response
@@ -255,47 +256,51 @@ message GetSummaryResponse {
   };
 
   // Total number of clusters
-  uint32 total_clusters = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 total_clusters = 2;
 
   // Total number of nodes
-  uint32 total_nodes = 2;
+  uint32 total_nodes = 3;
 
   // Total number of tenants (admin only, or filtered by tenant_id)
-  uint32 total_tenants = 3;
+  uint32 total_tenants = 4;
 
   // Total number of applications (filtered by tenant if auth enabled)
-  uint32 total_applications = 4;
+  uint32 total_applications = 5;
 
   // Actors by type (aggregated across all nodes)
-  map<string, uint32> actors_by_type = 5;
+  map<string, uint32> actors_by_type = 6;
 
   // Timestamp range for this summary
-  google.protobuf.Timestamp since = 6;
-  google.protobuf.Timestamp until = 7;
+  google.protobuf.Timestamp since = 7;
+  google.protobuf.Timestamp until = 8;
 }
 
 // Get nodes request
 message GetNodesRequest {
   // Filter by tenant ID (optional)
-  string tenant_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by cluster ID (optional)
-  string cluster_id = 2 [(buf.validate.field).string.max_len = 255];
+  string cluster_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 3;
+  plexspaces.common.v1.PageRequest page = 4;
 }
 
 // Get nodes response
 message GetNodesResponse {
-  repeated plexspaces.node.v1.Node nodes = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.node.v1.Node nodes = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Get node dashboard request
 message GetNodeDashboardRequest {
   // Node ID (required)
-  string node_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -304,7 +309,7 @@ message GetNodeDashboardRequest {
   ];
 
   // Show data since this timestamp (default: now - 24 hours)
-  google.protobuf.Timestamp since = 2;
+  google.protobuf.Timestamp since = 3;
 }
 
 // Get node dashboard response
@@ -317,19 +322,20 @@ message GetNodeDashboardResponse {
   };
 
   // Node information
-  plexspaces.node.v1.Node node = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.node.v1.Node node = 2;
 
   // Node metrics
-  plexspaces.node.v1.NodeMetrics node_metrics = 2;
+  plexspaces.node.v1.NodeMetrics node_metrics = 3;
 
   // System metrics (if available)
-  plexspaces.metrics.v1.SystemMetrics system_metrics = 3;
+  plexspaces.metrics.v1.SystemMetrics system_metrics = 4;
 
   // Summary metrics for this node
-  NodeSummaryMetrics summary = 4;
+  NodeSummaryMetrics summary = 5;
 
   // Dependency health status (external dependencies)
-  plexspaces.system.v1.DetailedHealthCheck dependency_health = 5;
+  plexspaces.system.v1.DetailedHealthCheck dependency_health = 6;
 }
 
 // Node summary metrics
@@ -347,58 +353,61 @@ message NodeSummaryMetrics {
 // Get applications request
 message GetApplicationsRequest {
   // Filter by node ID (optional)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by application name/ID pattern (optional)
-  string name_pattern = 4 [(buf.validate.field).string.max_len = 512];
+  string name_pattern = 5 [(buf.validate.field).string.max_len = 512];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 5;
+  plexspaces.common.v1.PageRequest page = 6;
 }
 
 // Get applications response
 message GetApplicationsResponse {
-  repeated plexspaces.application.v1.ApplicationInfo applications = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.application.v1.ApplicationInfo applications = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Get actors request
 message GetActorsRequest {
   // Filter by node ID (optional)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by actor ID pattern (optional)
-  string actor_id_pattern = 4 [(buf.validate.field).string.max_len = 512];
+  string actor_id_pattern = 5 [(buf.validate.field).string.max_len = 512];
 
   // Filter by actor group (optional)
-  string actor_group = 5 [(buf.validate.field).string.max_len = 255];
+  string actor_group = 6 [(buf.validate.field).string.max_len = 255];
 
   // Filter by actor type (optional)
-  string actor_type = 6 [(buf.validate.field).string.max_len = 255];
+  string actor_type = 7 [(buf.validate.field).string.max_len = 255];
 
   // Filter by status: "running" or "terminated" (optional)
-  string status = 7 [(buf.validate.field).string.max_len = 50];
+  string status = 8 [(buf.validate.field).string.max_len = 50];
 
   // Show data since this timestamp (default: now - 24 hours)
-  google.protobuf.Timestamp since = 8;
+  google.protobuf.Timestamp since = 9;
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 9;
+  plexspaces.common.v1.PageRequest page = 10;
 
   // Filter by runtime behavior kind (optional)
-  string behavior_kind = 10 [(buf.validate.field).string.max_len = 255];
+  string behavior_kind = 11 [(buf.validate.field).string.max_len = 255];
 }
 
 // Actor info with metrics
@@ -449,26 +458,28 @@ message ActorInfo {
 
 // Get actors response
 message GetActorsResponse {
-  repeated ActorInfo actors = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ActorInfo actors = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Get workflows request
 message GetWorkflowsRequest {
   // Filter by node ID (optional, empty = all nodes)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by definition ID (optional)
-  string definition_id = 3 [(buf.validate.field).string.max_len = 255];
+  string definition_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by status (optional)
-  plexspaces.workflow.v1.ExecutionStatus status = 4;
+  plexspaces.workflow.v1.ExecutionStatus status = 5;
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 5;
+  plexspaces.common.v1.PageRequest page = 6;
 }
 
 // Workflow info with view definition
@@ -489,17 +500,19 @@ message WorkflowInfo {
 
 // Get workflows response
 message GetWorkflowsResponse {
-  repeated WorkflowInfo workflows = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated WorkflowInfo workflows = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Get dependency health request
 message GetDependencyHealthRequest {
   // Filter by node ID (optional, empty = all nodes)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Include non-critical dependencies (default: true)
-  bool include_non_critical = 2;
+  bool include_non_critical = 3;
 }
 
 // Get dependency health response
@@ -512,34 +525,37 @@ message GetDependencyHealthResponse {
   };
 
   // Detailed health check with dependency breakdown
-  plexspaces.system.v1.DetailedHealthCheck health_check = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.system.v1.DetailedHealthCheck health_check = 2;
 
   // Node ID this health check is for (empty if aggregated)
-  string node_id = 2;
+  string node_id = 3;
 }
 
 // Dashboard metrics request (local node; same recorder as MetricsService gRPC).
 message GetDashboardMetricsRequest {
   // Optional `namespace` label filter (application / actor namespace)
-  string namespace = 1 [(buf.validate.field).string.max_len = 512];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 2 [(buf.validate.field).string.max_len = 512];
 
   // Name glob; empty or "*" matches all metric names
-  string name_pattern = 2 [(buf.validate.field).string.max_len = 512];
+  string name_pattern = 3 [(buf.validate.field).string.max_len = 512];
 
   // Additional label equality filters (AND)
-  map<string, string> label_filter = 3;
+  map<string, string> label_filter = 4;
 
   // Include metric definitions (metadata)
-  bool include_definitions = 4;
+  bool include_definitions = 5;
 
   // Include full Prometheus exposition text (for Prometheus-compatible UIs)
-  bool include_prometheus_text = 5;
+  bool include_prometheus_text = 6;
 }
 
 message GetDashboardMetricsResponse {
-  repeated plexspaces.metrics.v1.Metric metrics = 1;
-  repeated plexspaces.metrics.v1.MetricDefinition definitions = 2;
-  string prometheus_text = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.metrics.v1.Metric metrics = 2;
+  repeated plexspaces.metrics.v1.MetricDefinition definitions = 3;
+  string prometheus_text = 4;
 }
 
 // ============================================================================
@@ -548,30 +564,32 @@ message GetDashboardMetricsResponse {
 
 message GetObjectsRequest {
   // Filter by node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by object type string: "ACTOR", "TUPLESPACE", "SERVICE", "VM", "APPLICATION", "WORKFLOW", "NODE" (optional)
-  string object_type = 4 [(buf.validate.field).string.max_len = 64];
+  string object_type = 5 [(buf.validate.field).string.max_len = 64];
 
   // Filter by health status string: "HEALTHY", "DEGRADED", "DEAD" (optional)
-  string health_status = 5 [(buf.validate.field).string.max_len = 64];
+  string health_status = 6 [(buf.validate.field).string.max_len = 64];
 
   // Filter by object ID pattern (optional)
-  string id_pattern = 6 [(buf.validate.field).string.max_len = 512];
+  string id_pattern = 7 [(buf.validate.field).string.max_len = 512];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 7;
+  plexspaces.common.v1.PageRequest page = 8;
 }
 
 message GetObjectsResponse {
-  repeated plexspaces.object_registry.v1.ObjectRegistration objects = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.object_registry.v1.ObjectRegistration objects = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // ============================================================================
@@ -580,19 +598,20 @@ message GetObjectsResponse {
 
 message GetKeyValuesRequest {
   // Filter by node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Key prefix filter (optional)
-  string prefix = 4 [(buf.validate.field).string.max_len = 512];
+  string prefix = 5 [(buf.validate.field).string.max_len = 512];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 5;
+  plexspaces.common.v1.PageRequest page = 6;
 }
 
 // Lightweight KV entry for dashboard display (value truncated for safety)
@@ -608,8 +627,9 @@ message KeyValueDashboardEntry {
 }
 
 message GetKeyValuesResponse {
-  repeated KeyValueDashboardEntry entries = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated KeyValueDashboardEntry entries = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // ============================================================================
@@ -618,16 +638,17 @@ message GetKeyValuesResponse {
 
 message GetTupleSpacesRequest {
   // Filter by node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Optional pattern string to match against tuples (default: wildcard)
-  string pattern = 4 [(buf.validate.field).string.max_len = 512];
+  string pattern = 5 [(buf.validate.field).string.max_len = 512];
 }
 
 // Summary of a tuplespace namespace
@@ -646,7 +667,8 @@ message TupleSpaceSummary {
 }
 
 message GetTupleSpacesResponse {
-  repeated TupleSpaceSummary spaces = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated TupleSpaceSummary spaces = 2;
 }
 
 // ============================================================================
@@ -655,56 +677,63 @@ message GetTupleSpacesResponse {
 
 message GetBlobsRequest {
   // Filter by node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Filter by tenant ID (optional, from auth context if not provided)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Filter by namespace (optional)
-  string namespace = 3 [(buf.validate.field).string.max_len = 255];
+  string namespace = 4 [(buf.validate.field).string.max_len = 255];
 
   // Filter by blob kind (optional)
-  string kind = 4 [(buf.validate.field).string.max_len = 255];
+  string kind = 5 [(buf.validate.field).string.max_len = 255];
 
   // Filter by blob name prefix (optional)
-  string prefix = 5 [(buf.validate.field).string.max_len = 512];
+  string prefix = 6 [(buf.validate.field).string.max_len = 512];
 
   // Pagination
-  plexspaces.common.v1.PageRequest page = 6;
+  plexspaces.common.v1.PageRequest page = 7;
 }
 
 message GetBlobsResponse {
   // Reuses existing BlobMetadata proto from storage package
-  repeated plexspaces.storage.v1.BlobMetadata blobs = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.storage.v1.BlobMetadata blobs = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 message GetBlobPresignedUrlRequest {
   // Blob ID (required)
-  string blob_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string blob_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Node ID where the blob lives (optional, empty = local node)
-  string node_id = 2 [(buf.validate.field).string.max_len = 255];
+  string node_id = 3 [(buf.validate.field).string.max_len = 255];
 
   // Tenant ID for authorization (optional, from auth context if not provided)
-  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 4 [(buf.validate.field).string.max_len = 255];
 
   // Namespace for authorization (optional)
-  string namespace = 4 [(buf.validate.field).string.max_len = 255];
+  string namespace = 5 [(buf.validate.field).string.max_len = 255];
 }
 
 message GetBlobPresignedUrlResponse {
   // Presigned download URL (empty if not available)
-  string url = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string url = 2;
 
   // URL expiration timestamp
-  google.protobuf.Timestamp expires_at = 2;
+  google.protobuf.Timestamp expires_at = 3;
 
   // Error message if presigned URLs are not configured or blob not found
-  string error = 3;
+  string error = 4;
 }
 
 // ============================================================================
@@ -713,15 +742,17 @@ message GetBlobPresignedUrlResponse {
 
 message GetServiceLinksRequest {
   // Node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Tenant ID (optional, used for filtering if auth enabled)
-  string tenant_id = 2 [(buf.validate.field).string.max_len = 255];
+  string tenant_id = 3 [(buf.validate.field).string.max_len = 255];
 }
 
 message GetServiceLinksResponse {
   // Reuses existing ServiceLinkConfig proto from node/outbound package
-  repeated plexspaces.node.v1.ServiceLinkConfig service_links = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.node.v1.ServiceLinkConfig service_links = 2;
 }
 
 // ============================================================================
@@ -730,22 +761,24 @@ message GetServiceLinksResponse {
 
 message GetMetricsTableRequest {
   // Node ID (optional, empty = local node)
-  string node_id = 1 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string node_id = 2 [(buf.validate.field).string.max_len = 255];
 
   // Optional namespace label filter
-  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  string namespace = 3 [(buf.validate.field).string.max_len = 512];
 
   // Name glob; empty or "*" matches all metric names
-  string name_pattern = 3 [(buf.validate.field).string.max_len = 512];
+  string name_pattern = 4 [(buf.validate.field).string.max_len = 512];
 
   // Additional label equality filters (AND)
-  map<string, string> label_filter = 4;
+  map<string, string> label_filter = 5;
 }
 
 message GetMetricsTableResponse {
   // All matching metrics with current values
-  repeated plexspaces.metrics.v1.Metric metrics = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated plexspaces.metrics.v1.Metric metrics = 2;
 
   // Metric definitions (metadata: description, unit, type)
-  repeated plexspaces.metrics.v1.MetricDefinition definitions = 2;
+  repeated plexspaces.metrics.v1.MetricDefinition definitions = 3;
 }

@@ -38,7 +38,9 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::{log, now_ms};
+use plexspaces::actor::host_shard::{application_get_metrics, application_get_status, application_metrics_add};
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 
 mod leader;
@@ -181,7 +183,7 @@ fn json_error(err: impl Into<String>) -> Vec<u8> {
 }
 
 fn host_info(message: impl AsRef<str>) {
-    host::log("info", message.as_ref());
+    log("info", message.as_ref());
 }
 
 fn actor_node_id(actor_id: &str) -> String {
@@ -290,7 +292,7 @@ fn application_status_response_to_json(response: &GetApplicationStatusResponse) 
 
 fn merge_application_metrics(metrics: serde_json::Value) -> Result<serde_json::Value, String> {
     let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
-    let response = host::application_metrics_add(&current_application_id(), &metrics_bytes)?;
+    let response = application_metrics_add(&current_application_id(), &metrics_bytes)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
@@ -304,14 +306,14 @@ fn require_application_metrics_merge(
 }
 
 fn application_metrics(node_id: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_metrics(&current_application_id(), node_id)?;
+    let response = application_get_metrics(&current_application_id(), node_id)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
 }
 
 fn application_status(node_id: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_status(&current_application_id(), node_id)?;
+    let response = application_get_status(&current_application_id(), node_id)?;
     let response = GetApplicationStatusResponse::decode(response.as_slice())
         .map_err(|err| format!("invalid GetApplicationStatusResponse protobuf: {}", err))?;
     Ok(application_status_response_to_json(&response))
@@ -319,6 +321,7 @@ fn application_status(node_id: &str) -> Result<serde_json::Value, String> {
 
 fn shard_group_create_request_bytes(group_id: &str, actor_type: &str, shard_count: usize) -> Vec<u8> {
     CreateShardGroupRequest {
+        request_id: String::new(),
         config: Some(DataParallelConfig {
             group_id: group_id.to_string(),
             shard_count: shard_count as u32,
@@ -351,9 +354,10 @@ fn scatter_gather_request_bytes(
     timeout_ms: u64,
 ) -> Vec<u8> {
     ScatterGatherRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         query: Some(ProtoMessage {
-            id: format!("req-{}", host::now_ms()),
+            id: format!("req-{}", now_ms()),
             message_type: "call".to_string(),
             payload: json_bytes(payload),
             ..Default::default()
@@ -625,6 +629,7 @@ fn parse_tuple_line(bytes: &[u8]) -> Option<Vec<f64>> {
 
 fn build_boundary_tuple(label: &str, iteration: usize, region_id: usize, data: &[f64]) -> Vec<u8> {
     WriteRequest {
+        request_id: String::new(),
         tuples: vec![build_tuple(vec![
             proto_string_field("boundary"),
             proto_integer_field(iteration as i64),
@@ -639,6 +644,7 @@ fn build_boundary_tuple(label: &str, iteration: usize, region_id: usize, data: &
 
 fn boundary_pattern(label: &str, iteration: usize, region_id: usize) -> Vec<u8> {
     ReadRequest {
+        request_id: String::new(),
         template: Some(build_tuple(vec![
             proto_string_field("boundary"),
             proto_integer_field(iteration as i64),
@@ -839,7 +845,7 @@ impl Guest for HeatDiffusionActor {
             Ok(config) => config,
             Err(err) => return Err(format!("invalid init config: {}", err)),
         };
-        let actor_id = config.actor_id.clone().unwrap_or_else(|| host::self_id());
+        let actor_id = config.actor_id.clone().unwrap_or_else(|| self_id());
         let role = resolve_role(&config, &actor_id).ok_or_else(|| {
             format!(
                 "invalid init config: missing required role for actor {}",

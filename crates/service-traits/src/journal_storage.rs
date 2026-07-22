@@ -215,6 +215,16 @@ pub trait JournalStorage: Send + Sync {
     /// Unregister a reminder (remove from storage).
     async fn unregister_reminder(&self, actor_id: &str, reminder_name: &str) -> JournalResult<()>;
 
+    /// CAS-style alarm delete: removes the reminder only if its next_fire_time matches
+    /// expected_next_fire_ms (Unix milliseconds). Returns Ok(true) if deleted, Ok(false) if
+    /// the reminder was not found or the timestamp did not match.
+    async fn unregister_reminder_if_matches(
+        &self,
+        actor_id: &str,
+        reminder_name: &str,
+        expected_next_fire_ms: u64,
+    ) -> JournalResult<bool>;
+
     /// Load all reminders for an actor.
     async fn load_reminders(&self, actor_id: &str) -> JournalResult<Vec<ReminderState>>;
 

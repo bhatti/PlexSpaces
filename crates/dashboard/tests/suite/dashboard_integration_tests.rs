@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Comprehensive Integration Tests for Dashboard Service
@@ -126,15 +126,37 @@ impl Application for MockApplication {
 
 /// Helper to create a test node
 async fn create_test_node(node_id: &str) -> Arc<Node> {
-    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _env_guard = TEST_ENV_LOCK.lock().unwrap();
-    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
-    let node = NodeBuilder::new(node_id)
-        .with_in_memory_backends()
-        .build()
-        .await;
-    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    let node = Arc::new(node);
+    use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
+    use plexspaces_proto::storage::v1::SharedDbConfig;
+
+    // Use a unique temp-file DB per node so parallel tests are fully isolated.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path =
+        std::env::temp_dir().join(format!("plexspaces-dashboard-{node_id}-{unique}.db"));
+    let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
+    let release_spec = ReleaseSpec {
+        name: format!("dashboard-{node_id}"),
+        version: "0.0.0".to_string(),
+        runtime: Some(RuntimeConfig {
+            db: Some(SharedDbConfig {
+                connection_string,
+                auto_migrate: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let node = Arc::new(
+        NodeBuilder::new(node_id)
+            .with_release_spec(release_spec)
+            .with_auth_disabled()
+            .build()
+            .await,
+    );
     node.service_locator()
         .register_security_config(SecurityConfig {
             disable_auth: true,
@@ -288,6 +310,7 @@ async fn test_get_summary_empty_node_shows_data() {
 
     // ACT: Get summary
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -342,6 +365,7 @@ async fn test_get_summary_with_single_node() {
 
     // ACT: Get summary
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -389,6 +413,7 @@ async fn test_get_summary_with_applications() {
 
     // ACT: Get summary
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -411,6 +436,7 @@ async fn test_get_nodes_empty_node_shows_local_node() {
 
     // ACT
     let request = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: None,
@@ -457,6 +483,7 @@ async fn test_get_nodes_single_node() {
 
     // ACT
     let request = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: None,
@@ -481,9 +508,11 @@ async fn test_get_nodes_with_pagination() {
 
     // ACT: Request with pagination
     let request = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: Some(plexspaces_proto::common::v1::PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 10,
             filter: String::new(),
@@ -514,6 +543,7 @@ async fn test_get_node_dashboard() {
 
     // ACT
     let request = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-dashboard".to_string(),
         since: None,
     });
@@ -545,6 +575,7 @@ async fn test_get_applications_empty_returns_empty_list() {
 
     // ACT
     let request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -593,6 +624,7 @@ async fn test_get_applications_with_multiple_apps() {
 
     // ACT
     let request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -640,6 +672,7 @@ async fn test_get_applications_with_name_pattern_filter() {
 
     // ACT: Filter by name pattern "calc"
     let request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -680,6 +713,7 @@ async fn test_get_applications_exposes_tenant_and_namespace_metadata() {
     let service = create_dashboard_service(node).await;
     let response = service
         .get_applications(Request::new(GetApplicationsRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: String::new(),
             tenant_id: String::new(),
             namespace: String::new(),
@@ -720,6 +754,7 @@ async fn test_get_applications_respects_authenticated_tenant_scope() {
 
     let service = create_dashboard_service(node).await;
     let mut request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -751,6 +786,7 @@ async fn test_get_actors_empty() {
 
     // ACT
     let request = Request::new(GetActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -819,6 +855,7 @@ async fn test_get_actors_respects_authenticated_tenant_scope() {
 
     let service = create_dashboard_service(node).await;
     let mut request = Request::new(GetActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -851,6 +888,7 @@ async fn test_get_workflows() {
 
     // ACT
     let request = Request::new(GetWorkflowsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         definition_id: String::new(),
@@ -905,6 +943,7 @@ async fn test_get_workflows_reads_shared_storage_and_filters() {
 
     let service = create_dashboard_service(node.clone()).await;
     let request = Request::new(GetWorkflowsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: node.id().as_str().to_string(),
         tenant_id: String::new(),
         definition_id: "order-approval".to_string(),
@@ -940,6 +979,7 @@ async fn test_get_actors_reports_fsm_current_status() {
 
     let service = create_dashboard_service(node.clone()).await;
     let request = Request::new(GetActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: node.id().as_str().to_string(),
         tenant_id: String::new(),
         namespace: "fsm".to_string(),
@@ -967,6 +1007,7 @@ async fn test_get_dependency_health() {
 
     // ACT
     let request = Request::new(GetDependencyHealthRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         include_non_critical: true,
     });
@@ -1001,6 +1042,7 @@ async fn test_get_summary_comprehensive() {
 
     // ACT
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1035,11 +1077,13 @@ async fn test_get_applications_pagination() {
 
     // ACT: Request with page size 5
     let request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
         name_pattern: String::new(),
         page: Some(plexspaces_proto::common::v1::PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 5,
             filter: String::new(),
@@ -1072,6 +1116,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 1. Summary API
     let summary_req = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1088,6 +1133,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 2. Nodes API
     let nodes_req = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: None,
@@ -1102,6 +1148,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 3. Node Dashboard API
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-all-apis".to_string(),
         since: None,
     });
@@ -1127,6 +1174,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 4. Applications API
     let apps_req = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -1143,6 +1191,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 5. Actors API
     let actors_req = Request::new(GetActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -1164,6 +1213,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 6. Workflows API
     let workflows_req = Request::new(GetWorkflowsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         definition_id: String::new(),
@@ -1178,6 +1228,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
 
     // 7. Dependency Health API
     let deps_req = Request::new(GetDependencyHealthRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         include_non_critical: true,
     });
@@ -1198,6 +1249,7 @@ async fn test_summary_cluster_counting_logic() {
 
     // ACT: Get summary
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1226,6 +1278,7 @@ async fn test_summary_tenant_counting_logic() {
 
     // ACT: Get summary (as admin - no tenant_id specified)
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(), // Empty = admin view
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1253,6 +1306,7 @@ async fn test_node_dashboard_empty_node() {
 
     // ACT
     let request = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-dashboard-empty".to_string(),
         since: None,
     });
@@ -1308,6 +1362,7 @@ async fn test_get_summary_with_filters() {
     let service = create_dashboard_service(node).await;
 
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: "test-tenant".to_string(),
         node_id: String::new(),
         cluster_id: "test-cluster".to_string(),
@@ -1328,9 +1383,11 @@ async fn test_get_nodes_with_pagination_service() {
     let service = create_dashboard_service(node).await;
 
     let request = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: Some(plexspaces_proto::common::v1::PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 10,
             filter: String::new(),
@@ -1353,6 +1410,7 @@ async fn test_get_applications_with_filters() {
     let service = create_dashboard_service(node).await;
 
     let request = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -1373,6 +1431,7 @@ async fn test_get_actors_with_all_filters() {
     let service = create_dashboard_service(node).await;
 
     let request = Request::new(GetActorsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node".to_string(),
         tenant_id: "test-tenant".to_string(),
         namespace: "test-namespace".to_string(),
@@ -1382,6 +1441,7 @@ async fn test_get_actors_with_all_filters() {
         status: "running".to_string(),
         since: None,
         page: Some(plexspaces_proto::common::v1::PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: 0,
             limit: 20,
             filter: String::new(),
@@ -1410,6 +1470,7 @@ async fn test_dashboard_home_page_data() {
 
     // Test summary
     let summary_req = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1422,6 +1483,7 @@ async fn test_dashboard_home_page_data() {
 
     // Test nodes
     let nodes_req = Request::new(GetNodesRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         cluster_id: String::new(),
         page: None,
@@ -1434,6 +1496,7 @@ async fn test_dashboard_home_page_data() {
 
     // Test applications (should be empty initially)
     let apps_req = Request::new(GetApplicationsRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: String::new(),
         tenant_id: String::new(),
         namespace: String::new(),
@@ -1457,6 +1520,7 @@ async fn test_dashboard_node_page_data() {
 
     // Test node dashboard
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-page".to_string(),
         since: None,
     });
@@ -1483,6 +1547,7 @@ async fn test_dashboard_metrics_not_zero() {
 
     // Get node dashboard
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-metrics".to_string(),
         since: None,
     });
@@ -1588,6 +1653,7 @@ async fn test_actors_by_type_on_home_page() {
     // ACT: Get summary from dashboard
     let service = create_dashboard_service(node.clone()).await;
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),
@@ -1669,6 +1735,7 @@ async fn test_actors_by_type_on_node_page() {
     // ACT: Get node dashboard
     let service = create_dashboard_service(node.clone()).await;
     let request = Request::new(GetNodeDashboardRequest {
+        request_id: ulid::Ulid::new().to_string(),
         node_id: "test-node-actors-node-type".to_string(),
         since: None,
     });
@@ -1704,6 +1771,7 @@ async fn test_actors_by_type_empty_initially() {
 
     // ACT: Get summary
     let request = Request::new(GetSummaryRequest {
+        request_id: ulid::Ulid::new().to_string(),
         tenant_id: String::new(),
         node_id: String::new(),
         cluster_id: String::new(),

@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Guild Chat Server - Discord-style Real-Time Chat with Durable Objects (TypeScript WASM)
 //
 // Demonstrates Cloudflare Workers Durable Objects pattern for real-time chat:
 // - ChatRoom actor: per-room state, member tracking, message fan-out, history
 // - RateLimiter actor: per-user token bucket rate limiting (spam prevention)
+// - AlarmDemo actor: durable alarm/batch processing (like DO alarm() API)
 //
 // Inspired by:
 // - Discord's guild process architecture (one Elixir GenServer per guild)
@@ -13,13 +15,18 @@
 //
 // ## SDK Features Used
 //
-// - ActorRouter: Multi-actor routing (ChatRoom + RateLimiter)
+// - ActorRouter: Multi-actor routing (ChatRoom + RateLimiter + AlarmDemo)
 // - PlexSpacesActor<T>: Actor base with typed state + JSON serialization
 // - Host: Host function wrappers (ask, send, nowMs, kvPut, kvGet, etc.)
 // - onInit(): Actor initialization from framework config
 // - on<Op>(): Message handlers dispatched by payload.op
 // - getState()/setState(): Checkpoint-based state persistence
 // - host.kvPut()/kvGet(): Durable storage (message history persistence)
+// - host.kvMultiGet()/kvMultiPut(): Batch KV reads/writes
+// - host.kvIncrement(): Atomic distributed counter increment
+// - host.kvCas(): Atomic compare-and-swap for distributed state
+// - host.alarmSet()/alarmGet(): Durable scheduled callbacks (DO alarm equivalent)
+// - host.send(): Real fan-out to member actors
 //
 // ## Comparison to Cloudflare Workers / Durable Objects
 //
@@ -28,10 +35,13 @@
 // | export class ChatRoom extends DO  | ChatRoomActor extends PlexSpacesActor |
 // | env.CHAT_ROOM.get(id)             | host.ask(actorID, ...)            |
 // | this.state.storage.put/get        | host.kvPut/kvGet + getState       |
+// | storage.put(map) batch write      | host.kvMultiPut() batch write     |
+// | storage.get(keys[]) batch read    | host.kvMultiGet() batch read      |
 // | fetch(request) handler            | on<Op>(payload) handlers          |
 // | blockConcurrencyWhile()           | onInit() (runs before any handle) |
 // | WebSocket accept/send             | host.send() fan-out to members    |
-// | alarm() scheduled callback        | host.sendAfter() timer            |
+// | alarm() scheduled callback        | host.alarmSet() + on__alarm__()   |
+// | storage.setAlarm(timestamp)       | host.alarmSet(timestampMs)        |
 // | wrangler.toml [[bindings]]        | app-config.toml [[children]]      |
 // | Worker script routing             | ActorRouter prefix matching       |
 
@@ -66,6 +76,8 @@ interface ChatRoomState {
   total_leaves: number;
   total_broadcasts: number;
   total_compute_ms: number;
+  // Tracks real fan-out sends via host.send() (like DO WebSocket broadcast)
+  total_fanout_sends: number;
 }
 
 interface TokenBucket {
@@ -103,6 +115,7 @@ class ChatRoomActor extends PlexSpacesActor<ChatRoomState> {
       total_leaves: 0,
       total_broadcasts: 0,
       total_compute_ms: 0,
+      total_fanout_sends: 0,
     };
   }
 
@@ -119,11 +132,18 @@ class ChatRoomActor extends PlexSpacesActor<ChatRoomState> {
       this.state.max_history = 100;
     }
 
-    // Like Durable Object blockConcurrencyWhile() — restore persisted state
+    // Like Durable Object blockConcurrencyWhile() — restore persisted state.
+    // Use kvMultiGet to batch-fetch history and metadata in one call
+    // (like DO storage.get(["history", "seq"]) batch read).
     try {
-      const stored = host.kvGet("room:" + this.state.room_id + ":history");
-      if (stored) {
-        const msgs: ChatMessage[] = JSON.parse(stored);
+      const keys = [
+        "room:" + this.state.room_id + ":history",
+        "room:" + this.state.room_id + ":meta",
+      ];
+      const values = host.kv.multiGet(keys);
+      const [historyRaw, _metaRaw] = values;
+      if (historyRaw) {
+        const msgs: ChatMessage[] = JSON.parse(historyRaw);
         if (Array.isArray(msgs)) {
           this.state.messages = msgs;
           if (msgs.length > 0) {
@@ -211,16 +231,27 @@ class ChatRoomActor extends PlexSpacesActor<ChatRoomState> {
     const now = host.nowMs();
     const msg = this.addMessage(userId, content, now);
 
-    // Fan-out: count members who would receive the broadcast
+    // Fan-out: real host.send() to each member actor (like DO WebSocket broadcast).
+    // This is the PlexSpaces equivalent of iterating WebSocket connections and
+    // calling ws.send(message) for each connected session in Cloudflare DO.
+    const outMsg = JSON.stringify({ room: this.state.room_id, seq: msg.seq, from: userId, content });
     let fanOutCount = 0;
     for (const memberId of Object.keys(this.state.members)) {
       if (memberId !== userId) {
+        try {
+          host.send(memberId, "receive_message", outMsg);
+        } catch {
+          // Member actor may not be running — fan-out is best-effort
+        }
         fanOutCount++;
         this.state.total_broadcasts++;
       }
     }
+    this.state.total_fanout_sends += fanOutCount;
 
-    // Persist to durable storage (like DO transactional storage)
+    // Persist to durable storage (like DO transactional storage).
+    // Use kvMultiPut to batch history + metadata writes in one call
+    // (like DO storage.put(map) batch write).
     this.persistHistory();
 
     const computeEnd = host.nowMs();
@@ -364,6 +395,7 @@ class ChatRoomActor extends PlexSpacesActor<ChatRoomState> {
         total_joins: this.state.total_joins,
         total_leaves: this.state.total_leaves,
         total_broadcasts: this.state.total_broadcasts,
+        total_fanout_sends: this.state.total_fanout_sends ?? 0,
         active_members: Object.keys(this.state.members).length,
         history_size: this.state.messages.length,
         message_seq: this.state.message_seq,
@@ -405,10 +437,16 @@ class ChatRoomActor extends PlexSpacesActor<ChatRoomState> {
 
   private persistHistory(): void {
     try {
-      host.kvPut(
-        "room:" + this.state.room_id + ":history",
-        JSON.stringify(this.state.messages)
-      );
+      // Batch history + metadata write in one call — like DO storage.put(map).
+      // kvMultiPut is atomically more efficient than two separate kvPut calls.
+      host.kv.multiPut({
+        ["room:" + this.state.room_id + ":history"]: JSON.stringify(this.state.messages),
+        ["room:" + this.state.room_id + ":meta"]: JSON.stringify({
+          message_seq: this.state.message_seq,
+          total_messages: this.state.total_messages,
+          last_updated: host.nowMs(),
+        }),
+      });
     } catch {
       // KV not available — state will still be preserved via getState/setState
     }
@@ -455,6 +493,13 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
 
     const now = host.nowMs();
 
+    // Atomically track request counts via distributed KV increment.
+    // This is equivalent to using a Cloudflare DO storage.get/put with
+    // transactional semantics — kvIncrement ensures no lost updates
+    // across concurrent rate-check calls from multiple nodes.
+    const windowKey = "rate:" + this.state.actor_id + ":" + userId + ":" + Math.floor(now / this.state.refill_rate_ms);
+    const distributedCount = host.kv.increment(windowKey, 1);
+
     let bucket = this.state.buckets[userId];
     if (!bucket) {
       bucket = {
@@ -466,7 +511,7 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
       this.state.buckets[userId] = bucket;
     }
 
-    // Refill tokens based on elapsed time
+    // Refill tokens based on elapsed time (in-process token bucket)
     const elapsed = now - bucket.last_refill;
     if (this.state.refill_rate_ms > 0) {
       const newTokens = Math.floor(elapsed / this.state.refill_rate_ms);
@@ -479,8 +524,8 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
       }
     }
 
-    // Check if tokens available
-    const allowed = bucket.tokens > 0;
+    // Check if tokens available (local bucket) or distributed count exceeded
+    const allowed = bucket.tokens > 0 && distributedCount <= this.state.max_tokens;
     if (allowed) {
       bucket.tokens--;
       bucket.allowed++;
@@ -504,6 +549,7 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
       user_id: userId,
       remaining: bucket.tokens,
       limit: this.state.max_tokens,
+      distributed_count: distributedCount,
       retry_after_ms: retryAfterMs,
     };
   }
@@ -605,12 +651,81 @@ class RateLimiterActor extends PlexSpacesActor<RateLimiterState> {
 }
 
 // ========================================================================
+// AlarmDemo Actor (Durable Object alarm() API equivalent)
+// ========================================================================
+//
+// Cloudflare Durable Objects expose an alarm() method that fires at a
+// scheduled timestamp, enabling batch/deferred processing. This actor
+// demonstrates the equivalent using host.alarmSet()/alarmGet() and the
+// on__alarm__() handler dispatched by the PlexSpaces reminder facet.
+//
+// Cloudflare DO equivalent:
+//   async alarm() { /* process queued items */ }
+//   await this.state.storage.setAlarm(Date.now() + 30_000);
+
+interface AlarmDemoState {
+  [key: string]: unknown;
+  queued: number;
+  processed: number;
+  total_alarm_fires: number;
+}
+
+class AlarmDemoActor extends PlexSpacesActor<AlarmDemoState> {
+  getDefaultState(): AlarmDemoState {
+    return { queued: 0, processed: 0, total_alarm_fires: 0 };
+  }
+
+  // Enqueue an item for deferred batch processing.
+  // Sets a durable alarm on first item — equivalent to DO storage.setAlarm().
+  onEnqueue(_payload: Record<string, unknown>): Record<string, unknown> {
+    const state = this.state;
+    state.queued++;
+
+    if (state.queued === 1) {
+      // First item — schedule alarm to fire 30 seconds from now.
+      // Equivalent to: await this.state.storage.setAlarm(Date.now() + 30_000)
+      host.alarm.set(host.nowMs() + 30_000);
+      host.info("AlarmDemo: first item queued, alarm set for 30s from now");
+    }
+
+    return { status: "ok", queued: state.queued };
+  }
+
+  // Alarm fires when the scheduled timestamp is reached.
+  // Equivalent to Cloudflare DO: async alarm() { ... }
+  // The PlexSpaces reminder facet dispatches this as "on__alarm__".
+  on__alarm__(_payload: Record<string, unknown>): Record<string, unknown> {
+    const state = this.state;
+    const processed = state.queued;
+    state.processed += processed;
+    state.queued = 0;
+    state.total_alarm_fires++;
+
+    host.info(`AlarmDemo: alarm fired, processing ${processed} batched items`);
+    return { status: "ok", processed };
+  }
+
+  // Get current queue status and next alarm timestamp.
+  // Equivalent to: await this.state.storage.getAlarm()
+  onStatus(_payload: Record<string, unknown>): Record<string, unknown> {
+    const alarmAt = host.alarm.get();
+    return {
+      status: "ok",
+      ...this.state,
+      alarm_at: alarmAt,
+      alarm_set: alarmAt > 0,
+    };
+  }
+}
+
+// ========================================================================
 // Main - Register multi-actor router for WASM export
 // ========================================================================
 
 const router = new ActorRouter({
   "ChatRoomActor": () => new ChatRoomActor(),
   "RateLimiterActor": () => new RateLimiterActor(),
+  "AlarmDemoActor": () => new AlarmDemoActor(),
 });
 
 export const actor = {

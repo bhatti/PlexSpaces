@@ -25,9 +25,9 @@ class DebugProcessor:
     
     @handler("test_kv", "call")
     def test_kv(self) -> dict:
-        """Test host.kv_put/kv_get - should work."""
-        host.kv_put("debug_key", "debug_value")
-        value = host.kv_get("debug_key")
+        """Test host.kv.put/kv_get - should work."""
+        host.kv.put("debug_key", "debug_value")
+        value = host.kv.get("debug_key")
         return {"status": "ok", "test": "kv", "value": value}
     
     @handler("test_ts", "call")

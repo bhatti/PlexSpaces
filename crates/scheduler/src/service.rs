@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! gRPC service implementation for SchedulingService.
@@ -221,6 +221,7 @@ impl SchedulingService for SchedulingServiceImpl {
             })?;
 
         Ok(Response::new(GetSchedulingStatusResponse {
+            request_id: req.request_id.clone(),
             request: Some(scheduling_request),
         }))
     }
@@ -244,6 +245,7 @@ impl SchedulingService for SchedulingServiceImpl {
             .ok_or_else(|| Status::not_found(format!("Node {} not found", req.node_id)))?;
 
         Ok(Response::new(GetNodeCapacityResponse {
+            request_id: req.request_id.clone(),
             capacity: Some(capacity),
         }))
     }
@@ -286,10 +288,12 @@ impl SchedulingService for SchedulingServiceImpl {
 
         let total_count = entries.len();
         Ok(Response::new(ListNodeCapacitiesResponse {
+            request_id: req.request_id.clone(),
             capacities: entries,
             page: req.page.map(|_pr| {
                 // Create a simple page response (no next page for now)
                 plexspaces_proto::common::v1::PageResponse {
+                    request_id: ulid::Ulid::new().to_string(),
                     total_size: total_count as i32,
                     offset: 0,
                     limit: total_count as i32,
@@ -369,7 +373,7 @@ mod tests {
                     affinity_labels: HashMap::new(),
                 }),
             }),
-            request_id: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         // Create request with metadata for tenant/namespace
@@ -409,7 +413,7 @@ mod tests {
 
         let req = ScheduleActorRequest {
             requirements: None,
-            request_id: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         };
 
         let result = service.schedule_actor(Request::new(req)).await;
@@ -509,6 +513,7 @@ mod tests {
         let (service, _, _) = create_test_service().await;
 
         let req = GetNodeCapacityRequest {
+            request_id: ulid::Ulid::new().to_string(),
             node_id: "non-existent".to_string(),
         };
 
@@ -522,6 +527,7 @@ mod tests {
         let (service, _, _) = create_test_service().await;
 
         let req = ListNodeCapacitiesRequest {
+            request_id: ulid::Ulid::new().to_string(),
             label_filters: HashMap::new(),
             page: None,
         };

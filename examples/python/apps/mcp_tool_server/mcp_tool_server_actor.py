@@ -343,7 +343,7 @@ class SearchToolActor:
             {"id": "doc10", "content": "Circuit breakers prevent cascading failures in microservices"},
         ]
         for doc in sample_docs:
-            host.kv_put(f"doc:{doc['id']}", json.dumps(doc))
+            host.kv.put(f"doc:{doc['id']}", json.dumps(doc))
         host.info(f"SearchToolActor seeded {len(sample_docs)} documents in KV store")
 
     @handler("execute")
@@ -362,7 +362,7 @@ class SearchToolActor:
         query_words = [w.lower() for w in query.split() if w]
 
         # Retrieve all doc keys
-        raw_keys = host.kv_list("doc:")
+        raw_keys = host.kv.list("doc:")
         try:
             keys = json.loads(raw_keys) if raw_keys else []
         except (json.JSONDecodeError, TypeError):
@@ -370,7 +370,7 @@ class SearchToolActor:
 
         results = []
         for key in keys:
-            raw_doc = host.kv_get(key)
+            raw_doc = host.kv.get(key)
             if not raw_doc:
                 continue
             try:

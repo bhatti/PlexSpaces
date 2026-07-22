@@ -34,7 +34,9 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{ask, self_id};
+use plexspaces::actor::host_logging::{log, now_ms};
+use plexspaces::actor::host_shard::{application_get_metrics, application_get_status, application_metrics_add};
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 
 mod leader;
@@ -206,7 +208,7 @@ fn with_state<T>(f: impl FnOnce(&mut AppState) -> T) -> T {
 }
 
 fn host_info(message: impl AsRef<str>) {
-    host::log("info", message.as_ref());
+    log("info", message.as_ref());
 }
 
 fn parse_payload(payload: &[u8]) -> Result<Value, String> {
@@ -339,7 +341,7 @@ fn application_status_response_to_json(response: &GetApplicationStatusResponse) 
 
 fn merge_application_metrics(metrics: serde_json::Value) -> Result<serde_json::Value, String> {
     let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
-    let response = host::application_metrics_add(&current_application_id(), &metrics_bytes)?;
+    let response = application_metrics_add(&current_application_id(), &metrics_bytes)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
@@ -353,14 +355,14 @@ fn require_application_metrics_merge(
 }
 
 fn application_metrics(node_id_or_address: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_metrics(&current_application_id(), node_id_or_address)?;
+    let response = application_get_metrics(&current_application_id(), node_id_or_address)?;
     let response = ApplicationMetrics::decode(response.as_slice())
         .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
     Ok(application_metrics_to_json(&response))
 }
 
 fn application_status(node_id_or_address: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_status(&current_application_id(), node_id_or_address)?;
+    let response = application_get_status(&current_application_id(), node_id_or_address)?;
     let response = GetApplicationStatusResponse::decode(response.as_slice())
         .map_err(|err| format!("invalid GetApplicationStatusResponse protobuf: {}", err))?;
     Ok(application_status_response_to_json(&response))
@@ -368,6 +370,7 @@ fn application_status(node_id_or_address: &str) -> Result<serde_json::Value, Str
 
 fn shard_group_create_request_bytes(group_id: &str, actor_type: &str, shard_count: usize) -> Vec<u8> {
     CreateShardGroupRequest {
+        request_id: String::new(),
         config: Some(DataParallelConfig {
             group_id: group_id.to_string(),
             shard_count: shard_count as u32,
@@ -393,9 +396,10 @@ fn decode_shard_group_create_response(bytes: &[u8]) -> Result<Vec<String>, Strin
 
 fn scatter_gather_request_bytes(group_id: &str, aggregation: ShardGroupAggregationStrategy, payload: serde_json::Value, min_responses: usize, timeout_ms: u64) -> Vec<u8> {
     ScatterGatherRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         query: Some(ProtoMessage {
-            id: format!("req-{}", host::now_ms()),
+            id: format!("req-{}", now_ms()),
             message_type: "call".to_string(),
             payload: json_bytes(payload),
             ..Default::default()
@@ -447,7 +451,7 @@ fn ensure_worker_initialization(shard_actor_ids: &[String]) -> Result<(), String
         })
         .to_string()
         .into_bytes();
-        let response = host::ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
+        let response = ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
             format!(
                 "worker init failed for shard {} ({}): {}",
                 shard_index, shard_actor_id, err
@@ -809,7 +813,7 @@ impl Guest for Component {
         let actor_id = config
             .actor_id
             .clone()
-            .unwrap_or_else(|| host::self_id());
+            .unwrap_or_else(|| self_id());
         let role = resolve_role(&config, &actor_id).ok_or_else(|| {
             format!(
                 "invalid init config: missing required role for actor {}",
@@ -833,7 +837,7 @@ impl Guest for Component {
 
         host_info(format!(
             "genomics_pipeline init actor_id={} role={}",
-            host::self_id(),
+            self_id(),
             role
         ));
         Ok(())

@@ -94,7 +94,7 @@ func (t *TrajectoryStoreActor) put(p map[string]any) string {
 		t.FailedCount++
 		return marshal(map[string]any{"error": "failed to marshal trajectory"})
 	}
-	host.KVPut("trajectory:"+trajID, string(trajJSON))
+	host.KV().Put("trajectory:"+trajID, string(trajJSON))
 
 	// Store metadata for listing
 	steps := sliceVal(traj, "steps")
@@ -110,13 +110,13 @@ func (t *TrajectoryStoreActor) put(p map[string]any) string {
 		"stored_at_ms":        host.NowMs(),
 	}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("traj_meta:"+trajID, string(metaJSON))
+	host.KV().Put("traj_meta:"+trajID, string(metaJSON))
 
 	// Index by eval_run_id for batch collection
 	if evalRunID != "" {
 		indexKey := "traj_index:" + evalRunID
 		var index []string
-		if raw := host.KVGet(indexKey); raw != "" {
+		if raw, _ := host.KV().Get(indexKey); raw != "" {
 			_ = json.Unmarshal([]byte(raw), &index)
 		}
 		// Deduplicate
@@ -130,7 +130,7 @@ func (t *TrajectoryStoreActor) put(p map[string]any) string {
 		if !found {
 			index = append(index, trajID)
 			indexJSON, _ := json.Marshal(index)
-			host.KVPut(indexKey, string(indexJSON))
+			host.KV().Put(indexKey, string(indexJSON))
 		}
 	}
 
@@ -145,7 +145,7 @@ func (t *TrajectoryStoreActor) get(p map[string]any) string {
 	if trajID == "" {
 		return marshal(map[string]any{"error": "trajectory_id is required"})
 	}
-	raw := host.KVGet("trajectory:" + trajID)
+	raw, _ := host.KV().Get("trajectory:" + trajID)
 	if raw == "" {
 		return marshal(map[string]any{"error": fmt.Sprintf("trajectory %s not found", trajID)})
 	}
@@ -165,7 +165,7 @@ func (t *TrajectoryStoreActor) listForEvalRun(p map[string]any) string {
 
 	// Load from KV index
 	var trajIDs []string
-	if raw := host.KVGet("traj_index:" + evalRunID); raw != "" {
+	if raw, _ := host.KV().Get("traj_index:" + evalRunID); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &trajIDs)
 	}
 
@@ -189,7 +189,7 @@ func (t *TrajectoryStoreActor) listForEvalRun(p map[string]any) string {
 	trajectories := make([]any, 0, len(trajIDs))
 	for _, trajID := range trajIDs {
 		if includeFull {
-			raw := host.KVGet("trajectory:" + trajID)
+			raw, _ := host.KV().Get("trajectory:" + trajID)
 			if raw != "" {
 				var traj map[string]any
 				if err := json.Unmarshal([]byte(raw), &traj); err == nil {
@@ -197,7 +197,7 @@ func (t *TrajectoryStoreActor) listForEvalRun(p map[string]any) string {
 				}
 			}
 		} else {
-			raw := host.KVGet("traj_meta:" + trajID)
+			raw, _ := host.KV().Get("traj_meta:" + trajID)
 			if raw != "" {
 				var meta map[string]any
 				if err := json.Unmarshal([]byte(raw), &meta); err == nil {
@@ -220,8 +220,8 @@ func (t *TrajectoryStoreActor) deleteTraj(p map[string]any) string {
 	if trajID == "" {
 		return marshal(map[string]any{"error": "trajectory_id is required"})
 	}
-	host.KVDelete("trajectory:" + trajID)
-	host.KVDelete("traj_meta:" + trajID)
+	host.KV().Delete("trajectory:" + trajID)
+	host.KV().Delete("traj_meta:" + trajID)
 	t.IncrCounter(host, "trajectories_deleted_total")
 	return marshal(map[string]any{"status": "ok", "trajectory_id": trajID})
 }
@@ -233,15 +233,15 @@ func (t *TrajectoryStoreActor) deleteEvalRun(p map[string]any) string {
 	}
 	indexKey := "traj_index:" + evalRunID
 	var trajIDs []string
-	if raw := host.KVGet(indexKey); raw != "" {
+	if raw, _ := host.KV().Get(indexKey); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &trajIDs)
 	}
 	deleted := 0
 	for _, trajID := range trajIDs {
-		host.KVDelete("trajectory:" + trajID)
-		host.KVDelete("traj_meta:" + trajID)
+		host.KV().Delete("trajectory:" + trajID)
+		host.KV().Delete("traj_meta:" + trajID)
 		deleted++
 	}
-	host.KVDelete(indexKey)
+	host.KV().Delete(indexKey)
 	return marshal(map[string]any{"status": "ok", "eval_run_id": evalRunID, "deleted": deleted})
 }

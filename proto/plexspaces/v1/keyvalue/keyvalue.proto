@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces KeyValue Store API
@@ -156,7 +156,8 @@ service KeyValueService {
 // Get request
 message GetRequest {
   // Key to get
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -166,22 +167,24 @@ message GetRequest {
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // Get response
 message GetResponse {
   // Value if key exists
-  bytes value = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bytes value = 2;
 
   // Whether key exists
-  bool exists = 2;
+  bool exists = 3;
 }
 
 // Put request
 message PutRequest {
   // Key to put
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -190,45 +193,49 @@ message PutRequest {
   ];
 
   // Value to store
-  bytes value = 2 [(google.api.field_behavior) = REQUIRED];
+  bytes value = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 4;
+}
+
+// Put response
+message PutResponse {
+  // Success flag
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+}
+
+// Delete request
+message DeleteRequest {
+  // Key to delete
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
+  ];
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
   string namespace = 3;
 }
 
-// Put response
-message PutResponse {
-  // Success flag
-  bool success = 1;
-}
-
-// Delete request
-message DeleteRequest {
-  // Key to delete
-  string key = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 1024
-    }
-  ];
-
-  // Namespace for tenant isolation (optional; empty string = default).
-  // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
-}
-
 // Delete response
 message DeleteResponse {
   // Whether key was deleted (false if key didn't exist)
-  bool deleted = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool deleted = 2;
 }
 
 // Exists request
 message ExistsRequest {
   // Key to check
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -238,38 +245,42 @@ message ExistsRequest {
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // Exists response
 message ExistsResponse {
   // Whether key exists
-  bool exists = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool exists = 2;
 }
 
 // List request
 message ListRequest {
   // Prefix to list keys with
-  string prefix = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string prefix = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string.max_len = 1024
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // List response
 message ListResponse {
   // List of keys matching prefix
-  repeated string keys = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string keys = 2;
 }
 
 // MultiGet request
 message MultiGetRequest {
   // Keys to get
-  repeated string keys = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string keys = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {
       min_items: 1
@@ -285,13 +296,14 @@ message MultiGetRequest {
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // MultiGet response
 message MultiGetResponse {
   // Values (same order as request, None for missing keys)
-  repeated KeyValueEntry entries = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated KeyValueEntry entries = 2;
 }
 
 // Key-value entry
@@ -309,7 +321,8 @@ message KeyValueEntry {
 // MultiPut request
 message MultiPutRequest {
   // Key-value pairs to put
-  repeated KeyValuePair pairs = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated KeyValuePair pairs = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated = {
       min_items: 1
@@ -319,7 +332,7 @@ message MultiPutRequest {
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // Key-value pair
@@ -340,13 +353,15 @@ message KeyValuePair {
 // MultiPut response
 message MultiPutResponse {
   // Success flag
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 // PutWithTtl request
 message PutWithTtlRequest {
   // Key to put
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -355,9 +370,42 @@ message PutWithTtlRequest {
   ];
 
   // Value to store
-  bytes value = 2 [(google.api.field_behavior) = REQUIRED];
+  bytes value = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Time-to-live
+  google.protobuf.Duration ttl = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).duration = {
+      gte: {seconds: 1}
+      lte: {seconds: 2592000}
+    } /* 1s to 30 days */
+  ];
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 5;
+}
+
+// PutWithTtl response
+message PutWithTtlResponse {
+  // Success flag
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+}
+
+// RefreshTtl request
+message RefreshTtlRequest {
+  // Key to refresh
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
+  ];
+
+  // New TTL
   google.protobuf.Duration ttl = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).duration = {
@@ -371,30 +419,23 @@ message PutWithTtlRequest {
   string namespace = 4;
 }
 
-// PutWithTtl response
-message PutWithTtlResponse {
+// RefreshTtl response
+message RefreshTtlResponse {
   // Success flag
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
-// RefreshTtl request
-message RefreshTtlRequest {
-  // Key to refresh
-  string key = 1 [
+// GetTtl request
+message GetTtlRequest {
+  // Key to check
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 1024
     }
-  ];
-
-  // New TTL
-  google.protobuf.Duration ttl = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).duration = {
-      gte: {seconds: 1}
-      lte: {seconds: 2592000}
-    } /* 1s to 30 days */
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -402,41 +443,21 @@ message RefreshTtlRequest {
   string namespace = 3;
 }
 
-// RefreshTtl response
-message RefreshTtlResponse {
-  // Success flag
-  bool success = 1;
-}
-
-// GetTtl request
-message GetTtlRequest {
-  // Key to check
-  string key = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 1024
-    }
-  ];
-
-  // Namespace for tenant isolation (optional; empty string = default).
-  // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
-}
-
 // GetTtl response
 message GetTtlResponse {
   // TTL remaining if key exists with TTL
-  google.protobuf.Duration ttl = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  google.protobuf.Duration ttl = 2;
 
   // Whether key exists
-  bool exists = 2;
+  bool exists = 3;
 }
 
 // Cas request
 message CasRequest {
   // Key for CAS operation
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -445,26 +466,28 @@ message CasRequest {
   ];
 
   // Expected value (None means key must not exist)
-  bytes expected_value = 2; // Empty bytes = None
+  bytes expected_value = 3; // Empty bytes = None
 
   // New value
-  bytes new_value = 3 [(google.api.field_behavior) = REQUIRED];
+  bytes new_value = 4 [(google.api.field_behavior) = REQUIRED];
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 4;
+  string namespace = 5;
 }
 
 // Cas response
 message CasResponse {
   // Whether swap succeeded
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 // Increment request
 message IncrementRequest {
   // Key for counter
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -473,23 +496,25 @@ message IncrementRequest {
   ];
 
   // Delta to add
-  int64 delta = 2;
+  int64 delta = 3;
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 3;
+  string namespace = 4;
 }
 
 // Increment response
 message IncrementResponse {
   // New value after increment
-  int64 value = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int64 value = 2;
 }
 
 // Decrement request
 message DecrementRequest {
   // Key for counter
-  string key = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string key = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -498,74 +523,81 @@ message DecrementRequest {
   ];
 
   // Delta to subtract
-  int64 delta = 2;
+  int64 delta = 3;
+
+  // Namespace for tenant isolation (optional; empty string = default).
+  // Tenant-id comes from auth (JWT/mTLS), not from this request.
+  string namespace = 4;
+}
+
+// Decrement response
+message DecrementResponse {
+  // New value after decrement
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  int64 value = 2;
+}
+
+// ClearPrefix request
+message ClearPrefixRequest {
+  // Prefix to clear
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string prefix = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 1024
+  ];
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
   string namespace = 3;
 }
 
-// Decrement response
-message DecrementResponse {
-  // New value after decrement
-  int64 value = 1;
-}
-
-// ClearPrefix request
-message ClearPrefixRequest {
-  // Prefix to clear
-  string prefix = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string.max_len = 1024
-  ];
-
-  // Namespace for tenant isolation (optional; empty string = default).
-  // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
-}
-
 // ClearPrefix response
 message ClearPrefixResponse {
   // Number of keys deleted
-  uint64 deleted_count = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 deleted_count = 2;
 }
 
 // CountPrefix request
 message CountPrefixRequest {
   // Prefix to count
-  string prefix = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string prefix = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string.max_len = 1024
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 2;
+  string namespace = 3;
 }
 
 // CountPrefix response
 message CountPrefixResponse {
   // Number of keys with prefix
-  uint64 count = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 count = 2;
 }
 
 // GetStats request
 message GetStatsRequest {
   // Namespace for tenant isolation (optional; empty string = default).
   // Tenant-id comes from auth (JWT/mTLS), not from this request.
-  string namespace = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 2;
 }
 
 // GetStats response
 message GetStatsResponse {
   // Total number of keys
-  uint64 total_keys = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint64 total_keys = 2;
 
   // Total size in bytes (approximate)
-  uint64 total_size_bytes = 2;
+  uint64 total_size_bytes = 3;
 
   // Backend type (e.g., "InMemory", "SQLite", "Redis", "PostgreSQL")
-  string backend_type = 3;
+  string backend_type = 4;
 }
 
 // Error codes for key-value store operations.

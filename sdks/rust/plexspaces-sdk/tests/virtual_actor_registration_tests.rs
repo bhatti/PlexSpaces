@@ -101,7 +101,7 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     assert!(type_metadata.is_some(), "Type metadata should exist");
     let metadata = type_metadata.unwrap();
     assert_eq!(metadata.actor_type(), "gen_server");
-    assert_eq!(metadata.behavior_kind(), Some("GenServer"));
+    assert_eq!(metadata.behavior_kind(), Some("gen_server"));
     assert_eq!(metadata.namespace(), "test-namespace");
     assert!(
         metadata.facet_config().is_some(),

@@ -125,6 +125,7 @@ impl ServiceHttpClient {
         path_and_query: &str,
     ) -> Result<T, ServiceHttpClientError> {
         let req = OutboundHttpRequest {
+            request_id: ulid::Ulid::new().to_string(),
             method: "GET".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![plexspaces_actor::HttpHeader {
@@ -156,6 +157,7 @@ impl ServiceHttpClient {
     {
         let body_bytes = serde_json::to_vec(body)?;
         let req = OutboundHttpRequest {
+            request_id: ulid::Ulid::new().to_string(),
             method: "POST".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![
@@ -188,6 +190,7 @@ impl ServiceHttpClient {
     {
         let body_bytes = serde_json::to_vec(body)?;
         let req = OutboundHttpRequest {
+            request_id: ulid::Ulid::new().to_string(),
             method: "PUT".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![
@@ -211,6 +214,7 @@ impl ServiceHttpClient {
     /// Returns the response body as a string (may be empty).
     pub async fn delete(&self, path_and_query: &str) -> Result<String, ServiceHttpClientError> {
         let req = OutboundHttpRequest {
+            request_id: ulid::Ulid::new().to_string(),
             method: "DELETE".to_string(),
             path_and_query: path_and_query.to_string(),
             headers: vec![],
@@ -291,6 +295,7 @@ mod tests {
     fn mock_client(status: u16, body: &str) -> Arc<dyn OutboundHttpClient> {
         Arc::new(MockHttpClient {
             response: OutboundHttpResponse {
+                request_id: String::new(),
                 status: status as u32,
                 headers: vec![plexspaces_actor::HttpHeader {
                     key: "Content-Type".to_string(),

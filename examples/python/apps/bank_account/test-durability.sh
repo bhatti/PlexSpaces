@@ -39,6 +39,9 @@ start_node() {
     
     # Wait for node to start
     for i in {1..30}; do
+        APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+        zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
         HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
         if [ "$HTTP_CHECK" != "000" ]; then
             echo -e "   ${GREEN}✓ Node started${NC}"
@@ -124,8 +127,7 @@ RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/depl
     -F "application_id=$APP_ID" \
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
 
 if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
     echo -e "${GREEN}✓ Deployed 3 bank accounts${NC}"
@@ -185,12 +187,14 @@ echo "📦 Re-deploying to reactivate actors..."
 curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" 2>/dev/null || true
 sleep 1
 
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
     -F "name=$APP_ID" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
 
 if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
     echo -e "${GREEN}✓ Re-deployed${NC}"

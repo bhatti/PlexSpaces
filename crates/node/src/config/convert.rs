@@ -59,6 +59,7 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
                 .collect::<Result<Vec<_>, _>>()?,
             default_outbound_client_policy: None,
             outbound_policy_templates: std::collections::HashMap::new(),
+            static_dirs: vec![], // Set by config_manager::initialize from PLEXSPACES_STATIC_DIRS
         }),
         system_applications: yaml.system_applications,
         applications: yaml
@@ -399,6 +400,7 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
                 policy_template: link.policy_template,
             })
             .collect(),
+        static_mount: String::new(),
     }
 }
 

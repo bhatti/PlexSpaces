@@ -4,8 +4,6 @@ pub mod scheduling_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /** Scheduling service for resource-aware actor placement
-*/
     #[derive(Debug, Clone)]
     pub struct SchedulingServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -86,8 +84,6 @@ pub mod scheduling_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /** Schedule actor on best matching node (synchronous, returns immediately)
-*/
         pub async fn schedule_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::ScheduleActorRequest>,
@@ -118,8 +114,6 @@ pub mod scheduling_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Get scheduling request status (for polling)
-*/
         pub async fn get_scheduling_status(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSchedulingStatusRequest>,
@@ -219,8 +213,6 @@ pub mod scheduling_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with SchedulingServiceServer.
     #[async_trait]
     pub trait SchedulingService: Send + Sync + 'static {
-        /** Schedule actor on best matching node (synchronous, returns immediately)
-*/
         async fn schedule_actor(
             &self,
             request: tonic::Request<super::ScheduleActorRequest>,
@@ -228,8 +220,6 @@ pub mod scheduling_service_server {
             tonic::Response<super::ScheduleActorResponse>,
             tonic::Status,
         >;
-        /** Get scheduling request status (for polling)
-*/
         async fn get_scheduling_status(
             &self,
             request: tonic::Request<super::GetSchedulingStatusRequest>,
@@ -252,8 +242,6 @@ pub mod scheduling_service_server {
             tonic::Status,
         >;
     }
-    /** Scheduling service for resource-aware actor placement
-*/
     #[derive(Debug)]
     pub struct SchedulingServiceServer<T: SchedulingService> {
         inner: _Inner<T>,

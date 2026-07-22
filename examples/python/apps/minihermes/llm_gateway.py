@@ -51,7 +51,7 @@ class LLMGatewayActor:
 
         # Check cache
         cache_key = self._cache_key(messages)
-        cached = host.kv_get(f"llm_cache:{cache_key}")
+        cached = host.kv.get(f"llm_cache:{cache_key}")
         if cached:
             self.cache_hits += 1
             fire_audit("llm_cache_hit", f"provider={self.active_provider}")
@@ -71,7 +71,7 @@ class LLMGatewayActor:
             self.consecutive_failures = 0
             # Cache successful real responses
             try:
-                host.kv_put(f"llm_cache:{cache_key}", json.dumps(response))
+                host.kv.put(f"llm_cache:{cache_key}", json.dumps(response))
             except Exception:
                 pass
 
@@ -85,7 +85,7 @@ class LLMGatewayActor:
         if not name:
             return {"error": "name is required"}
         meta = {"name": name, "base_url": base_url, "model": model or self.default_model}
-        host.kv_put(f"provider_config:{name}", json.dumps(meta))
+        host.kv.put(f"provider_config:{name}", json.dumps(meta))
         fire_audit("provider_registered", f"name={name}")
         return {"status": "ok", "provider": name}
 
@@ -132,7 +132,7 @@ class LLMGatewayActor:
     def _call_provider(self, messages: list, tools: list, model: str):
         """Attempt HTTPFetch to the active provider. Returns normalized dict or None."""
         try:
-            cfg_raw = host.kv_get(f"provider_config:{self.active_provider}")
+            cfg_raw = host.kv.get(f"provider_config:{self.active_provider}")
             cfg = json.loads(cfg_raw) if cfg_raw else {}
             base_url = cfg.get("base_url", "")
 

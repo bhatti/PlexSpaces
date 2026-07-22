@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Actor Runtime API
@@ -894,11 +894,12 @@ message CreateShardGroupRequest {
   };
   // Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
   // Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
-  DataParallelConfig config = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  DataParallelConfig config = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  string actor_type = 2 [
+  string actor_type = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -906,9 +907,9 @@ message CreateShardGroupRequest {
     }
   ];
   // Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
-  ActorConfig shard_config = 3;
-  bytes initial_state = 4;
-  map<string, string> metadata = 5;
+  ActorConfig shard_config = 4;
+  bytes initial_state = 5;
+  map<string, string> metadata = 6;
 }
 
 message CreateShardGroupResponse {
@@ -918,7 +919,8 @@ message CreateShardGroupResponse {
       description: "Created shard group metadata"
     }
   };
-  ShardGroup group = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ShardGroup group = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message DeleteShardGroupRequest {
@@ -929,15 +931,16 @@ message DeleteShardGroupRequest {
       required: ["group_id"]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  bool force = 2;
-  google.protobuf.Duration shutdown_timeout = 3;
+  bool force = 3;
+  google.protobuf.Duration shutdown_timeout = 4;
 }
 
 message GetShardGroupRequest {
@@ -948,7 +951,8 @@ message GetShardGroupRequest {
       required: ["group_id"]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -964,7 +968,8 @@ message GetShardGroupResponse {
       description: "Shard group details"
     }
   };
-  ShardGroup group = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ShardGroup group = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message ListShardGroupsRequest {
@@ -974,12 +979,13 @@ message ListShardGroupsRequest {
       description: "Request to list shard groups"
     }
   };
-  string actor_type = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_type = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 128
   }];
-  ShardGroupState state = 2;
-  plexspaces.common.v1.PageRequest page = 3;
+  ShardGroupState state = 3;
+  plexspaces.common.v1.PageRequest page = 4;
 }
 
 message ListShardGroupsResponse {
@@ -989,8 +995,9 @@ message ListShardGroupsResponse {
       description: "Paged list of shard groups"
     }
   };
-  repeated ShardGroup groups = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ShardGroup groups = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 message SendToShardRequest {
@@ -1005,23 +1012,24 @@ message SendToShardRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  bytes partition_key = 2 [
+  bytes partition_key = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).bytes = {min_len: 1}
   ];
-  plexspaces.common.v1.Message message = 3 [
+  plexspaces.common.v1.Message message = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  bool wait_for_response = 4;
-  google.protobuf.Duration timeout = 5;
+  bool wait_for_response = 5;
+  google.protobuf.Duration timeout = 6;
 }
 
 message SendToShardResponse {
@@ -1031,9 +1039,10 @@ message SendToShardResponse {
       description: "Shard routing result"
     }
   };
-  uint32 shard_id = 1;
-  string shard_actor_id = 2;
-  plexspaces.common.v1.Message response = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 shard_id = 2;
+  string shard_actor_id = 3;
+  plexspaces.common.v1.Message response = 4;
 }
 
 // Aggregation strategy for scatter-gather results
@@ -1056,29 +1065,31 @@ message ScatterGatherRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  plexspaces.common.v1.Message query = 2 [
+  plexspaces.common.v1.Message query = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  google.protobuf.Duration timeout = 3;
-  ShardGroupAggregationStrategy aggregation = 4;
-  uint32 min_responses = 5;
+  google.protobuf.Duration timeout = 4;
+  ShardGroupAggregationStrategy aggregation = 5;
+  uint32 min_responses = 6;
 }
 
 message ShardQueryResponse {
-  uint32 shard_id = 1;
-  string shard_actor_id = 2;
-  plexspaces.common.v1.Message response = 3;
-  google.protobuf.Duration latency = 4;
-  bool success = 5;
-  string error = 6;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 shard_id = 2;
+  string shard_actor_id = 3;
+  plexspaces.common.v1.Message response = 4;
+  google.protobuf.Duration latency = 5;
+  bool success = 6;
+  string error = 7;
 }
 
 message ScatterGatherStats {
@@ -1095,9 +1106,10 @@ message ScatterGatherResponse {
       description: "Aggregated scatter-gather result"
     }
   };
-  plexspaces.common.v1.Message result = 1;
-  repeated ShardQueryResponse shard_responses = 2;
-  ScatterGatherStats stats = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.Message result = 2;
+  repeated ShardQueryResponse shard_responses = 3;
+  ScatterGatherStats stats = 4;
 }
 
 // Bulk update: send update messages to multiple shards (DPA UpdateFunction)
@@ -1114,7 +1126,8 @@ message BulkUpdateShardGroupRequest {
     }
   };
   // Group to update
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1124,16 +1137,16 @@ message BulkUpdateShardGroupRequest {
 
   // Update messages: partition_key -> message
   // Messages will be routed to appropriate shards based on partition_key
-  map<string, plexspaces.common.v1.Message> updates = 2 [(google.api.field_behavior) = REQUIRED];
+  map<string, plexspaces.common.v1.Message> updates = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Consistency level for updates
-  ConsistencyLevel consistency_level = 3;
+  ConsistencyLevel consistency_level = 4;
 
   // Timeout for updates
-  google.protobuf.Duration timeout = 4;
+  google.protobuf.Duration timeout = 5;
 
   // Wait for responses (true = wait for all, false = fire-and-forget)
-  bool wait_for_responses = 5;
+  bool wait_for_responses = 6;
 }
 
 message BulkUpdateShardGroupResponse {
@@ -1144,19 +1157,20 @@ message BulkUpdateShardGroupResponse {
     }
   };
   // Number of updates sent
-  uint32 updates_sent = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 updates_sent = 2;
 
   // Number of successful updates
-  uint32 updates_succeeded = 2;
+  uint32 updates_succeeded = 3;
 
   // Number of failed updates
-  uint32 updates_failed = 3;
+  uint32 updates_failed = 4;
 
   // Per-shard statistics
-  repeated ShardUpdateStats shard_stats = 4;
+  repeated ShardUpdateStats shard_stats = 5;
 
   // Errors (if any)
-  repeated string errors = 5;
+  repeated string errors = 6;
 }
 
 message ShardUpdateStats {
@@ -1181,7 +1195,8 @@ message MapShardGroupRequest {
     }
   };
   // Group to map over
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1190,16 +1205,16 @@ message MapShardGroupRequest {
   ];
 
   // Map function message (sent to each shard)
-  plexspaces.common.v1.Message map_function = 2 [
+  plexspaces.common.v1.Message map_function = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
 
   // Timeout for map operation
-  google.protobuf.Duration timeout = 3;
+  google.protobuf.Duration timeout = 4;
 
   // Minimum number of shards that must respond (0 = all required)
-  uint32 min_responses = 4;
+  uint32 min_responses = 5;
 }
 
 message MapShardGroupResponse {
@@ -1210,10 +1225,11 @@ message MapShardGroupResponse {
     }
   };
   // Mapped results from each shard
-  repeated ShardQueryResponse shard_results = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ShardQueryResponse shard_results = 2;
 
   // Statistics
-  ScatterGatherStats stats = 2;
+  ScatterGatherStats stats = 3;
 }
 
 enum CollectiveReduction {
@@ -1242,19 +1258,20 @@ message BroadcastShardGroupRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  plexspaces.common.v1.Message message = 2 [
+  plexspaces.common.v1.Message message = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  google.protobuf.Duration timeout = 3;
-  uint32 min_acks = 4;
+  google.protobuf.Duration timeout = 4;
+  uint32 min_acks = 5;
 }
 
 message BroadcastShardGroupResponse {
@@ -1264,8 +1281,9 @@ message BroadcastShardGroupResponse {
       description: "Per-shard responses for a broadcast operation"
     }
   };
-  repeated ShardQueryResponse shard_responses = 1;
-  ScatterGatherStats stats = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ShardQueryResponse shard_responses = 2;
+  ScatterGatherStats stats = 3;
 }
 
 message ReduceShardGroupRequest {
@@ -1279,21 +1297,22 @@ message ReduceShardGroupRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  plexspaces.common.v1.Message map_function = 2 [
+  plexspaces.common.v1.Message map_function = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  google.protobuf.Duration timeout = 3;
-  uint32 min_responses = 4;
-  CollectiveReduction reduction = 5;
-  CollectiveTargetField target = 6;
+  google.protobuf.Duration timeout = 4;
+  uint32 min_responses = 5;
+  CollectiveReduction reduction = 6;
+  CollectiveTargetField target = 7;
 }
 
 message ReduceShardGroupResponse {
@@ -1303,9 +1322,10 @@ message ReduceShardGroupResponse {
       description: "Reduced result and per-shard responses"
     }
   };
-  plexspaces.common.v1.Message result = 1;
-  repeated ShardQueryResponse shard_responses = 2;
-  ScatterGatherStats stats = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.Message result = 2;
+  repeated ShardQueryResponse shard_responses = 3;
+  ScatterGatherStats stats = 4;
 }
 
 message AllReduceShardGroupRequest {
@@ -1319,21 +1339,22 @@ message AllReduceShardGroupRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  plexspaces.common.v1.Message map_function = 2 [
+  plexspaces.common.v1.Message map_function = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).required = true
   ];
-  google.protobuf.Duration timeout = 3;
-  uint32 min_responses = 4;
-  CollectiveReduction reduction = 5;
-  CollectiveTargetField target = 6;
+  google.protobuf.Duration timeout = 4;
+  uint32 min_responses = 5;
+  CollectiveReduction reduction = 6;
+  CollectiveTargetField target = 7;
 }
 
 message AllReduceShardGroupResponse {
@@ -1343,9 +1364,10 @@ message AllReduceShardGroupResponse {
       description: "All-reduce result and per-shard responses"
     }
   };
-  plexspaces.common.v1.Message result = 1;
-  repeated ShardQueryResponse shard_responses = 2;
-  ScatterGatherStats stats = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.Message result = 2;
+  repeated ShardQueryResponse shard_responses = 3;
+  ScatterGatherStats stats = 4;
 }
 
 message BarrierShardGroupRequest {
@@ -1359,23 +1381,24 @@ message BarrierShardGroupRequest {
       ]
     }
   };
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string barrier_id = 2 [
+  string barrier_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  uint64 round = 3;
-  google.protobuf.Duration timeout = 4;
-  uint32 min_acks = 5;
+  uint64 round = 4;
+  google.protobuf.Duration timeout = 5;
+  uint32 min_acks = 6;
 }
 
 message BarrierShardGroupResponse {
@@ -1385,8 +1408,9 @@ message BarrierShardGroupResponse {
       description: "Barrier synchronization responses"
     }
   };
-  repeated ShardQueryResponse shard_responses = 1;
-  ScatterGatherStats stats = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ShardQueryResponse shard_responses = 2;
+  ScatterGatherStats stats = 3;
 }
 
 // Scale shard group (add/remove shards with rebalancing)
@@ -1402,7 +1426,8 @@ message ScaleShardGroupRequest {
     }
   };
   // Group to scale
-  string group_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string group_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1411,16 +1436,16 @@ message ScaleShardGroupRequest {
   ];
 
   // New shard count
-  uint32 new_shard_count = 2 [
+  uint32 new_shard_count = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).uint32 = {gte: 1}
   ];
 
   // Rebalancing policy
-  RebalancePolicy rebalance_policy = 3;
+  RebalancePolicy rebalance_policy = 4;
 
   // Configuration for new shards (if scaling up)
-  ActorConfig new_shard_config = 4;
+  ActorConfig new_shard_config = 5;
 }
 
 message ScaleShardGroupResponse {
@@ -1431,10 +1456,11 @@ message ScaleShardGroupResponse {
     }
   };
   // Updated shard group
-  ShardGroup group = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ShardGroup group = 2;
 
   // Rebalancing status
-  RebalanceStatus rebalance_status = 2;
+  RebalanceStatus rebalance_status = 3;
 }
 
 // State management mode (lattice-based data-parallel actors)
@@ -1595,18 +1621,19 @@ message SpawnActorRequest {
   };
 
   // Full spawn contract: identity, role, namespace, tenant_id, behavior_kind, args, facets, labels, config, visibility.
-  ActorSpawnSpec spec = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ActorSpawnSpec spec = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Optional namespace override for this RPC only.
   // If non-empty, the server merges this into spec.namespace for the spawn operation; if empty, spec.namespace is used.
-  string namespace = 2 [
+  string namespace = 3 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 
   // Number of identical replicas to spawn (default: 1 when 0).
   // When > 1, spawns N actors with auto-generated instance names derived from spec.identity.name (prefix pattern).
-  uint32 instances_count = 3 [
+  uint32 instances_count = 4 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).uint32 = {
       gte: 0
@@ -1640,7 +1667,8 @@ message SpawnActorResponse {
   // Reference to spawned actor (format: "actor_id@node_id")
   // Example: "general-1@node2", "worker-abc@prod-7"
   // Use this for messaging: actor_ref.tell(msg), actor_ref.ask(msg)
-  string actor_ref = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_ref = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1650,11 +1678,12 @@ message SpawnActorResponse {
 
   // Full actor details (state, config, metrics)
   // Useful for inspection and monitoring
-  Actor actor = 2;
+  Actor actor = 3;
 }
 
 message SpawnActorsRequest {
-  repeated SpawnActorRequest requests = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated SpawnActorRequest requests = 2;
 }
 
 message SpawnActorResult {
@@ -1664,7 +1693,8 @@ message SpawnActorResult {
 }
 
 message SpawnActorsResponse {
-  repeated SpawnActorResult results = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated SpawnActorResult results = 2;
 }
 
 // Request to get an actor
@@ -1677,7 +1707,8 @@ message GetActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1686,14 +1717,15 @@ message GetActorRequest {
   ];
 
   // Namespace for tenant isolation (tenant_id from JWT)
-  string namespace = 2 [
+  string namespace = 3 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 }
 
 message GetActorResponse {
-  Actor actor = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  Actor actor = 2;
 }
 
 // Request to list actors
@@ -1705,22 +1737,24 @@ message ListActorsRequest {
     }
   };
 
-  plexspaces.common.v1.PageRequest page_request = 1;
-  string actor_type = 2 [(buf.validate.field).string.max_len = 128];
-  ActorState state = 3;
-  string node_id = 4 [(buf.validate.field).string.max_len = 255];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page_request = 2;
+  string actor_type = 3 [(buf.validate.field).string.max_len = 128];
+  ActorState state = 4;
+  string node_id = 5 [(buf.validate.field).string.max_len = 255];
 
   // Namespace for tenant isolation (tenant_id from JWT)
   // Only actors in this namespace will be returned
-  string namespace = 5 [
+  string namespace = 6 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 }
 
 message ListActorsResponse {
-  repeated Actor actors = 1;
-  plexspaces.common.v1.PageResponse page_response = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Actor actors = 2;
+  plexspaces.common.v1.PageResponse page_response = 3;
 }
 
 // Request to send a message via tell semantics
@@ -1734,14 +1768,15 @@ message SendMessageRequest {
   };
 
   // Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
-  string namespace = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 2 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 
   // Actor type or actor id to target.
   // If this value contains '@', it is treated as a direct actor id first.
-  string actor_type = 2 [
+  string actor_type = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -1750,28 +1785,28 @@ message SendMessageRequest {
   ];
 
   // Optional HTTP method metadata for gateway-originated requests.
-  string http_method = 3 [(buf.validate.field).string.max_len = 16];
+  string http_method = 4 [(buf.validate.field).string.max_len = 16];
 
   // Request payload bytes.
-  bytes payload = 4;
+  bytes payload = 5;
 
   // Request headers or message metadata.
-  map<string, string> headers = 5;
+  map<string, string> headers = 6;
 
   // Query parameters from HTTP requests.
-  map<string, string> query_params = 6;
+  map<string, string> query_params = 7;
 
   // Full request path for gateway-originated requests.
-  string path = 7 [(buf.validate.field).string.max_len = 2048];
+  string path = 8 [(buf.validate.field).string.max_len = 2048];
 
   // Remaining path segment after actor_type.
-  string subpath = 8 [(buf.validate.field).string.max_len = 2048];
+  string subpath = 9 [(buf.validate.field).string.max_len = 2048];
 
   // Optional sender actor id for remoting and tracing.
-  string sender_id = 9 [(buf.validate.field).string.max_len = 255];
+  string sender_id = 10 [(buf.validate.field).string.max_len = 255];
 
   // Optional application or transport message type.
-  string message_type = 10 [(buf.validate.field).string = {
+  string message_type = 11 [(buf.validate.field).string = {
     in: [
       "",
       "cast",
@@ -1784,20 +1819,20 @@ message SendMessageRequest {
   }];
 
   // Optional correlation id preserved for remoting.
-  string correlation_id = 11 [(buf.validate.field).string.max_len = 255];
+  string correlation_id = 12 [(buf.validate.field).string.max_len = 255];
 
   // Optional reply_to preserved for remoting.
-  string reply_to = 12 [(buf.validate.field).string.max_len = 255];
+  string reply_to = 13 [(buf.validate.field).string.max_len = 255];
 
   // Optional client-provided message id.
-  string message_id = 13 [(buf.validate.field).string.max_len = 255];
+  string message_id = 14 [(buf.validate.field).string.max_len = 255];
 
   // Optional actor instance name. When set together with actor_type and namespace,
   // the handler constructs the canonical actor ID directly:
   //   actor_name//actor_type::namespace@node_id
   // This avoids ambiguous lookups and makes addressing explicit.
   // If empty, falls back to registry lookup by actor_type within the namespace.
-  string actor_name = 20 [(buf.validate.field).string.max_len = 255];
+  string actor_name = 21 [(buf.validate.field).string.max_len = 255];
 }
 
 message SendMessageResponse {
@@ -1808,13 +1843,14 @@ message SendMessageResponse {
     }
   };
 
-  bool success = 1;
-  string message_id = 2 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string message_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  string actor_id = 3 [(buf.validate.field).string.max_len = 255];
-  string error_message = 4 [(buf.validate.field).string.max_len = 2048];
+  string actor_id = 4 [(buf.validate.field).string.max_len = 255];
+  string error_message = 5 [(buf.validate.field).string.max_len = 2048];
 }
 
 // Request for streaming messages (high-throughput)
@@ -1827,26 +1863,28 @@ message StreamMessageRequest {
     }
   };
 
-  plexspaces.common.v1.Message message = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.Message message = 2 [(google.api.field_behavior) = REQUIRED];
   // Sequence number for ordering (client-generated)
-  uint64 sequence = 2;
+  uint64 sequence = 3;
 }
 
 // Response for streaming messages
 message StreamMessageResponse {
-  string message_id = 1 [(buf.validate.field).string = {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string message_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
   // Acknowledgement of sequence number
-  uint64 sequence = 2;
+  uint64 sequence = 3;
   // Status: "delivered", "failed", "queued"
-  string status = 3 [(buf.validate.field).string = {
+  string status = 4 [(buf.validate.field).string = {
     min_len: 1
     max_len: 32
   }];
   // Optional error message
-  string error = 4 [(buf.validate.field).string.max_len = 1024];
+  string error = 5 [(buf.validate.field).string.max_len = 1024];
 }
 
 // Request to delete actor
@@ -1859,17 +1897,18 @@ message DeleteActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  bool force = 2;
+  bool force = 3;
 
   // Namespace for tenant isolation (tenant_id from JWT)
-  string namespace = 3 [
+  string namespace = 4 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
@@ -2152,21 +2191,22 @@ message MonitorActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string supervisor_id = 2 [
+  string supervisor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string supervisor_callback = 3 [
+  string supervisor_callback = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -2195,7 +2235,8 @@ message MonitorActorResponse {
     }
   };
 
-  string monitor_ref = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string monitor_ref = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -2223,21 +2264,22 @@ message DemonitorActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string supervisor_id = 2 [
+  string supervisor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string monitor_ref = 3 [
+  string monitor_ref = 4 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -2327,7 +2369,8 @@ message GetActorStatesRequest {
   };
 
   // List of canonical actor IDs to check
-  repeated string actor_ids = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated string actor_ids = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Response for batch actor state check — uses existing ActorState enum
@@ -2341,7 +2384,8 @@ message GetActorStatesResponse {
 
   // Map of canonical actor_id -> ActorState (uses existing ActorState enum)
   // ACTOR_STATE_UNSPECIFIED / ACTOR_STATE_TERMINATED / not present = actor not found on this node
-  map<string, ActorState> states = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  map<string, ActorState> states = 2;
 }
 
 // ==================== Link Semantics (Erlang Pattern) ====================
@@ -2474,14 +2518,15 @@ message LinkActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string linked_actor_id = 2 [
+  string linked_actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -2499,7 +2544,8 @@ message LinkActorResponse {
     }
   };
 
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 /// Unlink two actors (Erlang unlink/1 equivalent)
@@ -2522,14 +2568,15 @@ message UnlinkActorRequest {
     }
   };
 
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string linked_actor_id = 2 [
+  string linked_actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -2547,7 +2594,8 @@ message UnlinkActorResponse {
     }
   };
 
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 }
 
 // Actor system service
@@ -3016,7 +3064,8 @@ message CheckActorExistsRequest {
   };
 
   // Actor ID to check
-  string actor_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -3035,13 +3084,14 @@ message CheckActorExistsResponse {
   };
 
   // Actor exists (virtual or active)
-  bool exists = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool exists = 2;
 
   // Actor is currently active (in memory)
-  bool is_active = 2;
+  bool is_active = 3;
 
   // Actor has VirtualActorFacet (is virtual)
-  bool is_virtual = 3;
+  bool is_virtual = 4;
 }
 
 // Request to ask an actor via HTTP-like interface (FaaS-style)
@@ -3065,14 +3115,15 @@ message AskReplyRequest {
   // Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
   // Can be empty - defaults to empty string if not provided
   // Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
-  string namespace = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string namespace = 2 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
   ];
 
   // Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})
   // Used to lookup actors via ActorRegistry discover_actors_by_type
-  string actor_type = 2 [
+  string actor_type = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -3081,37 +3132,37 @@ message AskReplyRequest {
   ];
 
   // HTTP method metadata (GET, POST, or PUT)
-  string http_method = 3;
+  string http_method = 4;
 
   // Request payload
   // For GET: JSON string of query parameters
   // For POST/PUT: Request body bytes
-  bytes payload = 4;
+  bytes payload = 5;
 
   // HTTP headers
   // Converted from HTTP request headers
-  map<string, string> headers = 5;
+  map<string, string> headers = 6;
 
   // Query parameters (for GET requests)
   // Converted to JSON and stored in payload
-  map<string, string> query_params = 6;
+  map<string, string> query_params = 7;
 
   // Full HTTP path for the request (optional)
   // Example: "/api/v1/actors/default/counter/custom/path"
   // Allows actors to perform custom routing based on the complete URL
-  string path = 7;
+  string path = 8;
 
   // Subpath after the actor_type segment (optional)
   // Example: for "/api/v1/actors/default/counter/metrics/latest"
   //          subpath = "metrics/latest"
   // This will be used in future for advanced per-actor routing capabilities.
-  string subpath = 8;
+  string subpath = 9;
 
   // Optional sender actor id for remoting and tracing.
-  string sender_id = 9 [(buf.validate.field).string.max_len = 255];
+  string sender_id = 10 [(buf.validate.field).string.max_len = 255];
 
   // Optional transport message type.
-  string message_type = 10 [(buf.validate.field).string = {
+  string message_type = 11 [(buf.validate.field).string = {
     in: [
       "",
       "call",
@@ -3121,18 +3172,18 @@ message AskReplyRequest {
   }];
 
   // Optional correlation id preserved for remoting.
-  string correlation_id = 11 [(buf.validate.field).string.max_len = 255];
+  string correlation_id = 12 [(buf.validate.field).string.max_len = 255];
 
   // Optional reply_to preserved for remoting.
-  string reply_to = 12 [(buf.validate.field).string.max_len = 255];
+  string reply_to = 13 [(buf.validate.field).string.max_len = 255];
 
   // Optional client-provided message id.
-  string message_id = 13 [(buf.validate.field).string.max_len = 255];
+  string message_id = 14 [(buf.validate.field).string.max_len = 255];
 
   // Optional timeout for request-reply (ask) operations.
   // Defaults to 5 seconds if not specified. Use for long-running operations like training.
   // HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-  google.protobuf.Duration timeout = 14 [
+  google.protobuf.Duration timeout = 15 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).duration.lte.seconds = 3600 // Max 1 hour
   ];
@@ -3141,7 +3192,7 @@ message AskReplyRequest {
   // the handler constructs the canonical actor ID directly:
   //   actor_name//actor_type::namespace@node_id
   // If empty, falls back to registry lookup by actor_type within the namespace.
-  string actor_name = 20 [(buf.validate.field).string.max_len = 255];
+  string actor_name = 21 [(buf.validate.field).string.max_len = 255];
 }
 
 // Response from asking an actor
@@ -3157,20 +3208,21 @@ message AskReplyResponse {
   };
 
   // Success status
-  bool success = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
 
   // Response payload (for GET/ask requests)
   // Contains the reply message from actor
-  bytes payload = 2;
+  bytes payload = 3;
 
   // Response headers (optional metadata)
-  map<string, string> headers = 3;
+  map<string, string> headers = 4;
 
   // Actor ID that was invoked (format: "actor_id@node_id")
-  string actor_id = 4;
+  string actor_id = 5;
 
   // Error message (if success is false)
-  string error_message = 5;
+  string error_message = 6;
 }
 
 //

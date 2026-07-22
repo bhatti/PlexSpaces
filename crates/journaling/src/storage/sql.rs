@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! SQL-based journal storage implementations (SQLite and PostgreSQL).
@@ -1173,7 +1173,7 @@ impl JournalStorage for SqliteJournalStorage {
         // Calculate next offset: current offset + number of events returned
         let next_offset = skip_count + events.len() as i64;
 
-        let page_response = PageResponse {
+        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan (expensive)
             offset: next_offset as i32,
             limit: page_size as i32,
@@ -1327,7 +1327,7 @@ impl JournalStorage for SqliteJournalStorage {
         // Calculate next offset: current offset + number of events returned
         let next_offset = skip_count + events.len() as i64;
 
-        let page_response = PageResponse {
+        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan (expensive)
             offset: next_offset as i32,
             limit: page_size as i32,
@@ -1418,10 +1418,35 @@ impl JournalStorage for SqliteJournalStorage {
         Ok(())
     }
 
+    async fn unregister_reminder_if_matches(
+        &self,
+        actor_id: &str,
+        reminder_name: &str,
+        expected_next_fire_ms: u64,
+    ) -> JournalResult<bool> {
+        let expected_seconds = (expected_next_fire_ms / 1000) as i64;
+        let expected_nanos = ((expected_next_fire_ms % 1000) * 1_000_000) as i32;
+        let result = sqlx::query(
+            r#"
+            DELETE FROM reminders
+            WHERE actor_id = ? AND reminder_name = ? AND next_fire_time_seconds = ? AND next_fire_time_nanos = ?
+            "#,
+        )
+        .bind(actor_id)
+        .bind(reminder_name)
+        .bind(expected_seconds)
+        .bind(expected_nanos)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn load_reminders(&self, actor_id: &str) -> JournalResult<Vec<ReminderState>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 actor_id, reminder_name,
                 interval_seconds, interval_nanos,
                 first_fire_time_seconds, first_fire_time_nanos,
@@ -2376,7 +2401,7 @@ impl JournalStorage for PostgresJournalStorage {
         // Calculate next offset: current offset + number of events returned
         let next_offset = skip_count + events.len() as i64;
 
-        let page_response = PageResponse {
+        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan (expensive)
             offset: next_offset as i32,
             limit: page_size as i32,
@@ -2555,7 +2580,7 @@ impl JournalStorage for PostgresJournalStorage {
         // Calculate next offset: current offset + number of events returned
         let next_offset = skip_count + events.len() as i64;
 
-        let page_response = PageResponse {
+        let page_response = PageResponse { request_id: ulid::Ulid::new().to_string(),
             total_size: 0, // Total size not available without full scan (expensive)
             offset: next_offset as i32,
             limit: page_size as i32,
@@ -2661,10 +2686,35 @@ impl JournalStorage for PostgresJournalStorage {
         Ok(())
     }
 
+    async fn unregister_reminder_if_matches(
+        &self,
+        actor_id: &str,
+        reminder_name: &str,
+        expected_next_fire_ms: u64,
+    ) -> JournalResult<bool> {
+        let expected_seconds = (expected_next_fire_ms / 1000) as i64;
+        let expected_nanos = ((expected_next_fire_ms % 1000) * 1_000_000) as i32;
+        let result = sqlx::query(
+            r#"
+            DELETE FROM reminders
+            WHERE actor_id = $1 AND reminder_name = $2 AND next_fire_time_seconds = $3 AND next_fire_time_nanos = $4
+            "#,
+        )
+        .bind(actor_id)
+        .bind(reminder_name)
+        .bind(expected_seconds)
+        .bind(expected_nanos)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn load_reminders(&self, actor_id: &str) -> JournalResult<Vec<ReminderState>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 actor_id, reminder_name,
                 interval_seconds, interval_nanos,
                 first_fire_time_seconds, first_fire_time_nanos,

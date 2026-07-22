@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces OAuth User Record
@@ -33,6 +33,7 @@ syntax = "proto3";
 
 package plexspaces.security.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
@@ -50,7 +51,11 @@ message User {
     json_schema: {
       title: "User"
       description: "OAuth user record. Email is unique."
-      required: ["user_id", "email", "tenant_id"]
+      required: [
+        "user_id",
+        "email",
+        "tenant_id"
+      ]
     }
   };
 
@@ -101,41 +106,46 @@ message GetOrCreateByEmailRequest {
     json_schema: {
       title: "Get Or Create By Email Request"
       description: "Find user by email or create if not exists. Called during OIDC callback."
-      required: ["email", "tenant_id"]
+      required: [
+        "email",
+        "tenant_id"
+      ]
     }
   };
 
   // Email from OIDC id_token
-  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string email = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Tenant ID (from OIDC org claim or config mapping)
-  string tenant_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string tenant_id = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Display name from OIDC profile
-  string display_name = 3;
+  string display_name = 4;
 
   // Avatar URL from OIDC profile
-  string avatar_url = 4;
+  string avatar_url = 5;
 
   // OIDC provider name
-  string provider = 5;
+  string provider = 6;
 
   // OIDC subject ID
-  string provider_sub = 6;
+  string provider_sub = 7;
 
   // Roles from OIDC claims
-  repeated string roles = 7;
+  repeated string roles = 8;
 
   // Groups from OIDC claims
-  repeated string groups = 8;
+  repeated string groups = 9;
 }
 
 message GetOrCreateByEmailResponse {
   // The user (existing or newly created)
-  User user = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  User user = 2;
 
   // Whether this was a new user creation
-  bool created = 2;
+  bool created = 3;
 }
 
 message UpdateUserRequest {
@@ -148,18 +158,20 @@ message UpdateUserRequest {
   };
 
   // User ID to update
-  string user_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string user_id = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Fields to update (only non-empty/set fields are applied)
-  string display_name = 2;
-  optional bool admin = 3;
-  repeated string roles = 4;
-  repeated string groups = 5;
-  string avatar_url = 6;
+  string display_name = 3;
+  optional bool admin = 4;
+  repeated string roles = 5;
+  repeated string groups = 6;
+  string avatar_url = 7;
 }
 
 message UpdateUserResponse {
-  User user = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  User user = 2;
 }
 
 // First-class tenant entity. Created automatically on first OIDC login for a tenant slug.
@@ -168,7 +180,10 @@ message Tenant {
     json_schema: {
       title: "Tenant"
       description: "A tenant (organisation) in PlexSpaces. Created on first OIDC login."
-      required: ["tenant_id", "slug"]
+      required: [
+        "tenant_id",
+        "slug"
+      ]
     }
   };
 
@@ -192,7 +207,12 @@ message ApiToken {
     json_schema: {
       title: "ApiToken"
       description: "Long-lived API token for programmatic access."
-      required: ["token_id", "user_id", "tenant_id", "name"]
+      required: [
+        "token_id",
+        "user_id",
+        "tenant_id",
+        "name"
+      ]
     }
   };
 
@@ -230,25 +250,29 @@ message ApiToken {
 
 // Paginated user listing request. Admins can filter across all tenants.
 message ListUsersRequest {
-  plexspaces.common.v1.PageRequest page = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page = 2;
 
   // Admin-only: filter to a specific tenant. Empty = caller's own tenant for non-admins.
-  string tenant_id_filter = 2;
+  string tenant_id_filter = 3;
 }
 
 message ListUsersResponse {
-  repeated User users = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated User users = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // Paginated tenant listing request. Non-admins see only their own tenant.
 message ListTenantsRequest {
-  plexspaces.common.v1.PageRequest page = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page = 2;
 }
 
 message ListTenantsResponse {
-  repeated Tenant tenants = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated Tenant tenants = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 message CreateApiTokenRequest {
@@ -261,36 +285,43 @@ message CreateApiTokenRequest {
   };
 
   // User-assigned label for this token
-  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Scopes to grant. Defaults to ["read", "write"] if empty.
-  repeated string scopes = 2;
+  repeated string scopes = 3;
 
   // TTL for the token. Defaults to 100× the session JWT TTL if unset.
-  google.protobuf.Duration ttl = 3;
+  google.protobuf.Duration ttl = 4;
 }
 
 message CreateApiTokenResponse {
   // Token metadata (without the secret)
-  ApiToken token = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  ApiToken token = 2;
 
   // The plaintext token (psx_<secret>). Shown ONCE — store it now.
-  string plaintext = 2;
+  string plaintext = 3;
 }
 
 message DeleteApiTokenRequest {
-  string token_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string token_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
-message DeleteApiTokenResponse {}
+message DeleteApiTokenResponse {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+}
 
 message ListApiTokensRequest {
-  plexspaces.common.v1.PageRequest page = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  plexspaces.common.v1.PageRequest page = 2;
 }
 
 message ListApiTokensResponse {
-  repeated ApiToken tokens = 1;
-  plexspaces.common.v1.PageResponse page = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated ApiToken tokens = 2;
+  plexspaces.common.v1.PageResponse page = 3;
 }
 
 // UserService — OAuth user, tenant, and API token management.
@@ -313,16 +344,12 @@ service UserService {
 
   // List users. Admins see all tenants; non-admins see only their own tenant.
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/auth/users"
-    };
+    option (google.api.http) = {get: "/api/v1/auth/users"};
   }
 
   // List tenants. Admins see all; non-admins see only their own tenant.
   rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/auth/tenants"
-    };
+    option (google.api.http) = {get: "/api/v1/auth/tenants"};
   }
 
   // Create a long-lived API token for programmatic access.
@@ -335,15 +362,11 @@ service UserService {
 
   // Revoke an API token. Owner or admin only.
   rpc DeleteApiToken(DeleteApiTokenRequest) returns (DeleteApiTokenResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/auth/tokens/{token_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/auth/tokens/{token_id}"};
   }
 
   // List the caller's API tokens.
   rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/auth/tokens"
-    };
+    option (google.api.http) = {get: "/api/v1/auth/tokens"};
   }
 }

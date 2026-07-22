@@ -51,7 +51,7 @@ class SkillStoreActor:
             "last_used_at": host.now_ms(),
         }
 
-        host.kv_put(f"skill_meta:{skill_id}", json.dumps(meta))
+        host.kv.put(f"skill_meta:{skill_id}", json.dumps(meta))
 
         try:
             host.blob.upload("skills", f"skill_procedure_{skill_id}", procedure.encode() if isinstance(procedure, str) else procedure)
@@ -81,7 +81,7 @@ class SkillStoreActor:
     def get_skill(self, skill_id: str = "") -> dict:
         if not skill_id:
             return {"error": "skill_id is required"}
-        raw = host.kv_get(f"skill_meta:{skill_id}")
+        raw = host.kv.get(f"skill_meta:{skill_id}")
         if not raw:
             return {"error": "skill not found", "skill_id": skill_id}
         meta = json.loads(raw)
@@ -109,7 +109,7 @@ class SkillStoreActor:
                 if len(tup) >= 4:
                     pattern, skill_id, name = str(tup[1]), str(tup[2]), str(tup[3])
                     if pattern.lower() in query_lower and skill_id not in matched:
-                        raw = host.kv_get(f"skill_meta:{skill_id}")
+                        raw = host.kv.get(f"skill_meta:{skill_id}")
                         if raw:
                             try:
                                 meta = json.loads(raw)
@@ -126,7 +126,7 @@ class SkillStoreActor:
                 if len(tup) >= 4:
                     tag, skill_id = str(tup[1]), str(tup[2])
                     if skill_id not in matched and tag.lower() in query_lower:
-                        raw = host.kv_get(f"skill_meta:{skill_id}")
+                        raw = host.kv.get(f"skill_meta:{skill_id}")
                         if raw:
                             try:
                                 meta = json.loads(raw)
@@ -144,13 +144,13 @@ class SkillStoreActor:
     def record_usage(self, skill_id: str = "") -> dict:
         if not skill_id:
             return {"error": "skill_id is required"}
-        raw = host.kv_get(f"skill_meta:{skill_id}")
+        raw = host.kv.get(f"skill_meta:{skill_id}")
         if not raw:
             return {"error": "skill not found"}
         meta = json.loads(raw)
         meta["usage_count"] = meta.get("usage_count", 0) + 1
         meta["last_used_at"] = host.now_ms()
-        host.kv_put(f"skill_meta:{skill_id}", json.dumps(meta))
+        host.kv.put(f"skill_meta:{skill_id}", json.dumps(meta))
         host.incr_counter("skill_uses", 1)
         return {"status": "ok", "usage_count": meta["usage_count"]}
 
@@ -158,7 +158,7 @@ class SkillStoreActor:
     def delete_skill(self, skill_id: str = "") -> dict:
         if not skill_id:
             return {"error": "skill_id is required"}
-        host.kv_delete(f"skill_meta:{skill_id}")
+        host.kv.delete(f"skill_meta:{skill_id}")
         try:
             host.blob.delete("skills", f"skill_procedure_{skill_id}")
         except Exception:
@@ -231,7 +231,7 @@ class SkillStoreActor:
     def maintenance_tick(self) -> None:
         now = host.now_ms()
         for skill_id in list(self.skill_ids):
-            raw = host.kv_get(f"skill_meta:{skill_id}")
+            raw = host.kv.get(f"skill_meta:{skill_id}")
             if not raw:
                 continue
             try:
@@ -240,10 +240,10 @@ class SkillStoreActor:
                 current_status = meta.get("status", "active")
                 if current_status == "active" and age >= _STALE_MS:
                     meta["status"] = "stale"
-                    host.kv_put(f"skill_meta:{skill_id}", json.dumps(meta))
+                    host.kv.put(f"skill_meta:{skill_id}", json.dumps(meta))
                 elif current_status == "stale" and age >= _ARCHIVE_MS:
                     meta["status"] = "archived"
-                    host.kv_put(f"skill_meta:{skill_id}", json.dumps(meta))
+                    host.kv.put(f"skill_meta:{skill_id}", json.dumps(meta))
                     self.archive_count += 1
             except Exception:
                 pass

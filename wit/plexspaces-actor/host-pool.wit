@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Elastic actor pool for deployable WASM actors.
+
+interface host-pool {
+    use types.{payload, actor-error};
+
+    pool-checkout: func(pool-name: string, timeout-ms: u64) -> result<payload, actor-error>;
+    pool-checkin: func(pool-name: string, actor-id: string, checkout-id: string, healthy: bool) -> result<_, actor-error>;
+    pool-get-metrics: func(pool-name: string) -> result<payload, actor-error>;
+}

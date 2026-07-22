@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PlexSpaces Chat</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f0f2f5;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+    /* ── Connect overlay ── */
+    #overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center}
+    #overlay.hidden{display:none}
+    #conn-box{background:white;border-radius:10px;padding:28px 32px;width:440px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+    #conn-box h2{color:#075e54;font-size:20px;margin-bottom:18px}
+    .cf{margin-bottom:12px}
+    .cf label{display:block;font-size:12px;color:#555;margin-bottom:3px}
+    .cf input{width:100%;border:1px solid #ccc;border-radius:5px;padding:8px 10px;font-size:14px}
+    .cf input:focus{outline:none;border-color:#075e54}
+    .cf small{display:block;font-size:11px;color:#aaa;margin-top:2px}
+    #connect-btn{width:100%;background:#075e54;color:white;border:none;border-radius:6px;padding:10px;font-size:15px;cursor:pointer;margin-top:4px}
+    #connect-btn:hover{background:#128c7e}
+    #connect-btn:disabled{background:#aaa;cursor:not-allowed}
+    #conn-error{background:#f8d7da;color:#842029;border-radius:5px;padding:8px 12px;font-size:13px;margin-top:12px;display:none}
+
+    /* ── App shell (after connect) ── */
+    #app{flex:1;display:flex;overflow:hidden;min-height:0}
+
+    /* ── Left sidebar ── */
+    #sidebar{width:280px;min-width:220px;background:#fff;border-right:1px solid #ddd;display:flex;flex-direction:column;flex-shrink:0}
+    #sidebar-header{background:#075e54;color:white;padding:12px 14px;display:flex;align-items:center;gap:10px}
+    #sidebar-header .my-name{font-weight:600;font-size:15px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #sidebar-header .node-id{font-size:10px;opacity:.7;margin-top:1px}
+    #disc-btn{background:rgba(255,255,255,.2);border:none;color:white;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap}
+    #disc-btn:hover{background:rgba(255,255,255,.35)}
+    #sidebar-search{padding:8px 10px;border-bottom:1px solid #eee}
+    #sidebar-search input{width:100%;border:1px solid #ccc;border-radius:16px;padding:5px 12px;font-size:13px;outline:none}
+    #sidebar-search input:focus{border-color:#075e54}
+    #sidebar-body{flex:1;overflow-y:auto}
+
+    .section-hdr{display:flex;align-items:center;padding:6px 12px 2px;color:#888;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;gap:6px}
+    .section-hdr button{margin-left:auto;background:#075e54;color:white;border:none;border-radius:10px;padding:2px 8px;font-size:10px;cursor:pointer}
+    .section-hdr button:hover{background:#128c7e}
+
+    .conv-item{display:flex;align-items:center;padding:9px 12px;cursor:pointer;gap:10px;border-left:3px solid transparent}
+    .conv-item:hover{background:#f5f5f5}
+    .conv-item.active{background:#e8f5e9;border-left-color:#075e54}
+    .avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:white;flex-shrink:0}
+    .av-group{background:#0d47a1}
+    .av-dm{background:#6a1b9a}
+    .av-user{background:#4caf50}
+    .conv-info{flex:1;min-width:0}
+    .conv-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .conv-sub{font-size:11px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+    .conv-badge{background:#25d366;color:white;border-radius:10px;font-size:10px;padding:2px 6px;flex-shrink:0}
+    .online-dot{width:9px;height:9px;border-radius:50%;background:#25d366;flex-shrink:0}
+    .offline-dot{width:9px;height:9px;border-radius:50%;background:#ccc;flex-shrink:0}
+
+    /* ── Chat area ── */
+    #chat-area{flex:1;display:flex;flex-direction:column;min-width:0;background:#e5ddd5}
+    #chat-header{background:#075e54;color:white;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+    #chat-header .ch-avatar{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+    #chat-header .ch-name{font-size:15px;font-weight:600;flex:1}
+    #chat-header .ch-sub{font-size:11px;opacity:.8;margin-top:1px}
+    #members-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+    .chip{background:rgba(255,255,255,.2);border-radius:10px;padding:2px 8px;font-size:11px}
+    #chat-header .join-area{margin-left:auto;display:flex;align-items:center;gap:6px}
+    .ch-btn{background:rgba(255,255,255,.2);border:none;color:white;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer}
+    .ch-btn:hover{background:rgba(255,255,255,.35)}
+    #no-chat{flex:1;display:flex;align-items:center;justify-content:center;color:#888;font-size:14px;text-align:center;padding:20px}
+    #messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:6px}
+    .msg{max-width:68%;padding:7px 11px;border-radius:8px;font-size:14px;line-height:1.4;word-break:break-word}
+    .msg.mine{align-self:flex-end;background:#dcf8c6;border-bottom-right-radius:2px}
+    .msg.theirs{align-self:flex-start;background:white;border-bottom-left-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+    .msg.system{align-self:center;background:rgba(255,255,255,.7);color:#666;font-size:11px;border-radius:12px;padding:3px 12px}
+    .msg .sender{font-size:11px;font-weight:600;color:#075e54;margin-bottom:2px}
+    .msg .time{font-size:10px;color:#aaa;text-align:right;margin-top:2px}
+    #input-row{background:white;padding:8px 12px;display:flex;gap:8px;border-top:1px solid #ddd;flex-shrink:0}
+    #msg-input{flex:1;border:1px solid #ccc;border-radius:20px;padding:8px 14px;font-size:14px;outline:none}
+    #msg-input:focus{border-color:#075e54}
+    #send-btn{background:#075e54;color:white;border:none;border-radius:50%;width:36px;height:36px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+    #send-btn:hover:not(:disabled){background:#128c7e}
+    #send-btn:disabled{background:#aaa;cursor:not-allowed}
+
+    /* ── New group modal ── */
+    #group-modal{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center}
+    #group-modal.hidden{display:none}
+    #group-box{background:white;border-radius:8px;padding:24px;width:340px;max-width:90vw}
+    #group-box h3{color:#075e54;margin-bottom:14px;font-size:16px}
+    #group-box input{width:100%;border:1px solid #ccc;border-radius:5px;padding:7px 10px;font-size:14px;outline:none}
+    #group-box input:focus{border-color:#075e54}
+    .modal-btns{display:flex;gap:8px;margin-top:12px}
+    .modal-btns button{flex:1;padding:8px;border:none;border-radius:5px;font-size:14px;cursor:pointer}
+    #group-confirm{background:#075e54;color:white}
+    #group-confirm:hover{background:#128c7e}
+    #group-cancel{background:#e9ecef;color:#333}
+    #group-cancel:hover{background:#ddd}
+    #group-error{color:#842029;font-size:12px;margin-top:6px;display:none}
+  </style>
+</head>
+<body>
+
+<!-- ── Connect overlay ── -->
+<div id="overlay">
+  <div id="conn-box">
+    <h2>PlexSpaces Chat</h2>
+    <div class="cf">
+      <label>Node WebSocket URL</label>
+      <input id="ws-url" type="text" value="ws://localhost:8091/ws" placeholder="ws://host:8091/ws" />
+    </div>
+    <div class="cf">
+      <label>JWT Token <small style="display:inline;color:#aaa">(optional — paste to auto-fill username/tenant)</small></label>
+      <input id="jwt-token" type="password" placeholder="leave empty if auth disabled" />
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="cf" style="flex:1">
+        <label>Username</label>
+        <input id="username" type="text" value="alice" placeholder="alice" />
+      </div>
+      <div class="cf" style="flex:1">
+        <label>Tenant</label>
+        <input id="tenant" type="text" value="default" placeholder="default" />
+      </div>
+    </div>
+    <div class="cf">
+      <label>Leader Node ID</label>
+      <input id="leader-node-id" type="text" value="test-node-8091" placeholder="test-node-8091" />
+    </div>
+    <button id="connect-btn">Connect</button>
+    <div id="conn-error"></div>
+  </div>
+</div>
+
+<!-- ── Main app ── -->
+<div id="app">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <div>
+        <div class="my-name" id="my-name-display">—</div>
+        <div class="node-id" id="my-node-display"></div>
+      </div>
+      <button id="disc-btn">Disconnect</button>
+    </div>
+    <div id="sidebar-search">
+      <input id="search-input" type="text" placeholder="Search conversations…" />
+    </div>
+    <div id="sidebar-body">
+      <!-- Groups section -->
+      <div class="section-hdr">
+        Groups
+        <button id="new-group-btn" title="Join or create a group">+</button>
+      </div>
+      <div id="groups-list"></div>
+
+      <!-- Users section -->
+      <div class="section-hdr">Users</div>
+      <div id="users-list"></div>
+    </div>
+  </div>
+
+  <!-- Chat area -->
+  <div id="chat-area">
+    <div id="no-chat">
+      <div>
+        <div style="font-size:40px;margin-bottom:12px">💬</div>
+        Select a group or user to start chatting
+      </div>
+    </div>
+    <!-- Populated dynamically when a conversation is selected -->
+  </div>
+
+</div>
+
+<!-- ── New/join group modal ── -->
+<div id="group-modal" class="hidden">
+  <div id="group-box">
+    <h3>Join or Create Group</h3>
+    <input id="group-name-input" type="text" placeholder="Group name (e.g. lobby, team-a)" />
+    <div id="group-error"></div>
+    <div class="modal-btns">
+      <button id="group-confirm">Join / Create</button>
+      <button id="group-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./client.js"></script>
+</body>
+</html>

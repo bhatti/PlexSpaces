@@ -1,5 +1,7 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_logging::now_ms;
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -59,9 +61,9 @@ pub(super) fn assigned_chromosomes(
 
 fn qc_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json::Value {
     let reads = distribute_units(request.total_reads, worker.shard_index, worker.shard_count);
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let checksum = cpu_spin((reads / 32).max(40_000), reads + worker.shard_index as u64);
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms = 6 + ((worker.shard_index as u64 + reads) % 7);
     let passed_reads = ((reads as f64) * 0.945) as u64;
     let failed_reads = reads.saturating_sub(passed_reads);
@@ -82,12 +84,12 @@ fn qc_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json::Value 
 
 fn alignment_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json::Value {
     let reads = distribute_units(request.total_reads, worker.shard_index, worker.shard_count);
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let checksum = cpu_spin(
         (reads / 24).max(50_000),
         reads ^ 0x55AA55AA ^ worker.shard_index as u64,
     );
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms = 8 + ((worker.shard_index as u64 + reads / 10_000) % 9);
     let aligned_reads = ((reads as f64) * 0.973) as u64;
     let unaligned_reads = reads.saturating_sub(aligned_reads);
@@ -112,7 +114,7 @@ fn variant_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json::V
     let mut total_snps = 0_u64;
     let mut total_indels = 0_u64;
     let mut chromosome_results = Vec::new();
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
 
     for chromosome in &assigned {
         let seed = chromosome
@@ -131,7 +133,7 @@ fn variant_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json::V
         }));
     }
 
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms = 10 + assigned.len() as u64 * 3;
 
     serde_json::json!({
@@ -153,12 +155,12 @@ fn annotation_stage(request: &WorkerRequest, worker: &WorkerShard) -> serde_json
         worker.shard_index,
         worker.shard_count,
     );
-    let compute_start = host::now_ms();
+    let compute_start = now_ms();
     let checksum = cpu_spin(
         (batches * 18_000).max(30_000),
         request.total_reads + batches,
     );
-    let compute_time_ms = host::now_ms().saturating_sub(compute_start);
+    let compute_time_ms = now_ms().saturating_sub(compute_start);
     let coordination_time_ms = 5 + batches;
     let annotated_variants = batches * 28 + (checksum % 13);
     let pathogenic = annotated_variants / 12;
@@ -246,17 +248,17 @@ pub(super) fn handle_worker_stage(payload: &[u8]) -> Vec<u8> {
         }
     };
 
-    let coordination_start = host::now_ms();
+    let coordination_start = now_ms();
     let mut payload = match process_stage(&request, &worker) {
         Ok(payload) => payload,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
     let coordination_time_ms = json_u64(&payload, "coordination_time_ms")
-        + host::now_ms().saturating_sub(coordination_start);
+        + now_ms().saturating_sub(coordination_start);
     let compute_time_ms = json_u64(&payload, "compute_time_ms");
     let stage_operations = json_u64(&payload, "stage_operations");
     let latency_ms = compute_time_ms + coordination_time_ms;
-    let actor_id = host::self_id();
+    let actor_id = self_id();
     let node_id = actor_node_id(&actor_id);
 
     if let Some(object) = payload.as_object_mut() {

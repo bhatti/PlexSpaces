@@ -56,7 +56,7 @@ func (c *CronSchedulerActor) Init(configJSON string) string {
 		host.Warn(fmt.Sprintf("CronSchedulerActor: failed to join svc:cron: %v", err))
 	}
 	// Schedule first tick
-	_ = host.SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
+	_, _ = host.Actor().SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
 	host.Info(fmt.Sprintf("CronSchedulerActor Init actor_id=%s interval_ms=%d", config.ActorID, c.TickInterval))
 	return ""
 }
@@ -112,10 +112,10 @@ func (c *CronSchedulerActor) createJob(p map[string]any) string {
 		"run_count":   0,
 	}
 	jobJSON, _ := json.Marshal(job)
-	host.KVPut("cron_job:"+jobID, string(jobJSON))
+	host.KV().Put("cron_job:"+jobID, string(jobJSON))
 
 	// Track job IDs
-	existing := host.KVGet("cron_job_ids")
+	existing, _ := host.KV().Get("cron_job_ids")
 	ids := []string{}
 	if existing != "" {
 		ids = strings.Split(existing, ",")
@@ -129,7 +129,7 @@ func (c *CronSchedulerActor) createJob(p map[string]any) string {
 	}
 	if !found {
 		ids = append(ids, jobID)
-		host.KVPut("cron_job_ids", strings.Join(ids, ","))
+		host.KV().Put("cron_job_ids", strings.Join(ids, ","))
 		c.JobCount++
 	}
 
@@ -143,8 +143,8 @@ func (c *CronSchedulerActor) deleteJob(p map[string]any) string {
 	if jobID == "" {
 		return marshal(map[string]any{"error": "job_id is required"})
 	}
-	host.KVDelete("cron_job:" + jobID)
-	existing := host.KVGet("cron_job_ids")
+	host.KV().Delete("cron_job:" + jobID)
+	existing, _ := host.KV().Get("cron_job_ids")
 	if existing != "" {
 		ids := strings.Split(existing, ",")
 		newIDs := make([]string, 0, len(ids))
@@ -153,7 +153,7 @@ func (c *CronSchedulerActor) deleteJob(p map[string]any) string {
 				newIDs = append(newIDs, id)
 			}
 		}
-		host.KVPut("cron_job_ids", strings.Join(newIDs, ","))
+		host.KV().Put("cron_job_ids", strings.Join(newIDs, ","))
 	}
 	if c.JobCount > 0 {
 		c.JobCount--
@@ -162,7 +162,7 @@ func (c *CronSchedulerActor) deleteJob(p map[string]any) string {
 }
 
 func (c *CronSchedulerActor) listJobs() string {
-	existing := host.KVGet("cron_job_ids")
+	existing, _ := host.KV().Get("cron_job_ids")
 	if existing == "" {
 		return marshal(map[string]any{"status": "ok", "jobs": []any{}, "count": 0})
 	}
@@ -172,7 +172,7 @@ func (c *CronSchedulerActor) listJobs() string {
 		if id == "" {
 			continue
 		}
-		raw := host.KVGet("cron_job:" + id)
+		raw, _ := host.KV().Get("cron_job:" + id)
 		if raw == "" {
 			continue
 		}
@@ -189,7 +189,7 @@ func (c *CronSchedulerActor) getJob(p map[string]any) string {
 	if jobID == "" {
 		return marshal(map[string]any{"error": "job_id is required"})
 	}
-	raw := host.KVGet("cron_job:" + jobID)
+	raw, _ := host.KV().Get("cron_job:" + jobID)
 	if raw == "" {
 		return marshal(map[string]any{"error": "job not found", "job_id": jobID})
 	}
@@ -208,32 +208,32 @@ func (c *CronSchedulerActor) tick() string {
 
 	// Try to acquire leader lock (non-blocking: timeoutMs=0)
 	holderID := fmt.Sprintf("cron-%d", now)
-	lockResult := host.LockAcquire("minihermes", "minihermes", holderID, "cron_leader", 120, 0)
-	if lockResult == "" || plexspaces.IsHostError(lockResult) {
+	lockResultBytes, lockErr := host.Locks().Acquire(holderID, "cron_leader", 120, 0)
+	if lockErr != nil || len(lockResultBytes) == 0 {
 		// Another node holds the lock; skip this tick but reschedule
-		_ = host.SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
+		_, _ = host.Actor().SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
 		return marshal(map[string]any{"status": "ok", "leader": false, "tick_count": c.TickCount})
 	}
 	var lockInfo struct {
 		LockKey string `json:"lock_key"`
 		Version string `json:"version"`
 	}
-	_ = json.Unmarshal([]byte(lockResult), &lockInfo)
+	_ = json.Unmarshal(lockResultBytes, &lockInfo)
 	defer func() {
-		_ = host.LockRelease(lockInfo.LockKey, "minihermes", "minihermes", holderID, lockInfo.Version)
+		_ = host.Locks().Release(lockInfo.LockKey, holderID, lockInfo.Version)
 	}()
 
 	c.TickCount++
 	triggered := 0
 
-	existing := host.KVGet("cron_job_ids")
+	existing, _ := host.KV().Get("cron_job_ids")
 	if existing != "" {
 		ids := strings.Split(existing, ",")
 		for _, id := range ids {
 			if id == "" {
 				continue
 			}
-			raw := host.KVGet("cron_job:" + id)
+			raw, _ := host.KV().Get("cron_job:" + id)
 			if raw == "" {
 				continue
 			}
@@ -266,7 +266,7 @@ func (c *CronSchedulerActor) tick() string {
 			job["last_run_at"] = now
 			job["run_count"] = intVal(job, "run_count", 0) + 1
 			updatedJSON, _ := json.Marshal(job)
-			host.KVPut("cron_job:"+id, string(updatedJSON))
+			host.KV().Put("cron_job:"+id, string(updatedJSON))
 
 			triggered++
 			c.TriggeredCount++
@@ -279,7 +279,7 @@ func (c *CronSchedulerActor) tick() string {
 	_ = host.TS().Write([]any{"cron_health", now, c.TickCount, triggered})
 
 	// Reschedule next tick
-	_ = host.SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
+	_, _ = host.Actor().SendAfter(c.TickInterval, "tick", map[string]any{"op": "tick"})
 
 	c.IncrCounter(host, "cron_ticks")
 	return marshal(map[string]any{

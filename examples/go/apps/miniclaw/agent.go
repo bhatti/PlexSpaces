@@ -271,7 +271,7 @@ func (a *AgentActor) chat(p map[string]any) string {
 	}
 	if sessionID != "" {
 		msgsJSON, _ := json.Marshal(a.Messages)
-		host.KVPut("session_history:"+sessionID, string(msgsJSON))
+		host.KV().Put("session_history:"+sessionID, string(msgsJSON))
 	}
 
 	a.TotalChats++
@@ -382,8 +382,8 @@ func (s *SessionManagerActor) createSession(p map[string]any) string {
 		"status":     "active",
 	}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("session:"+sessionID, string(metaJSON))
-	host.KVPut("session_map:"+channel+":"+userID, sessionID)
+	host.KV().Put("session:"+sessionID, string(metaJSON))
+	host.KV().Put("session_map:"+channel+":"+userID, sessionID)
 
 	s.SessionIDs = append(s.SessionIDs, sessionID)
 	s.ActiveSessions++
@@ -401,13 +401,13 @@ func (s *SessionManagerActor) getSession(p map[string]any) string {
 		channel := stringVal(p, "channel", "")
 		userID := stringVal(p, "user_id", "")
 		if channel != "" && userID != "" {
-			sessionID = host.KVGet("session_map:" + channel + ":" + userID)
+			sessionID, _ = host.KV().Get("session_map:" + channel + ":" + userID)
 		}
 	}
 	if sessionID == "" {
 		return marshal(map[string]any{"error": "session not found"})
 	}
-	raw := host.KVGet("session:" + sessionID)
+	raw, _ := host.KV().Get("session:" + sessionID)
 	if raw == "" {
 		return marshal(map[string]any{"error": "session not found", "session_id": sessionID})
 	}
@@ -424,7 +424,7 @@ func (s *SessionManagerActor) endSession(p map[string]any) string {
 	if sessionID == "" {
 		return marshal(map[string]any{"error": "session_id is required"})
 	}
-	host.KVDelete("session:" + sessionID)
+	host.KV().Delete("session:" + sessionID)
 
 	newIDs := make([]string, 0, len(s.SessionIDs))
 	for _, id := range s.SessionIDs {
@@ -443,7 +443,7 @@ func (s *SessionManagerActor) endSession(p map[string]any) string {
 func (s *SessionManagerActor) listSessions() string {
 	sessions := make([]any, 0, len(s.SessionIDs))
 	for _, id := range s.SessionIDs {
-		raw := host.KVGet("session:" + id)
+		raw, _ := host.KV().Get("session:" + id)
 		if raw == "" {
 			continue
 		}

@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Firecracker MicroVM API
@@ -468,20 +468,23 @@ message ResourceUsage {
 
 // CreateVm request
 message CreateVmRequest {
-  VmConfig config = 1 [(google.api.field_behavior) = REQUIRED];
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  VmConfig config = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // CreateVm response
 message CreateVmResponse {
-  bool success = 1;
-  string vm_id = 2;
-  string socket_path = 3;
-  FirecrackerError error = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string vm_id = 3;
+  string socket_path = 4;
+  FirecrackerError error = 5;
 }
 
 // BootVm request
 message BootVmRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -492,14 +495,16 @@ message BootVmRequest {
 
 // BootVm response
 message BootVmResponse {
-  bool success = 1;
-  VmState state = 2;
-  FirecrackerError error = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  VmState state = 3;
+  FirecrackerError error = 4;
 }
 
 // PauseVm request
 message PauseVmRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -510,14 +515,16 @@ message PauseVmRequest {
 
 // PauseVm response
 message PauseVmResponse {
-  bool success = 1;
-  VmState state = 2;
-  FirecrackerError error = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  VmState state = 3;
+  FirecrackerError error = 4;
 }
 
 // ResumeVm request
 message ResumeVmRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -528,32 +535,36 @@ message ResumeVmRequest {
 
 // ResumeVm response
 message ResumeVmResponse {
-  bool success = 1;
-  VmState state = 2;
-  FirecrackerError error = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  VmState state = 3;
+  FirecrackerError error = 4;
 }
 
 // StopVm request
 message StopVmRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  bool force = 2; // Force kill if graceful shutdown fails
+  bool force = 3; // Force kill if graceful shutdown fails
 }
 
 // StopVm response
 message StopVmResponse {
-  bool success = 1;
-  FirecrackerError error = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  FirecrackerError error = 3;
 }
 
 // GetVmState request
 message GetVmStateRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -564,29 +575,32 @@ message GetVmStateRequest {
 
 // GetVmState response
 message GetVmStateResponse {
-  bool success = 1;
-  VmInstance vm = 2;
-  FirecrackerError error = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  VmInstance vm = 3;
+  FirecrackerError error = 4;
 }
 
 // ListVms request
 message ListVmsRequest {
   // Filter by state (empty = all)
-  repeated VmState states = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated VmState states = 2;
 
   // Filter by node
-  string node_id = 2;
+  string node_id = 3;
 
   // Pagination
-  uint32 page_size = 3;
-  string page_token = 4;
+  uint32 page_size = 4;
+  string page_token = 5;
 }
 
 // ListVms response
 message ListVmsResponse {
-  repeated VmInstance vms = 1;
-  string next_page_token = 2;
-  uint32 total_count = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  repeated VmInstance vms = 2;
+  string next_page_token = 3;
+  uint32 total_count = 4;
 }
 
 // DeployApplication request
@@ -596,7 +610,8 @@ message ListVmsResponse {
 // Application includes framework runtime, WASM modules, and configuration.
 message DeployApplicationRequest {
   // VM identifier
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -605,7 +620,7 @@ message DeployApplicationRequest {
   ];
 
   // Application identifier
-  string application_id = 2 [
+  string application_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
@@ -620,43 +635,46 @@ message DeployApplicationRequest {
   // - WASM modules (actor implementations)
   // - Application configuration
   // - Dependencies
-  bytes application_bundle = 3 [(google.api.field_behavior) = REQUIRED];
+  bytes application_bundle = 4 [(google.api.field_behavior) = REQUIRED];
 
   // Application configuration (optional, can be in bundle)
-  string application_config_json = 4 [(buf.validate.field).string.max_len = 1048576]; // Max 1MB
+  string application_config_json = 5 [(buf.validate.field).string.max_len = 1048576]; // Max 1MB
 }
 
 // DeployApplication response
 message DeployApplicationResponse {
-  bool success = 1;
-  string application_id = 2;
-  string vm_id = 3;
-  FirecrackerError error = 4;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  string application_id = 3;
+  string vm_id = 4;
+  FirecrackerError error = 5;
 }
 
 // UndeployApplication request
 message UndeployApplicationRequest {
-  string vm_id = 1 [
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string vm_id = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  string application_id = 2 [
+  string application_id = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 255
     }
   ];
-  bool force = 3; // Force undeploy even if actors are running
+  bool force = 4; // Force undeploy even if actors are running
 }
 
 // UndeployApplication response
 message UndeployApplicationResponse {
-  bool success = 1;
-  FirecrackerError error = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool success = 2;
+  FirecrackerError error = 3;
 }
 
 // ============================================================================

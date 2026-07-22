@@ -26,7 +26,7 @@ class DashboardActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:dashboard", host.self_id())
+            host.kv.put("svc:dashboard", host.self_id())
         except Exception:
             pass
         try:
@@ -43,7 +43,7 @@ class DashboardActor:
             return {"error": "eval_run_id is required"}
         data = report if report else kwargs
         try:
-            host.kv_put(f"eval_report:{eval_run_id}", json.dumps(data))
+            host.kv.put(f"eval_report:{eval_run_id}", json.dumps(data))
             host.info(f"DashboardActor: stored eval report eval_run_id={eval_run_id}")
             return {"status": "ok", "eval_run_id": eval_run_id}
         except Exception as e:
@@ -54,7 +54,7 @@ class DashboardActor:
         """Get the full report for an eval run."""
         if not eval_run_id:
             return {"error": "eval_run_id is required"}
-        raw = host.kv_get(f"eval_report:{eval_run_id}")
+        raw = host.kv.get(f"eval_report:{eval_run_id}")
         if not raw:
             return {"error": f"eval run {eval_run_id} not found"}
         try:
@@ -66,12 +66,12 @@ class DashboardActor:
     def list_eval_runs(self, limit: int = 10) -> dict:
         """List recent eval runs."""
         try:
-            raw_keys = host.kv_list("eval_report:")
+            raw_keys = host.kv.list("eval_report:")
             keys = json.loads(raw_keys) if raw_keys and not raw_keys.startswith("ERROR:") else []
             run_ids = [k.replace("eval_report:", "") for k in keys[:limit]]
             reports = []
             for run_id in run_ids:
-                raw = host.kv_get(f"eval_report:{run_id}")
+                raw = host.kv.get(f"eval_report:{run_id}")
                 if raw:
                     try:
                         report = json.loads(raw)
@@ -95,7 +95,7 @@ class DashboardActor:
         """Get a specific trajectory by ID."""
         if not trajectory_id:
             return {"error": "trajectory_id is required"}
-        raw = host.kv_get(f"trajectory:{trajectory_id}")
+        raw = host.kv.get(f"trajectory:{trajectory_id}")
         if not raw:
             return {"error": f"trajectory {trajectory_id} not found"}
         try:
@@ -106,8 +106,8 @@ class DashboardActor:
     @handler("get_regressions")
     def get_regressions(self) -> dict:
         """Get regression baseline info."""
-        baseline_run = host.kv_get("regression_baseline_eval_run") or ""
-        baseline = host.kv_get("regression_baseline") or "{}"
+        baseline_run = host.kv.get("regression_baseline_eval_run") or ""
+        baseline = host.kv.get("regression_baseline") or "{}"
         try:
             baseline_data = json.loads(baseline)
             return {
@@ -122,13 +122,13 @@ class DashboardActor:
     def summary(self) -> dict:
         """High-level system summary with aggregate stats."""
         try:
-            raw_keys = host.kv_list("eval_report:")
+            raw_keys = host.kv.list("eval_report:")
             keys = json.loads(raw_keys) if raw_keys and not raw_keys.startswith("ERROR:") else []
             total_evals = 0
             score_sum = 0.0
             for key in keys:
                 run_id = key.replace("eval_report:", "")
-                raw = host.kv_get(f"eval_report:{run_id}")
+                raw = host.kv.get(f"eval_report:{run_id}")
                 if raw:
                     try:
                         report = json.loads(raw)

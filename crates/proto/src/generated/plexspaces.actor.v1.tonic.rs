@@ -287,24 +287,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Monitor an actor (Erlang-style location transparent monitoring)
-
- ## Purpose
- Establishes a monitor on the node hosting `actor_id`. When that actor terminates,
- the hosting node delivers `__DOWN__` to `supervisor_id`'s mailbox (via `tell` /
- `SendMessage` when the supervisor is remote).
-
- ## Erlang Philosophy
- In Erlang, monitor(process, Pid) works the same for local and remote processes.
- The runtime handles location transparency - same API whether the process is
- in the same node or a different node.
-
- ## Design Notes
- - supervisor_id: Canonical actor that receives `__DOWN__` (mailbox message)
- - supervisor_callback: Reserved for forward compatibility; see `MonitorActorRequest`
- - actor_id uses canonical ActorId format
- - Returns monitor_ref for `DemonitorActor` / local demonitor
-*/
         pub async fn monitor_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::MonitorActorRequest>,
@@ -332,12 +314,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Remove a monitor (Erlang demonitor/1 equivalent, location-transparent)
-
- ## Purpose
- Deletes the monitor entry on the node hosting `actor_id`. Used when the supervisor
- calls demonitor on a **remote** monitored actor; local demonitor uses the registry directly.
-*/
         pub async fn demonitor_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::DemonitorActorRequest>,
@@ -365,22 +341,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Link two actors (Erlang link/1 equivalent)
-
- ## Purpose
- Creates a bidirectional link between two actors. When one actor dies abnormally,
- the linked actor automatically dies (cascading failure).
-
- ## Erlang Philosophy
- Equivalent to Erlang's `link(Pid)` - creates bidirectional link.
- If either process dies abnormally, the other dies too.
-
- ## Design Notes
- - Links are bidirectional (if A links to B, B is linked to A)
- - Links only propagate abnormal deaths (not "normal" shutdowns)
- - Links are used internally by supervision (parent-child relationships)
- - Links can be created explicitly via this API
-*/
         pub async fn link_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::LinkActorRequest>,
@@ -408,15 +368,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Unlink two actors (Erlang unlink/1 equivalent)
-
- ## Purpose
- Removes the bidirectional link between two actors. After unlinking,
- actors can die independently without cascading failures.
-
- ## Erlang Philosophy
- Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
-*/
         pub async fn unlink_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::UnlinkActorRequest>,
@@ -444,23 +395,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Internal: Notify supervisor of actor termination
-
- ## Purpose
- Optional push-style path: deliver termination info to a supervisor node without
- going through `ActorRegistry::tell`. The primary monitor path today is mailbox
- `__DOWN__` via `tell` / `SendMessage` to `supervisor_id` when the monitored actor's
- node runs `handle_actor_termination`.
-
- ## Erlang Philosophy
- Equivalent to receiving {'DOWN', Ref, process, Pid, Reason} message in Erlang.
- The supervisor receives this asynchronously when the monitored actor exits.
-
- ## Design Notes
- - This is an internal RPC, not typically called by user code
- - Supervisor uses this to implement restart strategies
- - reason: "normal" for graceful shutdown, error message for crashes
-*/
         pub async fn notify_actor_down(
             &mut self,
             request: impl tonic::IntoRequest<super::ActorDownNotification>,
@@ -491,17 +425,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Check if virtual actor exists (without activating)
-
- ## Purpose
- Query whether a virtual actor exists without triggering activation.
- Useful for existence checks, health monitoring, and discovery.
-
- ## Returns
- - exists: Actor exists (virtual or active)
- - is_active: Actor is currently active (in memory)
- - is_virtual: Actor has VirtualActorFacet (is virtual)
-*/
         pub async fn check_actor_exists(
             &mut self,
             request: impl tonic::IntoRequest<super::CheckActorExistsRequest>,
@@ -532,18 +455,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Batch-check actor states — used by stale-monitor GC and health checks
-
- ## Purpose
- Returns the current lifecycle state (active/inactive/not_found) for a list of canonical
- actor IDs. Used by the background monitor GC task to detect stale entries for actors
- that no longer exist on their hosting node.
-
- ## Design
- - Single RPC call replaces N separate CheckActorExists calls
- - Groups actors by node for efficient batch processing
- - Returns NOT_FOUND for actors that have been deregistered
-*/
         pub async fn get_actor_states(
             &mut self,
             request: impl tonic::IntoRequest<super::GetActorStatesRequest>,
@@ -571,32 +482,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Ask an actor via HTTP-like interface (FaaS-style)
-
- ## Purpose
- Provides a FaaS-like interface for invoking actors via HTTP ask endpoints.
- This enables actors to be invoked like serverless functions while maintaining
- the actor model's stateful, message-driven architecture.
-
- ## HTTP Method Behavior
- - **GET**: Converts query parameters to JSON payload and performs ask (request-reply)
- - **POST/PUT**: Converts request body to payload and performs ask (request-reply)
-
- ## Actor Lookup
- - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
- - If multiple actors of same type found, randomly selects one (load balancing)
- - Returns 404 if no actor of requested type found
-
- ## Security
- - Extracts tenant_id from JWT claims if authentication is enabled
- - Uses that tenant context for actor lookup and authorization
- - When authentication is disabled, local test clients may supply tenant_id out of band
-
- ## Path Format
- `/api/v1/actors/{namespace}/{actor_type}`
- - namespace: Namespace identifier
- - actor_type: Type of actor to invoke (used for lookup)
-*/
         pub async fn ask_reply(
             &mut self,
             request: impl tonic::IntoRequest<super::AskReplyRequest>,
@@ -622,10 +507,6 @@ pub mod actor_service_client {
                 .insert(GrpcMethod::new("plexspaces.actor.v1.ActorService", "AskReply"));
             self.inner.unary(req, path, codec).await
         }
-        /** ============================================================================
- ACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.
- ============================================================================
-*/
         pub async fn create_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateShardGroupRequest>,
@@ -656,7 +537,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn delete_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteShardGroupRequest>,
@@ -687,7 +567,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn get_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::GetShardGroupRequest>,
@@ -715,7 +594,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn list_shard_groups(
             &mut self,
             request: impl tonic::IntoRequest<super::ListShardGroupsRequest>,
@@ -746,7 +624,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn scale_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::ScaleShardGroupRequest>,
@@ -777,7 +654,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn send_to_shard(
             &mut self,
             request: impl tonic::IntoRequest<super::SendToShardRequest>,
@@ -805,7 +681,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn broadcast_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::BroadcastShardGroupRequest>,
@@ -836,7 +711,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn reduce_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::ReduceShardGroupRequest>,
@@ -867,7 +741,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn all_reduce_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::AllReduceShardGroupRequest>,
@@ -898,7 +771,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn barrier_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::BarrierShardGroupRequest>,
@@ -929,7 +801,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn scatter_gather(
             &mut self,
             request: impl tonic::IntoRequest<super::ScatterGatherRequest>,
@@ -957,8 +828,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Bulk update: send update messages to multiple shards (DPA UpdateFunction)
-*/
         pub async fn bulk_update_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::BulkUpdateShardGroupRequest>,
@@ -1092,24 +961,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        /** Monitor an actor (Erlang-style location transparent monitoring)
-
- ## Purpose
- Establishes a monitor on the node hosting `actor_id`. When that actor terminates,
- the hosting node delivers `__DOWN__` to `supervisor_id`'s mailbox (via `tell` /
- `SendMessage` when the supervisor is remote).
-
- ## Erlang Philosophy
- In Erlang, monitor(process, Pid) works the same for local and remote processes.
- The runtime handles location transparency - same API whether the process is
- in the same node or a different node.
-
- ## Design Notes
- - supervisor_id: Canonical actor that receives `__DOWN__` (mailbox message)
- - supervisor_callback: Reserved for forward compatibility; see `MonitorActorRequest`
- - actor_id uses canonical ActorId format
- - Returns monitor_ref for `DemonitorActor` / local demonitor
-*/
         async fn monitor_actor(
             &self,
             request: tonic::Request<super::MonitorActorRequest>,
@@ -1117,12 +968,6 @@ pub mod actor_service_server {
             tonic::Response<super::MonitorActorResponse>,
             tonic::Status,
         >;
-        /** Remove a monitor (Erlang demonitor/1 equivalent, location-transparent)
-
- ## Purpose
- Deletes the monitor entry on the node hosting `actor_id`. Used when the supervisor
- calls demonitor on a **remote** monitored actor; local demonitor uses the registry directly.
-*/
         async fn demonitor_actor(
             &self,
             request: tonic::Request<super::DemonitorActorRequest>,
@@ -1130,22 +975,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        /** Link two actors (Erlang link/1 equivalent)
-
- ## Purpose
- Creates a bidirectional link between two actors. When one actor dies abnormally,
- the linked actor automatically dies (cascading failure).
-
- ## Erlang Philosophy
- Equivalent to Erlang's `link(Pid)` - creates bidirectional link.
- If either process dies abnormally, the other dies too.
-
- ## Design Notes
- - Links are bidirectional (if A links to B, B is linked to A)
- - Links only propagate abnormal deaths (not "normal" shutdowns)
- - Links are used internally by supervision (parent-child relationships)
- - Links can be created explicitly via this API
-*/
         async fn link_actor(
             &self,
             request: tonic::Request<super::LinkActorRequest>,
@@ -1153,15 +982,6 @@ pub mod actor_service_server {
             tonic::Response<super::LinkActorResponse>,
             tonic::Status,
         >;
-        /** Unlink two actors (Erlang unlink/1 equivalent)
-
- ## Purpose
- Removes the bidirectional link between two actors. After unlinking,
- actors can die independently without cascading failures.
-
- ## Erlang Philosophy
- Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
-*/
         async fn unlink_actor(
             &self,
             request: tonic::Request<super::UnlinkActorRequest>,
@@ -1169,23 +989,6 @@ pub mod actor_service_server {
             tonic::Response<super::UnlinkActorResponse>,
             tonic::Status,
         >;
-        /** Internal: Notify supervisor of actor termination
-
- ## Purpose
- Optional push-style path: deliver termination info to a supervisor node without
- going through `ActorRegistry::tell`. The primary monitor path today is mailbox
- `__DOWN__` via `tell` / `SendMessage` to `supervisor_id` when the monitored actor's
- node runs `handle_actor_termination`.
-
- ## Erlang Philosophy
- Equivalent to receiving {'DOWN', Ref, process, Pid, Reason} message in Erlang.
- The supervisor receives this asynchronously when the monitored actor exits.
-
- ## Design Notes
- - This is an internal RPC, not typically called by user code
- - Supervisor uses this to implement restart strategies
- - reason: "normal" for graceful shutdown, error message for crashes
-*/
         async fn notify_actor_down(
             &self,
             request: tonic::Request<super::ActorDownNotification>,
@@ -1193,17 +996,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        /** Check if virtual actor exists (without activating)
-
- ## Purpose
- Query whether a virtual actor exists without triggering activation.
- Useful for existence checks, health monitoring, and discovery.
-
- ## Returns
- - exists: Actor exists (virtual or active)
- - is_active: Actor is currently active (in memory)
- - is_virtual: Actor has VirtualActorFacet (is virtual)
-*/
         async fn check_actor_exists(
             &self,
             request: tonic::Request<super::CheckActorExistsRequest>,
@@ -1211,18 +1003,6 @@ pub mod actor_service_server {
             tonic::Response<super::CheckActorExistsResponse>,
             tonic::Status,
         >;
-        /** Batch-check actor states — used by stale-monitor GC and health checks
-
- ## Purpose
- Returns the current lifecycle state (active/inactive/not_found) for a list of canonical
- actor IDs. Used by the background monitor GC task to detect stale entries for actors
- that no longer exist on their hosting node.
-
- ## Design
- - Single RPC call replaces N separate CheckActorExists calls
- - Groups actors by node for efficient batch processing
- - Returns NOT_FOUND for actors that have been deregistered
-*/
         async fn get_actor_states(
             &self,
             request: tonic::Request<super::GetActorStatesRequest>,
@@ -1230,32 +1010,6 @@ pub mod actor_service_server {
             tonic::Response<super::GetActorStatesResponse>,
             tonic::Status,
         >;
-        /** Ask an actor via HTTP-like interface (FaaS-style)
-
- ## Purpose
- Provides a FaaS-like interface for invoking actors via HTTP ask endpoints.
- This enables actors to be invoked like serverless functions while maintaining
- the actor model's stateful, message-driven architecture.
-
- ## HTTP Method Behavior
- - **GET**: Converts query parameters to JSON payload and performs ask (request-reply)
- - **POST/PUT**: Converts request body to payload and performs ask (request-reply)
-
- ## Actor Lookup
- - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
- - If multiple actors of same type found, randomly selects one (load balancing)
- - Returns 404 if no actor of requested type found
-
- ## Security
- - Extracts tenant_id from JWT claims if authentication is enabled
- - Uses that tenant context for actor lookup and authorization
- - When authentication is disabled, local test clients may supply tenant_id out of band
-
- ## Path Format
- `/api/v1/actors/{namespace}/{actor_type}`
- - namespace: Namespace identifier
- - actor_type: Type of actor to invoke (used for lookup)
-*/
         async fn ask_reply(
             &self,
             request: tonic::Request<super::AskReplyRequest>,
@@ -1263,10 +1017,6 @@ pub mod actor_service_server {
             tonic::Response<super::AskReplyResponse>,
             tonic::Status,
         >;
-        /** ============================================================================
- ACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.
- ============================================================================
-*/
         async fn create_shard_group(
             &self,
             request: tonic::Request<super::CreateShardGroupRequest>,
@@ -1274,7 +1024,6 @@ pub mod actor_service_server {
             tonic::Response<super::CreateShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn delete_shard_group(
             &self,
             request: tonic::Request<super::DeleteShardGroupRequest>,
@@ -1282,7 +1031,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        ///
         async fn get_shard_group(
             &self,
             request: tonic::Request<super::GetShardGroupRequest>,
@@ -1290,7 +1038,6 @@ pub mod actor_service_server {
             tonic::Response<super::GetShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn list_shard_groups(
             &self,
             request: tonic::Request<super::ListShardGroupsRequest>,
@@ -1298,7 +1045,6 @@ pub mod actor_service_server {
             tonic::Response<super::ListShardGroupsResponse>,
             tonic::Status,
         >;
-        ///
         async fn scale_shard_group(
             &self,
             request: tonic::Request<super::ScaleShardGroupRequest>,
@@ -1306,7 +1052,6 @@ pub mod actor_service_server {
             tonic::Response<super::ScaleShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn send_to_shard(
             &self,
             request: tonic::Request<super::SendToShardRequest>,
@@ -1314,7 +1059,6 @@ pub mod actor_service_server {
             tonic::Response<super::SendToShardResponse>,
             tonic::Status,
         >;
-        ///
         async fn broadcast_shard_group(
             &self,
             request: tonic::Request<super::BroadcastShardGroupRequest>,
@@ -1322,7 +1066,6 @@ pub mod actor_service_server {
             tonic::Response<super::BroadcastShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn reduce_shard_group(
             &self,
             request: tonic::Request<super::ReduceShardGroupRequest>,
@@ -1330,7 +1073,6 @@ pub mod actor_service_server {
             tonic::Response<super::ReduceShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn all_reduce_shard_group(
             &self,
             request: tonic::Request<super::AllReduceShardGroupRequest>,
@@ -1338,7 +1080,6 @@ pub mod actor_service_server {
             tonic::Response<super::AllReduceShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn barrier_shard_group(
             &self,
             request: tonic::Request<super::BarrierShardGroupRequest>,
@@ -1346,7 +1087,6 @@ pub mod actor_service_server {
             tonic::Response<super::BarrierShardGroupResponse>,
             tonic::Status,
         >;
-        ///
         async fn scatter_gather(
             &self,
             request: tonic::Request<super::ScatterGatherRequest>,
@@ -1354,8 +1094,6 @@ pub mod actor_service_server {
             tonic::Response<super::ScatterGatherResponse>,
             tonic::Status,
         >;
-        /** Bulk update: send update messages to multiple shards (DPA UpdateFunction)
-*/
         async fn bulk_update_shard_group(
             &self,
             request: tonic::Request<super::BulkUpdateShardGroupRequest>,
@@ -2803,50 +2541,6 @@ pub mod lifecycle_event_channel_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /**
- ## JavaNOW Heritage
- JavaNOW provided event notification through:
- - **EntitySpace.addListener()**: Subscribe to entity add/remove events
- - **ChannelI**: Interface for event channels
- - **SubscriberI**: Interface for event consumers
- - **MulticasterImpl**: Event distribution to multiple subscribers
-
- ## PlexSpaces Design
- This service elevates JavaNOW's concepts with:
- - **Proto-typed events**: Strongly-typed ActorLifecycleEvent instead of generic objects
- - **gRPC streaming**: Efficient event delivery across distributed nodes
- - **Metrics integration**: Events automatically feed Prometheus, StatsD, OpenTelemetry
- - **Filtering**: Subscribers receive only events matching their criteria
- - **Backpressure handling**: Slow subscribers don't block fast publishers
-
- ## Integration with Observability Backends
- This channel serves as the **event source** for:
- 1. **Prometheus**: Lifecycle events → Counter/Gauge metrics
-    - ActorCreated → `plexspaces_actor_spawn_total`
-    - ActorTerminated → Decrement `plexspaces_actor_active`
-    - ActorFailed → `plexspaces_actor_error_total`
-
- 2. **StatsD**: Lifecycle events → DogStatsD metrics
-    - Same metric conversions as Prometheus
-    - UDP batched for efficiency
-
- 3. **OpenTelemetry**: Lifecycle events → Spans
-    - ActorActivated → Start span
-    - ActorDeactivated → End span
-    - Distributed tracing across actor calls
-
- 4. **Custom Backends**: Users can subscribe and forward to any system
-    - Elasticsearch for log aggregation
-    - Grafana Loki for log streaming
-    - Custom analytics platforms
-
- ## Design Principles
- 1. **Optional**: Subscribing doesn't affect core supervision (Erlang-simple approach)
- 2. **Decoupled**: Publishers (actors/nodes) don't know about subscribers
- 3. **Efficient**: Events multicast to many subscribers without duplication
- 4. **Filtered**: Subscribers express interest patterns (actor ID, event type, etc.)
- 5. **Resilient**: Slow/failing subscribers don't impact actor performance
-*/
     #[derive(Debug, Clone)]
     pub struct LifecycleEventChannelClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -3017,50 +2711,6 @@ pub mod lifecycle_event_channel_server {
             tonic::Status,
         >;
     }
-    /**
- ## JavaNOW Heritage
- JavaNOW provided event notification through:
- - **EntitySpace.addListener()**: Subscribe to entity add/remove events
- - **ChannelI**: Interface for event channels
- - **SubscriberI**: Interface for event consumers
- - **MulticasterImpl**: Event distribution to multiple subscribers
-
- ## PlexSpaces Design
- This service elevates JavaNOW's concepts with:
- - **Proto-typed events**: Strongly-typed ActorLifecycleEvent instead of generic objects
- - **gRPC streaming**: Efficient event delivery across distributed nodes
- - **Metrics integration**: Events automatically feed Prometheus, StatsD, OpenTelemetry
- - **Filtering**: Subscribers receive only events matching their criteria
- - **Backpressure handling**: Slow subscribers don't block fast publishers
-
- ## Integration with Observability Backends
- This channel serves as the **event source** for:
- 1. **Prometheus**: Lifecycle events → Counter/Gauge metrics
-    - ActorCreated → `plexspaces_actor_spawn_total`
-    - ActorTerminated → Decrement `plexspaces_actor_active`
-    - ActorFailed → `plexspaces_actor_error_total`
-
- 2. **StatsD**: Lifecycle events → DogStatsD metrics
-    - Same metric conversions as Prometheus
-    - UDP batched for efficiency
-
- 3. **OpenTelemetry**: Lifecycle events → Spans
-    - ActorActivated → Start span
-    - ActorDeactivated → End span
-    - Distributed tracing across actor calls
-
- 4. **Custom Backends**: Users can subscribe and forward to any system
-    - Elasticsearch for log aggregation
-    - Grafana Loki for log streaming
-    - Custom analytics platforms
-
- ## Design Principles
- 1. **Optional**: Subscribing doesn't affect core supervision (Erlang-simple approach)
- 2. **Decoupled**: Publishers (actors/nodes) don't know about subscribers
- 3. **Efficient**: Events multicast to many subscribers without duplication
- 4. **Filtered**: Subscribers express interest patterns (actor ID, event type, etc.)
- 5. **Resilient**: Slow/failing subscribers don't impact actor performance
-*/
     #[derive(Debug)]
     pub struct LifecycleEventChannelServer<T: LifecycleEventChannel> {
         inner: _Inner<T>,

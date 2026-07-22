@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # Object Registry gRPC Service Handler
@@ -136,6 +136,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
             {
                 Ok(RegisterResult::Registered) => {
                     return Ok(Response::new(RegisterResponse {
+                        request_id: body.request_id.clone(),
                         registration: Some(reg),
                         created: true,
                         ..Default::default()
@@ -146,6 +147,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
                     object_id,
                 }) => {
                     return Ok(Response::new(RegisterResponse {
+                        request_id: body.request_id.clone(),
                         registration: None,
                         created: false,
                         existing_grpc_address: grpc_address,
@@ -158,6 +160,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
 
         match self.registry.register(&ctx, reg.clone()).await {
             Ok(()) => Ok(Response::new(RegisterResponse {
+                request_id: body.request_id.clone(),
                 registration: Some(reg),
                 created: true,
                 ..Default::default()
@@ -184,11 +187,12 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
             .unregister(&ctx, object_type, &body.object_id)
             .await
         {
-            Ok(()) => Ok(Response::new(UnregisterResponse { unregistered: true })),
+            Ok(()) => Ok(Response::new(UnregisterResponse { request_id: body.request_id.clone(), unregistered: true })),
             Err(e) => {
                 let msg = e.to_string().to_lowercase();
                 if msg.contains("not found") || msg.contains("does not exist") {
                     Ok(Response::new(UnregisterResponse {
+                        request_id: body.request_id.clone(),
                         unregistered: false,
                     }))
                 } else {
@@ -216,10 +220,12 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
         if !body.alias.is_empty() {
             return match self.registry.lookup_by_alias(&ctx, &body.alias).await {
                 Ok(Some(reg)) => Ok(Response::new(LookupResponse {
+                    request_id: body.request_id.clone(),
                     registration: Some(reg),
                     found: true,
                 })),
                 Ok(None) => Ok(Response::new(LookupResponse {
+                    request_id: body.request_id.clone(),
                     registration: None,
                     found: false,
                 })),
@@ -235,10 +241,12 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
             .await
         {
             Ok(Some(reg)) => Ok(Response::new(LookupResponse {
+                request_id: body.request_id.clone(),
                 registration: Some(reg),
                 found: true,
             })),
             Ok(None) => Ok(Response::new(LookupResponse {
+                request_id: body.request_id.clone(),
                 registration: None,
                 found: false,
             })),
@@ -311,6 +319,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
                 let has_more = registrations.len() >= page_size;
                 let total = registrations.len() as i64;
                 Ok(Response::new(DiscoverResponse {
+                    request_id: body.request_id.clone(),
                     registrations,
                     total_count: total,
                     has_more,
@@ -336,6 +345,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
 
         match self.registry.heartbeat(&ctx, object_type, &body.object_id).await {
             Ok(()) => Ok(Response::new(HeartbeatResponse {
+                request_id: body.request_id.clone(),
                 accepted: true,
                 registration: None,
             })),
@@ -343,6 +353,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
                 let msg = e.to_string().to_lowercase();
                 if msg.contains("not found") || msg.contains("does not exist") {
                     Ok(Response::new(HeartbeatResponse {
+                        request_id: body.request_id.clone(),
                         accepted: false,
                         registration: None,
                     }))
@@ -380,12 +391,14 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
                 failure_count += 1;
             }
             results.push(HeartbeatResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 accepted,
                 registration: None,
             });
         }
 
         Ok(Response::new(BatchHeartbeatResponse {
+            request_id: ulid::Ulid::new().to_string(),
             results,
             success_count,
             failure_count,
@@ -434,6 +447,7 @@ impl ObjectRegistryGrpc for ObjectRegistryServiceImpl {
 
         let total_count = all.len() as i64;
         Ok(Response::new(ListObjectTypesResponse {
+            request_id: body.request_id.clone(),
             summaries,
             total_count,
         }))
@@ -568,6 +582,7 @@ mod tests {
                 object_type: ObjectType::ObjectTypeActor as i32,
                 tenant_id: "t1".to_string(),
                 namespace: "ns1".to_string(),
+                request_id: ulid::Ulid::new().to_string(),
             }))
             .await
             .unwrap()

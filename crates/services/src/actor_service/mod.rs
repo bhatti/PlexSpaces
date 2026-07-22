@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! ActorService - gRPC Gateway for Distributed Actor Messaging
@@ -398,6 +398,21 @@ impl ActorServiceImpl {
             }
         };
 
+        // Fast path: instance-level-only virtual actors (spawned with VirtualActorFacet directly,
+        // not via a type-level registration). After stop_actor() removes them from actor_type_index
+        // they are no longer discoverable via discover_actors_by_type, but their metadata persists
+        // in VirtualActorManager. Check the specific instance before requiring type-level metadata.
+        if let Ok(candidate_id) = self.build_canonical_actor_id(
+            &actor_name,
+            &actor_type,
+            &requested_namespace,
+            &self.local_node_id,
+        ) {
+            if virtual_actor_manager.get_metadata(&candidate_id).await.is_some() {
+                return Ok(candidate_id.to_string());
+            }
+        }
+
         let definition_metadata = virtual_actor_manager
             .get_virtual_actor_definition(&requested_namespace, &actor_type_hint)
             .await;
@@ -663,7 +678,18 @@ impl ActorServiceImpl {
             .await
         {
             Ok((message_id, reply)) => Ok((requested_target, message_id, reply)),
-            Err(status) if status.code() == tonic::Code::NotFound => {
+            // Treat InvalidArgument from parse failure (non-canonical actor_type) the same as
+            // NotFound so the fallback type-based resolution path runs.
+            Err(status)
+                if status.code() == tonic::Code::NotFound
+                    || (status.code() == tonic::Code::InvalidArgument
+                        && status.message().contains("Invalid canonical format")) =>
+            {
+                let not_found_status = Status::not_found(format!(
+                    "Actor '{}' not found",
+                    requested_actor_type
+                ));
+
                 let mut type_candidates = Vec::new();
                 type_candidates.push(requested_actor_type.to_string());
 
@@ -695,7 +721,7 @@ impl ActorServiceImpl {
                     }
                 }
 
-                let resolved_actor_id = resolved_actor_id.ok_or(status)?;
+                let resolved_actor_id = resolved_actor_id.ok_or(not_found_status)?;
                 Self::set_message_receiver_id(&mut message, &resolved_actor_id);
                 let (message_id, reply) = self
                     .route_message(ctx, &resolved_actor_id, message, wait_for_response, timeout)
@@ -918,7 +944,11 @@ impl ActorServiceImpl {
         .await)
     }
 
-    /// Send a message to an actor (local or remote) - Public API for ActorContext
+    /// Send a message to an actor (local or remote).
+    ///
+    /// All messages — including ask() replies — route through `ActorRegistry::tell()`/`ask()`,
+    /// which handles local delivery (virtual actor activation, temporary-sender reply routing
+    /// via ReplyWaiterRegistry) and gRPC for remote delivery.
     ///
     /// ## Arguments
     /// * `actor_id` - Canonical actor ID in format `name//actor_type::namespace@node_id`
@@ -926,10 +956,6 @@ impl ActorServiceImpl {
     ///
     /// ## Returns
     /// Message ID if successful
-    ///
-    /// ## Reply Routing
-    /// If the message has a `correlation_id`, it's treated as a reply to an `ask()` request.
-    /// For local actors, the reply is routed automatically via ActorRef::tell() using ReplyWaiterRegistry.
     pub async fn send_message(
         &self,
         actor_id: &str,
@@ -943,87 +969,7 @@ impl ActorServiceImpl {
             );
         }
 
-        // Check if this is a reply (has correlation_id) and route to per-ActorRef reply map if local
-        // correlation_id is now String - check if not empty
-        if !message.correlation_id.is_empty() {
-            let correlation_id = message.correlation_id.clone();
-            let actor_id_full = self
-                .parse_canonical_actor_id(actor_id)
-                .map_err(|e| e.to_string())?;
-            let node_id = actor_id_full.node_id().to_string();
-
-            // If local actor, route reply via MessageSender.tell()
-            // ActorRef::tell() will automatically check for correlation_id and route to ReplyWaiter
-            // if there's a pending ask() call - routing handled by ReplyWaiterRegistry
-            if node_id == self.local_node_id {
-                // Use MessageSender.tell() - ActorRef::tell() handles reply routing automatically
-                // When MessageSender.tell() is called, it eventually calls ActorRef::tell(),
-                // which checks ReplyWaiterRegistry for the correlation_id and routes to ReplyWaiter
-                // Try lookup with constructed ID first
-                let sender_opt = self
-                    .get_actor_registry()
-                    .await
-                    .lookup_actor(&actor_id_full)
-                    .await;
-
-                if let Some(sender) = sender_opt {
-                    // MessageSender exists - use it directly
-                    // ActorRef::tell() will check for correlation_id and route to ReplyWaiter if present
-                    let message_id = message.id.to_string();
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        tracing::trace!(
-                            "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTING: message_id={}, correlation_id={}, routing via MessageSender.tell()",
-                            message_id, correlation_id
-                        );
-                    }
-                    let ctx = routing_ctx.ok_or_else(|| {
-                        Status::internal(
-                            "send_message: missing RequestContext for local reply routing (MessageSender::tell)",
-                        )
-                    })?;
-                    sender
-                        .tell(ctx, message)
-                        .await
-                        .map_err(|e| Status::internal(format!("Failed to send reply: {}", e)))?;
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        tracing::trace!(
-                            "🟪 [ACTOR_SERVICE::send_message] REPLY ROUTED: message_id={}, correlation_id={}",
-                            message_id, correlation_id
-                        );
-                    }
-                    return Ok(message_id);
-                }
-
-                // Temp sender not found in ActorRegistry (may have been cleaned up after
-                // ask() timeout).  Try ReplyWaiterRegistry directly using correlation_id
-                // so the reply still reaches the waiter if it is still active.
-                if actor_id_full.is_temporary_sender() {
-                    if let Some(waiter_registry) =
-                        self.service_locator.reply_waiter_registry().await
-                    {
-                        let message_id = message.id.to_string();
-                        if waiter_registry.notify(&correlation_id, message).await {
-                            tracing::info!(
-                                message_id = %message_id,
-                                correlation_id = %correlation_id,
-                                temp_sender = %actor_id_full,
-                                "Reply routed directly via ReplyWaiterRegistry after temporary sender cleanup"
-                            );
-                            return Ok(message_id);
-                        }
-                        tracing::warn!(
-                            message_id = %message_id,
-                            correlation_id = %correlation_id,
-                            temp_sender = %actor_id_full,
-                            "Reply arrived after ask timeout; temporary sender and ReplyWaiter were already cleaned up"
-                        );
-                        return Ok(message_id);
-                    }
-                }
-            }
-        }
-
-        // Normal message routing (no correlation_id or remote actor).
+        // Route all messages through the unified routing module.
         // `actor_id` MUST be a full canonical ID. gRPC handlers resolve type names to canonical
         // IDs at the transport boundary; WASM actors must supply canonical IDs from PGs or config.
         // Derive namespace from sender's canonical ID so route_message can build a valid
@@ -1185,37 +1131,128 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        let _message_id = message.id.clone();
+        let message_id = message.id.clone();
 
-        // Use unified routing module (returns Future, converts ActorRefError to Status)
-        use plexspaces_actor::routing::route_message as routing_route_message;
-        let result = routing_route_message(
-            ctx,
-            self.service_locator.clone(),
-            actor_id.to_string(),
-            message,
-            wait_for_response,
-            timeout,
-        )
-        .await;
+        let target_id = plexspaces_actor::ActorId::from_canonical(actor_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
 
-        // Convert ActorRefError to Status
-        result.map_err(|e| match e {
-            plexspaces_actor::ActorRefError::Timeout => {
-                Status::deadline_exceeded("No reply received within timeout")
+        // Local actors: use ActorRegistry (handles virtual activation, temp senders, etc.)
+        // Remote actors: use direct gRPC to avoid registry → ActorService → registry recursion.
+        let is_remote = target_id.node_id() != self.local_node_id;
+
+        if is_remote {
+            let node_id = target_id.node_id().to_string();
+            let transport = self.service_locator
+                .get_actor_transport_client()
+                .await
+                .ok_or_else(|| Status::internal("ActorTransportClient not available"))?;
+
+            // Decompose canonical ID into name + type + namespace for the gRPC API.
+            // The receiving handler reconstructs the canonical ID via actor_name + actor_type + namespace.
+            let actor_name = target_id.name().to_string();
+            let actor_type_str = target_id.actor_type().to_string();
+            let actor_namespace = target_id.namespace().to_string();
+
+            if wait_for_response {
+                let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(30));
+                let timeout_proto = prost_types::Duration {
+                    seconds: timeout_duration.as_secs() as i64,
+                    nanos: timeout_duration.subsec_nanos() as i32,
+                };
+                let ask_req = AskReplyRequest {
+                    request_id: ulid::Ulid::new().to_string(),
+                    namespace: actor_namespace.clone(),
+                    actor_type: actor_type_str.clone(),
+                    actor_name: actor_name.clone(),
+                    payload: message.payload,
+                    headers: message.headers,
+                    sender_id: message.sender_id,
+                    message_type: message.message_type,
+                    correlation_id: message.correlation_id,
+                    reply_to: message.reply_to,
+                    message_id: message.id,
+                    timeout: Some(timeout_proto),
+                    // Must be POST so the ask_reply handler passes payload through unchanged.
+                    // The default "" is treated as GET which would replace the payload with
+                    // serialized query_params (empty), discarding the actual message payload.
+                    http_method: "POST".to_string(),
+                    ..Default::default()
+                };
+                let mut req = tonic::Request::new(ask_req);
+                plexspaces_actor::apply_request_context_to_grpc_metadata(&ctx, req.metadata_mut());
+                let resp = transport
+                    .ask_reply(&node_id, req)
+                    .await
+                    .map_err(|e| Status::internal(format!("Remote ask to '{}' failed: {}", node_id, e)))?
+                    .into_inner();
+                if !resp.success {
+                    return Err(Status::internal(format!("Remote ask failed: {}", resp.error_message)));
+                }
+                let reply_msg = plexspaces_proto::common::v1::Message {
+                    id: ulid::Ulid::new().to_string(),
+                    payload: resp.payload,
+                    headers: resp.headers,
+                    message_type: "reply".to_string(),
+                    ..Default::default()
+                };
+                Ok((message_id, Some(reply_msg)))
+            } else {
+                let send_req = SendMessageRequest {
+                    request_id: ulid::Ulid::new().to_string(),
+                    namespace: actor_namespace,
+                    actor_type: actor_type_str,
+                    actor_name,
+                    payload: message.payload,
+                    headers: message.headers,
+                    sender_id: message.sender_id,
+                    message_type: message.message_type,
+                    correlation_id: message.correlation_id,
+                    reply_to: message.reply_to,
+                    message_id: message.id,
+                    ..Default::default()
+                };
+                let mut req = tonic::Request::new(send_req);
+                plexspaces_actor::apply_request_context_to_grpc_metadata(&ctx, req.metadata_mut());
+                transport
+                    .send_message(&node_id, req)
+                    .await
+                    .map_err(|e| Status::internal(format!("Remote send to '{}' failed: {}", node_id, e)))?;
+                Ok((message_id, None))
             }
-            plexspaces_actor::ActorRefError::ActorNotFound(id) => {
-                Status::not_found(format!("Actor not found: {}", id))
+        } else {
+            let registry = self.service_locator
+                .actor_registry()
+                .await
+                .ok_or_else(|| Status::internal("ActorRegistry unavailable"))?;
+
+            if wait_for_response {
+                let timeout = timeout.unwrap_or(std::time::Duration::from_secs(30));
+                registry
+                    .ask(&ctx, &target_id, message, timeout)
+                    .await
+                    .map(|reply| (message_id, Some(reply)))
+                    .map_err(|e| match e {
+                        plexspaces_actor::actor_registry::ActorRegistryError::Timeout => {
+                            Status::deadline_exceeded("No reply received within timeout")
+                        }
+                        plexspaces_actor::actor_registry::ActorRegistryError::ActorNotFound(id) => {
+                            Status::not_found(format!("Actor not found: {}", id))
+                        }
+                        other => Status::internal(format!("Routing error: {}", other)),
+                    })
+            } else {
+                registry
+                    .tell(&ctx, &target_id, message)
+                    .await
+                    .map(|()| (message_id, None))
+                    .map_err(|e| match e {
+                        plexspaces_actor::actor_registry::ActorRegistryError::ActorNotFound(id) => {
+                            Status::not_found(format!("Actor not found: {}", id))
+                        }
+                        other => Status::internal(format!("Routing error: {}", other)),
+                    })
             }
-            plexspaces_actor::ActorRefError::InvalidActorId(msg) => Status::invalid_argument(msg),
-            plexspaces_actor::ActorRefError::SendFailed(msg) => {
-                Status::internal(format!("Failed to send message: {}", msg))
-            }
-            plexspaces_actor::ActorRefError::VisibilityDenied(msg) => {
-                Status::permission_denied(msg)
-            }
-            _ => Status::internal(format!("Routing error: {}", e)),
-        })
+        }
     }
 
     /// Send message to actor with location transparency
@@ -1427,6 +1464,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             .await
             .map_err(|e| format!("Service not accepting requests: {}", e))?;
 
+        let request_id = req.request_id.clone();
         let mut results = Vec::new();
         for spawn_req in req.requests {
             let mut base_spec = match spawn_req.spec {
@@ -1507,6 +1545,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
                             success: true,
                             error: String::new(),
                             response: Some(plexspaces_proto::actor::v1::SpawnActorResponse {
+        request_id: ulid::Ulid::new().to_string(),
                                 actor_ref: actor_id.to_string(),
                                 actor: None,
                             }),
@@ -1522,7 +1561,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
                 }
             }
         }
-        Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { results })
+        Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { request_id, results })
     }
 
     async fn monitor_actor(
@@ -1543,6 +1582,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
         let mut client = ActorServiceClient::new(channel);
         let mut req = tonic::Request::new(MonitorActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             supervisor_id: supervisor_id.to_string(),
             supervisor_callback: supervisor_callback.to_string(),
@@ -1574,6 +1614,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
         let mut client = ActorServiceClient::new(channel);
         let mut req = tonic::Request::new(DemonitorActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             supervisor_id: supervisor_id.to_string(),
             monitor_ref: monitor_ref.to_string(),
@@ -1604,6 +1645,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
         let mut client = ActorServiceClient::new(channel);
         let mut req = tonic::Request::new(LinkActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });
@@ -1633,6 +1675,7 @@ impl plexspaces_actor::actor_context::ActorService for ActorServiceImpl {
             .map_err(|e: Box<dyn std::error::Error + Send + Sync>| e)?;
         let mut client = ActorServiceClient::new(channel);
         let mut req = tonic::Request::new(UnlinkActorRequest {
+            request_id: ulid::Ulid::new().to_string(),
             actor_id: actor_id.to_string(),
             linked_actor_id: linked_actor_id.to_string(),
         });
@@ -1673,6 +1716,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
 
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
         let namespace = if req.namespace.is_empty() {
             ctx.namespace().to_string()
         } else {
@@ -1765,6 +1809,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                     "send_message tell request completed"
                 );
                 Ok(Response::new(SendMessageResponse {
+                    request_id,
                     success: true,
                     message_id,
                     actor_id: resolved_actor_id,
@@ -2020,6 +2065,7 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         // Return response with the canonical actor ID string
         Ok(Response::new(SpawnActorResponse {
+            request_id: req.request_id.clone(),
             actor_ref: spawned_actor_id.to_string(),
             actor: Some(proto_actor),
         }))
@@ -2147,7 +2193,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 other => Status::internal(format!("monitor failed: {}", other)),
             })?;
 
-        Ok(Response::new(MonitorActorResponse { monitor_ref }))
+        Ok(Response::new(MonitorActorResponse { request_id: req.request_id.clone(), monitor_ref }))
     }
 
     async fn demonitor_actor(
@@ -2295,7 +2341,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 other => Status::internal(format!("link failed: {}", other)),
             })?;
 
-        Ok(Response::new(LinkActorResponse { success: true }))
+        Ok(Response::new(LinkActorResponse { request_id: req.request_id.clone(), success: true }))
     }
 
     async fn unlink_actor(
@@ -2332,7 +2378,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 other => Status::internal(format!("unlink failed: {}", other)),
             })?;
 
-        Ok(Response::new(UnlinkActorResponse { success: true }))
+        Ok(Response::new(UnlinkActorResponse { request_id: req.request_id.clone(), success: true }))
     }
 
     async fn get_actor_states(
@@ -2358,7 +2404,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             states.insert(actor_id_str.clone(), state);
         }
 
-        Ok(Response::new(GetActorStatesResponse { states }))
+        Ok(Response::new(GetActorStatesResponse { request_id: req.request_id.clone(), states }))
     }
 
     async fn check_actor_exists(
@@ -2386,6 +2432,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
 
         let req = request.into_inner();
+        let request_id = req.request_id.clone();
         let namespace = if req.namespace.is_empty() {
             ctx.namespace().to_string()
         } else {
@@ -2485,6 +2532,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                     );
                 }
                 Ok(Response::new(AskReplyResponse {
+                    request_id,
                     success: !is_error,
                     payload: reply.payload,
                     headers: reply.headers,
@@ -2782,6 +2830,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?;
 
         Ok(Response::new(GetShardGroupResponse {
+            request_id: req.request_id.clone(),
             group: Some(group.clone()),
         }))
     }
@@ -2839,8 +2888,10 @@ impl ActorServiceTrait for ActorServiceImpl {
         let paginated: Vec<ShardGroup> = filtered.into_iter().skip(offset).take(limit).collect();
 
         Ok(Response::new(ListShardGroupsResponse {
+            request_id: req.request_id.clone(),
             groups: paginated,
             page: Some(plexspaces_proto::common::v1::PageResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 total_size: total_size as i32,
                 offset: offset as i32,
                 limit: limit as i32,
@@ -2921,6 +2972,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             "shard_id" => shard_id.to_string());
 
         Ok(Response::new(SendToShardResponse {
+            request_id: req.request_id.clone(),
             shard_id,
             shard_actor_id,
             response: response_message,
@@ -3197,6 +3249,7 @@ impl ActorServiceImpl {
                     .map_err(|e| format!("Failed to get client for node {}: {}", target_node, e))?;
                 let mut client = plexspaces_proto::ActorServiceClient::new(channel);
                 let spawn_req = SpawnActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
                     spec: Some(remote_spawn_spec),
                     namespace: ctx.namespace().to_string(),
                     instances_count: 1,
@@ -3283,7 +3336,7 @@ impl ActorServiceImpl {
             "Created ShardGroup"
         );
 
-        Ok(CreateShardGroupResponse { group: Some(group) })
+        Ok(CreateShardGroupResponse { request_id: req.request_id.clone(), group: Some(group) })
     }
 
     /// Internal implementation of bulk_update_shard_group
@@ -3306,6 +3359,7 @@ impl ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         use futures::future::join_all;
 
+        let request_id = req.request_id.clone();
         let timeout = resolve_timeout(req.timeout.as_ref());
 
         // Group updates by shard_id
@@ -3359,76 +3413,36 @@ impl ActorServiceImpl {
             let wait_for_responses = req.wait_for_responses;
             let consistency_level = req.consistency_level;
 
+            let registry_for_shard = self
+                .service_locator
+                .actor_registry()
+                .await
+                .ok_or_else(|| Status::internal("ActorRegistry not available"))?;
             let handle = tokio::spawn(async move {
                 let mut succeeded = 0u32;
                 let mut failed = 0u32;
 
-                let updates_clone = updates.clone();
-                match consistency_level {
-                    x if x
-                        == plexspaces_proto::v1::actor::ConsistencyLevel::ConsistencyLevelEventual
-                            as i32 =>
-                    {
-                        for (_key, mut message) in updates_clone {
-                            // Ensure message ID has "req-" prefix
-                            if message.id.is_empty() {
-                                message.id = format!("req-{}", ulid::Ulid::new().to_string());
-                            } else if !message.id.starts_with("req-")
-                                && !message.id.starts_with("res-")
-                            {
-                                message.id = format!("req-{}", message.id);
-                            }
-                            let receiver_id = message.receiver_id.clone();
-                            let route_result = plexspaces_actor::routing::route_message(
-                                ctx.clone(),
-                                service_locator.clone() as Arc<dyn ServiceLocatorTrait>,
-                                receiver_id,
-                                message,
-                                wait_for_responses,
-                                if wait_for_responses {
-                                    Some(timeout)
-                                } else {
-                                    None
-                                },
-                            )
-                            .await;
-                            if route_result.is_ok() {
-                                succeeded += 1;
-                            } else {
-                                failed += 1;
-                            }
-                        }
+                for (_key, mut message) in updates.clone() {
+                    // Ensure message ID has "req-" prefix
+                    if message.id.is_empty() {
+                        message.id = format!("req-{}", ulid::Ulid::new().to_string());
+                    } else if !message.id.starts_with("req-") && !message.id.starts_with("res-") {
+                        message.id = format!("req-{}", message.id);
                     }
-                    _ => {
-                        for (_key, mut message) in updates_clone {
-                            // Ensure message ID has "req-" prefix
-                            if message.id.is_empty() {
-                                message.id = format!("req-{}", ulid::Ulid::new().to_string());
-                            } else if !message.id.starts_with("req-")
-                                && !message.id.starts_with("res-")
-                            {
-                                message.id = format!("req-{}", message.id);
-                            }
-                            let receiver_id = message.receiver_id.clone();
-                            let route_result = plexspaces_actor::routing::route_message(
-                                ctx.clone(),
-                                service_locator.clone() as Arc<dyn ServiceLocatorTrait>,
-                                receiver_id,
-                                message,
-                                wait_for_responses,
-                                if wait_for_responses {
-                                    Some(timeout)
-                                } else {
-                                    None
-                                },
-                            )
-                            .await;
-                            if route_result.is_ok() {
-                                succeeded += 1;
-                            } else {
-                                failed += 1;
-                            }
-                        }
+                    let receiver_id = message.receiver_id.clone();
+                    let actor_id = match plexspaces_actor::ActorId::from_canonical(&receiver_id) {
+                        Ok(id) => id,
+                        Err(_) => { failed += 1; continue; }
+                    };
+                    let route_result = if wait_for_responses {
+                        registry_for_shard.ask(&ctx, &actor_id, message, timeout).await.map(|_| ())
+                    } else {
+                        registry_for_shard.tell(&ctx, &actor_id, message).await
+                    };
+                    if route_result.is_ok() {
+                        succeeded += 1;
+                    } else {
+                        failed += 1;
                     }
                 }
 
@@ -3469,6 +3483,7 @@ impl ActorServiceImpl {
         }
 
         Ok(BulkUpdateShardGroupResponse {
+            request_id,
             updates_sent: total_sent,
             updates_succeeded: total_succeeded,
             updates_failed: total_failed,
@@ -3480,9 +3495,9 @@ impl ActorServiceImpl {
     /// Unified parallel operation helper (Erlang pmap pattern)
     ///
     /// ## Design
-    /// Uses `routing::ask_helper()` for each shard with one shared temporary sender created by
-    /// `ActorFactory::create_temporary_sender`. Each shard still gets its own correlation id and
-    /// waiter entry, while local delivery continues to flow through `ActorRegistry::tell()`.
+    /// Uses `ActorRegistry::ask_with_sender()` for each shard with one shared temporary sender
+    /// created by `ActorFactory::create_temporary_sender`. Each shard still gets its own correlation
+    /// id and waiter entry, while local delivery continues to flow through `ActorRegistry::tell()`.
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext with tenant_id and namespace (CRITICAL: flows from API → ActorBuilder → ActorRef)
@@ -3510,7 +3525,7 @@ impl ActorServiceImpl {
             shard_count = shard_actor_ids.len(),
             timeout_secs = timeout.as_secs(),
             tenant_id = %ctx.tenant_id(),
-            "🔄 [{}] Starting parallel operation (ask_helper)",
+            "🔄 [{}] Starting parallel operation (ask_with_sender)",
             operation_name
         );
 
@@ -3552,12 +3567,16 @@ impl ActorServiceImpl {
             group_id = %group_id,
             temp_sender_id = %temp_sender_id,
             shard_count = shard_actor_ids.len(),
-            "✅ [{}] Created temp sender, sending {} ask_helper requests...",
+            "✅ [{}] Created temp sender, sending {} ask_with_sender requests...",
             operation_name,
             shard_actor_ids.len()
         );
 
-        let service_locator = self.service_locator.clone();
+        let registry = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
         let mut handles = Vec::with_capacity(shard_actor_ids.len());
         for (shard_id, shard_actor_id) in shard_actor_ids.iter().enumerate() {
             // Each shard gets its own correlation_id (format: "req-shard-{shard_id}-{ulid}" for debugging)
@@ -3577,7 +3596,7 @@ impl ActorServiceImpl {
             msg.receiver_id = shard_actor_id.clone();
             msg.message_type = "call".to_string();
 
-            let sl = service_locator.clone();
+            let registry_clone = registry.clone();
             let tid = temp_sender_id.clone();
             let cid = correlation_id.clone();
             let sid = shard_actor_id.clone();
@@ -3586,18 +3605,25 @@ impl ActorServiceImpl {
             // CRITICAL: Clone RequestContext for each task (tenant_id flows from API → ActorBuilder → ActorRef)
             let ctx_task = ctx.clone();
 
+            let shard_actor_id_parsed = plexspaces_actor::ActorId::from_canonical(&sid)
+                .map_err(|e| format!("Invalid shard actor ID '{}': {}", sid, e))?;
+
             let handle = tokio::spawn(async move {
-                use plexspaces_actor::routing::ask_helper;
-                let result = ask_helper(
-                    ctx_task,
-                    sl,
-                    sid.clone(),
-                    msg,
-                    tid.to_string(),
-                    cid.clone(),
-                    t,
-                )
-                .await;
+                let result = registry_clone
+                    .ask_with_sender(&ctx_task, &shard_actor_id_parsed, msg, t, tid, cid)
+                    .await
+                    .map_err(|e| match e {
+                        plexspaces_actor::ActorRegistryError::ActorNotFound(id) => {
+                            plexspaces_actor::ActorRefError::ActorNotFound(id.into())
+                        }
+                        plexspaces_actor::ActorRegistryError::Timeout => {
+                            plexspaces_actor::ActorRefError::Timeout
+                        }
+                        plexspaces_actor::ActorRegistryError::VisibilityDenied(m) => {
+                            plexspaces_actor::ActorRefError::VisibilityDenied(m)
+                        }
+                        other => plexspaces_actor::ActorRefError::SendFailed(other.to_string()),
+                    });
                 (shard_id as u32, sid, request_start, result)
             });
             handles.push(handle);
@@ -3605,7 +3631,7 @@ impl ActorServiceImpl {
 
         // Await all handles in parallel using join_all (true parallel map/reduce)
         // This enables all asks to be sent asynchronously, then all replies collected in parallel
-        // All ask_helper() calls return Futures, so we can await them all together
+        // All ask_with_sender() calls return Futures, so we can await them all together
         let join_results = join_all(handles).await;
 
         let mut results = Vec::with_capacity(join_results.len());
@@ -3717,7 +3743,7 @@ impl ActorServiceImpl {
         }
 
         // Cleanup: Remove the single shared temporary sender after all per-correlation waiters
-        // created by ask_helper() have been cleaned up.
+        // created by ask_with_sender() have been cleaned up.
         if let Some(registry) = self.service_locator.actor_registry().await {
             registry.remove_temporary_sender(&temp_sender_id).await;
         }
@@ -3734,6 +3760,7 @@ impl ActorServiceImpl {
     ) -> Result<MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
         let start_time = Instant::now();
         let group_id = req.group_id.clone();
+        let request_id = req.request_id.clone();
 
         // Get group
         let group = {
@@ -3787,6 +3814,7 @@ impl ActorServiceImpl {
             }
 
             shard_responses.push(ShardQueryResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 shard_id,
                 shard_actor_id,
                 response: proto_response,
@@ -3850,6 +3878,7 @@ impl ActorServiceImpl {
 
         use plexspaces_proto::actor::v1::ScatterGatherStats;
         Ok(MapShardGroupResponse {
+            request_id,
             shard_results: shard_responses,
             stats: Some(ScatterGatherStats {
                 shards_queried: shard_group_config(&group).shard_count,
@@ -3872,6 +3901,7 @@ impl ActorServiceImpl {
     ) -> Result<ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
         let start_time = Instant::now();
         let group_id = req.group_id.clone();
+        let request_id = req.request_id.clone();
 
         // Get group
         let group = {
@@ -3927,6 +3957,7 @@ impl ActorServiceImpl {
             }
 
             shard_responses.push(ShardQueryResponse {
+                request_id: ulid::Ulid::new().to_string(),
                 shard_id,
                 shard_actor_id,
                 response: proto_response,
@@ -4045,6 +4076,7 @@ impl ActorServiceImpl {
         );
 
         Ok(ScatterGatherResponse {
+            request_id,
             result,
             shard_responses,
             stats: Some(ScatterGatherStats {
@@ -4064,6 +4096,7 @@ impl ActorServiceImpl {
         ctx: &RequestContext,
         req: BroadcastShardGroupRequest,
     ) -> Result<BroadcastShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let request_id = req.request_id.clone();
         let group = {
             let groups = self.shard_groups.read().await;
             groups
@@ -4095,6 +4128,7 @@ impl ActorServiceImpl {
             .into());
         }
         Ok(BroadcastShardGroupResponse {
+            request_id,
             shard_responses: shard_query_responses_from_results(results),
             stats: Some(stats),
         })
@@ -4105,6 +4139,7 @@ impl ActorServiceImpl {
         ctx: &RequestContext,
         req: ReduceShardGroupRequest,
     ) -> Result<ReduceShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let request_id = req.request_id.clone();
         let group = {
             let groups = self.shard_groups.read().await;
             groups
@@ -4154,6 +4189,7 @@ impl ActorServiceImpl {
             ]),
         );
         Ok(ReduceShardGroupResponse {
+            request_id,
             result: Some(result),
             shard_responses: shard_query_responses_from_results(results),
             stats: Some(stats),
@@ -4165,7 +4201,9 @@ impl ActorServiceImpl {
         ctx: &RequestContext,
         req: AllReduceShardGroupRequest,
     ) -> Result<AllReduceShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let request_id = req.request_id.clone();
         let reduce_req = ReduceShardGroupRequest {
+            request_id: ulid::Ulid::new().to_string(),
             group_id: req.group_id.clone(),
             map_function: req.map_function.clone(),
             timeout: req.timeout,
@@ -4188,6 +4226,7 @@ impl ActorServiceImpl {
             .broadcast_shard_group_internal(
                 ctx,
                 BroadcastShardGroupRequest {
+                    request_id: ulid::Ulid::new().to_string(),
                     group_id: req.group_id,
                     message: Some(broadcast_message),
                     timeout: req.timeout,
@@ -4196,6 +4235,7 @@ impl ActorServiceImpl {
             )
             .await?;
         Ok(AllReduceShardGroupResponse {
+            request_id,
             result: Some(reduced_message),
             shard_responses: broadcast_resp.shard_responses,
             stats: broadcast_resp.stats,
@@ -4207,6 +4247,7 @@ impl ActorServiceImpl {
         ctx: &RequestContext,
         req: BarrierShardGroupRequest,
     ) -> Result<BarrierShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let request_id = req.request_id.clone();
         let payload = serde_json::json!({
             "barrier_id": req.barrier_id,
             "round": req.round,
@@ -4223,6 +4264,7 @@ impl ActorServiceImpl {
             .broadcast_shard_group_internal(
                 ctx,
                 BroadcastShardGroupRequest {
+                    request_id: ulid::Ulid::new().to_string(),
                     group_id: req.group_id,
                     message: Some(message),
                     timeout: req.timeout,
@@ -4231,6 +4273,7 @@ impl ActorServiceImpl {
             )
             .await?;
         Ok(BarrierShardGroupResponse {
+            request_id,
             shard_responses: response.shard_responses,
             stats: response.stats,
         })
@@ -4546,6 +4589,7 @@ mod tests {
             correlation_id: message.correlation_id,
             reply_to: message.reply_to,
             message_id: message.id,
+            request_id: ulid::Ulid::new().to_string(),
         }
     }
 
@@ -5363,6 +5407,7 @@ mod tests {
             correlation_id: String::new(),
             reply_to: String::new(),
             message_id: String::new(),
+            request_id: ulid::Ulid::new().to_string(),
         });
 
         let result = ActorServiceTrait::send_message(&service, request).await;

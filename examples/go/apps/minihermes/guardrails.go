@@ -51,7 +51,7 @@ func (g *GuardrailsGateActor) Init(configJSON string) string {
 	g.SetRuntimeMetadata(config.ActorID)
 	// Seed default policies in KV
 	for tool, policy := range restrictedTools {
-		host.KVPut("guardrail_policy:"+tool, policy)
+		host.KV().Put("guardrail_policy:"+tool, policy)
 	}
 	if err := host.PG().Join("svc:guardrails"); err != nil {
 		host.Warn(fmt.Sprintf("GuardrailsGateActor: failed to join svc:guardrails: %v", err))
@@ -96,7 +96,7 @@ func (g *GuardrailsGateActor) check(p map[string]any) string {
 	}
 
 	// Look up policy: KV > in-memory defaults
-	policy := host.KVGet("guardrail_policy:" + toolName)
+	policy, _ := host.KV().Get("guardrail_policy:" + toolName)
 	if policy == "" {
 		policy = "allow"
 	}
@@ -121,15 +121,15 @@ func (g *GuardrailsGateActor) check(p map[string]any) string {
 			"created_at":  host.NowMs(),
 		}
 		approvalJSON, _ := json.Marshal(approval)
-		host.KVPut("approval:"+approvalID, string(approvalJSON))
+		host.KV().Put("approval:"+approvalID, string(approvalJSON))
 		// Also track pending IDs
-		pending := host.KVGet("pending_approval_ids")
+		pending, _ := host.KV().Get("pending_approval_ids")
 		if pending == "" {
 			pending = approvalID
 		} else {
 			pending = pending + "," + approvalID
 		}
-		host.KVPut("pending_approval_ids", pending)
+		host.KV().Put("pending_approval_ids", pending)
 
 		// Write to TupleSpace for visibility
 		_ = host.TS().Write([]any{"approval_pending", toolName, approvalID, host.NowMs()})
@@ -151,7 +151,7 @@ func (g *GuardrailsGateActor) approve(p map[string]any) string {
 	if approvalID == "" {
 		return marshal(map[string]any{"error": "approval_id is required"})
 	}
-	raw := host.KVGet("approval:" + approvalID)
+	raw, _ := host.KV().Get("approval:" + approvalID)
 	if raw == "" {
 		return marshal(map[string]any{"error": "approval not found", "approval_id": approvalID})
 	}
@@ -162,7 +162,7 @@ func (g *GuardrailsGateActor) approve(p map[string]any) string {
 	approval["status"] = "approved"
 	approval["approved_at"] = host.NowMs()
 	updatedJSON, _ := json.Marshal(approval)
-	host.KVPut("approval:"+approvalID, string(updatedJSON))
+	host.KV().Put("approval:"+approvalID, string(updatedJSON))
 
 	g.ApprovalCount++
 	fireAudit("guardrail_approved", fmt.Sprintf("approval_id=%s tool=%s", approvalID, stringVal(approval, "tool", "")))
@@ -174,7 +174,7 @@ func (g *GuardrailsGateActor) deny(p map[string]any) string {
 	if approvalID == "" {
 		return marshal(map[string]any{"error": "approval_id is required"})
 	}
-	raw := host.KVGet("approval:" + approvalID)
+	raw, _ := host.KV().Get("approval:" + approvalID)
 	if raw == "" {
 		return marshal(map[string]any{"error": "approval not found"})
 	}
@@ -185,7 +185,7 @@ func (g *GuardrailsGateActor) deny(p map[string]any) string {
 	approval["status"] = "denied"
 	approval["denied_at"] = host.NowMs()
 	updatedJSON, _ := json.Marshal(approval)
-	host.KVPut("approval:"+approvalID, string(updatedJSON))
+	host.KV().Put("approval:"+approvalID, string(updatedJSON))
 
 	g.DeniedCount++
 	fireAudit("guardrail_denied_manual", fmt.Sprintf("approval_id=%s", approvalID))
@@ -201,7 +201,7 @@ func (g *GuardrailsGateActor) setPolicy(p map[string]any) string {
 	if policy != "allow" && policy != "review" && policy != "deny" {
 		return marshal(map[string]any{"error": "policy must be: allow, review, or deny"})
 	}
-	host.KVPut("guardrail_policy:"+toolName, policy)
+	host.KV().Put("guardrail_policy:"+toolName, policy)
 	return marshal(map[string]any{"status": "ok", "tool": toolName, "policy": policy})
 }
 
@@ -210,7 +210,7 @@ func (g *GuardrailsGateActor) getPolicy(p map[string]any) string {
 	if toolName == "" {
 		return marshal(map[string]any{"error": "tool is required"})
 	}
-	policy := host.KVGet("guardrail_policy:" + toolName)
+	policy, _ := host.KV().Get("guardrail_policy:" + toolName)
 	if policy == "" {
 		policy = "allow"
 	}
@@ -218,14 +218,14 @@ func (g *GuardrailsGateActor) getPolicy(p map[string]any) string {
 }
 
 func (g *GuardrailsGateActor) getPending() string {
-	pending := host.KVGet("pending_approval_ids")
+	pending, _ := host.KV().Get("pending_approval_ids")
 	if pending == "" {
 		return marshal(map[string]any{"status": "ok", "approvals": []any{}, "count": 0})
 	}
 	ids := splitNonEmpty(pending, ",")
 	approvals := make([]any, 0, len(ids))
 	for _, id := range ids {
-		raw := host.KVGet("approval:" + id)
+		raw, _ := host.KV().Get("approval:" + id)
 		if raw == "" {
 			continue
 		}

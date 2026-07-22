@@ -17,7 +17,8 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::self_id;
+use plexspaces::actor::host_shard::application_metrics_add;
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
@@ -195,7 +196,7 @@ fn resolve_application_id() -> String {
     if !id.is_empty() {
         return id;
     }
-    actor_application_id(&host::self_id())
+    actor_application_id(&self_id())
 }
 
 fn merge_application_metrics_for(
@@ -214,7 +215,7 @@ fn merge_application_metrics_for(
         latency_max_ms: metrics.get("latency_max_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
         latency_samples: metrics.get("latency_samples").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
     }.encode_to_vec();
-    host::application_metrics_add(application_id, &metrics_bytes)
+    application_metrics_add(application_id, &metrics_bytes)
         .map(|_| ())
         .map_err(|err| format!("{context}: {err}"))
 }
@@ -438,7 +439,7 @@ impl SkyPilotActor {
         with_state(|state| {
             let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
             state.application_id = if actor_id.is_empty() {
-                actor_application_id(&host::self_id())
+                actor_application_id(&self_id())
             } else {
                 actor_application_id(actor_id)
             };

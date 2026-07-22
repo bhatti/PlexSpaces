@@ -89,8 +89,8 @@ func (s *SessionManagerActor) createSession(p map[string]any) string {
 		"status":     "active",
 	}
 	metaJSON, _ := json.Marshal(meta)
-	host.KVPut("session:"+sessionID, string(metaJSON))
-	host.KVPut("session_map:"+channel+":"+userID, sessionID)
+	host.KV().Put("session:"+sessionID, string(metaJSON))
+	host.KV().Put("session_map:"+channel+":"+userID, sessionID)
 	_ = host.TS().Write([]any{"session", "active", channel, userID, sessionID})
 
 	s.SessionIDs = append(s.SessionIDs, sessionID)
@@ -107,13 +107,13 @@ func (s *SessionManagerActor) getSession(p map[string]any) string {
 		channel := stringVal(p, "channel", "")
 		userID := stringVal(p, "user_id", "")
 		if channel != "" && userID != "" {
-			sessionID = host.KVGet("session_map:" + channel + ":" + userID)
+			sessionID, _ = host.KV().Get("session_map:" + channel + ":" + userID)
 		}
 	}
 	if sessionID == "" {
 		return marshal(map[string]any{"error": "session not found"})
 	}
-	raw := host.KVGet("session:" + sessionID)
+	raw, _ := host.KV().Get("session:" + sessionID)
 	if raw == "" {
 		return marshal(map[string]any{"error": "session not found", "session_id": sessionID})
 	}
@@ -130,8 +130,8 @@ func (s *SessionManagerActor) endSession(p map[string]any) string {
 	if sessionID == "" {
 		return marshal(map[string]any{"error": "session_id is required"})
 	}
-	host.KVDelete("session:" + sessionID)
-	host.KVDelete("session_history:" + sessionID)
+	host.KV().Delete("session:" + sessionID)
+	host.KV().Delete("session_history:" + sessionID)
 	newIDs := make([]string, 0, len(s.SessionIDs))
 	for _, id := range s.SessionIDs {
 		if id != sessionID {
@@ -149,7 +149,7 @@ func (s *SessionManagerActor) endSession(p map[string]any) string {
 func (s *SessionManagerActor) listSessions() string {
 	sessions := make([]any, 0, len(s.SessionIDs))
 	for _, id := range s.SessionIDs {
-		raw := host.KVGet("session:" + id)
+		raw, _ := host.KV().Get("session:" + id)
 		if raw == "" {
 			continue
 		}
@@ -209,7 +209,7 @@ func (h *HealthMonitorActor) Init(configJSON string) string {
 	if err := host.PG().Join("svc:health_monitor"); err != nil {
 		host.Warn(fmt.Sprintf("HealthMonitorActor: failed to join svc:health_monitor: %v", err))
 	}
-	_ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+	_, _ = host.Actor().SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
 	host.Info(fmt.Sprintf("HealthMonitorActor Init actor_id=%s interval_ms=%d", config.ActorID, h.PollInterval))
 	return ""
 }
@@ -250,7 +250,7 @@ func (h *HealthMonitorActor) Handle(fromActor, msgType, payloadJSON string) stri
 func (h *HealthMonitorActor) doPoll() string {
 	now := host.NowMs()
 	if h.LastPollMs > 0 && now-h.LastPollMs < h.PollInterval/2 {
-		_ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+		_, _ = host.Actor().SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
 		return marshal(map[string]any{"status": "ok", "skipped": true})
 	}
 
@@ -270,7 +270,7 @@ func (h *HealthMonitorActor) doPoll() string {
 
 	snapJSON, _ := json.Marshal(h.GroupHealth)
 	_ = host.TS().Write([]any{"health_snapshot", h.LastPollMs, string(snapJSON)})
-	_ = host.SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
+	_, _ = host.Actor().SendAfter(h.PollInterval, "poll_tick", map[string]any{"op": "poll_tick"})
 
 	return marshal(map[string]any{"status": "ok", "poll_count": h.PollCount})
 }

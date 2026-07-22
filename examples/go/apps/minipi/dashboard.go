@@ -79,7 +79,7 @@ func (d *DashboardActor) reportEval(p map[string]any) string {
 	if err != nil {
 		return marshal(map[string]any{"error": "failed to serialize report"})
 	}
-	host.KVPut("eval_report:"+evalRunID, string(data))
+	host.KV().Put("eval_report:"+evalRunID, string(data))
 	host.Info(fmt.Sprintf("DashboardActor: stored eval report eval_run_id=%s", evalRunID))
 	return marshal(map[string]any{"status": "ok", "eval_run_id": evalRunID})
 }
@@ -89,7 +89,7 @@ func (d *DashboardActor) getEvalReport(p map[string]any) string {
 	if evalRunID == "" {
 		return marshal(map[string]any{"error": "eval_run_id is required"})
 	}
-	raw := host.KVGet("eval_report:" + evalRunID)
+	raw, _ := host.KV().Get("eval_report:" + evalRunID)
 	if raw == "" {
 		return marshal(map[string]any{"error": fmt.Sprintf("eval run %s not found", evalRunID)})
 	}
@@ -120,7 +120,7 @@ func (d *DashboardActor) listEvalRuns(p map[string]any) string {
 			break
 		}
 		seen[evalRunID] = true
-		raw := host.KVGet("eval_report:" + evalRunID)
+		raw, _ := host.KV().Get("eval_report:" + evalRunID)
 		if raw == "" {
 			continue
 		}
@@ -151,7 +151,7 @@ func (d *DashboardActor) listEvalRuns(p map[string]any) string {
 			if seen[evalRunID] {
 				continue
 			}
-			raw := host.KVGet("eval_report:" + evalRunID)
+			raw, _ := host.KV().Get("eval_report:" + evalRunID)
 			if raw == "" {
 				continue
 			}
@@ -183,9 +183,9 @@ func (d *DashboardActor) getTrajectory(p map[string]any) string {
 		return marshal(map[string]any{"error": "trajectory_id is required"})
 	}
 	// Check both KV keys used by different actors
-	raw := host.KVGet("trajectory:" + trajID)
+	raw, _ := host.KV().Get("trajectory:" + trajID)
 	if raw == "" {
-		raw = host.KVGet("agent_trajectory:" + trajID)
+		raw, _ = host.KV().Get("agent_trajectory:" + trajID)
 	}
 	if raw == "" {
 		return marshal(map[string]any{"error": fmt.Sprintf("trajectory %s not found", trajID)})
@@ -201,8 +201,8 @@ func (d *DashboardActor) getTrajectory(p map[string]any) string {
 }
 
 func (d *DashboardActor) getRegressions() string {
-	baselineRun := host.KVGet("regression_baseline_eval_run")
-	baseline := host.KVGet("regression_baseline")
+	baselineRun, _ := host.KV().Get("regression_baseline_eval_run")
+	baseline, _ := host.KV().Get("regression_baseline")
 	if baseline == "" {
 		baseline = "{}"
 	}
@@ -247,7 +247,7 @@ func (d *DashboardActor) summary() string {
 		if seen[evalRunID] {
 			continue
 		}
-		raw := host.KVGet("eval_report:" + evalRunID)
+		raw, _ := host.KV().Get("eval_report:" + evalRunID)
 		if raw == "" {
 			continue
 		}

@@ -87,8 +87,8 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
     }
 
     const cacheKey = `${this.cacheKeyPrefix()}${city}`;
-    const cached = host.kvGet(cacheKey);
-    if (cached.startsWith("ERROR:")) {
+    const cached = host.kv.get(cacheKey);
+    if (cached && cached.startsWith("ERROR:")) {
       host.log("warn", `Cache read failed for ${city}: ${cached}`);
     } else if (cached) {
       try {
@@ -120,10 +120,7 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
         wind_kph: current["wind_speed_10m"] ?? 0,
         fetched_at_ms: host.nowMs(),
       };
-      const cacheWrite = host.kvPut(cacheKey, JSON.stringify(result));
-      if (cacheWrite.startsWith("ERROR:")) {
-        host.log("warn", `Cache write failed for ${city}: ${cacheWrite}`);
-      }
+      host.kv.put(cacheKey, JSON.stringify(result));
       return { ...result, city, source: "api" };
     } catch (err) {
       host.log("error", `Weather API call failed: ${err}`);
@@ -139,14 +136,9 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
     this.state.cache_hits = 0;
     this.state.cache_misses = 0;
     const prefix = this.cacheKeyPrefix();
-    const keysJson = host.kvList(prefix);
-    try {
-      const keys: string[] = JSON.parse(keysJson);
-      for (const key of keys) {
-        host.kvDelete(key);
-      }
-    } catch (e) {
-      host.log("warn", `kvList/delete error: ${e}`);
+    const keys = host.kv.list(prefix);
+    for (const key of keys) {
+      host.kv.delete(key);
     }
     return { cleared: true };
   }

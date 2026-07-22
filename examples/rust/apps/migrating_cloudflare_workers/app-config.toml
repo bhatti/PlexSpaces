@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Cloudflare Workers Guild Chat Application Configuration (Rust)
+#
+# Deploys a Discord-style chat server with three Durable Object actors:
+# - ChatRoomActor:  per-room state, members, message history, fan-out
+# - RateLimiterActor: per-user token bucket spam prevention
+# - AlarmDemoActor: durable alarm lifecycle (setAlarm equivalent)
+#
+# Equivalent to a Cloudflare Workers wrangler.toml with:
+#   [[durable_objects.bindings]]
+#   name = "CHAT_ROOM"
+#   class_name = "ChatRoomActor"
+#
+#   [[durable_objects.bindings]]
+#   name = "RATE_LIMITER"
+#   class_name = "RateLimiterActor"
+#
+#   [[durable_objects.bindings]]
+#   name = "ALARM_DEMO"
+#   class_name = "AlarmDemoActor"
+
+tenant_id = "default"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# ChatRoomActor (Durable Object: one per room)
+[[supervisor.children]]
+name = "ChatRoomActor"
+tenant_id = "default"
+actor_type = "ChatRoomActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+max_history = "100"
+
+# RateLimiterActor (Durable Object: per-user rate limiting)
+[[supervisor.children]]
+name = "RateLimiterActor"
+actor_type = "RateLimiterActor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+tenant_id = "default"
+
+[supervisor.children.args]
+max_tokens = "5"
+refill_rate_ms = "1000"
+
+# AlarmDemoActor (Durable Object: durable alarm lifecycle)
+# Demonstrates setAlarm/getAlarm/deleteAlarm + batched request processing.
+[[supervisor.children]]
+name = "AlarmDemoActor"
+actor_type = "AlarmDemoActor"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+facets = ["virtual_actor", "reminder"]
+tenant_id = "default"
+
+[supervisor.children.args]
+tenant_id = "default"

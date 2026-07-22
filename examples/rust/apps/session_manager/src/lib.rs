@@ -15,7 +15,9 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{self_id, send_after};
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_shard::application_metrics_add;
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
@@ -70,7 +72,7 @@ fn resolve_application_id() -> String {
     if !id.is_empty() {
         return id;
     }
-    actor_application_id(&host::self_id())
+    actor_application_id(&self_id())
 }
 
 fn merge_application_metrics_for(
@@ -89,7 +91,7 @@ fn merge_application_metrics_for(
         latency_max_ms: metrics.get("latency_max_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
         latency_samples: metrics.get("latency_samples").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
     }.encode_to_vec();
-    host::application_metrics_add(application_id, &metrics_bytes)
+    application_metrics_add(application_id, &metrics_bytes)
         .map(|_| ())
         .map_err(|err| format!("{context}: {err}"))
 }
@@ -179,7 +181,7 @@ fn schedule_idle() {
     if idle_ms == 0 {
         return;
     }
-    let _ = host::send_after(idle_ms, "session_idle", b"{}");
+    let _ = send_after(idle_ms, "session_idle", b"{}");
 }
 
 fn schedule_heartbeat() {
@@ -187,7 +189,7 @@ fn schedule_heartbeat() {
     if hb_ms == 0 {
         return;
     }
-    let _ = host::send_after(hb_ms, "session_heartbeat", b"{}");
+    let _ = send_after(hb_ms, "session_heartbeat", b"{}");
 }
 
 fn handle_start_session(payload: &serde_json::Value) -> String {
@@ -208,11 +210,11 @@ fn handle_start_session(payload: &serde_json::Value) -> String {
         .unwrap_or(2_000)
         .min(120_000);
 
-    let idle_tid = match host::send_after(idle_timeout_ms, "session_idle", b"{}") {
+    let idle_tid = match send_after(idle_timeout_ms, "session_idle", b"{}") {
         Ok(timer_id) => timer_id,
         Err(err) => return serde_json::json!({ "error": err }).to_string(),
     };
-    let hb_tid = match host::send_after(heartbeat_ms, "session_heartbeat", b"{}") {
+    let hb_tid = match send_after(heartbeat_ms, "session_heartbeat", b"{}") {
         Ok(timer_id) => timer_id,
         Err(err) => return serde_json::json!({ "error": err }).to_string(),
     };
@@ -224,7 +226,7 @@ fn handle_start_session(payload: &serde_json::Value) -> String {
         s.activity_count = 0;
         s.heartbeat_ticks = 0;
         s.idle_fired = false;
-        s.last_event_ms = host::now_ms();
+        s.last_event_ms = now_ms();
         s.timers_started += 2;
         s.total_compute_ms += 0.5;
         s.total_coord_ms += 0.1;
@@ -266,7 +268,7 @@ fn handle_touch(_payload: &serde_json::Value) -> String {
     let coord_u = COORD_MS_TOUCH as u64;
     with_state(|s| {
         s.activity_count += 1;
-        s.last_event_ms = host::now_ms();
+        s.last_event_ms = now_ms();
         s.total_compute_ms += COMPUTE_MS_TOUCH;
         s.total_coord_ms += COORD_MS_TOUCH;
     });
@@ -425,7 +427,7 @@ impl SessionManagerActor {
         with_state(|state| {
             let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
             state.application_id = if actor_id.is_empty() {
-                actor_application_id(&host::self_id())
+                actor_application_id(&self_id())
             } else {
                 actor_application_id(actor_id)
             };

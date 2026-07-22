@@ -17,12 +17,15 @@ if [ ! -f "$WASM_FILE" ]; then
 fi
 
 echo "Deploying to http://localhost:$HTTP_PORT ..."
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
   -F "name=$APP_ID" \
   -F "version=1.0.0" \
-  -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-  -F "config=@$CONFIG_FILE" 2>&1) || true
+  -F "app_file=@$APP_ZIP" 2>&1) || true
 
 if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
   echo "✓ Deployed $APP_ID"

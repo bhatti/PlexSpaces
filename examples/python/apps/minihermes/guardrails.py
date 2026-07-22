@@ -34,7 +34,7 @@ class GuardrailsGateActor:
         except Exception:
             pass
         for tool, policy in _BUILTIN_POLICIES.items():
-            host.kv_put(f"guardrail_policy:{tool}", policy)
+            host.kv.put(f"guardrail_policy:{tool}", policy)
         host.info(f"GuardrailsGateActor init actor_id={self.actor_id}")
 
     @handler("check")
@@ -42,7 +42,7 @@ class GuardrailsGateActor:
         if not tool:
             return {"error": "tool is required"}
         self.check_count += 1
-        policy_raw = host.kv_get(f"guardrail_policy:{tool}")
+        policy_raw = host.kv.get(f"guardrail_policy:{tool}")
         policy = policy_raw or "allow"
 
         if policy == "deny":
@@ -55,7 +55,7 @@ class GuardrailsGateActor:
             approval_id = hashlib.md5(f"{tool}{host.now_ms()}".encode()).hexdigest()[:8]
             approval = {"approval_id": approval_id, "tool": tool, "input": input or {},
                         "status": "pending", "created_at": host.now_ms()}
-            host.kv_put(f"approval:{approval_id}", json.dumps(approval))
+            host.kv.put(f"approval:{approval_id}", json.dumps(approval))
             try:
                 host.ts.write(["approval_pending", approval_id, tool])
             except Exception:
@@ -69,12 +69,12 @@ class GuardrailsGateActor:
     def approve(self, approval_id: str = "") -> dict:
         if not approval_id:
             return {"error": "approval_id is required"}
-        raw = host.kv_get(f"approval:{approval_id}")
+        raw = host.kv.get(f"approval:{approval_id}")
         if not raw:
             return {"error": "approval not found"}
         approval = json.loads(raw)
         approval["status"] = "approved"
-        host.kv_put(f"approval:{approval_id}", json.dumps(approval))
+        host.kv.put(f"approval:{approval_id}", json.dumps(approval))
         self.approval_count += 1
         fire_audit("guardrail_approved", f"approval_id={approval_id}")
         return {"status": "ok", "decision": "approved", "approval_id": approval_id}
@@ -83,12 +83,12 @@ class GuardrailsGateActor:
     def deny_approval(self, approval_id: str = "") -> dict:
         if not approval_id:
             return {"error": "approval_id is required"}
-        raw = host.kv_get(f"approval:{approval_id}")
+        raw = host.kv.get(f"approval:{approval_id}")
         if not raw:
             return {"error": "approval not found"}
         approval = json.loads(raw)
         approval["status"] = "denied"
-        host.kv_put(f"approval:{approval_id}", json.dumps(approval))
+        host.kv.put(f"approval:{approval_id}", json.dumps(approval))
         self.deny_count += 1
         return {"status": "ok", "decision": "denied", "approval_id": approval_id}
 
@@ -98,6 +98,6 @@ class GuardrailsGateActor:
             return {"error": "tool is required"}
         if policy not in ("allow", "review", "deny"):
             return {"error": f"invalid policy: {policy}"}
-        host.kv_put(f"guardrail_policy:{tool}", policy)
+        host.kv.put(f"guardrail_policy:{tool}", policy)
         fire_audit("guardrail_policy_set", f"tool={tool} policy={policy}")
         return {"status": "ok", "tool": tool, "policy": policy}

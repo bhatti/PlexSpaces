@@ -33,7 +33,10 @@ wit_bindgen::generate!({
 });
 
 use exports::plexspaces::actor::actor::Guest;
-use plexspaces::actor::host;
+use plexspaces::actor::host_actor::{ask, pg_join, pg_members, self_id, send, send_after};
+use plexspaces::actor::host_logging::now_ms;
+use plexspaces::actor::host_pool::{pool_checkin, pool_checkout};
+use plexspaces::actor::host_shard::{all_reduce_shard_group, application_metrics_add, barrier_shard_group, broadcast_shard_group, create_shard_group, reduce_shard_group, scatter_gather};
 use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
@@ -280,7 +283,7 @@ fn merge_application_metrics_for(
         latency_samples: json_object_to_u64_map(metrics.get("latency_samples")),
     }
     .encode_to_vec();
-    host::application_metrics_add(application_id, &metrics_bytes)
+    application_metrics_add(application_id, &metrics_bytes)
         .map(|_| ())
         .map_err(|err| format!("{context}: {err}"))
 }
@@ -295,7 +298,7 @@ fn require_application_metrics_merge(metrics: Value, context: &str) -> Result<()
 
 fn make_proto_message(payload: Value) -> ProtoMessage {
     ProtoMessage {
-        id: format!("req-{}", host::now_ms()),
+        id: format!("req-{}", now_ms()),
         message_type: "call".to_string(),
         payload: json_bytes(payload),
         ..Default::default()
@@ -304,6 +307,7 @@ fn make_proto_message(payload: Value) -> ProtoMessage {
 
 fn shard_group_create_request_bytes(group_id: &str, actor_type: &str, shard_count: usize) -> Vec<u8> {
     CreateShardGroupRequest {
+        request_id: String::new(),
         config: Some(DataParallelConfig {
             group_id: group_id.to_string(),
             shard_count: shard_count as u32,
@@ -339,6 +343,7 @@ fn scatter_gather_request_bytes(
     timeout_ms: u64,
 ) -> Vec<u8> {
     ScatterGatherRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         query: Some(make_proto_message(payload)),
         timeout: Some(duration_from_ms(timeout_ms)),
@@ -383,9 +388,10 @@ fn decode_scatter_gather_response(bytes: &[u8]) -> Result<Vec<Value>, String> {
 
 fn broadcast_request_bytes(group_id: &str, payload: Value, min_acks: usize, timeout_ms: u64) -> Vec<u8> {
     BroadcastShardGroupRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         message: Some(ProtoMessage {
-            id: format!("req-{}", host::now_ms()),
+            id: format!("req-{}", now_ms()),
             message_type: "cast".to_string(),
             payload: json_bytes(payload),
             ..Default::default()
@@ -398,6 +404,7 @@ fn broadcast_request_bytes(group_id: &str, payload: Value, min_acks: usize, time
 
 fn barrier_request_bytes(group_id: &str, round: u64, min_acks: usize, timeout_ms: u64) -> Vec<u8> {
     BarrierShardGroupRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         barrier_id: format!("barrier-{group_id}-{round}"),
         round,
@@ -409,6 +416,7 @@ fn barrier_request_bytes(group_id: &str, round: u64, min_acks: usize, timeout_ms
 
 fn reduce_request_bytes(group_id: &str, target: &str, min_responses: usize, timeout_ms: u64) -> Vec<u8> {
     ReduceShardGroupRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         map_function: Some(make_proto_message(json!({ "op": "get_numeric_stats" }))),
         timeout: Some(duration_from_ms(timeout_ms)),
@@ -423,6 +431,7 @@ fn reduce_request_bytes(group_id: &str, target: &str, min_responses: usize, time
 
 fn all_reduce_request_bytes(group_id: &str, target: &str, min_responses: usize, timeout_ms: u64) -> Vec<u8> {
     AllReduceShardGroupRequest {
+        request_id: String::new(),
         group_id: group_id.to_string(),
         map_function: Some(make_proto_message(json!({ "op": "get_numeric_stats" }))),
         timeout: Some(duration_from_ms(timeout_ms)),
@@ -524,7 +533,7 @@ fn unwrap_payload(payload: &Value) -> Value {
 }
 
 fn notify_metrics_event(worker_id: &str, latency_ms: u64, model_type: &str) {
-    if let Ok(members) = host::pg_members(METRICS_GROUP) {
+    if let Ok(members) = pg_members(METRICS_GROUP) {
         if let Some(target) = members.first() {
             let payload = json!({
                 "op": "inference_completed",
@@ -532,7 +541,7 @@ fn notify_metrics_event(worker_id: &str, latency_ms: u64, model_type: &str) {
                 "latency_ms": latency_ms,
                 "model_type": model_type,
             });
-            let _ = host::send(target, "cast", &json_bytes(payload));
+            let _ = send(target, "cast", &json_bytes(payload));
         }
     }
 }
@@ -564,12 +573,12 @@ fn handle_worker_infer(payload: &[u8]) -> Vec<u8> {
     // batch_size as a multiplier; coordination cost is paid once for the whole batch.
     let iterations = model_iterations(&model_type).saturating_mul(work_multiplier);
 
-    let batch_start_ms = host::now_ms();
+    let batch_start_ms = now_ms();
     let mut acc = 0_u64;
     for i in 0..iterations {
         acc = acc.wrapping_add(i as u64);
     }
-    let compute_time_ms = host::now_ms().saturating_sub(batch_start_ms);
+    let compute_time_ms = now_ms().saturating_sub(batch_start_ms);
     // One coordination RTT for the whole batch — this is the key batching benefit
     let coordination_time_ms = synthetic_worker_coordination_ms(&worker_id, &model_type);
     let latency_ms = compute_time_ms.saturating_add(coordination_time_ms);
@@ -623,7 +632,7 @@ fn handle_worker_infer(payload: &[u8]) -> Vec<u8> {
         "compute_time_ms": compute_time_ms,
         "coordination_time_ms": coordination_time_ms,
         "worker_id": worker_id,
-        "node_id": actor_node_id(&host::self_id()),
+        "node_id": actor_node_id(&self_id()),
         "acc": acc % 1000,
     }))
 }
@@ -683,14 +692,14 @@ fn run_shard_benchmark_impl(
     weak_scaling: bool,
 ) -> Value {
     let mut benchmark_results = Vec::new();
-    let leader_node_id = actor_node_id(&host::self_id());
+    let leader_node_id = actor_node_id(&self_id());
     let mut baseline: Option<(usize, f64)> = None;
 
     for shard_count in shard_counts {
-        let group_id = format!("bench-shard-{shard_count}-{}", host::now_ms());
+        let group_id = format!("bench-shard-{shard_count}-{}", now_ms());
         let create_request_bytes =
             shard_group_create_request_bytes(&group_id, "inference_worker", shard_count);
-        let create_response = match host::create_shard_group(&create_request_bytes) {
+        let create_response = match create_shard_group(&create_request_bytes) {
             Ok(response) => response,
             Err(err) => {
                 benchmark_results.push(json!({
@@ -735,7 +744,7 @@ fn run_shard_benchmark_impl(
         let mut total_errors = 0_u64;
         let mut worker_nodes = std::collections::BTreeSet::new();
         let mut remote_nodes = std::collections::BTreeSet::new();
-        let bench_start = host::now_ms();
+        let bench_start = now_ms();
 
         for warmup_idx in 0..warmup_requests {
             let request_bytes = scatter_gather_request_bytes(
@@ -752,7 +761,7 @@ fn run_shard_benchmark_impl(
                 shard_count,
                 DEFAULT_WORKER_TIMEOUT_MS,
             );
-            let _ = host::scatter_gather(&request_bytes);
+            let _ = scatter_gather(&request_bytes);
         }
 
         for i in 0..scatter_gather_rounds {
@@ -770,8 +779,8 @@ fn run_shard_benchmark_impl(
                 shard_count,
                 DEFAULT_WORKER_TIMEOUT_MS,
             );
-            let request_start = host::now_ms();
-            let response = match host::scatter_gather(&request_bytes) {
+            let request_start = now_ms();
+            let response = match scatter_gather(&request_bytes) {
                 Ok(response) => response,
                 Err(err) => {
                     benchmark_results.push(json!({
@@ -783,7 +792,7 @@ fn run_shard_benchmark_impl(
                 }
             };
             // Wall-clock coordination time includes the full scatter_gather RTT
-            let rtt_ms = host::now_ms().saturating_sub(request_start);
+            let rtt_ms = now_ms().saturating_sub(request_start);
             total_coordination_ms = total_coordination_ms.saturating_add(rtt_ms);
             if let Ok(shards) = decode_scatter_gather_response(&response) {
                 for shard in shards {
@@ -819,7 +828,7 @@ fn run_shard_benchmark_impl(
             continue;
         }
 
-        let elapsed_ms = host::now_ms().saturating_sub(bench_start);
+        let elapsed_ms = now_ms().saturating_sub(bench_start);
         let elapsed_s = if elapsed_ms > 0 {
             elapsed_ms as f64 / 1000.0
         } else {
@@ -1002,18 +1011,18 @@ fn handle_benchmark_run_pool(payload: &[u8]) -> Vec<u8> {
     let mut exec_times = Vec::new();
     let mut successful = 0_u64;
     let mut failed = 0_u64;
-    let bench_start = host::now_ms();
+    let bench_start = now_ms();
 
     for i in 0..total_requests {
-        let checkout_start = host::now_ms();
-        let checkout = match host::pool_checkout(&pool_name, 5_000) {
+        let checkout_start = now_ms();
+        let checkout = match pool_checkout(&pool_name, 5_000) {
             Ok(bytes) => bytes,
             Err(_) => {
                 failed += 1;
                 continue;
             }
         };
-        let wait_ms = host::now_ms().saturating_sub(checkout_start);
+        let wait_ms = now_ms().saturating_sub(checkout_start);
         if checkout.is_empty() {
             failed += 1;
             continue;
@@ -1041,8 +1050,8 @@ fn handle_benchmark_run_pool(payload: &[u8]) -> Vec<u8> {
             continue;
         }
 
-        let exec_start = host::now_ms();
-        let healthy = match host::ask(
+        let exec_start = now_ms();
+        let healthy = match ask(
             &actor_id,
             "infer",
             &json_bytes(json!({
@@ -1053,7 +1062,7 @@ fn handle_benchmark_run_pool(payload: &[u8]) -> Vec<u8> {
             10_000,
         ) {
             Ok(_) => {
-                exec_times.push(host::now_ms().saturating_sub(exec_start));
+                exec_times.push(now_ms().saturating_sub(exec_start));
                 successful += 1;
                 true
             }
@@ -1062,11 +1071,11 @@ fn handle_benchmark_run_pool(payload: &[u8]) -> Vec<u8> {
                 false
             }
         };
-        let _ = host::pool_checkin(&pool_name, &actor_id, &checkout_id, healthy);
+        let _ = pool_checkin(&pool_name, &actor_id, &checkout_id, healthy);
         wait_times.push(wait_ms);
     }
 
-    let elapsed_ms = host::now_ms().saturating_sub(bench_start);
+    let elapsed_ms = now_ms().saturating_sub(bench_start);
     let avg_wait_ms = if wait_times.is_empty() {
         0.0
     } else {
@@ -1117,10 +1126,10 @@ fn handle_benchmark_run_collective(payload: &[u8]) -> Vec<u8> {
     let num_shards = request.num_shards.unwrap_or(4);
     with_state(|state| state.benchmark_running = true);
 
-    let group_id = format!("bench-collective-{}", host::now_ms());
+    let group_id = format!("bench-collective-{}", now_ms());
     let create_request_bytes =
         shard_group_create_request_bytes(&group_id, "inference_worker", num_shards);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return json_error(err),
     };
@@ -1134,28 +1143,28 @@ fn handle_benchmark_run_collective(payload: &[u8]) -> Vec<u8> {
 
     let mut timings = serde_json::Map::new();
 
-    let t0 = host::now_ms();
-    let broadcast_result = host::broadcast_shard_group(&broadcast_request_bytes(
+    let t0 = now_ms();
+    let broadcast_result = broadcast_shard_group(&broadcast_request_bytes(
         &group_id,
         json!({ "op": "reset" }),
         num_shards,
         10_000,
     ));
-    let broadcast_ms = host::now_ms().saturating_sub(t0);
+    let broadcast_ms = now_ms().saturating_sub(t0);
     timings.insert("broadcast_ms".to_string(), json!(broadcast_ms));
 
-    let t0 = host::now_ms();
-    let barrier_result = host::barrier_shard_group(&barrier_request_bytes(
+    let t0 = now_ms();
+    let barrier_result = barrier_shard_group(&barrier_request_bytes(
         &group_id,
         1,
         num_shards,
         10_000,
     ));
-    let barrier_ms = host::now_ms().saturating_sub(t0);
+    let barrier_ms = now_ms().saturating_sub(t0);
     timings.insert("barrier_ms".to_string(), json!(barrier_ms));
 
-    let t0 = host::now_ms();
-    let scatter_result = host::scatter_gather(&scatter_gather_request_bytes(
+    let t0 = now_ms();
+    let scatter_result = scatter_gather(&scatter_gather_request_bytes(
         &group_id,
         ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
         json!({
@@ -1166,7 +1175,7 @@ fn handle_benchmark_run_collective(payload: &[u8]) -> Vec<u8> {
         num_shards,
         DEFAULT_WORKER_TIMEOUT_MS,
     ));
-    let scatter_gather_ms = host::now_ms().saturating_sub(t0);
+    let scatter_gather_ms = now_ms().saturating_sub(t0);
     timings.insert("scatter_gather_ms".to_string(), json!(scatter_gather_ms));
     let total_ok = scatter_result
         .ok()
@@ -1184,24 +1193,24 @@ fn handle_benchmark_run_collective(payload: &[u8]) -> Vec<u8> {
         })
         .unwrap_or(0);
 
-    let t0 = host::now_ms();
-    let reduce_result = host::reduce_shard_group(&reduce_request_bytes(
+    let t0 = now_ms();
+    let reduce_result = reduce_shard_group(&reduce_request_bytes(
         &group_id,
         "requests_processed",
         num_shards,
         10_000,
     ));
-    let reduce_ms = host::now_ms().saturating_sub(t0);
+    let reduce_ms = now_ms().saturating_sub(t0);
     timings.insert("reduce_ms".to_string(), json!(reduce_ms));
 
-    let t0 = host::now_ms();
-    let allreduce_result = host::all_reduce_shard_group(&all_reduce_request_bytes(
+    let t0 = now_ms();
+    let allreduce_result = all_reduce_shard_group(&all_reduce_request_bytes(
         &group_id,
         "requests_processed",
         num_shards,
         10_000,
     ));
-    let allreduce_ms = host::now_ms().saturating_sub(t0);
+    let allreduce_ms = now_ms().saturating_sub(t0);
     timings.insert("allreduce_ms".to_string(), json!(allreduce_ms));
 
     let broadcast_acks = broadcast_result
@@ -1282,7 +1291,7 @@ fn handle_benchmark_get_results() -> Vec<u8> {
 fn orchestrator_run_shard_mode(group_id: &str, num_shards: usize, num_requests: usize) -> Value {
     let create_request_bytes =
         shard_group_create_request_bytes(group_id, "inference_worker", num_shards);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return json!({ "status": "error", "error": err }),
     };
@@ -1310,7 +1319,7 @@ fn orchestrator_run_shard_mode(group_id: &str, num_shards: usize, num_requests: 
             num_shards,
             DEFAULT_WORKER_TIMEOUT_MS,
         );
-        let response = match host::scatter_gather(&request_bytes) {
+        let response = match scatter_gather(&request_bytes) {
             Ok(response) => response,
             Err(err) => return json!({ "status": "error", "error": err }),
         };
@@ -1354,7 +1363,7 @@ fn orchestrator_run_shard_mode(group_id: &str, num_shards: usize, num_requests: 
 fn orchestrator_run_collective_mode(group_id: &str, num_shards: usize) -> Value {
     let create_request_bytes =
         shard_group_create_request_bytes(group_id, "inference_worker", num_shards);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return json!({ "status": "error", "error": err }),
     };
@@ -1368,21 +1377,21 @@ fn orchestrator_run_collective_mode(group_id: &str, num_shards: usize) -> Value 
 
     let mut timings = serde_json::Map::new();
 
-    let t0 = host::now_ms();
-    let _ = host::broadcast_shard_group(&broadcast_request_bytes(
+    let t0 = now_ms();
+    let _ = broadcast_shard_group(&broadcast_request_bytes(
         group_id,
         json!({ "op": "reset" }),
         num_shards,
         10_000,
     ));
-    timings.insert("broadcast_ms".to_string(), json!(host::now_ms().saturating_sub(t0)));
+    timings.insert("broadcast_ms".to_string(), json!(now_ms().saturating_sub(t0)));
 
-    let t0 = host::now_ms();
-    let _ = host::barrier_shard_group(&barrier_request_bytes(group_id, 1, num_shards, 10_000));
-    timings.insert("barrier_ms".to_string(), json!(host::now_ms().saturating_sub(t0)));
+    let t0 = now_ms();
+    let _ = barrier_shard_group(&barrier_request_bytes(group_id, 1, num_shards, 10_000));
+    timings.insert("barrier_ms".to_string(), json!(now_ms().saturating_sub(t0)));
 
-    let t0 = host::now_ms();
-    let response = host::scatter_gather(&scatter_gather_request_bytes(
+    let t0 = now_ms();
+    let response = scatter_gather(&scatter_gather_request_bytes(
         group_id,
         ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
         json!({
@@ -1393,7 +1402,7 @@ fn orchestrator_run_collective_mode(group_id: &str, num_shards: usize) -> Value 
         num_shards,
         DEFAULT_WORKER_TIMEOUT_MS,
     ));
-    timings.insert("scatter_gather_ms".to_string(), json!(host::now_ms().saturating_sub(t0)));
+    timings.insert("scatter_gather_ms".to_string(), json!(now_ms().saturating_sub(t0)));
     let total_ok = response
         .ok()
         .and_then(|bytes| decode_scatter_gather_response(&bytes).ok())
@@ -1410,14 +1419,14 @@ fn orchestrator_run_collective_mode(group_id: &str, num_shards: usize) -> Value 
         })
         .unwrap_or(0);
 
-    let t0 = host::now_ms();
-    let _ = host::reduce_shard_group(&reduce_request_bytes(
+    let t0 = now_ms();
+    let _ = reduce_shard_group(&reduce_request_bytes(
         group_id,
         "requests_processed",
         num_shards,
         10_000,
     ));
-    timings.insert("reduce_ms".to_string(), json!(host::now_ms().saturating_sub(t0)));
+    timings.insert("reduce_ms".to_string(), json!(now_ms().saturating_sub(t0)));
 
     json!({
         "status": "ok",
@@ -1439,7 +1448,7 @@ fn orchestrator_run_pool_mode(num_requests: usize) -> Value {
     let mut failed = 0_u64;
     let mut total_latency = 0_u64;
     for i in 0..num_requests {
-        let checkout = match host::pool_checkout(POOL_NAME, 5_000) {
+        let checkout = match pool_checkout(POOL_NAME, 5_000) {
             Ok(bytes) => bytes,
             Err(_) => {
                 failed += 1;
@@ -1463,8 +1472,8 @@ fn orchestrator_run_pool_mode(num_requests: usize) -> Value {
             failed += 1;
             continue;
         }
-        let t0 = host::now_ms();
-        let healthy = match host::ask(
+        let t0 = now_ms();
+        let healthy = match ask(
             actor_id,
             "infer",
             &json_bytes(json!({
@@ -1476,7 +1485,7 @@ fn orchestrator_run_pool_mode(num_requests: usize) -> Value {
         ) {
             Ok(_) => {
                 successful += 1;
-                total_latency += host::now_ms().saturating_sub(t0);
+                total_latency += now_ms().saturating_sub(t0);
                 true
             }
             Err(_) => {
@@ -1484,7 +1493,7 @@ fn orchestrator_run_pool_mode(num_requests: usize) -> Value {
                 false
             }
         };
-        let _ = host::pool_checkin(POOL_NAME, actor_id, checkout_id, healthy);
+        let _ = pool_checkin(POOL_NAME, actor_id, checkout_id, healthy);
     }
 
     let avg_latency_ms = if successful > 0 {
@@ -1512,7 +1521,7 @@ fn handle_orchestrator_workflow_run(payload: &[u8]) -> Vec<u8> {
     let mode = request.mode.unwrap_or_else(|| "shard".to_string());
     let num_shards = request.num_shards.unwrap_or(4);
     let num_requests = request.num_requests.unwrap_or(20);
-    let group_id = format!("orch-{mode}-{}", host::now_ms());
+    let group_id = format!("orch-{mode}-{}", now_ms());
 
     let result = match mode.as_str() {
         "shard" => orchestrator_run_shard_mode(&group_id, num_shards, num_requests),
@@ -1658,7 +1667,7 @@ fn handle_circuit_record_failure() -> Vec<u8> {
         }))
     });
     if should_schedule_reset {
-        let _ = host::send_after(5_000, "try_reset", b"{}");
+        let _ = send_after(5_000, "try_reset", b"{}");
     }
     response
 }
@@ -1762,7 +1771,7 @@ impl ParallelAiInferenceBridge {
         let actor_id = config
             .actor_id
             .clone()
-            .unwrap_or_else(|| host::self_id());
+            .unwrap_or_else(|| self_id());
         let role = resolve_role(&config, &actor_id)
             .ok_or_else(|| format!("missing required role for actor {actor_id}"))?;
         let application_id = actor_application_id(&actor_id);
@@ -1791,7 +1800,7 @@ impl ParallelAiInferenceBridge {
         });
 
         if role == "metrics_event" {
-            let _ = host::pg_join(METRICS_GROUP);
+            let _ = pg_join(METRICS_GROUP);
         }
 
         Ok(String::new())

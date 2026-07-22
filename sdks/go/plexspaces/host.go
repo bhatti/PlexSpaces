@@ -17,6 +17,7 @@
 package plexspaces
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,6 +25,47 @@ import (
 
 // errorPrefix is the convention used by WIT host functions to signal errors.
 const errorPrefix = "ERROR:"
+
+// ActorRef is a lightweight handle to a named virtual actor.
+// Use GetActorRef to obtain one; call Tell or Ask to send messages.
+// Equivalent to Cloudflare DO's env.BINDING.get(id).
+type ActorRef struct {
+	actorID string
+}
+
+// GetActorRef constructs an ActorRef for a named virtual actor.
+// The actor is created automatically on first contact.
+//
+// Example (equivalent to Cloudflare env.CHAT_ROOM.get(roomId)):
+//
+//	room := plexspaces.GetActorRef("ChatRoomActor", roomId, "default")
+//	result := room.Ask("send_message", payload, 5000)
+func GetActorRef(actorType, name, namespace string) *ActorRef {
+	return &ActorRef{
+		actorID: name + "//" + actorType + "::" + namespace + "@*",
+	}
+}
+
+// ID returns the canonical actor ID string.
+func (r *ActorRef) ID() string {
+	return r.actorID
+}
+
+// Tell sends a fire-and-forget message to the actor.
+// payload should be JSON-encoded bytes or nil.
+func (r *ActorRef) Tell(msgType string, payload []byte) {
+	hostSend(r.actorID, msgType, string(payload))
+}
+
+// Ask sends a request and waits for a response (up to timeoutMs milliseconds).
+// Returns the response bytes or an error string.
+func (r *ActorRef) Ask(msgType string, payload []byte, timeoutMs uint64) ([]byte, error) {
+	result := hostAsk(r.actorID, msgType, string(payload), timeoutMs)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return []byte(result), nil
+}
 
 // Host provides access to PlexSpaces host functions from within a WASM actor.
 //
@@ -59,6 +101,286 @@ type TupleSpace struct {
 
 // TS returns the TupleSpace helper for list-in, list-out operations.
 func (h *Host) TS() *TupleSpace { return h.ts }
+
+// KeyValueStore provides a namespaced accessor for KV and durable alarm operations.
+// Equivalent to Cloudflare DO's this.state.storage API.
+type KeyValueStore struct{}
+
+// KV returns the KeyValueStore namespace accessor.
+func (h *Host) KV() *KeyValueStore {
+	return &KeyValueStore{}
+}
+
+// Alarm provides a namespaced accessor for durable alarm operations.
+// Equivalent to Cloudflare DO's this.state.storage.setAlarm / deleteAlarm.
+type Alarm struct{}
+
+// Alarm returns the Alarm namespace accessor.
+func (h *Host) Alarm() *Alarm {
+	return &Alarm{}
+}
+
+// LockClient provides a namespaced accessor for distributed lock operations.
+type LockClient struct{}
+
+// Locks returns the LockClient namespace accessor.
+func (h *Host) Locks() *LockClient {
+	return &LockClient{}
+}
+
+// BlobStore provides a namespaced accessor for blob/object storage operations.
+type BlobStore struct{}
+
+// Blob returns the BlobStore namespace accessor.
+func (h *Host) Blob() *BlobStore {
+	return &BlobStore{}
+}
+
+// HTTPClient provides a namespaced accessor for outbound HTTP via service links.
+type HTTPClient struct{}
+
+// HTTP returns the HTTPClient namespace accessor.
+func (h *Host) HTTP() *HTTPClient {
+	return &HTTPClient{}
+}
+
+// ActorMessaging provides a namespaced accessor for actor messaging and lifecycle.
+type ActorMessaging struct{}
+
+// Actor returns the ActorMessaging namespace accessor.
+func (h *Host) Actor() *ActorMessaging {
+	return &ActorMessaging{}
+}
+
+// KeyValueStore methods
+
+func (kv *KeyValueStore) Get(key string) (string, error) {
+	result := hostKVGet(key)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+func (kv *KeyValueStore) Put(key, value string) error {
+	return checkError(hostKVPut(key, value))
+}
+func (kv *KeyValueStore) Delete(key string) error {
+	return checkError(hostKVDelete(key))
+}
+func (kv *KeyValueStore) List(prefix string) ([]string, error) {
+	result := hostKVList(prefix)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(result), &keys); err != nil {
+		return nil, fmt.Errorf("kv list: parse response: %w", err)
+	}
+	return keys, nil
+}
+func (kv *KeyValueStore) PutWithTTL(key, value string, ttlSeconds uint64) error {
+	return checkError(hostKVPutWithTTL(key, value, ttlSeconds))
+}
+func (kv *KeyValueStore) GetTTL(key string) uint64 { return hostKVGetTTL(key) }
+func (kv *KeyValueStore) CAS(key, expected, newValue string) (bool, error) {
+	return hostKVCAS(key, expected, newValue), nil
+}
+func (kv *KeyValueStore) Increment(key string, delta int64) int64 {
+	return hostKVIncrement(key, delta)
+}
+func (kv *KeyValueStore) MultiGet(keys []string) ([]string, error) {
+	keysJSON, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	raw := hostKVMultiGet(string(keysJSON))
+	if isHostError(raw) {
+		return nil, fmt.Errorf("%s", raw[len(errorPrefix):])
+	}
+	var b64vals []interface{}
+	if err := json.Unmarshal([]byte(raw), &b64vals); err != nil {
+		return nil, fmt.Errorf("kv_multi_get: parse response: %w", err)
+	}
+	results := make([]string, len(b64vals))
+	for i, v := range b64vals {
+		if v == nil {
+			results[i] = ""
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return nil, fmt.Errorf("kv_multi_get: decode key %d: %w", i, err)
+		}
+		results[i] = string(decoded)
+	}
+	return results, nil
+}
+func (kv *KeyValueStore) MultiPut(entries map[string]string) error {
+	encoded := make(map[string]string, len(entries))
+	for k, v := range entries {
+		encoded[k] = base64.StdEncoding.EncodeToString([]byte(v))
+	}
+	data, err := json.Marshal(encoded)
+	if err != nil {
+		return err
+	}
+	return checkError(hostKVMultiPut(string(data)))
+}
+func (kv *KeyValueStore) GetJSON(key string, dest interface{}) (bool, error) {
+	raw, err := kv.Get(key)
+	if err != nil {
+		return false, err
+	}
+	if raw == "" {
+		return false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), dest); err != nil {
+		return false, fmt.Errorf("KVGetJSON(%q): %w", key, err)
+	}
+	return true, nil
+}
+func (kv *KeyValueStore) PutJSON(key string, src interface{}) error {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return fmt.Errorf("KVPutJSON(%q): marshal: %w", key, err)
+	}
+	return kv.Put(key, string(data))
+}
+
+// Alarm methods
+
+func (a *Alarm) Set(timestampMs uint64) error { return checkError(hostAlarmSet(timestampMs)) }
+func (a *Alarm) SetIn(delayMs uint64) error   { return checkError(hostAlarmSet(hostNowMs() + delayMs)) }
+func (a *Alarm) Get() (uint64, error)         { return hostAlarmGet(), nil }
+func (a *Alarm) Delete() error                { return checkError(hostAlarmDelete()) }
+
+// LockClient methods
+
+func (lc *LockClient) Acquire(holderID, lockName string, leaseSecs uint32, timeoutMs uint64) ([]byte, error) {
+	result := hostLockAcquire(holderID, lockName, leaseSecs, timeoutMs)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return []byte(result), nil
+}
+func (lc *LockClient) Release(lockID, holderID, lockVersion string) error {
+	return checkError(hostLockRelease(lockID, holderID, lockVersion))
+}
+func (lc *LockClient) Renew(lockID, holderID, lockVersion string, leaseSecs uint32) ([]byte, error) {
+	result := hostLockRenew(lockID, holderID, lockVersion, leaseSecs)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return []byte(result), nil
+}
+
+// BlobStore methods
+
+func (bs *BlobStore) Upload(name string, data []byte, contentType string) (string, error) {
+	result := hostBlobUpload(name, string(data), contentType)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+func (bs *BlobStore) Download(blobID string) ([]byte, error) {
+	result := hostBlobDownload(blobID)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	return []byte(result), nil
+}
+func (bs *BlobStore) Delete(blobID string) error {
+	return checkError(hostBlobDelete(blobID))
+}
+func (bs *BlobStore) List(prefix string) ([]string, error) {
+	result := hostBlobList(prefix)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(result), &keys); err != nil {
+		return nil, fmt.Errorf("blob list: parse response: %w", err)
+	}
+	return keys, nil
+}
+
+// HTTPClient methods
+
+func (hc *HTTPClient) Fetch(linkName, method, pathAndQuery string, headers map[string]string, body []byte) (map[string]any, error) {
+	reqWire, err := encodeHttpFetchRequestWire(headers, body)
+	if err != nil {
+		return nil, err
+	}
+	result := hostHTTPFetch(linkName, method, pathAndQuery, reqWire)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var jsonOut map[string]any
+	if err := json.Unmarshal([]byte(result), &jsonOut); err == nil {
+		return jsonOut, nil
+	}
+	return decodeHttpFetchResponseWire([]byte(result))
+}
+
+// ActorMessaging methods
+
+func (am *ActorMessaging) Send(to, msgType string, payload any) string {
+	return hostSend(to, msgType, marshalPayload(payload))
+}
+func (am *ActorMessaging) Ask(to, msgType string, payload any, timeoutMs uint64) (any, error) {
+	result := hostAsk(to, msgType, marshalPayload(payload), timeoutMs)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		return result, nil
+	}
+	return parsed, nil
+}
+func (am *ActorMessaging) SelfID() string { return hostSelfID() }
+func (am *ActorMessaging) Spawn(moduleRef, actorName, role string, args map[string]string) (string, error) {
+	var argsJSON string
+	if len(args) == 0 {
+		argsJSON = "{}"
+	} else {
+		data, err := json.Marshal(args)
+		if err != nil {
+			return "", fmt.Errorf("Spawn: marshal args: %w", err)
+		}
+		argsJSON = string(data)
+	}
+	result := hostSpawn(moduleRef, actorName, role, argsJSON)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+func (am *ActorMessaging) Stop(actorID string) error { return checkError(hostStop(actorID)) }
+func (am *ActorMessaging) Link(actorID string) error { return checkError(hostLink(actorID)) }
+func (am *ActorMessaging) Unlink(actorID string) error { return checkError(hostUnlink(actorID)) }
+func (am *ActorMessaging) Monitor(actorID string) (string, error) {
+	result := hostMonitor(actorID)
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
+func (am *ActorMessaging) Demonitor(monitorRef string) error {
+	return checkError(hostDemonitor(monitorRef))
+}
+func (am *ActorMessaging) SendAfter(delayMs uint64, msgType string, payload any) (string, error) {
+	result := hostSendAfter(delayMs, msgType, marshalPayload(payload))
+	if isHostError(result) {
+		return "", &HostError{result}
+	}
+	return result, nil
+}
 
 // Write writes a tuple. Elements must be JSON-serializable (WASM: encoded as tuplespace WriteRequest protobuf).
 func (ts *TupleSpace) Write(tuple []any) string {
@@ -213,14 +535,6 @@ func (h *Host) Demonitor(monitorRef string) error {
 // Timers
 // ========================================================================
 
-// SendAfter sends a message to self after a delay. Returns a timer ID for tracking.
-// Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
-// Stop the actor to cancel pending timers.
-func (h *Host) SendAfter(delayMs uint64, msgType string, payload any) string {
-	payloadJSON := marshalPayload(payload)
-	return hostSendAfter(delayMs, msgType, payloadJSON)
-}
-
 // ========================================================================
 // Logging & Time
 // ========================================================================
@@ -247,55 +561,6 @@ func (h *Host) NowMs() uint64 {
 	return hostNowMs()
 }
 
-// ========================================================================
-// Key-Value Store
-// ========================================================================
-
-// KVGet retrieves a value by key. Returns value or empty if not found.
-func (h *Host) KVGet(key string) string { return hostKVGet(key) }
-
-// KVPut stores a value. Returns empty on success, "ERROR:message" on failure.
-func (h *Host) KVPut(key, value string) string { return hostKVPut(key, value) }
-
-// KVDelete removes a key. Returns empty on success, "ERROR:message" on failure.
-func (h *Host) KVDelete(key string) string { return hostKVDelete(key) }
-
-// KVList lists keys with a prefix. Returns JSON array of keys.
-func (h *Host) KVList(prefix string) string { return hostKVList(prefix) }
-
-// KVGetJSON retrieves a value by key and JSON-unmarshals it into dest.
-// Returns (true, nil) on success, (false, nil) if the key does not exist,
-// or (false, err) if unmarshalling fails.
-//
-//	var task map[string]any
-//	found, err := host.KVGetJSON("queue:pending:1", &task)
-func (h *Host) KVGetJSON(key string, dest any) (bool, error) {
-	raw := h.KVGet(key)
-	if raw == "" {
-		return false, nil
-	}
-	if err := json.Unmarshal([]byte(raw), dest); err != nil {
-		return false, fmt.Errorf("KVGetJSON(%q): %w", key, err)
-	}
-	return true, nil
-}
-
-// KVPutJSON marshals src to JSON and stores it under key.
-// Returns an error if marshalling fails or the KV write fails.
-//
-//	if err := host.KVPutJSON("queue:pending:1", task); err != nil {
-//	    host.Warn(fmt.Sprintf("KVPutJSON failed: %v", err))
-//	}
-func (h *Host) KVPutJSON(key string, src any) error {
-	data, err := json.Marshal(src)
-	if err != nil {
-		return fmt.Errorf("KVPutJSON(%q): marshal: %w", key, err)
-	}
-	if result := h.KVPut(key, string(data)); isHostError(result) {
-		return fmt.Errorf("KVPutJSON(%q): %s", key, result)
-	}
-	return nil
-}
 
 // ========================================================================
 // TupleSpace (Linda-style coordination)
@@ -321,48 +586,6 @@ func (h *Host) TSTake(patternJSON string) string { return hostTSTake(patternJSON
 // Returns JSON array of matched tuples, e.g. [["task","w1",1],["task","w2",2]].
 func (h *Host) TSReadAll(patternJSON string) string { return hostTSReadAll(patternJSON) }
 
-// ========================================================================
-// Distributed Locks
-// ========================================================================
-
-// LockAcquire acquires a distributed lock.
-// Returns JSON on success with lock details, or "ERROR:message" on failure/timeout.
-func (h *Host) LockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
-	return hostLockAcquire(tenantID, namespace, holderID, lockName, leaseDurationSecs, timeoutMs)
-}
-
-// LockRelease releases a distributed lock.
-// Returns empty on success, "ERROR:message" on failure.
-func (h *Host) LockRelease(lockID, tenantID, namespace, holderID, lockVersion string) string {
-	return hostLockRelease(lockID, tenantID, namespace, holderID, lockVersion)
-}
-
-// LockRenew renews the lease on a held lock (heartbeat).
-// Returns new lock version on success, or "ERROR:message" on failure.
-func (h *Host) LockRenew(lockID, tenantID, namespace, holderID, lockVersion string, leaseDurationSecs uint32) string {
-	return hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion, leaseDurationSecs)
-}
-
-// ========================================================================
-// Blob Storage
-// ========================================================================
-
-// BlobUpload uploads blob data (base64-encoded).
-// On success returns the server-assigned blob id (ULID on WASM); native stubs return "".
-// On failure returns "ERROR:message". Use IsHostError to tell error from success.
-func (h *Host) BlobUpload(blobID, data, contentType string) string {
-	return hostBlobUpload(blobID, data, contentType)
-}
-
-// BlobDownload downloads blob data.
-// Returns base64-encoded content on success, empty if not found.
-func (h *Host) BlobDownload(blobID string) string { return hostBlobDownload(blobID) }
-
-// BlobDelete deletes a blob. Returns empty on success, "ERROR:message" on failure.
-func (h *Host) BlobDelete(blobID string) string { return hostBlobDelete(blobID) }
-
-// BlobList lists blobs with a prefix. Returns JSON array of blob IDs.
-func (h *Host) BlobList(prefix string) string { return hostBlobList(prefix) }
 
 // ========================================================================
 // EventLog — two-cursor watermark (embed in actor state)
@@ -393,9 +616,14 @@ type EventLog struct {
 func (el *EventLog) Append(h *Host, prefix string, entry any) (int64, error) {
 	el.Watermark++
 	key := fmt.Sprintf("%sseq:%d", prefix, el.Watermark)
-	if err := h.KVPutJSON(key, entry); err != nil {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		el.Watermark--
+		return 0, fmt.Errorf("KVPutJSON(%q): marshal: %w", key, err)
+	}
+	if result := hostKVPut(key, string(data)); isHostError(result) {
 		el.Watermark-- // roll back on failure
-		return 0, err
+		return 0, fmt.Errorf("KVPutJSON(%q): %s", key, result)
 	}
 	return el.Watermark, nil
 }
@@ -406,7 +634,7 @@ func (el *EventLog) Append(h *Host, prefix string, entry any) (int64, error) {
 func (el *EventLog) Poll(h *Host, prefix, consumerID string, limit int) ([]any, int64, error) {
 	cursorKey := prefix + "cursor:" + consumerID
 	var cursor int64
-	if raw := h.KVGet(cursorKey); raw != "" {
+	if raw := hostKVGet(cursorKey); raw != "" {
 		fmt.Sscanf(raw, "%d", &cursor)
 	}
 
@@ -414,19 +642,20 @@ func (el *EventLog) Poll(h *Host, prefix, consumerID string, limit int) ([]any, 
 	newCursor := cursor
 	for seq := cursor + 1; seq <= el.Watermark && len(events) < limit; seq++ {
 		key := fmt.Sprintf("%sseq:%d", prefix, seq)
+		raw := hostKVGet(key)
+		if raw == "" {
+			continue
+		}
 		var entry any
-		found, err := h.KVGetJSON(key, &entry)
-		if err != nil {
-			return events, newCursor, err
+		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			return events, newCursor, fmt.Errorf("KVGetJSON(%q): %w", key, err)
 		}
-		if found {
-			events = append(events, entry)
-			newCursor = seq
-		}
+		events = append(events, entry)
+		newCursor = seq
 	}
 
 	if newCursor != cursor {
-		h.KVPut(cursorKey, fmt.Sprintf("%d", newCursor))
+		hostKVPut(cursorKey, fmt.Sprintf("%d", newCursor))
 	}
 	return events, newCursor, nil
 }
@@ -1055,19 +1284,6 @@ func checkError(result string) error {
 //   - any other type: JSON-marshaled
 //
 // On marshal failure, returns the error as a JSON error object.
-// marshalStringSlice serializes a string slice to a JSON array for WIT boundary crossing.
-// TinyGo //go:wasmimport functions cannot accept Go slices directly.
-func marshalStringSlice(s []string) string {
-	if len(s) == 0 {
-		return "[]"
-	}
-	data, err := json.Marshal(s)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
 func marshalPayload(payload any) string {
 	if payload == nil {
 		return "{}"

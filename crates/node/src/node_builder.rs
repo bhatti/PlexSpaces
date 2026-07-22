@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # Node Builder
@@ -474,6 +474,25 @@ impl NodeBuilder {
         if let Some(registry) = node.service_locator().actor_registry().await {
             registry.set_local_listen_addr(
                 plexspaces_common::dialable_node_address(node.config().listen_addr.trim()),
+            ).await;
+        }
+
+        // Register gRPC transport clients so that remote actor messaging works without
+        // calling `Node::start()`.  `start()` registers WS-wrapping clients on top of
+        // these; here we register the plain gRPC clients which are sufficient for tests
+        // and embedded nodes that do not need WebSocket thin-client support.
+        {
+            use plexspaces_actor::{GrpcActorTransportClient, GrpcNodeTransportClient, InitializableServiceLocator};
+
+            let sl = node.service_locator();
+            let sl_trait: std::sync::Arc<dyn plexspaces_actor::ServiceLocator> = sl.clone();
+            let grpc_actor = std::sync::Arc::new(GrpcActorTransportClient::new(sl_trait.clone()));
+            let grpc_node = std::sync::Arc::new(GrpcNodeTransportClient::new(sl_trait));
+            sl.register_actor_transport_client(
+                grpc_actor as std::sync::Arc<dyn plexspaces_service_traits::ActorTransportClient>,
+            ).await;
+            sl.register_node_transport_client(
+                grpc_node as std::sync::Arc<dyn plexspaces_service_traits::NodeTransportClient>,
             ).await;
         }
 

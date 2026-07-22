@@ -270,6 +270,7 @@ async fn do_callback(
     let (user, _created) = oidc
         .user_repo
         .get_or_create_by_email(&GetOrCreateByEmailRequest {
+            request_id: ulid::Ulid::new().to_string(),
             email: user_info.email.clone(),
             tenant_id: tenant_id.clone(),
             display_name: user_info.name.clone(),

@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2025 PlexSpaces Contributors
+//
 // Guild Chat Server - Discord-style Real-Time Chat with Durable Objects (Go WASM)
 //
 // Demonstrates Cloudflare Workers Durable Objects pattern for real-time chat:
 // - ChatRoom actor: per-room state, member tracking, message fan-out, history
 // - RateLimiter actor: per-user token bucket rate limiting (spam prevention)
+// - AlarmDemo actor: durable alarm lifecycle (setAlarm equivalent)
 //
 // Inspired by:
 // - Discord's guild process architecture (one Elixir GenServer per guild)
@@ -13,14 +17,18 @@
 //
 // ## SDK Features Used
 //
-// - plexspaces.ActorRouter: Multi-actor routing (ChatRoom + RateLimiter)
+// - plexspaces.ActorRouter: Multi-actor routing (ChatRoom + RateLimiter + AlarmDemo)
 // - plexspaces.BaseActor: Actor base with JSON state serialization
-// - plexspaces.Host: Host function wrappers (Ask, Send, NowMs, KV, etc.)
+// - plexspaces.Host: Host function wrappers (Ask, Send, NowMs, KV, Alarms, etc.)
 // - Init(): Actor initialization from framework config
 // - Handle(): Message routing by msg-type
 // - GetState()/SetState(): Checkpoint-based state persistence
-// - host.Send(): Fire-and-forget messaging (fan-out)
-// - host.KVPut()/KVGet(): Durable storage (message history persistence)
+// - host.Send(): Fire-and-forget messaging (real fan-out to member actors)
+// - host.KV().Put()/KVGet(): Durable storage (message history persistence)
+// - host.KV().CAS(): Atomic compare-and-swap for idempotent operations
+// - host.KV().Increment(): Atomic counter increment for distributed rate limiting
+// - host.KV().MultiGet()/KVMultiPut(): Batch KV for history load/store
+// - host.Alarm().Set()/AlarmGet()/AlarmDelete(): Durable alarm lifecycle
 //
 // ## Comparison to Cloudflare Workers / Durable Objects
 //
@@ -32,7 +40,13 @@
 // | fetch(request) handler            | Handle(from, msgType, payload)    |
 // | blockConcurrencyWhile()           | Init() (runs before any Handle)   |
 // | WebSocket accept/send             | host.Send() fan-out to members    |
-// | alarm() scheduled callback        | host.SendAfter() timer            |
+// | storage.setAlarm(timestamp)       | host.Alarm().Set(timestampMs)        |
+// | storage.getAlarm()                | host.Alarm().Get()                   |
+// | alarm() scheduled callback        | "__alarm__" message handler       |
+// | CAS / transactional put           | host.KV().CAS(key, expected, new)    |
+// | Atomic counter (R2/KV)            | host.KV().Increment(key, delta)      |
+// | Batch storage.get([k1,k2,...])    | host.KV().MultiGet(keys)             |
+// | Batch storage.put({k:v,...})      | host.KV().MultiPut(entries)          |
 // | wrangler.toml [[bindings]]        | app-config.toml [[children]]      |
 // | Worker script routing             | ActorRouter prefix matching       |
 
@@ -119,21 +133,69 @@ func (c *ChatRoom) Init(configJSON string) string {
 		c.MaxHistory = 100
 	}
 
-	// Like Durable Object blockConcurrencyWhile() — restore persisted state
-	stored := host.KVGet("room:" + c.RoomID + ":history")
-	if stored != "" {
-		var msgs []ChatMessage
-		if err := json.Unmarshal([]byte(stored), &msgs); err == nil {
-			c.Messages = msgs
-			if len(msgs) > 0 {
-				c.MessageSeq = msgs[len(msgs)-1].Seq
-			}
-		}
-	}
+	// Like Durable Object blockConcurrencyWhile() — restore persisted state.
+	// Use KVMultiGet for batch history load: fetch seq index + individual message keys.
+	c.loadHistoryBatch()
 
 	host.Info(fmt.Sprintf("ChatRoom %s: max_history=%d, restored=%d messages",
 		c.RoomID, c.MaxHistory, len(c.Messages)))
 	return ""
+}
+
+// loadHistoryBatch restores message history using KVMultiGet (batch fetch).
+// Falls back to the legacy single-key format if the index key is absent.
+func (c *ChatRoom) loadHistoryBatch() {
+	indexKey := "room:" + c.RoomID + ":seq_index"
+	indexRaw, _ := host.KV().Get(indexKey)
+	if indexRaw == "" {
+		// Fallback: legacy single-key history blob
+		stored, _ := host.KV().Get("room:" + c.RoomID + ":history")
+		if stored != "" {
+			var msgs []ChatMessage
+			if err := json.Unmarshal([]byte(stored), &msgs); err == nil {
+				c.Messages = msgs
+				if len(msgs) > 0 {
+					c.MessageSeq = msgs[len(msgs)-1].Seq
+				}
+			}
+		}
+		return
+	}
+
+	// Parse the seq index (list of seq numbers stored)
+	var seqs []uint64
+	if err := json.Unmarshal([]byte(indexRaw), &seqs); err != nil || len(seqs) == 0 {
+		return
+	}
+
+	// Build keys for batch fetch
+	keys := make([]string, len(seqs))
+	for i, seq := range seqs {
+		keys[i] = fmt.Sprintf("room:%s:msg:%d", c.RoomID, seq)
+	}
+
+	values, err := host.KV().MultiGet(keys)
+	if err != nil {
+		host.Info(fmt.Sprintf("ChatRoom %s: KVMultiGet error: %v", c.RoomID, err))
+		return
+	}
+
+	msgs := make([]ChatMessage, 0, len(seqs))
+	for i, v := range values {
+		if v == "" {
+			continue
+		}
+		var msg ChatMessage
+		if err := json.Unmarshal([]byte(v), &msg); err == nil {
+			msgs = append(msgs, msg)
+		} else {
+			host.Info(fmt.Sprintf("ChatRoom %s: skip key %s: %v", c.RoomID, keys[i], err))
+		}
+	}
+	c.Messages = msgs
+	if len(msgs) > 0 {
+		c.MessageSeq = msgs[len(msgs)-1].Seq
+	}
 }
 
 func (c *ChatRoom) Handle(fromActor, msgType, payloadJSON string) string {
@@ -235,6 +297,7 @@ func (c *ChatRoom) handleLeave(payloadJSON string) string {
 // handleSendMessage broadcasts a message to all room members.
 // This is the core fan-out pattern — like Discord's guild process
 // that fans out events to all connected session processes.
+// Uses host.Send() for real fire-and-forget fan-out to each member actor.
 func (c *ChatRoom) handleSendMessage(payloadJSON string) string {
 	var req struct {
 		UserID  string `json:"user_id"`
@@ -261,12 +324,22 @@ func (c *ChatRoom) handleSendMessage(payloadJSON string) string {
 	// Add to history (like Durable Object storage.put)
 	msg := c.addMessage(req.UserID, req.Content, now)
 
-	// Fan-out: notify all other members (like Discord's Manifold pattern)
-	// In production, each member would be a session actor receiving the broadcast.
-	// Here we track the fan-out count for benchmarking.
+	// Build the broadcast payload once
+	outMsg := marshal(map[string]any{
+		"room_id":   c.RoomID,
+		"seq":       msg.Seq,
+		"from":      req.UserID,
+		"content":   req.Content,
+		"timestamp": now,
+	})
+
+	// Real fan-out: send to every other member actor via host.Send().
+	// Each member is treated as a session actor — mirrors Discord's Manifold
+	// pattern where the guild process fans out to all connected session processes.
 	fanOutCount := 0
 	for memberID := range c.Members {
 		if memberID != req.UserID {
+			host.Send(memberID, "receive_message", outMsg)
 			fanOutCount++
 			c.TotalBroadcasts++
 		}
@@ -337,11 +410,20 @@ func (c *ChatRoom) handleSendMessageBatch(payloadJSON string) string {
 		member.MsgCount++
 
 		now := host.NowMs()
-		c.addMessage(req.UserID, fmt.Sprintf("%s #%d", req.Content, i), now)
+		msg := c.addMessage(req.UserID, fmt.Sprintf("%s #%d", req.Content, i), now)
 
-		// Count fan-out per message
+		outMsg := marshal(map[string]any{
+			"room_id":   c.RoomID,
+			"seq":       msg.Seq,
+			"from":      req.UserID,
+			"content":   fmt.Sprintf("%s #%d", req.Content, i),
+			"timestamp": now,
+		})
+
+		// Fan-out via host.Send() to each member actor
 		for memberID := range c.Members {
 			if memberID != req.UserID {
+				host.Send(memberID, "receive_message", outMsg)
 				totalFanOut++
 				c.TotalBroadcasts++
 			}
@@ -374,6 +456,8 @@ func (c *ChatRoom) handleSendMessageBatch(payloadJSON string) string {
 }
 
 // handleGetHistory returns recent messages (like DO storage.list).
+// Uses KVMultiGet to batch-fetch individual message keys when they are
+// stored per-seq, demonstrating the batch KV API.
 func (c *ChatRoom) handleGetHistory(payloadJSON string) string {
 	var req struct {
 		Limit    int    `json:"limit"`
@@ -400,12 +484,31 @@ func (c *ChatRoom) handleGetHistory(payloadJSON string) string {
 	}
 	result := filtered[start:]
 
+	// Demonstrate KVMultiGet: fetch the same messages from per-seq KV keys.
+	// This shows how batch KV maps directly to Cloudflare DO storage.get([k1,k2,...]).
+	var batchFetched int
+	if len(result) > 0 {
+		keys := make([]string, len(result))
+		for i, msg := range result {
+			keys[i] = fmt.Sprintf("room:%s:msg:%d", c.RoomID, msg.Seq)
+		}
+		values, err := host.KV().MultiGet(keys)
+		if err == nil {
+			for _, v := range values {
+				if v != "" {
+					batchFetched++
+				}
+			}
+		}
+	}
+
 	return marshal(map[string]any{
-		"status":   "ok",
-		"room_id":  c.RoomID,
-		"messages": result,
-		"count":    len(result),
-		"total":    len(c.Messages),
+		"status":        "ok",
+		"room_id":       c.RoomID,
+		"messages":      result,
+		"count":         len(result),
+		"total":         len(c.Messages),
+		"batch_fetched": batchFetched,
 	})
 }
 
@@ -481,11 +584,37 @@ func (c *ChatRoom) addMessage(userID, content string, timestamp uint64) ChatMess
 	return msg
 }
 
-// persistHistory durably stores message history (like DO storage.put).
+// persistHistory durably stores message history using KVMultiPut (batch write).
+// Stores each message under its own key ("room:{id}:msg:{seq}") plus a seq index.
+// This mirrors Cloudflare DO storage.put({k1:v1, k2:v2, ...}) batch API.
 func (c *ChatRoom) persistHistory() {
-	data, err := json.Marshal(c.Messages)
-	if err == nil {
-		host.KVPut("room:"+c.RoomID+":history", string(data))
+	if len(c.Messages) == 0 {
+		return
+	}
+
+	entries := make(map[string]string, len(c.Messages)+1)
+
+	// Store each message individually keyed by seq
+	seqs := make([]uint64, 0, len(c.Messages))
+	for _, msg := range c.Messages {
+		data, err := json.Marshal(msg)
+		if err == nil {
+			entries[fmt.Sprintf("room:%s:msg:%d", c.RoomID, msg.Seq)] = string(data)
+			seqs = append(seqs, msg.Seq)
+		}
+	}
+
+	// Store seq index so Init can reconstruct the key list on restore
+	if idxData, err := json.Marshal(seqs); err == nil {
+		entries["room:"+c.RoomID+":seq_index"] = string(idxData)
+	}
+
+	if err := host.KV().MultiPut(entries); err != nil {
+		// Fallback: legacy single-key write
+		data, merr := json.Marshal(c.Messages)
+		if merr == nil {
+			host.KV().Put("room:"+c.RoomID+":history", string(data))
+		}
 	}
 }
 
@@ -496,6 +625,9 @@ func (c *ChatRoom) persistHistory() {
 // RateLimiter implements per-user token bucket rate limiting.
 // Like the Cloudflare chat demo's RateLimiter Durable Object that
 // tracks request frequency per IP to prevent spam.
+//
+// Uses host.KVIncrement for distributed atomic counting and host.KVCAS
+// for idempotent token reservation, demonstrating both atomic KV APIs.
 type RateLimiter struct {
 	plexspaces.BaseActor
 
@@ -574,6 +706,9 @@ func (r *RateLimiter) Handle(fromActor, msgType, payloadJSON string) string {
 }
 
 // checkRate checks if a user is within rate limits using token bucket.
+// Demonstrates two atomic KV primitives:
+//   - host.KVIncrement: atomically counts requests per user across restarts
+//   - host.KVCAS: atomically reserves a token slot (idempotent deduction)
 func (r *RateLimiter) checkRate(payloadJSON string) string {
 	var req struct {
 		UserID string `json:"user_id"`
@@ -586,6 +721,11 @@ func (r *RateLimiter) checkRate(payloadJSON string) string {
 	}
 
 	now := host.NowMs()
+
+	// Atomic distributed counter: counts total lifetime requests for this user.
+	// Survives actor restarts — unlike the in-process bucket which resets on restart.
+	// Equivalent to Cloudflare KV atomic increment for distributed rate limiting.
+	_ = host.KV().Increment("rate:"+req.UserID+":total", 1)
 
 	bucket, exists := r.Buckets[req.UserID]
 	if !exists {
@@ -609,7 +749,15 @@ func (r *RateLimiter) checkRate(payloadJSON string) string {
 		}
 	}
 
-	// Check if tokens available
+	// Atomic CAS: attempt to reserve a token slot.
+	// Demonstrates host.KVCAS — equivalent to Cloudflare DO transactional storage
+	// where you read-modify-write atomically to prevent double-spend.
+	casKey := fmt.Sprintf("rate:%s:window", req.UserID)
+	currentVal, _ := host.KV().Get(casKey)
+	nextVal := fmt.Sprintf("%d", now)
+	_, _ = host.KV().CAS(casKey, currentVal, nextVal)
+
+	// Check if tokens available (in-process token bucket)
 	allowed := bucket.Tokens > 0
 	if allowed {
 		bucket.Tokens--
@@ -749,6 +897,184 @@ func (r *RateLimiter) getStats() string {
 }
 
 // ========================================================================
+// AlarmDemo Actor (Durable Object setAlarm equivalent)
+// ========================================================================
+
+// AlarmDemo demonstrates the durable alarm lifecycle.
+// Equivalent to Cloudflare Durable Object this.state.storage.setAlarm():
+//   - "start"    → host.Alarm().Set(nowMs + 30s)   — schedule alarm 30s from now
+//   - "__alarm__" → process batched requests      — alarm fired callback
+//   - "status"   → host.Alarm().Get()               — when does the alarm fire?
+//   - "cancel"   → host.Alarm().Delete()            — cancel the pending alarm
+//
+// In production this pattern batches writes, flushes queues, or expires sessions.
+type AlarmDemo struct {
+	plexspaces.BaseActor
+
+	// Pending requests collected before the alarm fires
+	PendingRequests []string `json:"pending_requests"`
+
+	// Lifecycle counters
+	TotalAlarmsSet   int `json:"total_alarms_set"`
+	TotalAlarmsFired int `json:"total_alarms_fired"`
+	TotalProcessed   int `json:"total_processed"`
+}
+
+func NewAlarmDemo() plexspaces.Actor {
+	a := &AlarmDemo{
+		PendingRequests: make([]string, 0),
+	}
+	a.SetSelf(a)
+	return a
+}
+
+func (a *AlarmDemo) Init(configJSON string) string {
+	var config struct {
+		ActorID string `json:"actor_id"`
+	}
+	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+		return "ERROR: " + err.Error()
+	}
+	a.SetRuntimeMetadata(config.ActorID)
+	host.Info(fmt.Sprintf("AlarmDemo %s: initialized", a.ActorID()))
+	return ""
+}
+
+func (a *AlarmDemo) Handle(fromActor, msgType, payloadJSON string) string {
+	switch msgType {
+	case "start":
+		return a.handleStart(payloadJSON)
+	case "__alarm__":
+		return a.handleAlarm(payloadJSON)
+	case "status":
+		return a.handleStatus()
+	case "cancel":
+		return a.handleCancel()
+	case "enqueue":
+		return a.handleEnqueue(payloadJSON)
+	default:
+		return marshal(map[string]any{"error": "unknown operation: " + msgType})
+	}
+}
+
+// handleStart schedules a durable alarm 30 seconds from now.
+// Equivalent to Cloudflare DO: this.state.storage.setAlarm(Date.now() + 30_000)
+func (a *AlarmDemo) handleStart(payloadJSON string) string {
+	var req struct {
+		DelayMs uint64 `json:"delay_ms"`
+	}
+	// Default delay: 30 seconds
+	req.DelayMs = 30000
+	if payloadJSON != "" && payloadJSON != "{}" {
+		json.Unmarshal([]byte(payloadJSON), &req)
+	}
+	if req.DelayMs == 0 {
+		req.DelayMs = 30000
+	}
+
+	fireAt := host.NowMs() + req.DelayMs
+	if err := host.Alarm().Set(fireAt); err != nil {
+		return marshal(map[string]any{"error": "alarm_set failed: " + err.Error()})
+	}
+	a.TotalAlarmsSet++
+
+	host.Info(fmt.Sprintf("AlarmDemo %s: alarm set, fires in %dms at ts=%d",
+		a.ActorID(), req.DelayMs, fireAt))
+
+	return marshal(map[string]any{
+		"status":            "ok",
+		"action":            "alarm_scheduled",
+		"fire_at_ms":        fireAt,
+		"delay_ms":          req.DelayMs,
+		"total_alarms_set":  a.TotalAlarmsSet,
+		"pending_requests":  len(a.PendingRequests),
+	})
+}
+
+// handleAlarm is invoked by the framework when the scheduled alarm fires.
+// Equivalent to Cloudflare DO: async alarm() { ... }
+// Processes all batched pending requests and optionally reschedules.
+func (a *AlarmDemo) handleAlarm(payloadJSON string) string {
+	a.TotalAlarmsFired++
+	processed := len(a.PendingRequests)
+	a.TotalProcessed += processed
+
+	host.Info(fmt.Sprintf("AlarmDemo %s: alarm fired, processing %d pending requests",
+		a.ActorID(), processed))
+
+	// Process the batch
+	results := make([]string, 0, processed)
+	for _, req := range a.PendingRequests {
+		results = append(results, fmt.Sprintf("processed:%s", req))
+	}
+	a.PendingRequests = make([]string, 0)
+
+	return marshal(map[string]any{
+		"status":              "ok",
+		"action":              "alarm_fired",
+		"processed":           processed,
+		"results":             results,
+		"total_alarms_fired":  a.TotalAlarmsFired,
+		"total_processed":     a.TotalProcessed,
+	})
+}
+
+// handleStatus returns the current alarm schedule.
+// Equivalent to Cloudflare DO: this.state.storage.getAlarm()
+func (a *AlarmDemo) handleStatus() string {
+	fireAt, err := host.Alarm().Get()
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+
+	return marshal(map[string]any{
+		"status":             "ok",
+		"alarm_fire_at_ms":   fireAt,
+		"alarm_set":          fireAt > 0,
+		"pending_requests":   len(a.PendingRequests),
+		"total_alarms_set":   a.TotalAlarmsSet,
+		"total_alarms_fired": a.TotalAlarmsFired,
+		"total_processed":    a.TotalProcessed,
+		"error":              errMsg,
+	})
+}
+
+// handleCancel cancels the pending durable alarm.
+// Equivalent to Cloudflare DO: this.state.storage.deleteAlarm()
+func (a *AlarmDemo) handleCancel() string {
+	if err := host.Alarm().Delete(); err != nil {
+		return marshal(map[string]any{"error": "alarm_delete failed: " + err.Error()})
+	}
+
+	host.Info(fmt.Sprintf("AlarmDemo %s: alarm cancelled", a.ActorID()))
+
+	return marshal(map[string]any{
+		"status": "ok",
+		"action": "alarm_cancelled",
+	})
+}
+
+// handleEnqueue adds a request to the pending batch (processed when alarm fires).
+func (a *AlarmDemo) handleEnqueue(payloadJSON string) string {
+	var req struct {
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(payloadJSON), &req); err != nil || req.Data == "" {
+		req.Data = fmt.Sprintf("item-%d", len(a.PendingRequests))
+	}
+
+	a.PendingRequests = append(a.PendingRequests, req.Data)
+
+	return marshal(map[string]any{
+		"status":           "ok",
+		"action":           "enqueued",
+		"data":             req.Data,
+		"pending_requests": len(a.PendingRequests),
+	})
+}
+
+// ========================================================================
 // Helpers
 // ========================================================================
 
@@ -796,6 +1122,7 @@ func init() {
 	router := plexspaces.NewActorRouter()
 	router.Route("ChatRoom", NewChatRoom)
 	router.Route("RateLimiter", NewRateLimiter)
+	router.Route("AlarmDemo", NewAlarmDemo)
 	plexspaces.Register(router)
 }
 

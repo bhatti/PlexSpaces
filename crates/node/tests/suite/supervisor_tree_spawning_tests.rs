@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Comprehensive tests for supervisor tree spawning (Erlang-style)
@@ -577,6 +577,7 @@ async fn deploy_application_with_wasm(
 
     // Create deployment request (same as gRPC would receive)
     let request = DeployApplicationRequest {
+        request_id: ulid::Ulid::new().to_string(),
         application_id: format!("{}-001", app_name),
         name: app_name.to_string(),
         version: app_spec.version.clone(),
@@ -636,6 +637,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
@@ -738,6 +740,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "nested-app", app_spec)
@@ -1031,6 +1034,7 @@ async fn test_deeply_nested_supervisor_tree() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
@@ -1126,6 +1130,7 @@ async fn test_actors_tracked_in_application() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
@@ -1204,6 +1209,7 @@ async fn test_complex_supervisor_hierarchy() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "complex-app", app_spec)
@@ -1376,6 +1382,7 @@ async fn test_multiple_sibling_supervisors() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
@@ -1477,6 +1484,7 @@ async fn test_auto_generated_supervisor_tree() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "auto-app", app_spec)
@@ -1566,6 +1574,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "shutdown-app", app_spec)
@@ -1656,6 +1665,7 @@ async fn test_actor_type_tracking_complex_tree() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
@@ -1800,6 +1810,7 @@ async fn test_erlang_style_supervision_structure() {
             seed_nodes: vec![],
             required_service_links: vec![],
             metadata: None,
+            static_mount: String::new(),
         };
 
         deploy_application_mock(&node, "my_app", app_spec)

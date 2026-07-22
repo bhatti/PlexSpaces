@@ -12,6 +12,7 @@
 package plexspaces
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -26,6 +27,7 @@ var stubState = struct {
 	groupSent         []stubGroupMessage
 	logs              []stubLog
 	kvStore           map[string]string
+	alarmStore        map[string]uint64            // actor_id → alarm timestamp ms
 	tupleStore        [][]any
 	blobStore         map[string]string
 	pgMembers         map[string][]string
@@ -41,6 +43,7 @@ var stubState = struct {
 	useRealTime       bool
 }{
 	kvStore:       make(map[string]string),
+	alarmStore:    make(map[string]uint64),
 	blobStore:     make(map[string]string),
 	pgMembers:     make(map[string][]string),
 	registryStore: make(map[string]map[string]any),
@@ -75,6 +78,7 @@ func ResetStubs() {
 	stubState.groupSent = nil
 	stubState.logs = nil
 	stubState.kvStore = make(map[string]string)
+	stubState.alarmStore = make(map[string]uint64)
 	stubState.tupleStore = nil
 	stubState.blobStore = make(map[string]string)
 	stubState.pgMembers = make(map[string][]string)
@@ -234,6 +238,105 @@ func hostKVList(prefix string) string {
 	return string(data)
 }
 
+func hostKVPutWithTTL(key, value string, _ uint64) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	stubState.kvStore[key] = value
+	return ""
+}
+
+func hostKVGetTTL(_ string) uint64 { return 0 }
+
+func hostKVCAS(key, expected, newValue string) bool {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	current, exists := stubState.kvStore[key]
+	// empty expected means "key must not exist" (matches host semantics)
+	if expected == "" {
+		if exists {
+			return false
+		}
+	} else {
+		if !exists || current != expected {
+			return false
+		}
+	}
+	stubState.kvStore[key] = newValue
+	return true
+}
+
+func hostKVIncrement(key string, delta int64) int64 {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var current int64
+	if v, ok := stubState.kvStore[key]; ok {
+		fmt.Sscanf(v, "%d", &current)
+	}
+	current += delta
+	stubState.kvStore[key] = fmt.Sprintf("%d", current)
+	return current
+}
+
+func hostKVMultiGet(keysJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var keys []string
+	if err := json.Unmarshal([]byte(keysJSON), &keys); err != nil {
+		return errorPrefix + err.Error()
+	}
+	// Result is JSON array of base64-encoded values or null for missing keys,
+	// matching the Rust host format so KVMultiGet can decode transparently.
+	result := make([]interface{}, len(keys))
+	for i, k := range keys {
+		if v, ok := stubState.kvStore[k]; ok {
+			result[i] = base64.StdEncoding.EncodeToString([]byte(v))
+		} else {
+			result[i] = nil
+		}
+	}
+	data, _ := json.Marshal(result)
+	return string(data)
+}
+
+func hostKVMultiPut(entriesJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	// entriesJSON is a map of key → base64-encoded value (matches KVMultiPut encoding).
+	var encoded map[string]string
+	if err := json.Unmarshal([]byte(entriesJSON), &encoded); err != nil {
+		return errorPrefix + err.Error()
+	}
+	for k, v64 := range encoded {
+		decoded, err := base64.StdEncoding.DecodeString(v64)
+		if err != nil {
+			return errorPrefix + "base64 decode for key " + k + ": " + err.Error()
+		}
+		stubState.kvStore[k] = string(decoded)
+	}
+	return ""
+}
+
+func hostAlarmSet(timestampMs uint64) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	actorID := stubState.selfID
+	stubState.alarmStore[actorID] = timestampMs
+	return ""
+}
+
+func hostAlarmGet() uint64 {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	return stubState.alarmStore[stubState.selfID]
+}
+
+func hostAlarmDelete() string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	delete(stubState.alarmStore, stubState.selfID)
+	return ""
+}
+
 func tupleMatches(tupleValue []any, pattern []any) bool {
 	if len(tupleValue) != len(pattern) {
 		return false
@@ -310,12 +413,12 @@ func hostTSReadAll(patternJSON string) string {
 	return string(data)
 }
 
-func hostLockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
+func hostLockAcquire(holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
 	return `{"lock_key":"test-lock","version":"v1","holder_id":"` + holderID + `","locked":true}`
 }
 
-func hostLockRelease(lockID, tenantID, namespace, holderID, lockVersion string) string { return "" }
-func hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion string, leaseDurationSecs uint32) string {
+func hostLockRelease(lockID, holderID, lockVersion string) string { return "" }
+func hostLockRenew(lockID, holderID, lockVersion string, leaseDurationSecs uint32) string {
 	return "v2"
 }
 

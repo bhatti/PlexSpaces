@@ -10,6 +10,7 @@ categories.workspace = true
 description = "Dashboard service and UI for PlexSpaces monitoring"
 
 [dependencies]
+ulid = { workspace = true }
 # Core dependencies
 plexspaces-proto = { workspace = true }
 plexspaces-common = { workspace = true }

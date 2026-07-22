@@ -136,6 +136,7 @@ async fn test_event_sourcing_paginated_history() {
 
     loop {
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset,
             limit,
             filter: String::new(),
@@ -267,6 +268,7 @@ async fn test_event_sourcing_large_event_log() {
 
     // Test pagination with large event log
     let page_request = PageRequest {
+        request_id: ulid::Ulid::new().to_string(),
         offset: 0,
         limit: 100,
         filter: String::new(),
@@ -289,6 +291,7 @@ async fn test_event_sourcing_large_event_log() {
     for _ in 0..9 {
         // 9 more pages to get all 1000 events
         let page_request = PageRequest {
+            request_id: ulid::Ulid::new().to_string(),
             offset: current_offset,
             limit: 100,
             filter: String::new(),

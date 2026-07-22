@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 // PlexSpaces Elastic Actor Pool API
@@ -43,6 +43,7 @@ syntax = "proto3";
 
 package plexspaces.pool.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -317,26 +318,30 @@ service PoolService {
 
 // CreatePool request
 message CreatePoolRequest {
-  PoolConfig config = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  PoolConfig config = 2;
 }
 
 // CreatePool response
 message CreatePoolResponse {
-  string pool_id = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_id = 2;
 }
 
 // Checkout request
 message CheckoutRequest {
-  string pool_name = 1;
-  google.protobuf.Duration timeout = 2;
-  map<string, string> metadata = 3; // For tracking/correlation
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
+  google.protobuf.Duration timeout = 3;
+  map<string, string> metadata = 4; // For tracking/correlation
 }
 
 // Checkout response
 message CheckoutResponse {
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
   oneof result {
-    ActorHandle actor = 1;
-    CheckoutError error = 2;
+    ActorHandle actor = 2;
+    CheckoutError error = 3;
   }
 }
 
@@ -356,93 +361,108 @@ message CheckoutError {
 
 // Checkin request
 message CheckinRequest {
-  string pool_name = 1;
-  string actor_id = 2;
-  string checkout_id = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
+  string actor_id = 3;
+  string checkout_id = 4;
 
   // Optional: actor health status
-  bool healthy = 4;
+  bool healthy = 5;
 }
 
 // Checkin response
 message CheckinResponse {
-  bool checked_in = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool checked_in = 2;
 }
 
 // GetStats request
 message GetStatsRequest {
-  string pool_name = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
 }
 
 // GetStats response
 message GetStatsResponse {
-  PoolMetrics metrics = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  PoolMetrics metrics = 2;
 }
 
 // Scale request (manual scaling)
 message ScaleRequest {
-  string pool_name = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
 
   oneof scale_type {
-    uint32 absolute_size = 2; // Set to exact size
-    int32 relative_size = 3; // Add/remove N actors
+    uint32 absolute_size = 3; // Set to exact size
+    int32 relative_size = 4; // Add/remove N actors
   }
 }
 
 // Scale response
 message ScaleResponse {
-  uint32 new_size = 1;
-  uint32 actors_added = 2;
-  uint32 actors_removed = 3;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  uint32 new_size = 2;
+  uint32 actors_added = 3;
+  uint32 actors_removed = 4;
 }
 
 // PauseScaling request
 message PauseScalingRequest {
-  string pool_name = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
 }
 
 // PauseScaling response
 message PauseScalingResponse {
-  bool paused = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool paused = 2;
 }
 
 // ResumeScaling request
 message ResumeScalingRequest {
-  string pool_name = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
 }
 
 // ResumeScaling response
 message ResumeScalingResponse {
-  bool resumed = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool resumed = 2;
 }
 
 // Drain request
 message DrainRequest {
-  string pool_name = 1;
-  google.protobuf.Duration timeout = 2; // Wait for actors to finish
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
+  google.protobuf.Duration timeout = 3; // Wait for actors to finish
 }
 
 // Drain response
 message DrainResponse {
-  bool drained = 1;
-  uint32 actors_drained = 2;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool drained = 2;
+  uint32 actors_drained = 3;
 }
 
 // DeletePool request
 message DeletePoolRequest {
-  string pool_name = 1;
-  bool force = 2; // Force delete even with busy actors
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
+  bool force = 3; // Force delete even with busy actors
 }
 
 // DeletePool response
 message DeletePoolResponse {
-  bool deleted = 1;
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  bool deleted = 2;
 }
 
 // StreamMetrics request
 message StreamMetricsRequest {
-  string pool_name = 1;
-  google.protobuf.Duration interval = 2; // Update frequency
+  string request_id = 1 [(buf.validate.field).string.max_len = 40];
+  string pool_name = 2;
+  google.protobuf.Duration interval = 3; // Update frequency
 }
 
 // ==================== Error Types ====================

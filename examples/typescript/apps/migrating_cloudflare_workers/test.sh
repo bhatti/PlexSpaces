@@ -25,6 +25,7 @@ NC='\033[0m'
 APP_ID="cloudflare-guild-chat-ts"
 CHAT_ACTOR="ChatRoomActor:room-1"
 RL_ACTOR="RateLimiterActor:rl-1"
+ALARM_ACTOR="AlarmDemoActor:alarm-1"
 NUM_USERS=5
 BATCH_MSGS=200
 BATCH_RATE_CHECKS=5000
@@ -72,6 +73,10 @@ fi
 # Step 1: Check node
 echo "Step 1: Check node status"
 echo "----------------------------------------------------------------"
+trap 'rm -f "${APP_ZIP:-}"' EXIT
+APP_ZIP="$(mktemp /tmp/app_XXXXXX.zip)"
+rm -f "$APP_ZIP"
+zip -j "$APP_ZIP" "$WASM_FILE" "$CONFIG_FILE" >/dev/null
 HTTP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$HTTP_PORT/" 2>/dev/null) || HTTP_CHECK="000"
 if [ "$HTTP_CHECK" = "000" ]; then
     echo -e "${RED}Cannot connect to node at localhost:$HTTP_PORT${NC}"
@@ -96,8 +101,7 @@ DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/ap
     -F "application_id=$APP_ID" \
     -F "name=cloudflare-guild-chat-ts" \
     -F "version=1.0.0" \
-    -F "wasm_file=@$WASM_FILE;type=application/wasm" \
-    -F "config=@$CONFIG_FILE" 2>&1) || true
+    -F "app_file=@$APP_ZIP" 2>&1) || true
   HTTP_CODE=$(echo "$DEPLOY_OUT" | tail -n1)
   RESPONSE=$(echo "$DEPLOY_OUT" | sed '$d')
   if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
@@ -115,6 +119,7 @@ fi
 echo -e "${GREEN}Deployed $APP_ID${NC}"
 echo "  - ChatRoomActor:    ChatRoomActor:room-1"
 echo "  - RateLimiterActor: RateLimiterActor:rl-1"
+echo "  - AlarmDemoActor:   AlarmDemoActor:alarm-1"
 echo ""
 sleep 2
 
@@ -338,8 +343,42 @@ else
 fi
 echo ""
 
-# Step 8: Final Statistics
-echo "Step 8: Final Statistics"
+# Step 8: Alarm Demo (Durable alarm / batch processing)
+echo "Step 8: Alarm Demo - Durable Alarm API (DO alarm() equivalent)"
+echo "----------------------------------------------------------------"
+echo ""
+
+echo "  Enqueuing items for deferred batch processing..."
+for i in 1 2 3; do
+    RESP=$(send_op "$ALARM_ACTOR" "{\"op\":\"enqueue\",\"item\":\"task-$i\"}" 5)
+    if echo "$RESP" | grep -q '"status":"ok"'; then
+        QUEUED=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('queued',0))" 2>/dev/null || echo "?")
+        echo -e "    ${GREEN}Enqueued item $i (queued: $QUEUED)${NC}"
+    else
+        echo -e "    ${YELLOW}Enqueue item $i: $RESP${NC}"
+    fi
+done
+echo ""
+
+echo "  Checking alarm status..."
+ALARM_RESP=$(send_op "$ALARM_ACTOR" '{"op":"status"}' 5)
+if echo "$ALARM_RESP" | grep -q '"status":"ok"'; then
+    ALARM_QUEUED=$(echo "$ALARM_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('queued',0))" 2>/dev/null || echo "?")
+    ALARM_SET=$(echo "$ALARM_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('alarm_set',False))" 2>/dev/null || echo "?")
+    ALARM_AT=$(echo "$ALARM_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',d); print(p.get('alarm_at',0))" 2>/dev/null || echo "?")
+    echo -e "    ${GREEN}Alarm status: queued=$ALARM_QUEUED, alarm_set=$ALARM_SET, alarm_at=$ALARM_AT${NC}"
+    if [ "$ALARM_SET" = "True" ] || [ "$ALARM_SET" = "true" ]; then
+        echo -e "    ${GREEN}PASS: Durable alarm scheduled (DO storage.setAlarm() equivalent)${NC}"
+    else
+        echo -e "    ${YELLOW}WARN: Alarm not scheduled (reminder facet may not be active in test env)${NC}"
+    fi
+else
+    echo -e "    ${YELLOW}AlarmDemo status: $ALARM_RESP${NC}"
+fi
+echo ""
+
+# Step 9: Final Statistics
+echo "Step 9: Final Statistics"
 echo "================================================================"
 echo ""
 

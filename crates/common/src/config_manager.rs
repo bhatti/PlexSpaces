@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Configuration Manager (Viper-style)
@@ -75,6 +75,11 @@ pub const ENV_WASM_APPS_DIR: &str = "PLEXSPACES_WASM_APPS_DIR";
 
 /// Save deployed WASM applications to wasm_apps_directory (for testing only)
 pub const ENV_SAVE_WASM_APPS: &str = "PLEXSPACES_SAVE_WASM_APPS";
+
+/// Static file directories to serve over HTTP.
+/// Format: "<mount_path>:<fs_path>[:<mount_path2>:<fs_path2>...]"
+/// Example: "apps/chat:/opt/plexspaces/static/chat:apps/admin:/opt/plexspaces/static/admin"
+pub const ENV_STATIC_DIRS: &str = "PLEXSPACES_STATIC_DIRS";
 
 /// Base directory for PlexSpaces data (default: $HOME/plexspaces)
 pub const ENV_BASE_DIR: &str = "PLEXSPACES_BASE_DIR";
@@ -321,6 +326,24 @@ pub fn get_env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+/// Parse PLEXSPACES_STATIC_DIRS env value into (mount_path, fs_path) pairs.
+/// Format: "<mount>:<path>[:<mount2>:<path2>...]"
+pub fn parse_static_dirs_env(value: Option<&str>) -> Vec<(String, String)> {
+    let Some(s) = value else { return vec![] };
+    let parts: Vec<&str> = s.split(':').collect();
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i + 1 < parts.len() {
+        let mount = parts[i].trim();
+        let path = parts[i + 1].trim();
+        if !mount.is_empty() && !path.is_empty() {
+            result.push((mount.to_string(), path.to_string()));
+        }
+        i += 2;
+    }
+    result
+}
+
 // ============================================================================
 // EnvConfig - Typed Configuration Access
 // ============================================================================
@@ -375,6 +398,8 @@ pub struct EnvConfig {
     pub mtls_server_cert: Option<String>,
     /// mTLS server key path (from PLEXSPACES_MTLS_SERVER_KEY)
     pub mtls_server_key: Option<String>,
+    /// Static dirs from PLEXSPACES_STATIC_DIRS (parsed into mount/fs pairs)
+    pub static_dirs: Vec<(String, String)>,
 }
 
 impl EnvConfig {
@@ -398,6 +423,7 @@ impl EnvConfig {
             mtls_ca_cert: get_env(ENV_MTLS_CA_CERT),
             mtls_server_cert: get_env(ENV_MTLS_SERVER_CERT),
             mtls_server_key: get_env(ENV_MTLS_SERVER_KEY),
+            static_dirs: parse_static_dirs_env(get_env(ENV_STATIC_DIRS).as_deref()),
         }
     }
 
@@ -521,6 +547,7 @@ fn mask_db_url(url: &str) -> String {
 /// - `PLEXSPACES_JWT_SECRET` → `spec.runtime.security.jwt.secret`
 /// - `PLEXSPACES_DISABLE_AUTH` → `spec.runtime.security.disable_auth`
 /// - `PLEXSPACES_MTLS_*` → mTLS certificate paths
+/// - `PLEXSPACES_STATIC_DIRS` → `spec.runtime.static_dirs` (format: `<mount>:<path>[:<mount2>:<path2>...]`)
 ///
 /// ## Arguments
 /// * `spec` - ReleaseSpec to initialize in-place
@@ -621,6 +648,22 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
         runtime.save_wasm_apps = true;
     }
     // Note: If config.save_wasm_apps is false, we keep the existing value from proto (defaults to false)
+
+    // ===========================================
+    // 2b. Apply static_dirs env override
+    // ===========================================
+    // Env var takes precedence over config file: if PLEXSPACES_STATIC_DIRS is set, it replaces
+    // whatever was in the config file entirely (same precedence as other env overrides).
+    if !config.static_dirs.is_empty() {
+        runtime.static_dirs = config
+            .static_dirs
+            .iter()
+            .map(|(mount, path)| plexspaces_proto::node::v1::StaticDirMount {
+                mount_path: mount.clone(),
+                fs_path: path.clone(),
+            })
+            .collect();
+    }
 
     // ===========================================
     // 4. Set locks_provider default
@@ -1052,6 +1095,7 @@ mod tests {
             mtls_cert_dir: None,
             redis_url: None,
             release_config_path: None,
+            static_dirs: vec![],
         };
 
         // Verify EnvConfig fields

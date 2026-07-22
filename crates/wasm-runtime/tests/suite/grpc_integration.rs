@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! Integration tests for WASM gRPC service
@@ -95,6 +95,7 @@ async fn test_grpc_deploy_module_integration() {
     };
 
     let request = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module),
         pre_warm: 0,
         target_node_tags: vec![],
@@ -134,6 +135,7 @@ async fn test_grpc_deploy_invalid_module() {
     };
 
     let request = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module),
         pre_warm: 0,
         target_node_tags: vec![],
@@ -166,6 +168,7 @@ async fn test_grpc_deploy_missing_module() {
 
     // Create request with missing module field
     let request = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: None,
         pre_warm: 0,
         target_node_tags: vec![],
@@ -205,6 +208,7 @@ async fn test_grpc_deploy_empty_name() {
     };
 
     let request = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module),
         pre_warm: 0,
         target_node_tags: vec![],
@@ -244,6 +248,7 @@ async fn test_grpc_instantiate_actor_integration() {
     };
 
     let deploy_req = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module),
         pre_warm: 0,
         target_node_tags: vec![],
@@ -255,8 +260,9 @@ async fn test_grpc_instantiate_actor_integration() {
 
     // Now instantiate actor using the module hash
     let instantiate_req = tonic::Request::new(InstantiateActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module_ref: module_hash,
-        actor_id: "actor-001".to_string(),
+        actor_id: "actor-001//wasm::default@local".to_string(),
         initial_state: vec![],
         config: Some(ProtoWasmConfig::default()),
         target_node_id: String::new(),
@@ -274,7 +280,7 @@ async fn test_grpc_instantiate_actor_integration() {
         "Instantiation should succeed: {:?}",
         instantiate_resp.error
     );
-    assert_eq!(instantiate_resp.actor_id, "actor-001");
+    assert_eq!(instantiate_resp.actor_id, "actor-001//wasm::default@local");
     assert_eq!(instantiate_resp.node_id, "local");
     assert!(instantiate_resp.created_at.is_some());
     assert!(instantiate_resp.error.is_none());
@@ -291,6 +297,7 @@ async fn test_grpc_instantiate_actor_missing_module() {
 
     // Try to instantiate with non-existent module
     let request = tonic::Request::new(InstantiateActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module_ref: "nonexistent-hash".to_string(),
         actor_id: "actor-002".to_string(),
         initial_state: vec![],
@@ -327,6 +334,7 @@ async fn test_grpc_instantiate_empty_module_ref() {
 
     // Try to instantiate with empty module_ref
     let request = tonic::Request::new(InstantiateActorRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module_ref: String::new(),
         actor_id: "actor-003".to_string(),
         initial_state: vec![],
@@ -372,6 +380,7 @@ async fn test_grpc_concurrent_deployments() {
             };
 
             let request = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
                 module: Some(module),
                 pre_warm: 0,
                 target_node_tags: vec![],
@@ -423,6 +432,7 @@ async fn test_grpc_idempotent_deployment() {
 
     // First deployment
     let req1 = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module.clone()),
         pre_warm: 0,
         target_node_tags: vec![],
@@ -433,6 +443,7 @@ async fn test_grpc_idempotent_deployment() {
 
     // Second deployment (should be idempotent)
     let req2 = tonic::Request::new(DeployWasmModuleRequest {
+        request_id: ulid::Ulid::new().to_string(),
         module: Some(module),
         pre_warm: 0,
         target_node_tags: vec![],

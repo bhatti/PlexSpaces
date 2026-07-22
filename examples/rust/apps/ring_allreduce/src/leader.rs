@@ -1,5 +1,8 @@
 use super::*;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
+use plexspaces::actor::host_actor::{ask, self_id};
+use plexspaces::actor::host_logging::{log, now_ms};
+use plexspaces::actor::host_shard::{create_shard_group, scatter_gather};
 
 #[gen_server_actor(wasm)]
 #[derive(Default)]
@@ -33,7 +36,7 @@ fn ensure_worker_initialization(
         })
         .to_string()
         .into_bytes();
-        let response = host::ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
+        let response = ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
             format!(
                 "worker init failed for shard {} ({}): {}",
                 shard_id, shard_actor_id, err
@@ -78,10 +81,10 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         );
     }
 
-    let group_id = format!("ring-allreduce-{}", host::now_ms());
+    let group_id = format!("ring-allreduce-{}", now_ms());
     let create_request_bytes =
         shard_group_create_request_bytes(&group_id, "worker", request.worker_count);
-    let create_response = match host::create_shard_group(&create_request_bytes) {
+    let create_response = match create_shard_group(&create_request_bytes) {
         Ok(response) => response,
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
@@ -90,7 +93,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
 
-    let leader_node_id = actor_node_id(&host::self_id());
+    let leader_node_id = actor_node_id(&self_id());
     let mut per_node_metrics: HashMap<String, NodeMetrics> = HashMap::new();
     let mut per_role_metrics: HashMap<String, RoleMetrics> = HashMap::new();
 
@@ -98,11 +101,11 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
     let mut leader_compute_ms = 0_u64;
     let mut leader_coordination_ms = 0_u64;
 
-    let init_start = host::now_ms();
+    let init_start = now_ms();
     if let Err(err) = ensure_worker_initialization(&shard_actor_ids, &request) {
         return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    leader_coordination_ms += host::now_ms().saturating_sub(init_start);
+    leader_coordination_ms += now_ms().saturating_sub(init_start);
     leader_message_count += shard_actor_ids.len() as u64;
 
     let participant_node_ids: std::collections::BTreeSet<String> =
@@ -127,7 +130,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         }
     }
 
-    let wall_start = host::now_ms();
+    let wall_start = now_ms();
     let ring_steps_per_round = request.worker_count.saturating_sub(1);
     let mut total_errors = 0_u64;
     let mut total_values_reduced = 0_u64;
@@ -137,7 +140,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
         std::collections::BTreeSet::new();
 
     for round in 0..request.rounds {
-        let round_start = host::now_ms();
+        let round_start = now_ms();
         let mut round_errors = 0_u64;
         let mut round_successes = 0_u64;
         let mut round_worker_latency_ms = 0_u64;
@@ -152,7 +155,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 "round": round,
                 "phase": phase,
             });
-            let scatter_start = host::now_ms();
+            let scatter_start = now_ms();
             let scatter_request_bytes = scatter_gather_request_bytes(
                 &group_id,
                 plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
@@ -160,16 +163,16 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 request.worker_count,
                 30_000,
             );
-            let response = match host::scatter_gather(&scatter_request_bytes) {
+            let response = match scatter_gather(&scatter_request_bytes) {
                 Ok(response) => response,
                 Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
             };
-            leader_coordination_ms += host::now_ms().saturating_sub(scatter_start);
+            leader_coordination_ms += now_ms().saturating_sub(scatter_start);
             let shard_responses = match decode_scatter_gather_response(&response) {
                 Ok(shard_responses) => shard_responses,
                 Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
             };
-            let phase_compute_start = host::now_ms();
+            let phase_compute_start = now_ms();
 
             for shard in shard_responses {
                 let success = shard
@@ -222,7 +225,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 if let Some(error_message) = payload.get("error").and_then(|value| value.as_str()) {
                     round_errors += 1;
                     total_errors += 1;
-                    host::log(
+                    log(
                         "info",
                         &format!(
                             "ring_allreduce shard error actor_id={} error={}",
@@ -241,7 +244,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 round_successes += 1;
             }
 
-            leader_compute_ms += host::now_ms().saturating_sub(phase_compute_start);
+            leader_compute_ms += now_ms().saturating_sub(phase_compute_start);
         }
 
         leader_message_count += 1;
@@ -249,7 +252,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             "op": "finalize_round",
             "round": round,
         });
-        let finalize_start = host::now_ms();
+        let finalize_start = now_ms();
         let finalize_request_bytes = scatter_gather_request_bytes(
             &group_id,
             plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
@@ -257,16 +260,16 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             request.worker_count,
             30_000,
         );
-        let finalize_response = match host::scatter_gather(&finalize_request_bytes) {
+        let finalize_response = match scatter_gather(&finalize_request_bytes) {
             Ok(response) => response,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        leader_coordination_ms += host::now_ms().saturating_sub(finalize_start);
+        leader_coordination_ms += now_ms().saturating_sub(finalize_start);
         let finalize_responses = match decode_scatter_gather_response(&finalize_response) {
             Ok(shard_responses) => shard_responses,
             Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        let finalize_compute_start = host::now_ms();
+        let finalize_compute_start = now_ms();
         for shard in finalize_responses {
             let raw_payload = shard
                 .get("payload")
@@ -276,7 +279,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             if let Some(error_message) = payload.get("error").and_then(|value| value.as_str()) {
                 round_errors += 1;
                 total_errors += 1;
-                host::log(
+                log(
                     "info",
                     &format!("ring_allreduce finalize error error={}", error_message),
                 );
@@ -285,7 +288,7 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
             reduced_checksum =
                 reduced_checksum.wrapping_add(json_u64(&payload, "reduced_checksum"));
         }
-        leader_compute_ms += host::now_ms().saturating_sub(finalize_compute_start);
+        leader_compute_ms += now_ms().saturating_sub(finalize_compute_start);
 
         total_values_reduced += round_values_reduced;
         round_metrics.push(serde_json::json!({
@@ -301,11 +304,11 @@ pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
                 0.0
             },
             "max_latency_ms": round_max_latency_ms,
-            "round_time_ms": host::now_ms().saturating_sub(round_start),
+            "round_time_ms": now_ms().saturating_sub(round_start),
         }));
     }
 
-    let wall_time_ms = host::now_ms().saturating_sub(wall_start);
+    let wall_time_ms = now_ms().saturating_sub(wall_start);
     if let Err(err) = require_application_metrics_merge(
         serde_json::json!({
             "message_count": 1,

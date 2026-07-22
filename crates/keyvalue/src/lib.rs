@@ -4,16 +4,16 @@
 // This file is part of PlexSpaces.
 //
 // PlexSpaces is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // PlexSpaces is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
+// You should have received a copy of the GNU Affero General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
 //! # PlexSpaces KeyValue Store
@@ -323,6 +323,36 @@ macro_rules! impl_common_keyvalue_store {
                 delta: i64,
             ) -> plexspaces_common::KeyValueStoreResult<i64> {
                 $crate::KeyValueStore::increment(self, ctx, key, delta)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn get_ttl(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                key: &str,
+            ) -> plexspaces_common::KeyValueStoreResult<Option<std::time::Duration>> {
+                $crate::KeyValueStore::get_ttl(self, ctx, key)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn multi_get(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                keys: &[&str],
+            ) -> plexspaces_common::KeyValueStoreResult<Vec<Option<Vec<u8>>>> {
+                $crate::KeyValueStore::multi_get(self, ctx, keys)
+                    .await
+                    .map_err($crate::map_kv_error)
+            }
+
+            async fn multi_put(
+                &self,
+                ctx: &plexspaces_common::RequestContext,
+                pairs: &[(&str, Vec<u8>)],
+            ) -> plexspaces_common::KeyValueStoreResult<()> {
+                $crate::KeyValueStore::multi_put(self, ctx, pairs)
                     .await
                     .map_err($crate::map_kv_error)
             }

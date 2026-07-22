@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name = "ts-mersenne-prime"
+version = "1.0.0"
+tenant_id = "default"
+seed_nodes = []
+
+[static]
+mount = "apps/ts-mersenne-prime"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+name = "CoordinatorActor"
+actor_type = "CoordinatorActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+name = "CodeServerActor"
+actor_type = "CodeServerActor"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "60m", activation_strategy = "lazy" } }
+]

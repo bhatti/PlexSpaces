@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed locking for deployable WASM actors.
+
+interface host-locks {
+    use types.{payload, actor-error};
+
+    // See: locks.wit for the full native-actor equivalent.
+    lock-acquire: func(
+        holder-id: string,
+        lock-name: string,
+        lease-duration-secs: u32,
+        timeout-ms: u64
+    ) -> result<payload, actor-error>;
+
+    lock-release: func(
+        lock-id: string,
+        holder-id: string,
+        lock-version: string
+    ) -> result<_, actor-error>;
+
+    lock-renew: func(
+        lock-id: string,
+        holder-id: string,
+        lock-version: string,
+        lease-duration-secs: u32
+    ) -> result<payload, actor-error>;
+}

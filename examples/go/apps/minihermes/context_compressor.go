@@ -89,7 +89,7 @@ func (c *ContextCompressorActor) compress(p map[string]any) string {
 	// Checkpoint original history in KV
 	originalJSON, _ := json.Marshal(messages)
 	checkpointKey := fmt.Sprintf("compression_checkpoint:%s:%d", sessionID, host.NowMs())
-	host.KVPut(checkpointKey, string(originalJSON))
+	host.KV().Put(checkpointKey, string(originalJSON))
 
 	// Separate: system messages stay, last keepLast messages stay,
 	// middle section gets summarized
@@ -222,7 +222,7 @@ func (c *ContextCompressorActor) getCheckpoint(p map[string]any) string {
 	if key == "" {
 		return marshal(map[string]any{"error": "checkpoint_key is required"})
 	}
-	raw := host.KVGet(key)
+	raw, _ := host.KV().Get(key)
 	if raw == "" {
 		return marshal(map[string]any{"error": "checkpoint not found", "key": key})
 	}

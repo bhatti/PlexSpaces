@@ -216,6 +216,7 @@ impl ActorServiceMessageSender {
         let mut client = ApplicationServiceClient::new(channel);
         let response = client
             .get_application_status(GetApplicationStatusRequest {
+                request_id: ulid::Ulid::new().to_string(),
                 application_id: application_id.to_string(),
             })
             .await

@@ -36,7 +36,7 @@ class ApprovalGateActor:
     def on_init(self, config: dict) -> None:
         self.actor_id = config.get("actor_id", "")
         try:
-            host.kv_put("svc:approval_gate", host.self_id())
+            host.kv.put("svc:approval_gate", host.self_id())
         except Exception:
             pass
         try:
@@ -69,7 +69,7 @@ class ApprovalGateActor:
 
         # Store request for external review (e.g., dashboard display)
         try:
-            host.kv_put(
+            host.kv.put(
                 f"approval_request:{self.actor_id}",
                 json.dumps({**self.pending_request, "agent_id": agent_id})
             )

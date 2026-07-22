@@ -18,7 +18,7 @@ Real-world use cases:
 ## APIs Used
 
 - @gen_server_actor: Request-reply pattern
-- host.kv_get/kv_put: Idempotency checks
+- host.kv.get/kv_put: Idempotency checks
 - host.lock_acquire/lock_release: Critical section protection
 - state(): Transaction persistence
 
@@ -83,7 +83,7 @@ class PaymentHandler:
             return {"error": "invalid amount", "status": "failed"}
         
         # Idempotency check using KV store
-        existing = host.kv_get(f"payment:{payment_id}")
+        existing = host.kv.get(f"payment:{payment_id}")
         if existing and not existing.startswith("ERROR"):
             try:
                 result = json.loads(existing)
@@ -118,7 +118,7 @@ class PaymentHandler:
             "amount": amount,
             "currency": currency
         }
-        host.kv_put(f"payment:{payment_id}", json.dumps(result))
+        host.kv.put(f"payment:{payment_id}", json.dumps(result))
         
         host.log("info", f"Payment processed: {tx_id} amount={amount} {currency}")
         return result
@@ -149,7 +149,7 @@ class PaymentHandler:
             return {"error": "refund_id and original_tx_id required", "status": "failed"}
         
         # Idempotency check
-        existing = host.kv_get(f"refund:{refund_id}")
+        existing = host.kv.get(f"refund:{refund_id}")
         if existing and not existing.startswith("ERROR"):
             try:
                 result = json.loads(existing)
@@ -212,7 +212,7 @@ class PaymentHandler:
                 "amount": refund_amount,
                 "currency": original_tx["currency"]
             }
-            host.kv_put(f"refund:{refund_id}", json.dumps(result))
+            host.kv.put(f"refund:{refund_id}", json.dumps(result))
             
             host.log("info", f"Refund processed: {refund_tx_id} amount={refund_amount}")
             return result

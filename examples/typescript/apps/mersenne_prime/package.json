@@ -8,7 +8,7 @@
     "test": "bash test.sh"
   },
   "dependencies": {
-    "@plexspaces/sdk": "file:../../../../sdks/typescript"
+    "@plexspaces/sdk": "^0.1"
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.10",

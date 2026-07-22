@@ -1,7 +1,7 @@
 {
   "name": "ts-alarms-api",
   "version": "1.0.0",
-  "description": "Cloudflare DO alarm() pattern → PlexSpaces: RequestQueue actor with durable alarm batch processing (TypeScript WASM)",
+  "description": "Cloudflare DO alarm() pattern \u2192 PlexSpaces: RequestQueue actor with durable alarm batch processing (TypeScript WASM)",
   "private": true,
   "type": "module",
   "scripts": {

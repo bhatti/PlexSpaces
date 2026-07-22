@@ -1,7 +1,7 @@
 {
   "name": "plexspaces-ws-chat-room-example",
   "version": "0.1.0",
-  "description": "PlexSpaces WebSocket chat room — thin-node browser clients",
+  "description": "PlexSpaces WebSocket chat room \u2014 thin-node browser clients",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",

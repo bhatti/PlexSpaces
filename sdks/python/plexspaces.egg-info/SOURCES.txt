@@ -82,6 +82,9 @@ plexspaces/generated/plexspaces/system/__init__.py
 plexspaces/generated/plexspaces/system/v1/__init__.py
 plexspaces/generated/plexspaces/timer/__init__.py
 plexspaces/generated/plexspaces/timer/v1/__init__.py
+plexspaces/generated/plexspaces/transport/__init__.py
+plexspaces/generated/plexspaces/transport/ws/__init__.py
+plexspaces/generated/plexspaces/transport/ws/v1/__init__.py
 plexspaces/generated/plexspaces/tuplespace/__init__.py
 plexspaces/generated/plexspaces/tuplespace/v1/__init__.py
 plexspaces/generated/plexspaces/v1/__init__.py
